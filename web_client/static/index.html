@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Heartsworn Battle</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div id="app">
+  <section id="lobby" class="screen">
+    <div class="lobby-panel">
+      <h1>Heartsworn</h1>
+      <p class="subtitle">Hex: Shards of Fate, in the browser</p>
+      <label>Your name <input id="player-name" maxlength="32" value="You"></label>
+      <div class="deck-pickers">
+        <label>Your deck
+          <select id="deck-mine"></select>
+        </label>
+        <label>Opponent (server AI)
+          <select id="deck-theirs"></select>
+        </label>
+      </div>
+      <div class="cosmetics">
+        <label>Card sleeve <select id="sleeve-choice"></select></label>
+        <label>Gameboard <select id="board-choice"></select></label>
+      </div>
+      <button id="start-match" class="primary">Battle</button>
+      <p id="lobby-status" class="status"></p>
+    </div>
+  </section>
+
+  <section id="battle" class="screen hidden">
+    <div id="board">
+      <div class="side opponent">
+        <div class="hand-row" id="opp-hand"></div>
+        <div class="champion-slot" id="opp-champion"></div>
+        <div class="piles" id="opp-piles"></div>
+        <div class="field">
+          <div class="zone-row resources" id="opp-resources"></div>
+          <div class="zone-row warzone" id="opp-warzone"></div>
+        </div>
+      </div>
+
+      <div id="chain-bar">
+        <div class="chain-label">Chain</div>
+        <div class="chain-items" id="chain"></div>
+        <div id="phase-track"></div>
+      </div>
+
+      <div class="side me">
+        <div class="field">
+          <div class="zone-row warzone" id="my-warzone"></div>
+          <div class="zone-row resources" id="my-resources"></div>
+        </div>
+        <div class="champion-slot" id="my-champion"></div>
+        <div class="piles" id="my-piles"></div>
+        <div class="hand-row" id="my-hand"></div>
+      </div>
+
+      <div id="action-panel">
+        <div id="prompt-text"></div>
+        <div id="action-buttons"></div>
+      </div>
+      <div id="preview"></div>
+      <div id="log"></div>
+      <button id="menu-button" title="Menu">&#9881;</button>
+    </div>
+  </section>
+
+  <div id="modal" class="hidden"><div class="modal-card" id="modal-body"></div></div>
+</div>
+<script src="/static/app.js"></script>
+</body>
+</html>
