@@ -204,12 +204,13 @@ def reveal_cards(context):
         reveal_targets = "Everyone"
     private = False
     if (context.bstate.get("pvp") and reveal_targets.lower() in
-            ("self", "you", "controller")):
+            ("self", "you", "controller", "opponents")):
         sender = getattr(context.handler, "_push_private_revealed_cards", None)
         if callable(sender):
             private = bool(sender(
                 context.session, context.bstate, owner, rows,
-                context.player_uid, context.ai_uid))
+                context.player_uid, context.ai_uid,
+                to_opponent=reveal_targets.lower() == "opponents"))
     if not private:
         event = game_engine.CardsRevealedSessionEventArgs()
         event.player_id = owner_uid(owner, context.player_uid,

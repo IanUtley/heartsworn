@@ -1696,12 +1696,13 @@ def _reveal_cards_legacy(game, session, db, handler, pl_t, ai_t, bstate,
             reveal_targets = "Everyone"
         private = False
         if (bstate or {}).get("pvp") and reveal_targets.lower() in (
-                "self", "you", "controller"):
+                "self", "you", "controller", "opponents"):
             private_sender = getattr(handler, "_push_private_revealed_cards",
                                      None)
             if callable(private_sender):
                 private = bool(private_sender(
-                    session, bstate, owner, rows, pl_t, ai_t))
+                    session, bstate, owner, rows, pl_t, ai_t,
+                    to_opponent=reveal_targets.lower() == "opponents"))
         if not private:
             for row in rows:
                 scid = game_engine.SessionCardId(game_engine.UID(int(row[0])))

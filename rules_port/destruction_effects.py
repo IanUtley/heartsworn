@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-import random
-
 
 def destroy_by_defense(context):
     """Destroy warzone troops using their effective defense value."""
     from pvp_db import db_warzone_troop_uids
+    from .runtime_helpers import rng_below
     from .static_rules import effective_stats
 
     rows = db_warzone_troop_uids(
@@ -17,7 +16,8 @@ def destroy_by_defense(context):
         defense = int(effective_stats(
             context.db, context.session.session_id, context.bstate,
             int(uid))[1] or 0)
-        if random.random() > 0.10 * defense:
+        # C# rolls Next(10) and destroys when roll >= defense.
+        if rng_below(context.bstate, 10) >= defense:
             # The decision (candidate set, effective defense, and random roll)
             # is port-owned; destroy() is the host mutation/event boundary.
             context.destroy(int(uid))

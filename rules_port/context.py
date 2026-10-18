@@ -722,8 +722,19 @@ class EffectContext:
                 scid, discard_owner, game_engine.ECardCollections.Discard,
                 ct, template_id=row[1], attack=atk, defense=defense,
                 cost=cost, gems=gem)
+            # C# BuryCard is MoveCardWithDispatch to Discard: exit, enter and
+            # hidden enter. It never calls DiscardCard, so no CardDiscardedEvent.
+            self._emit_trigger(
+                "CardExitedZoneEvent", int(row[0]), deck_owner,
+                event_source_collection="deck",
+                event_destination_collection="discard")
             self._emit_trigger(
                 "CardEnteredZoneEvent", int(row[0]), deck_owner,
+                event_source_collection="deck",
+                event_destination_collection="discard",
+                event_previous_state=0)
+            self._emit_trigger(
+                "HiddenCardEnteredZoneEvent", int(row[0]), deck_owner,
                 event_source_collection="deck",
                 event_destination_collection="discard",
                 event_previous_state=0)
@@ -753,11 +764,13 @@ class EffectContext:
         if card_owner is None:
             return "void: target not found"
         owner = owner_uid(card_owner, self.player_uid, self.ai_uid, self.bstate)
+        # Read the source zone before the void overwrites it.
+        details = db_card_zone_details(
+            self.session.session_id, target, conn=self.db)
+        source_zone = str(details[3] or "").lower() if details else None
         db_void_card(self.session.session_id, target, conn=self.db)
         self.db.commit()
         scid = game_engine.SessionCardId(game_engine.UID(target))
-        details = db_card_zone_details(
-            self.session.session_id, target, conn=self.db)
         tpl_guid = details[0] if details else None
         _tpl, ct, _name, cost, atk, defense, gem = \
             self.handler._card_full_data(self.game, scid, tpl_guid)
@@ -765,7 +778,19 @@ class EffectContext:
             scid, owner, game_engine.ECardCollections.Void, ct,
             template_id=tpl_guid, attack=atk, defense=defense,
             cost=cost, gems=gem)
-        self._emit_trigger("CardExitedZoneEvent", target, card_owner)
+        # C# AuthoritativeSessionBase.VoidCard moves the card with
+        # MoveCardWithDispatch (exit, enter, hidden enter), then sends the
+        # client a CardVoided session event for the voiding player. Unlike the
+        # base Session.VoidCard it does not enqueue a CardVoidedEvent trigger.
+        self._emit_trigger("CardExitedZoneEvent", target, card_owner,
+                           event_source_collection=source_zone,
+                           event_destination_collection="void")
+        self._emit_trigger("CardEnteredZoneEvent", target, card_owner,
+                           event_source_collection=source_zone,
+                           event_destination_collection="void")
+        self._emit_trigger("HiddenCardEnteredZoneEvent", target, card_owner,
+                           event_source_collection=source_zone,
+                           event_destination_collection="void")
 
         # The client's ``VoidCardAbilityEffectTemplate`` records the voided
         # card on the ability's ``VoidedCards`` list attr.  Follow-up operands
@@ -776,6 +801,10 @@ class EffectContext:
         # operand resolved to 0 and the ability healed nothing.
         from rules_port.statistics import record_ability_card_list
         record_ability_card_list(self.bstate, "VoidedCards", target)
+        voiding_owner = self.bstate.get("resolving_owner_id", card_owner)
+        self.game.push_card_voided(
+            scid, owner_uid(voiding_owner, self.player_uid, self.ai_uid,
+                            self.bstate))
 
         source = self.bstate.get("resolving_source_uid")
         if source is not None:
@@ -1403,8 +1432,16 @@ class EffectContext:
                if details else None)
         if not row:
             return f"discard: target {hex(int(target))} not found"
-        if str(row[3]).lower() not in ("hand", "choosing"):
-            return f"discard: target {hex(int(target))} is in {row[3]}"
+        source_location = str(row[3]).lower()
+        # C# Session.DiscardCard is a MoveCardWithDispatch to Discard from any
+        # collection; only a card already in the crypt is a no-op.
+        if source_location == "discard":
+            return f"discard: target {hex(int(target))} is already in discard"
+        if source_location == "warzone":
+            # Leaving play drops the troop from combat, as C# DeactivateCard
+            # does for any warzone exit.
+            from rules_port.combat import remove_troop_from_combat
+            remove_troop_from_combat(self.bstate, int(target))
 
         from db import db_discard_card
         from rules_port.runtime_helpers import owner_uid
@@ -1531,15 +1568,15 @@ class EffectContext:
             "m_CardLocation", "") or "").rsplit(".", 1)[-1].lower()
         if self.native_context or self.bstate.get("_rules_port_native_effect"):
             from rules_port.token_effects import create_matching_target
+            # C# CreateTokenMatchingTarget: a typed zero creates nothing.
             made = create_matching_target(
-                self, int(target), max(1, int(count)), collection,
-                deck_location)
+                self, int(target), int(count), collection, deck_location)
         else:
             from abilities.framework.effects.utility import _create_matching_target
             made = _create_matching_target(
                 self.game, self.session, self.db, self.handler,
                 self.player_uid, self.ai_uid, self.bstate, int(target),
-                max(1, int(count)), collection, deck_location)
+                int(count), collection, deck_location)
         return f"created {made} matching token(s)"
 
     def transform_replica(self) -> str:
@@ -1795,7 +1832,6 @@ class EffectContext:
         if self.native_context or self.bstate.get("_rules_port_native_effect"):
             from rules_port.destruction_effects import destroy_by_defense
             return destroy_by_defense(self)
-        import random
 
         from abilities.framework.kill_troop import kill_troop
 
@@ -1807,7 +1843,8 @@ class EffectContext:
                 self.session.session_id, int(uid), conn=self.db)
             defense = ((stat_row[0] or 0) + (stat_row[1] or 0)
                        if stat_row else 0)
-            if random.random() > 0.10 * defense:
+            from .runtime_helpers import rng_below
+            if rng_below(self.bstate, 10) >= defense:
                 kill_troop(
                     self.game, self.session, self.db, self.handler,
                     self.player_uid, self.ai_uid, int(uid), self.bstate,
@@ -2411,6 +2448,14 @@ class EffectContext:
             return f"{label}: card not found"
         old_location, old_state = str(old[1] or "").lower(), int(old[2] or 0)
         position = 100 if destination == "hand" else 0
+        # C# MoveCardToZone.InternalApply reads the destination deck's
+        # CardCount before the card moves (TopHalfOfDeck draws against it).
+        deck_count_before = 0
+        if destination == "deck" and bool(self.template_value(
+                "m_TopHalfOfDeck", False)):
+            from pvp_db import db_deck_card_count
+            deck_count_before = db_deck_card_count(
+                self.session.session_id, int(old[0] or 0), conn=self.db)
         clear_dead = destination == "warzone"
         clear_bits = game_engine.ECardStates.Dead if clear_dead else 0
         new_state = old_state if destination == "warzone" else 0
@@ -2440,22 +2485,40 @@ class EffectContext:
             from rules_port.combat import remove_troop_from_combat
             remove_troop_from_combat(self.bstate, target)
         if destination == "deck":
-            # C# ``MoveCardToZone`` with an "Unknown"/random destination
-            # location shuffles the card into the deck.  Leaving it at
-            # position 0 put the moved cards on TOP, so a following "draw N"
-            # returned the same cards (Corinth's Shifted Paradigm looked like
-            # it never shuffled).
+            # Mirrors C# ``MoveCardToZoneEffectTemplate.InternalApply``:
+            # - TopHalfOfDeck draws Next(deck count) and uses that as the
+            #   random bound (the authored name says "top half", but the C#
+            #   code bounds by the whole deck count).
+            # - A positive bound draws Next(bound) for the index, which
+            #   ``AuthoritativeSessionBase.MoveCardWithDispatch`` applies.
+            # - Top/Bottom insert at that index counted from the chosen end
+            #   (``CardCollection.AddCardAtIndexAndLocation``); Bottom with no
+            #   bound is the last card.
+            # - Unknown/other locations ignore the index and go to a uniform
+            #   slot over the whole deck (``Session.FinishMovingCard``).
+            # Leaving every deck move at position 0 put it on TOP, so a
+            # following "draw N" returned the same cards.
+            from pvp_db import (db_insert_deck_card_at,
+                                db_randomly_insert_deck_cards, deck_rng_index)
+            rng = self.bstate.get("_rules_rng")
+            owner_id = int(old[0] or 0)
             dest_location = str(self.template_value(
                 "m_DestinationLocation", "") or "").rsplit(".", 1)[-1].lower()
             random_location = int(self.template_value(
                 "m_RandomLocation", -1) or -1)
             top_half = bool(self.template_value("m_TopHalfOfDeck", False))
-            if dest_location in ("", "unknown", "random") or \
-                    random_location >= 0 or top_half:
-                from pvp_db import db_randomly_insert_deck_cards
+            if dest_location in ("top", "bottom"):
+                bound = random_location
+                if top_half:
+                    bound = deck_rng_index(rng, deck_count_before)
+                index = deck_rng_index(rng, bound) if bound > 0 else 0
+                db_insert_deck_card_at(
+                    self.session.session_id, owner_id, target, index,
+                    from_bottom=dest_location == "bottom", conn=self.db)
+            else:
                 db_randomly_insert_deck_cards(
-                    self.session.session_id, int(old[0] or 0), [target],
-                    conn=self.db)
+                    self.session.session_id, owner_id, [target],
+                    conn=self.db, rng=rng)
         self.db.commit()
         details = db_card_zone_details(
             self.session.session_id, target, conn=self.db)
@@ -2926,7 +2989,6 @@ class EffectContext:
 
     def shuffle_collection(self) -> str:
         """Shuffle the typed target controller collection and renumber slots."""
-        import random
         target = self.resolved_target()
         owner = self.target_owner(target, default=self.bstate.get(
             "resolving_owner_id", 0))
@@ -2940,7 +3002,8 @@ class EffectContext:
         rows = db_ordered_zone_uids(
             self.session.session_id, int(owner), location, conn=self.db)
         uids = [int(row[0]) for row in rows]
-        random.shuffle(uids)
+        from .runtime_helpers import rng_shuffle
+        rng_shuffle(self.bstate, uids)
         db_set_card_positions(
             [(self.session.session_id, uid, index)
              for index, uid in enumerate(uids)], conn=self.db)
@@ -3247,10 +3310,61 @@ class EffectContext:
             data["atk"] = 0
         if "def" in data:
             data["def"] = 0
-        from pvp_db import db_reset_card_modifiers
+        # C# Card.Revert: counters, escalation, card variables, damage shields.
+        for key in ("counters", "counter_guids", "escalation_count",
+                    "card_integer_variables", "damage_shields"):
+            data.pop(key, None)
+        import game_engine
+        from pvp_db import (
+            db_card_ability_state, db_card_mutation_field,
+            db_reset_card_modifiers, db_reset_card_uses,
+            db_set_card_abilities, db_set_card_mutation_field,
+            db_update_card_state)
         db_reset_card_modifiers(
             self.session.session_id, int(target), json.dumps(data), conn=self.db)
+        raw_temp = db_card_mutation_field(
+            self.session.session_id, int(target), "temporary_buffs", conn=self.db)
+        try:
+            temp = json.loads(raw_temp or "{}")
+        except (TypeError, ValueError, json.JSONDecodeError):
+            temp = {}
+        if isinstance(temp, dict) and temp.pop("damage_shields", None) is not None:
+            db_set_card_mutation_field(
+                self.session.session_id, int(target), "temporary_buffs",
+                json.dumps(temp), conn=self.db)
+        # Champion counters and shields live in battle state, not game_cards.
+        for key in ("champion_counters", "damage_shields"):
+            store = self.bstate.get(key)
+            if isinstance(store, dict):
+                store.pop(str(int(target)), None)
+        # Damage, the Damaged state bit, per-game/per-turn uses and cooldowns.
+        db_update_card_state(
+            self.session.session_id, int(target),
+            clear_bits=int(game_engine.ECardStates.Damaged),
+            reset_damage=True, conn=self.db)
+        db_reset_card_uses(
+            self.session.session_id, int(target),
+            preserve_turn_and_cooldowns=False, conn=self.db)
+        # Dynamic, revoked and shifted abilities: restore the authored list.
+        ability_row = db_card_ability_state(
+            self.session.session_id, int(target), conn=self.db)
+        if ability_row:
+            try:
+                authored = json.loads(ability_row[1] or "[]")
+            except (TypeError, ValueError, json.JSONDecodeError):
+                authored = []
+            if isinstance(authored, list):
+                db_set_card_abilities(
+                    self.session.session_id, int(target),
+                    json.dumps([str(guid).lower() for guid in authored]),
+                    conn=self.db)
         self.db.commit()
+        if template_row and template_row[1]:
+            # C# RevertCard follows Card.Revert with TransformCardBase, which
+            # sends CardReverted even when the template is unchanged.
+            self.game.push_card_reverted(
+                game_engine.SessionCardId(game_engine.UID(int(target))),
+                str(template_row[1]))
         if self.native_context or self.bstate.get("_rules_port_native_effect"):
             from rules_port.card_projection import push_card_state
             push_card_state(self.game, self.session, self.db, self.handler,

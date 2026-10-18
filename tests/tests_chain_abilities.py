@@ -1539,7 +1539,7 @@ def test_worker_bot_creation_replacement_is_authored(db):
         context = EffectContext.from_rules_port(
             game, SessionStub(), db, HandlerStub(db), pl_t, ai_t, bstate,
             "effect", ability=None)
-        with mock.patch("rules_port.token_effects.random.choice",
+        with mock.patch("rules_port.token_effects.rng_choice",
                         return_value=robot):
             summon_token(context, {"token_guid": token_guid, "amount": 1,
                                    "collection": "Warzone"})
@@ -1805,6 +1805,10 @@ def test_void_leaf_publishes_the_voided_troops_stats(db):
     location = db.execute(
         "SELECT location FROM game_cards WHERE card_uid=901").fetchone()[0]
     assert location == "void", location
+    # AuthoritativeSessionBase.VoidCard tells the client which card was voided.
+    voided = [event for event in game.events if isinstance(
+        event, game_engine.CardVoidedSessionEventArgs)]
+    assert [int(event.session_card_id.uid.uid64) for event in voided] == [901]
     # The heal equals the voided troop's defense (0/1 -> +1), and the list attr
     # does not leak into the next ability resolution.
     assert bstate["ai_health"] == 16, bstate
@@ -2010,6 +2014,26 @@ def test_pvp_champion_trigger_discovery_uses_raw_participant_id(db):
             "TurnEndedEvent", 9001, 1001)
     found = {int(c.source_uid): list(c.ability_guids) for c in candidates}
     assert ability_guid in found.get(9001, []), found
+
+
+def test_registered_trigger_is_discovered_for_its_card(db):
+    """A RegisterTriggerAbilityEffectTemplate handler is a discovery candidate.
+
+    C# Session.RegisterTriggerEventHandler keys the trigger on the card, not on
+    its printed ability list, so it must be offered even though the card does
+    not carry the ability itself.
+    """
+    from rules_port.trigger_discovery import RecordsTriggerDiscovery
+    registered = "5b3d0c9e-1a2b-4c3d-8e9f-0a1b2c3d4e5f"
+    add_card(db, 9301, 1001, TPL_GLADIATOR, loc="warzone")
+    db.commit()
+    bstate = {"registered_triggers": {"9301": [registered]}}
+    candidates = RecordsTriggerDiscovery(
+        db, HandlerStub(db), SessionStub(), game_engine.UID.make(244, 1001),
+        game_engine.UID.make(244, 1002), bstate).discover(
+            "TurnEndedEvent", 9301, 1001)
+    found = {int(c.source_uid): list(c.ability_guids) for c in candidates}
+    assert registered in found.get(9301, []), found
 
 
 def test_pvp_champion_trigger_condition_uses_raw_participant_owner(db):
@@ -3733,6 +3757,7 @@ def _main():
              test_friendly_zone_trigger_ignores_cards_taken_from_an_opponent,
              test_incantation_of_fear_counter_on_opposing_crypt_entry,
              test_pvp_champion_trigger_discovery_uses_raw_participant_id,
+             test_registered_trigger_is_discovered_for_its_card,
              test_pvp_champion_trigger_condition_uses_raw_participant_owner,
              test_shifted_paradigm_never_moves_champion_when_crypt_empty,
              test_corinth_end_of_turn_ability_resolves_inline,

@@ -241,7 +241,14 @@ def grant_ability(context):
         "m_AllPaymentPowersOfTarget", False))
     all_remembered = bool(context.template_value("m_AllRememberedPowers", False))
     if (random_inspire or random_charge) and not granted_values:
-        picked = context.bstate.get("random_power_template")
+        # Keyed by the resolving activation's instance (as C# stores it on the
+        # ability instance): it survives a pause/continuation of this
+        # activation and is dropped when the activation finishes.
+        instance_values = context.bstate.setdefault(
+            "ability_runtime_state", {}).setdefault(
+                str(int(context.bstate.get("resolving_ability_instance_id")
+                        or 0)), {})
+        picked = instance_values.get("RandomPowerTemplate")
         if not picked:
             from pvp_db import (db_champion_charge_power_guids,
                                 db_inspire_ability_guids)
@@ -254,7 +261,7 @@ def grant_ability(context):
                 else:
                     import random as _random
                     picked = pool[_random.randrange(len(pool))]
-                context.bstate["random_power_template"] = picked
+                instance_values["RandomPowerTemplate"] = picked
         if picked:
             granted_values = [str(picked).lower()]
     if (all_socket_source or all_socket_target or all_socket_master or
