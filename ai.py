@@ -4473,6 +4473,24 @@ def _choose_priority_troop_summon(evaluator, session, battle_state, phase):
     return None
 
 
+def _trick_targets_blockers(card):
+    """Whether a card's ability targets are restricted to blocking troops
+    (the client's IsBlocking filter, e.g. Heroic Inspiration)."""
+    import json as _j
+    from pvp_db import db_ability_target_template_ids, db_target_template_filter
+    for ag in card.ability_guids or ():
+        try:
+            template_ids = _j.loads(
+                db_ability_target_template_ids(str(ag).lower(), conn=_db) or "[]")
+        except (TypeError, ValueError, _j.JSONDecodeError):
+            continue
+        for template_id in template_ids:
+            flt = db_target_template_filter(template_id, conn=_db) or ""
+            if "IsBlocking" in flt:
+                return True
+    return False
+
+
 def ai_choose_combat_trick(handler, session, battle_state, ai_t, pl_t, *,
                            evaluator=None):
     """Choose the normal AI's useful QuickAction for a combat window.
@@ -4551,6 +4569,10 @@ def ai_choose_combat_trick(handler, session, battle_state, ai_t, pl_t, *,
                 continue
             if (h.buff is None or not trick.is_quick_action()
                     or ev.is_playable(trick) != "True"):
+                continue
+            # "Target blocking troop" buffs can only land on a blocker, so an
+            # attacker in this combat is not a legal target.
+            if int(my_uid) in my_attackers and _trick_targets_blockers(trick):
                 continue
             atk_buff = h.buff.attack
             def_buff = h.buff.defense

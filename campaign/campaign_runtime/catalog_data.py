@@ -26,6 +26,7 @@ from campaign_runtime.records import (
 AREA_TEMPLATE = "AZ1"
 RULES_DIR = CAMPAIGN_ROOT / "campaign_rules"
 ZONES_PATH = RULES_DIR / "zones.json"
+GENERATED_MAPS = CAMPAIGN_ROOT.parent / "campaign_editor" / "generated"
 _ZONES_LOCK = threading.Lock()
 _ZONES: tuple[float, list[dict[str, Any]]] | None = None
 
@@ -559,6 +560,7 @@ def _authored_items(template: dict[str, Any] | None) -> dict[str, dict[str, Any]
                          else scene_names.get(guid)) or "",
                 "qualifiers": _qualifiers(event.get("m_Qualifiers"))})
         authored[node] = {
+            "map_node": str(item.get("m_MapNodeId") or ""),
             "name": item.get("m_Name", ""), "title": item.get("m_Title", ""),
             "terrain": item.get("m_TerrainType", ""),
             "totem": item.get("m_TotemType", ""),
@@ -568,19 +570,45 @@ def _authored_items(template: dict[str, Any] | None) -> dict[str, dict[str, Any]
                 "type": d.get("m_Type", ""), "text": d.get("m_Description", ""),
                 "qualifiers": _qualifiers(d.get("m_Qualifiers"))}
                 for d in item.get("m_Descriptions") or ()]}
-    # A battle that SCENE_NODE_LINKS places at another node was recorded on the
-    # wrong item's visit events: move it, so each node shows its own battle.
+    # A battle or conversation that a link table places at another node was
+    # recorded on the wrong item's visit events: move it, so each node shows its
+    # own battle and the entrance conversation plays on the entrance.
     for node, item in list(authored.items()):
         kept = []
         for event in item["visit_events"]:
-            target = SCENE_NODE_LINKS.get(str(event.get("guid") or "").lower())
-            if ("encounter" in str(event.get("type") or "").lower() and target
-                    and target != node and target in authored):
+            guid = str(event.get("guid") or "").lower()
+            kind = str(event.get("type") or "").lower()
+            target = (SCENE_NODE_LINKS if "encounter" in kind else CONVERSATION_NODE_LINKS).get(guid)
+            if (target and target != node and target in authored):
                 authored[target]["visit_events"].append(event)
             else:
                 kept.append(event)
         item["visit_events"] = kept
     return authored
+
+
+@functools.lru_cache(maxsize=32)
+def client_node_keys(template_name: str) -> dict[str, str]:
+    """Rules node -> the Records ``m_MapNodeId`` the client keys its item text by,
+    where the two differ (Fort Romor's Command Post is ``NodeD`` in the rules but
+    ``CmdPost`` in Records). The client finds a node's title and descriptions by
+    the ``node`` name the server sends, so the server sends this key there.
+    Read-only: the cached dict is shared between callers."""
+    return {node: str(item["map_node"])
+            for node, item in _authored_items(scene_template(template_name)).items()
+            if item["map_node"] and item["map_node"] != node}
+
+
+@functools.lru_cache(maxsize=32)
+def prefab_fork_nodes(zone_id: str) -> frozenset[str]:
+    """The map nodes the client prefab flags as path forks (``IsPathFork``,
+    extracted to the editor's ``generated/<zone>/map.json`` as ``fork``)."""
+    path = GENERATED_MAPS / zone_id / "map.json"
+    if not path.exists():
+        return frozenset()
+    layout = json.loads(path.read_text(encoding="utf-8"))
+    return frozenset(str(node["id"]) for node in layout.get("nodes") or ()
+                     if node.get("fork"))
 
 
 @functools.lru_cache(maxsize=32)
@@ -600,6 +628,14 @@ def entrance_visit_conversation(entry: dict[str, Any], node: str) -> str | None:
     if entry.get("kind") != "dungeon" or not entry.get("records") or not node:
         return None
     return _visit_conversations(str(entry["records"])).get(str(node))
+
+# Records visit-event conversation links, corrected from the Underworld
+# playthrough: Fort Romor's Ruined Gate conversation starts as soon as the
+# player enters the dungeon, so it is the Entrance's (Node001). Conversation
+# GUID -> the node whose first visit plays it.
+CONVERSATION_NODE_LINKS = {
+    "f688a1b3-ccd3-41d2-bd1e-cc2d40079ed3": "Node001",   # Ruined Gate - Entrance
+}
 
 # Records visit-event battle links that are mis-wired, corrected from the
 # Underworld playthrough (playlist PL5KcPcNiQlz7KYBS72s7qYx2vxvMoDyVn, videos

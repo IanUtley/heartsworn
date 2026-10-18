@@ -51,10 +51,6 @@ def zone_nodes(rules: dict[str, Any], zone_entry: dict[str, Any],
     return sorted(nodes)
 
 
-def n_not_fork(node: str) -> bool:
-    return not str(node).startswith("Fork")
-
-
 def display(node: str) -> str:
     """The name the client knows a node by (``Myaa@cavein`` -> ``Myaa``)."""
     return str(node).split("@", 1)[0]
@@ -110,7 +106,8 @@ def project(rules: dict[str, Any], state: dict[str, Any],
             scene_champions: dict[str, str] | None = None,
             gaal_nodes: frozenset = frozenset(), gaal_display: str | None = None,
             force_move: str | None = None,
-            count_picker: str | None = None) -> dict[str, Any]:
+            count_picker: str | None = None,
+            client_keys: dict[str, str] | None = None) -> dict[str, Any]:
     """The client ``GameplayState`` for ``state`` (one zone's engine state).
 
     ``previous`` is the campaign row's last state: keys this module does not
@@ -126,10 +123,20 @@ def project(rules: dict[str, Any], state: dict[str, Any],
     ``force_move`` a node the client's token must walk to (a walk-back).
     ``count_picker`` is the node whose count picker (``engine.count_picker``)
     shows now, after the conversation played there.
+    ``client_keys`` maps a rules node to the name the client keys its item text
+    by (``catalog_data.client_node_keys``); the rules name is used otherwise.
     """
     out = copy.deepcopy(previous or {})
     layout = engine.layout(rules, state)
     kind = zone_entry.get("kind")
+    client_keys = client_keys or {}
+
+    def client_name(node: str) -> str:
+        return client_keys.get(node) or display(node)
+
+    def not_fork(node: str) -> bool:
+        return not engine.is_fork(rules, node)
+
     nodes = zone_nodes(rules, zone_entry, children)
     entries = {n: next((e for e in (rules.get("nodes", {}).get(n) or {})
                         .get("entries") or () if e.get("id") == info.get("entry")), None)
@@ -157,6 +164,8 @@ def project(rules: dict[str, Any], state: dict[str, Any],
         ltype, conversation, scene, allow_cancel = location_content(
             rules, state, node, entry, children, pending_visit)
         data = _base_location(node)
+        # The client's item text lookup and its event replies use this name.
+        data["node"] = client_name(node)
         progress = (state.get("nodes") or {}).get(node) or {}
         data.update({
             "type": ltype, "conversationId": conversation, "encounter": scene,
@@ -213,7 +222,7 @@ def project(rules: dict[str, Any], state: dict[str, Any],
             pre_talk = ltype == "Convo" and (entry or {}).get("kind") in ("encounter", "shroomhaus")
             data["autostart"] = bool(
                 info.get("visible") and not info.get("completed") and
-                n_not_fork(node) and
+                not_fork(node) and
                 (info.get("impassable") or info.get("autostart") or first_talk or pre_talk
                  or ltype == "ShroomHaus") and not played)
         if pending_visit and info.get("visible") and not info.get("completed"):
@@ -224,12 +233,12 @@ def project(rules: dict[str, Any], state: dict[str, Any],
         if scene:
             scenes.append(scene)
         vislocs.append({"Data": data})
-        node_data = {"id": display(node), "type": "FORK" if not n_not_fork(node) else "DEFAULT"}
+        node_data = {"id": display(node), "type": "DEFAULT" if not_fork(node) else "FORK"}
         champion = (scene_champions or {}).get(str(scene or "").lower())
         champion = champion or (rules.get("npc_champions") or {}).get(node)
         if kind == "panorama" and champion:
             node_data["championId"] = champion
-        locnodes.append({"Name": display(node), "Data": node_data})
+        locnodes.append({"Name": client_name(node), "Data": node_data})
     aloc = (started.get("node") if started.get("node") in nodes and not parked
             else None) or \
         (active if active in nodes else None) or autostart
@@ -279,7 +288,7 @@ def project(rules: dict[str, Any], state: dict[str, Any],
     # A walk-back applies to every map kind: the client's token must return
     # to the node the rules hold it on (a refused path walk, or an impassable).
     if force_move:
-        pdata["force_move_dest"] = display(force_move)
+        pdata["force_move_dest"] = client_name(force_move)
     else:
         pdata.pop("force_move_dest", None)
     # The card selector lists the active battle's options (modlistId path).
@@ -299,7 +308,7 @@ def project(rules: dict[str, Any], state: dict[str, Any],
                        for s in dict.fromkeys(scenes)],
         "Champions": out.get("Champions") or [],
         "CurState": "LOSE" if state.get("run_lost") else "EXPLORE",
-        "LastNode": display(state.get("current") or aloc or ""),
+        "LastNode": client_name(state.get("current") or aloc or ""),
         "RulesZone": zone_entry["id"],
     })
     for key, default in (("Started", None), ("Finished", None),

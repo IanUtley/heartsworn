@@ -28,6 +28,13 @@ in place because each needs a design decision or a larger change.
 - [ ] `GrantAbilityEffectTemplate`'s random-Inspire pool is not format/rarity
       filtered (C# `GetRandomInspirePower` uses `setsValidInFormat`;
       `rules_port/effects.py` ~243).
+- [ ] `RegisterTriggerAbilityEffectTemplate` writes
+      `bstate["registered_triggers"]` but nothing reads it, so registered
+      triggers never fire (C# `Session.RegisterTriggerEventHandler`).
+- [x] `GrantAbilityEffectTemplate` caches the random power in
+      `bstate["random_power_template"]` for the whole battle instead of per
+      activation. Fixed: each activation draws its own power (not yet tested in
+      a game).
 - [ ] `RevertPermanentModificationsAbilityEffectTemplate` non-transform path
       (`rules_port/context.py` `revert_modifications`) now clears counters,
       escalation, card variables, damage shields, damage, uses/cooldowns, and
@@ -46,3 +53,26 @@ in place because each needs a design decision or a larger change.
       the persisted battle state keyed by ability GUID; C# stores on the
       ability instance and drops it with the activation (needs an explicit
       `ForgetAllCards` today).
+- [ ] `tests/tests_leaves.py::test_revert_mods` fixture `make_db()` lacks
+      `game_cards.original_template_guid`, so the test errors before exercising
+      the leaf.
+
+## Campaign node OnMove text — investigate
+
+Client shows OnMove text in the node panel only through `Completed_OnMove`
+(`hex-private/HexClient/Assembly-CSharp/UICampaignNodeInfoPanel.cs:66-73`),
+and only when the node is completed or repeatable. A plain `OnMove` entry is
+never requested. About 124 dungeon-template nodes have plain `OnMove` with no
+`Completed_OnMove`, including most of AZ1's overworld (Howling Plains: 69 of 85
+nodes), so their text should be visible in play but is not.
+
+- [ ] **Confirm in game.** Stand on a visited Howling Plains node and check
+      whether the plain OnMove text appears. If it does, the static read is
+      wrong somewhere, so find the path that shows it.
+- [ ] **Decide the fix if it is confirmed.** The server cannot supply the text.
+      Options are a `Completed_OnMove` entry per node in the client gamedata
+      (client-side, so out of server scope), or accepting the current display.
+
+Sources: `hex-private/Records/SceneData.jsonl` (Howling Plains and The Smoldering
+Dead entries), `campaign.py` (~1110-1150, summary TypeInfo),
+`UIDungeonZoneViewModel.cs:1208` (`CollectItemData`).

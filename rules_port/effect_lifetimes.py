@@ -371,7 +371,10 @@ def _stat_expired(item, *, boundary=None, boundary_owner=None):
     if boundary == "prep" and duration == "AfterCardsReadyOnPlayersTurn":
         return owner == boundary_owner
     if boundary == "end_turn" and duration == "EndOfTurn":
-        return owner == boundary_owner
+        # "This turn" ends at the end of whichever turn it was cast in, even
+        # when the caster's opponent is the player whose turn ends (C#
+        # AbilityManager.RemoveEndOfTurnAbilities).
+        return True
     return False
 
 

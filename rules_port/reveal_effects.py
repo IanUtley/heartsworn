@@ -200,7 +200,9 @@ def reveal_cards(context):
 
     reveal_targets = str(context.template_value(
         "m_PlayerRevealTargets", "Everyone") or "Everyone")
-    if owner == 0:
+    # A self-only look stays with its owner, the AI's included (never shown to the
+    # human). Only an everyone-reveal of an AI card is public.
+    if owner == 0 and reveal_targets.lower() not in ("self", "you", "controller"):
         reveal_targets = "Everyone"
     private = False
     if (context.bstate.get("pvp") and reveal_targets.lower() in
@@ -227,6 +229,10 @@ def reveal_cards(context):
         # the Coverflow shows the cards temporarily and does not keep them
         # revealed after a follow-up move puts them back into a hidden zone.
         event.inactive = True
+        if reveal_targets.lower() in ("self", "you", "controller"):
+            # Only the owner's packet carries a self-only reveal (the packet filter
+            # drops a private event for every other viewer).
+            event._private_player_uid = event.player_id
         # The client builds the coverflow from the revealed card views the
         # moment CardsRevealed arrives, and hidden deck cards have no view until
         # their CardUpdated lands. Send the card updates first.
@@ -258,3 +264,36 @@ def reveal_cards(context):
                 context.game.events[-1]._temporary_reveal = True
         context.game._push(event)
     return f"revealed {len(uids)}"
+
+
+def publish_revealed_card(context, uid):
+    """A card its owner looked at (a self-only reveal) and then moved into hand is
+    public: the opponent sees it in a temporary reveal, as C# RevealCards does."""
+    import game_engine
+    from .runtime_helpers import owner_uid
+    row = context.db.execute(
+        "SELECT template_guid, user_id FROM game_cards "
+        "WHERE session_id=? AND card_uid=?",
+        (context.session.session_id, int(uid))).fetchone()
+    if not row:
+        return
+    template_guid, owner = row
+    scid = game_engine.SessionCardId(game_engine.UID(int(uid)))
+    player = owner_uid(int(owner or 0), context.player_uid, context.ai_uid,
+                       context.bstate)
+    _tpl, card_type, _name, cost, attack, defense, gems = \
+        context.handler._card_full_data(context.game, scid, template_guid)
+    context.game.push_card_updated(
+        scid, player, game_engine.ECardCollections.Hand, card_type,
+        template_id=template_guid, cost=cost, attack=attack, defense=defense,
+        gems=gems, nulling=False)
+    context.game.events[-1]._hand_reveal_viewer_uid = context.player_uid
+    context.game.events[-1]._temporary_reveal = True
+    event = game_engine.CardsRevealedSessionEventArgs()
+    event.player_id = player
+    event.session_card_ids = [scid]
+    event.collections = [game_engine.ECardCollections.Hand]
+    event.owning_players = [player]
+    event.positions = [0]
+    event.inactive = True
+    context.game._push(event)

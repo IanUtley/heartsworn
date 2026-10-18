@@ -2663,8 +2663,19 @@ class EffectContext:
                 self._move_simple_zone(int(uid), destination)
                 moved += 1
             return f"moved all {moved} {all_zone} cards to {destination}"
-        return self._move_simple_zone(target, destination,
-                                      previous_owner_id=previous_owner_id)
+        moved = self._move_simple_zone(target, destination,
+                                       previous_owner_id=previous_owner_id)
+        # A card the owner looked at, then put into hand, is revealed to the
+        # opponent (C# keeps a revealed card public while it stays in hand).
+        if (destination == "hand" and target is not None and
+                int(target) in {int(uid) for uid in
+                                self.bstate.get("source_revealed_chosen") or ()}):
+            from rules_port.reveal_effects import publish_revealed_card
+            publish_revealed_card(self, int(target))
+            self.bstate["source_revealed_chosen"] = [
+                uid for uid in self.bstate.get("source_revealed_chosen") or ()
+                if int(uid) != int(target)]
+        return moved
 
     def _move_zone_new_owner(self, target: int) -> int | None:
         """Resolve the C# MoveCardToZone control-transfer flags to an owner."""

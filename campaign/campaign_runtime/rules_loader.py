@@ -119,6 +119,13 @@ def _build(db, zone_id: str, path: Path):
             if own and node_id not in own:
                 continue
             merged.setdefault("nodes", {}).setdefault(node_id, {})["entries"] = node_entries
+        # A node the prefab flags as a path fork is a junction the token passes
+        # through, unless it has offers of its own (campaign_rules.is_fork).
+        for node_id in catalog_data.prefab_fork_nodes(zone_id):
+            if own and node_id not in own:
+                continue
+            node_rules = merged.setdefault("nodes", {}).setdefault(node_id, {})
+            node_rules["fork"] = True
         # Scene actions (set_flag / clear_flag / check_tamed()) are live
         # editor data: rebuild their hooks instead of trusting the copies an
         # importer baked into the rules file.

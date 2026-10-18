@@ -438,7 +438,15 @@ class CardStateMixin:
                 atk += static["atk"]
                 def_ += static["def"]
                 if native_cost is None:
-                    cost = max(0, cost + static["cost_mod"])
+                    # The payable cost, as the AI and player payment use it
+                    # (includes champion cost auras such as Great Wisdom).
+                    try:
+                        from rules_port.static_rules import effective_cost
+                        cost = int(effective_cost(
+                            _hc._db, game.session_id.uid64, bstate,
+                            scid.uid.uid64))
+                    except Exception:
+                        cost = max(0, cost + static["cost_mod"])
                 attributes |= static["attrs"]
             except Exception:
                 pass

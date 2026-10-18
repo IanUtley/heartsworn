@@ -4,9 +4,12 @@
  "scene": "Fort Romor",
  "start": {
   "node": "Node001",
-  "node_completed": true,
+  "node_completed": false,
   "flags": [],
-  "counters": {"lives": 3, "run_streak": 0}
+  "counters": {
+   "lives": 3,
+   "run_streak": 0
+  }
  },
  "map": {
   "paths": [
@@ -74,6 +77,67 @@
  },
  "quests": {},
  "nodes": {
+  "Node001": {
+   "hidden": [
+    [
+     "completed(NodeB)"
+    ],
+    [
+     "completed(NodeC)"
+    ],
+    [
+     "completed(NodeD)"
+    ]
+   ]
+  },
+  "Node6": {
+   "visible": [
+    "visited(NodeA)"
+   ]
+  },
+  "Node7": {
+   "hidden": [
+    [
+     "completed(NodeD)"
+    ],
+    [
+     "completed(NodeB)"
+    ],
+    [
+     "completed(NodeC)"
+    ]
+   ]
+  },
+  "Node8": {
+   "visible": [
+    "completed(NodeA)"
+   ]
+  },
+  "NodeA": {
+   "hidden": {
+    "any": [
+     [
+      "completed(NodeB)"
+     ],
+     [
+      "completed(NodeC)"
+     ],
+     [
+      "completed(NodeD)"
+     ]
+    ]
+   }
+  },
+  "NodeB": {
+   "visible": [
+    "visited(NodeA)"
+   ]
+  },
+  "NodeC": {
+   "visible": [
+    "visited(NodeA)"
+   ]
+  },
   "NodeE": {
    "completed": [
     "flag(romor_adam_told)"
@@ -90,6 +154,25 @@
   "NodeE": [
    "completed",
    "visible"
+  ],
+  "NodeC": [
+   "visible"
+  ],
+  "NodeB": [
+   "visible"
+  ],
+  "NodeA": [
+   "visible"
+  ],
+  "Node8": [
+   "visible"
+  ],
+  "Node7": [
+   "visible",
+   "hidden"
+  ],
+  "Node001": [
+   "hidden"
   ]
  },
  "runtime": "rules"

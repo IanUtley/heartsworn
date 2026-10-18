@@ -203,7 +203,8 @@ class Zone:
             gaal_nodes=frozenset(self.rules.get("gaal_nodes") or ()),
             gaal_display=self.rt.get("gaal_display"),
             force_move=self.rt.get("force_move"),
-            count_picker=self.rt.get("count_picker"))
+            count_picker=self.rt.get("count_picker"),
+            client_keys=catalog_data.client_node_keys(str(self.entry.get("records") or "")))
         self.state["CampID"] = self.camp_id
         self.state["ChampID"] = self.champ_id
         if _has_lives(self.rules):
@@ -280,8 +281,8 @@ def enter_child(zone: Zone, node: str):
 
 # -- token travel (the overworld map) ------------------------------------
 
-def _is_fork(node: str) -> bool:
-    return str(node).startswith("Fork")
+def _is_fork(zone: Zone, node: str) -> bool:
+    return engine.is_fork(zone.rules, node)
 
 
 def _route(zone: Zone, start: str, path_ids: list[str]) -> tuple[list[str], list[str], bool]:
@@ -313,7 +314,7 @@ def _route_stop(zone: Zone, route: list[str]) -> str:
             for loc in zone.state.get("VisLocs") or ()}
     for node in route[1:]:
         data = locs.get(node) or {}
-        if (not _is_fork(node) and not data.get("completed") and
+        if (not _is_fork(zone, node) and not data.get("completed") and
                 (data.get("impassable") or data.get("autostart"))):
             return node
     return route[-1] if len(route) > 1 else ""
@@ -328,11 +329,11 @@ def _reachable(zone: Zone, node: str) -> bool:
 
 def arrive(zone: Zone, node: str, route: list[str] | None = None):
     """The token has reached ``node``: record the visit and where it came from."""
-    if not node or _is_fork(node) or not _reachable(zone, node):
+    if not node or _is_fork(zone, node) or not _reachable(zone, node):
         return
     came = None
     if route and node in route[1:]:
-        prior = [n for n in route[:route.index(node, 1)] if not _is_fork(n)]
+        prior = [n for n in route[:route.index(node, 1)] if not _is_fork(zone, n)]
         came = prior[-1] if prior else None
     if zone.eng.get("current") != node:
         zone.apply({"type": "visit", "node": node})
@@ -711,6 +712,16 @@ def _enter_runtime_zone(handler, zone: Zone, dest: str, node: str):
     zone.after.append(lambda net: _campaign().push_campupdate(
         net["handler"], zone.db, row_id, zone.champ_id, "teleport", row_type,
         True, state, *net["args"]))
+
+
+def refresh_projection(db, camp_id: int, zone_id: str) -> dict:
+    """The stored zone state, projected again with the current rules and layout.
+    A stored ``state_json`` was projected by whatever code wrote it, so entering a
+    zone re-projects it rather than sending the old map."""
+    zone = Zone(db, camp_id, zone_id)
+    state = zone.project()
+    pve_db.db_campaign_update_state(camp_id, json.dumps(state), db)
+    return state
 
 
 def activate_zone(db, champ_id: int, dest: str):

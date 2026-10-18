@@ -1124,7 +1124,10 @@ class HCPHandler(RulesPortProjectionMixin, ProfileStreamMixin, CardPlayMixin, Ca
                             battle_state=battle_state):
                         selected = cost_map.get(cost.index,
                                                 cost_map.get(str(cost.index), ()))
-                        if cost.is_source_auto_target and not selected:
+                        if cost.is_source_auto_target:
+                            # "Sacrifice this": the only choice is the source. The
+                            # client may flatten the effect's chosen target into
+                            # this slot (Burning Oil), so do not take it from there.
                             source = getattr(ability, "source_uid", None)
                             selected = (() if source is None else (int(source),))
                         selected = validate_cost_target_selection(
@@ -1215,6 +1218,12 @@ class HCPHandler(RulesPortProjectionMixin, ProfileStreamMixin, CardPlayMixin, Ca
                         additional_selections,
                         source_uid=getattr(ability, "source_uid", None),
                         expected_owner_id=owner_id)
+                    # A sacrifice paid on a different Game object (the port's
+                    # event sink) queues its discard update there; send it now,
+                    # or the client keeps showing the card on the board.
+                    if payment_game is not game:
+                        self._send_battle_events(
+                            session, payment_game, payment_game.player_uid)
                 counter_changes = ()
                 if counter_cost_plan:
                     from rules_port.costs import \
@@ -1248,6 +1257,14 @@ class HCPHandler(RulesPortProjectionMixin, ProfileStreamMixin, CardPlayMixin, Ca
                     if source_uid is None:
                         return False
                     source_uid = int(source_uid)
+                    # A card that left play while paying its cost (a sacrifice
+                    # of itself, e.g. Hellshot Catapult) has nothing to exhaust;
+                    # a Warzone update here would move it back onto the board.
+                    from pvp_db import db_card_location
+                    if str(db_card_location(
+                            session.session_id, source_uid, conn=_db)
+                           or "").lower() != "warzone":
+                        return True
                     db_set_card_state_or(
                         session.session_id, source_uid,
                         int(game_engine.ECardStates.Tapped), conn=_db)

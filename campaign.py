@@ -1537,6 +1537,7 @@ def _handle_createcamp(handler, db, env_json, comp, session_id,
                 pve_db.db_campaign_set_zone(
                     cid, "DUNGEON", template_name, json.dumps(state), conn=db,
                     is_started=is_started)
+                state = runtime.refresh_projection(db, cid, dungeon_zone["id"])
             else:
                 cid = _new_camp_id(db)
                 inst_id = _generate_inst_id()

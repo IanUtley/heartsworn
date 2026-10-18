@@ -432,6 +432,9 @@ class Game:
         ev.attributes = kwargs.get('attributes', cdef.attributes if cdef else ECardAttributes.Unknown)
         ev.lethal = kwargs.get('lethal', getattr(cdef, 'lethal', False) if cdef else False)
         ev.int_attrs = dict(kwargs.get('int_attrs', getattr(cdef, 'int_attrs', {}) or {}))
+        # The client's Armor icon reads the dedicated armor fields, not int_attrs.
+        ev.armor = int(ev.int_attrs.get('Armor', 0) or 0)
+        ev.current_armor = max(0, ev.armor - int(ev.int_attrs.get('ArmorUsed', 0) or 0))
         template_id = kwargs.get('template_id', None)
         if template_id:
             ev.card_id = ResourceId.from_str(template_id)

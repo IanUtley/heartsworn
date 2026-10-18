@@ -607,6 +607,7 @@
      "label": "The Defense of Fort Romor - lord adam fail",
      "source": "import_dungeons.py",
      "tags": [
+      "outcome:fail",
       "flag(romor_alexander_told)",
       "flag(romor_lost)",
       "!flag(romor_adam)"
@@ -629,6 +630,7 @@
      "label": "The Defense of Fort Romor - lord adam success",
      "source": "import_dungeons.py",
      "tags": [
+      "outcome:success",
       "flag(romor_adam)",
       "!flag(romor_adam_told)"
      ],
@@ -675,6 +677,7 @@
      "label": "The Defense of Fort Romor - lord alexander fail",
      "source": "import_dungeons.py",
      "tags": [
+      "outcome:fail",
       "flag(romor_benjamin_told)",
       "flag(romor_lost)",
       "!flag(romor_alexander)"
@@ -697,6 +700,7 @@
      "label": "The Defense of Fort Romor - lord alexander success",
      "source": "import_dungeons.py",
      "tags": [
+      "outcome:success",
       "flag(romor_alexander)",
       "!flag(romor_alexander_told)"
      ],
@@ -739,6 +743,7 @@
      "label": "The Defense of Fort Romor - lord benjamin fail",
      "source": "import_dungeons.py",
      "tags": [
+      "outcome:fail",
       "flag(romor_lost)",
       "!flag(romor_benjamin)"
      ],
@@ -760,6 +765,7 @@
      "label": "The Defense of Fort Romor - lord benjamin success",
      "source": "import_dungeons.py",
      "tags": [
+      "outcome:success",
       "flag(romor_benjamin)",
       "!flag(romor_benjamin_told)"
      ],
@@ -773,7 +779,7 @@
    {
     "campaign_template": "Fort Romor",
     "conversation_guid": "f688a1b3-ccd3-41d2-bd1e-cc2d40079ed3",
-    "node_id": "NodeA",
+    "node_id": "Node001",
     "conversation_name": "Fort Romor - Ruined Gate - Entrance",
     "priority": 1,
     "enabled": true,

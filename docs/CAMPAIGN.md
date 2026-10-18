@@ -112,7 +112,7 @@ completed.
 
 **Visibility** (`layout`). A node is shown when a visited node that is *open*
 reveals it. A visited node is open when it is completed, retryable, let through
-by `let_pass()`, or has no action left to play. Forks are always shown. An
+by `let_pass()`, or has no action left to play. `Fork`-named junctions are always shown; a prefab-flagged fork is a pass-through and is revealed like any node. An
 authored `visible` condition is required when present, and `hidden` and
 `blocked` gates take precedence. A node that is not visible reports none of its
 other states.

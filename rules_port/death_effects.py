@@ -71,7 +71,7 @@ def kill_troop(context, target, *, cause="effect"):
                           context.bstate)
     context.game.push_card_updated(
         scid, recipient, card_collection_for_location("discard"),
-        game_engine.card_type_from_db(card_type), template_id=tpl,
+        card_type, template_id=tpl,
         attack=attack, defense=defense, cost=cost, gems=gems)
     context._emit_trigger("CardExitedZoneEvent", target, owner)
     context._emit_trigger(

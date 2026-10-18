@@ -1184,6 +1184,14 @@ class NativeEffectBackend:
                                 _max = int(target_spec.maximum or 0)
                                 target_values = tuple(
                                     candidates[:_max] if _max > 0 else candidates)
+                                # A card chosen from a revealed set ("put a
+                                # revealed Human into your hand") stays public
+                                # when it moves to hand (move_card_to_zone).
+                                chosen = battle_state.setdefault(
+                                    "source_revealed_chosen", [])
+                                chosen.extend(
+                                    int(uid) for uid in target_values
+                                    if int(uid) not in chosen)
                         elif target_spec.is_auto:
                             from .targeting import target_uses_both_players
                             both_players = target_uses_both_players(

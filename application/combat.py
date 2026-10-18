@@ -860,8 +860,9 @@ class CombatMixin:
             _hc.log_req(f"    Sacrifice rejected missing card {int(card_uid)}")
             return False
         actual_owner, location, card_type = card_row
-        if (str(location or "").lower() != "warzone" or
-                "troop" not in str(card_type or "").lower()):
+        # A sacrifice cost names a troop or the source itself (an Artifact, e.g.
+        # Hellshot Catapult); the cost's own candidates already limit the choice.
+        if str(location or "").lower() != "warzone":
             _hc.log_req(
                 f"    Sacrifice rejected invalid zone/type uid={int(card_uid)} "
                 f"owner={int(actual_owner or 0)} location={location!r} type={card_type!r}")

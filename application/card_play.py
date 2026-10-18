@@ -690,8 +690,11 @@ class CardPlayMixin:
                 if not row:
                     return False
                 owner_id, location, card_type = row
-                if (str(location or "").lower() != "warzone" or
-                        "troop" not in str(card_type or "").lower()):
+                # A sacrifice cost names troops ("sacrifice a troop") or the
+                # source itself ("sacrifice it", e.g. Hellshot Catapult, an
+                # Artifact). Both are Warzone cards; the target was already
+                # validated against the cost's candidates.
+                if str(location or "").lower() != "warzone":
                     return False
                 if (expected_owner_id is not None and
                         int(owner_id or 0) != int(expected_owner_id)):

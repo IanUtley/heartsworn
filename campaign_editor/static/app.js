@@ -1792,7 +1792,7 @@ function hiddenNote(total, shown) {
 // Tag grammar: campaign_rules.parse_tag. Saved by /api/edit/* to
 // campaign_data/<template>.json (conversations) and campaign_rules/<zone>.json
 // (node states).
-const NODE_STATES = ["visible", "completed", "retryable", "marker", "impassable"];
+const NODE_STATES = ["visible", "hidden", "completed", "retryable", "marker", "impassable"];
 // Panorama NPCs: what the client reads per NPC location
 // (UIPanoramaZoneViewModel.ProcessStateChange). A completed NPC is hidden.
 const NPC_STATES = ["visible", "completed", "givequest", "turninquest", "autostart", "retryable"];

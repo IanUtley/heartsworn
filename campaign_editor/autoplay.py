@@ -387,11 +387,11 @@ def _route(rules, layout, start, goal):
     return None
 
 
-def _stop(layout, route):
+def _stop(rules, layout, route):
     """Where the client's token stops on ``route`` (runtime._route_stop)."""
     for node in route[1:]:
         info = layout["nodes"].get(node) or {}
-        if (not node.startswith("Fork") and not info.get("completed") and
+        if (not engine.is_fork(rules, node) and not info.get("completed") and
                 (info.get("impassable") or info.get("autostart"))):
             return node
     return route[-1]
@@ -408,7 +408,7 @@ def _travel_target(db, rules, state, layout, memo, zone_id):
         # A fork is a pass-through junction (no offer, never enabled): it is
         # only worth walking to when it is shown and unvisited, to open the
         # nodes behind it.
-        fork = node_id.startswith("Fork")
+        fork = engine.is_fork(rules, node_id)
         if node_id == current or not info.get("visible") or not (
                 info.get("enabled") or (fork and not info.get("visited"))):
             continue
@@ -444,7 +444,7 @@ def _travel_target(db, rules, state, layout, memo, zone_id):
     if rank == 4:
         # Each incomplete node is revisited once per quest/flag state.
         memo.setdefault("looked", []).append(f"{zone_id}|{node_id}|{_signature(state)}")
-    stop = _stop(layout, route) if len(route) > 2 else route[-1]
+    stop = _stop(rules, layout, route) if len(route) > 2 else route[-1]
     if stop != node_id:
         why = f"on the way to {node_id} ({why})"
     return stop, why

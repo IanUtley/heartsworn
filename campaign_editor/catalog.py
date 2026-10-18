@@ -748,7 +748,7 @@ _RULES_CACHE: dict[str, dict[str, Any]] = {}
 
 
 # Node states the editor no longer offers or shows.
-EDITOR_HIDDEN_STATES = frozenset({"hidden", "blocked"})
+EDITOR_HIDDEN_STATES = frozenset({"blocked"})
 
 
 def _rules_module():

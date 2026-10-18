@@ -1454,6 +1454,15 @@ def _neighbours(rules) -> dict[str, set[str]]:
     return result
 
 
+def is_fork(rules, node) -> bool:
+    """A path junction the token passes through rather than stops at: a ``Fork``
+    node, or a node the map flags as a path fork (``rules_loader`` sets
+    ``fork``) that has no offers of its own. A node with an encounter or a
+    conversation is always a stop."""
+    info = (rules.get("nodes") or {}).get(str(node)) or {}
+    return str(node).startswith("Fork") or bool(info.get("fork") and not info.get("entries"))
+
+
 def _opens_neighbours(rules, state, node_id) -> bool:
     """Arrival at an unfinished action node does not draw its paths."""
     completed, retryable = node_status(rules, state, node_id)
@@ -1537,15 +1546,23 @@ def travel_blocked(rules, state, a, b, visited=None) -> bool:
     visited.  Visited nodes stay reachable, so the way back is always open.
     """
     visited = visited_nodes(state) if visited is None else visited
-    return ((b not in visited and _unwon_encounter(rules, state, a)) or
-            (a not in visited and _unwon_encounter(rules, state, b)))
+    # A fork is a pass-through junction the player never stands on, so it is
+    # never "unvisited" for this rule: the lock is on the encounter beyond it.
+    def reached(node):
+        return node in visited or is_fork(rules, node)
+
+    return ((not reached(b) and _unwon_encounter(rules, state, a)) or
+            (not reached(a) and _unwon_encounter(rules, state, b)))
 
 
 def layout(rules: dict[str, Any], state: dict[str, Any]) -> dict[str, Any]:
     """Derive the client-visible map for ``state``."""
     node_rules = rules.get("nodes") or {}
     neighbours = _neighbours(rules)
-    forks = {n for n in neighbours if n.startswith("Fork")}
+    forks = {n for n in neighbours if is_fork(rules, n)}
+    # Named ``Fork`` junctions are always drawn. A prefab-flagged fork is only a
+    # pass-through, so it is revealed like any node.
+    drawn_forks = {n for n in forks if n.startswith("Fork")}
     visited = visited_nodes(state)
 
     def gate(node_id, key):
@@ -1577,7 +1594,7 @@ def layout(rules: dict[str, Any], state: dict[str, Any]) -> dict[str, Any]:
     for node_id in sorted(all_nodes):
         progress = _node(state, node_id)
         completed, retryable = node_status(rules, state, node_id)
-        if node_id in forks:
+        if node_id in drawn_forks:
             visible = True
         else:
             visible = (node_id in revealed or node_id in forced or
@@ -1708,7 +1725,7 @@ def validate(rules: dict[str, Any], *, known_conversations=None,
     for node_id, spec in (rules.get("nodes") or {}).items():
         if map_nodes and node_id not in map_nodes:
             add("warn", node_id, "node is not on the map")
-        for key in sorted(set(spec) - set(GATES) - {"entries", "review", "note"}):
+        for key in sorted(set(spec) - set(GATES) - {"entries", "review", "note", "fork"}):
             add("error", node_id, f"unknown node key {key!r}")
         for key in GATES:
             if key in spec:

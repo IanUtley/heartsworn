@@ -573,6 +573,7 @@ def _champion_filter_cards(champions, battle_state=None):
                 guids[int(owner)] = str(guid or "").lower()
             except (TypeError, ValueError):
                 continue
+    persisted_counters = state.get("champion_counters") or {}
     cards = []
     for champion in champions or ():
         try:
@@ -580,6 +581,12 @@ def _champion_filter_cards(champions, battle_state=None):
         except (IndexError, TypeError, ValueError):
             continue
         guid = guids.get(owner, "")
+        # Champion counters (Vulnerable, Burning ...) persist in the battle state
+        # keyed by counter GUID, not in a game_cards row; without them a
+        # HasCountersValue filter never sees the champion.
+        counter_values = persisted_counters.get(str(uid)) or {}
+        counters = {str(k): int(v or 0) for k, v in counter_values.items()
+                    if isinstance(counter_values, dict)}
         cards.append({
             "card_uid": uid, "card_type": "Champion",
             "location": "champions", "collection": "champions",
@@ -591,6 +598,8 @@ def _champion_filter_cards(champions, battle_state=None):
             "attack": 0,
             "defense": int(champion[3] or 0)
             if len(champion) > 3 else 0,
+            "counters": counters,
+            "counter_guids": {guid_: guid_ for guid_ in counters},
         })
     return cards
 

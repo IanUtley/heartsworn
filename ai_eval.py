@@ -1599,6 +1599,14 @@ class CardEvaluator:
                 order, val = self._best_stack(
                     rest, resources - cost, has_resource, used, depth + 1)
             value = self.get_card_value(card) + val
+            # Inspire setup (e.g. Ruby Pyromancer): an Inspire troop buffs each
+            # troop that enters play after it with cost at least its own, so
+            # play it before those troops.
+            if (not card.is_resource() and card.is_troop()
+                    and card.has_attribute(ECardAttributes.Inspire)):
+                value += self.personality.values["Attack"] * sum(
+                    1 for other in rest
+                    if other.is_troop() and other.cost >= card.cost)
             if value > best[1]:
                 best = ([card] + order, value)
         return best
@@ -2125,7 +2133,11 @@ class CardEvaluator:
                     "VoidCardAbilityEffectTemplate",
                     "ReturnToHandAbilityEffectTemplate",
                     "TapCardAbilityEffectTemplate",
-                    "TransformCardAbilityEffectTemplate"):
+                    "TransformCardAbilityEffectTemplate",
+                    # A battle deals damage to its target (C# AIHints treats
+                    # Battle2Cards as removal), so the AI picks an opponent.
+                    "Battle2CardsAbilityEffectTemplate",
+                    "BattleAbilityEffectTemplate"):
                 hostile = True
             elif effect_type == "MoveCardToZoneEffectTemplate":
                 if any(destination in ("hand", "deck", "void")
@@ -2436,6 +2448,49 @@ class CardEvaluator:
                         int(item.card_uid) for item in chosen)}
         return None
 
+    def _damage_amount(self, card, ability_guid):
+        """The damage an ability deals, from its DamageModifier's input variable
+        (a card count, expression, sum or counter), evaluated the way the rules
+        port evaluates effect amounts. None when the ability does not deal
+        damage through a variable."""
+        from pvp_db import db_ability_effect_type_params, db_ability_raw_json
+        from rules_port.static_rules import _native_leaf_value
+        connection = self._connection()
+        for etype, param in db_ability_effect_type_params(
+                str(ability_guid).lower(), conn=connection):
+            if etype != "CardModifierAbilityEffectTemplate" or not param:
+                continue
+            try:
+                params = json.loads(param)
+            except (TypeError, ValueError):
+                continue
+            if str(params.get("property") or "").lower() != "damage":
+                continue
+            raw = db_ability_raw_json(str(ability_guid).lower(), conn=connection)
+            value = _native_leaf_value(
+                connection, self.session.session_id, self.bstate,
+                card.card_uid, self.ai_owner_id, params, raw)
+            if isinstance(value, tuple):
+                value = value[1]
+            if value is None and not params.get("input_variable"):
+                value = int(params.get("amount") or 0)
+            return None if value is None else int(value)
+        return None
+
+    def _victory_burn(self, card):
+        """VictoryBurnRecognizer.DetermineTargets: a damage spell whose fixed
+        damage is at least the opposing champion's health targets the champion.
+        Variable-X damage depends on the payment, so it is not judged here."""
+        from ai import _spell_damage_info
+        try:
+            info = _spell_damage_info(self._connection(), card.template_guid)
+        except Exception:
+            return False
+        if not info or info.get("is_x"):
+            return False
+        fixed = int(info.get("fixed") or 0)
+        return fixed > 0 and fixed >= int(self.player_health)
+
     def choose_action_target(self, card, preferred_target=None):
         """Pick a target for a hand action using gamedata effect params:
         enforce effect-side preference after metadata legality, and retain an
@@ -2469,10 +2524,20 @@ class CardEvaluator:
                 if intent == "opponent":
                     available = [c for c in available
                                  if c.card_uid in opposing_uids]
-                    if available:
-                        return self._best_target(available, card=card).card_uid
                     champions = [uid for uid in candidates
                                  if uid in opposing_uids]
+                    # VictoryBurnRecognizer: lethal damage goes to the champion.
+                    if champions and self._victory_burn(card):
+                        return champions[0]
+                    # DirectDamage: a troop is only worth targeting when its
+                    # defense is no more than the damage this card deals, with
+                    # the damage computed from its authored variables.
+                    damage = self._damage_amount(card, ag)
+                    if damage is not None:
+                        available = [c for c in available
+                                     if c.effective_defense() <= damage]
+                    if available:
+                        return self._best_target(available, card=card).card_uid
                     if champions:
                         return champions[0]
                     continue
