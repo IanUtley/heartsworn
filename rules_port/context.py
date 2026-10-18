@@ -3305,10 +3305,61 @@ class EffectContext:
             data["atk"] = 0
         if "def" in data:
             data["def"] = 0
-        from pvp_db import db_reset_card_modifiers
+        # C# Card.Revert: counters, escalation, card variables, damage shields.
+        for key in ("counters", "counter_guids", "escalation_count",
+                    "card_integer_variables", "damage_shields"):
+            data.pop(key, None)
+        import game_engine
+        from pvp_db import (
+            db_card_ability_state, db_card_mutation_field,
+            db_reset_card_modifiers, db_reset_card_uses,
+            db_set_card_abilities, db_set_card_mutation_field,
+            db_update_card_state)
         db_reset_card_modifiers(
             self.session.session_id, int(target), json.dumps(data), conn=self.db)
+        raw_temp = db_card_mutation_field(
+            self.session.session_id, int(target), "temporary_buffs", conn=self.db)
+        try:
+            temp = json.loads(raw_temp or "{}")
+        except (TypeError, ValueError, json.JSONDecodeError):
+            temp = {}
+        if isinstance(temp, dict) and temp.pop("damage_shields", None) is not None:
+            db_set_card_mutation_field(
+                self.session.session_id, int(target), "temporary_buffs",
+                json.dumps(temp), conn=self.db)
+        # Champion counters and shields live in battle state, not game_cards.
+        for key in ("champion_counters", "damage_shields"):
+            store = self.bstate.get(key)
+            if isinstance(store, dict):
+                store.pop(str(int(target)), None)
+        # Damage, the Damaged state bit, per-game/per-turn uses and cooldowns.
+        db_update_card_state(
+            self.session.session_id, int(target),
+            clear_bits=int(game_engine.ECardStates.Damaged),
+            reset_damage=True, conn=self.db)
+        db_reset_card_uses(
+            self.session.session_id, int(target),
+            preserve_turn_and_cooldowns=False, conn=self.db)
+        # Dynamic, revoked and shifted abilities: restore the authored list.
+        ability_row = db_card_ability_state(
+            self.session.session_id, int(target), conn=self.db)
+        if ability_row:
+            try:
+                authored = json.loads(ability_row[1] or "[]")
+            except (TypeError, ValueError, json.JSONDecodeError):
+                authored = []
+            if isinstance(authored, list):
+                db_set_card_abilities(
+                    self.session.session_id, int(target),
+                    json.dumps([str(guid).lower() for guid in authored]),
+                    conn=self.db)
         self.db.commit()
+        if template_row and template_row[1]:
+            # C# RevertCard follows Card.Revert with TransformCardBase, which
+            # sends CardReverted even when the template is unchanged.
+            self.game.push_card_reverted(
+                game_engine.SessionCardId(game_engine.UID(int(target))),
+                str(template_row[1]))
         if self.native_context or self.bstate.get("_rules_port_native_effect"):
             from rules_port.card_projection import push_card_state
             push_card_state(self.game, self.session, self.db, self.handler,

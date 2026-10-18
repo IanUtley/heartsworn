@@ -9,15 +9,11 @@ in place because each needs a design decision or a larger change.
 
 ### Deliberately left (in scope for FRA/encounter champions)
 
-- [ ] **TransformCard to a ChampionTemplate/MercenaryTemplate is a no-op.**
-      `rules_port/transform_effects.py:49` resolves only `card_templates`;
-      C# `TransformCardAbilityEffectTemplate.Apply` falls through
-      CardTemplate -> ChampionTemplate -> MercenaryTemplate and synthesizes the
-      champion's card via `ChampionTemplate.GetCardTemplate()` (keeping the
-      target's name). Affects FRA **Tormented Locksmith/Elite** (`9484265f`),
-      **Midnight Gatherer Elite** (`78c19418`), encounter **Wormoid Queen**
-      (`609f5a87`).
-      them into their deck").
+- [ ] **TransformCard to a MercenaryTemplate is a no-op.** Champion targets
+      now work (`pvp_db.db_copy_template_payload` falls back to the
+      champion's ability list), but C#
+      `TransformCardAbilityEffectTemplate.Apply` also falls through to
+      MercenaryTemplate, which the port does not resolve.
 - [ ] **CreateAndCastSpell resolves the copy inline and ignores locks.**
       `rules_port/effects.py:436` resolves the created spell synchronously
       instead of pushing it onto the chain, has no `CantCreateCopies` check,
@@ -33,26 +29,20 @@ in place because each needs a design decision or a larger change.
       filtered (C# `GetRandomInspirePower` uses `setsValidInFormat`;
       `rules_port/effects.py` ~243).
 - [ ] `RevertPermanentModificationsAbilityEffectTemplate` non-transform path
-      only clears stat mods via `db_reset_card_modifiers`; C# `Card.Revert`
-      also clears damage, counters, dynamic abilities, damage shields,
-      uses/cooldowns, card integer variables, and emits `CardReverted`
-      (`rules_port/context.py:2926`).
+      (`rules_port/context.py` `revert_modifications`) now clears counters,
+      escalation, card variables, damage shields, damage, uses/cooldowns, and
+      restores authored abilities, and emits `CardReverted`. Still open vs C#
+      `Card.Revert`: `RemovePermanentAndTargetedAbilities`/`RemoveCardCreatedAbilities`
+      and trigger unregistration are not run; `bstate["card_integer_variables"]`
+      is keyed by name only, so a revert cannot clear one card's values there;
+      `IntAttrs.Charges`/`ChargePointsSpent`/`ChargePointsGained` are not reset.
 - [ ] `MoveCardToZoneEffectTemplate`: `m_ControlGivenToTargetIndex=-2` and
       `m_UseSourceDestination` are unhandled (`rules_port/context.py`).
 - [ ] `ActivateAbilityEffectTemplate` resolves the child inline instead of
       pushing it on the chain after the parent, so ordering differs when the
       parent has later effects (Rhiannon of Flame, The Nameless Knight,
       Calilac).
-- [ ] `TransformSelfAbilityEffectTemplate` non-PlantGarden path does not copy
-      the target's gems/boons/counters/damage; `TransformCardToTarget` moves
-      the source to the warzone instead of keeping its zone
-      (`rules_port/context.py:1418`).
-- [ ] `RevealCardsAbilityEffectTemplate` broadcasts `Opponents` reveals
-      publicly in PvP (`rules_port/reveal_effects.py`).
 - [ ] `StoreTargetsAbilityEffectTemplate` with TAC `StoreInAbility` stores in
       the persisted battle state keyed by ability GUID; C# stores on the
       ability instance and drops it with the activation (needs an explicit
       `ForgetAllCards` today).
-- [ ] `tests/tests_leaves.py::test_revert_mods` fixture `make_db()` lacks
-      `game_cards.original_template_guid`, so the test errors before exercising
-      the leaf.

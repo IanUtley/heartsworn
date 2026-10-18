@@ -890,14 +890,16 @@ class PendingChoicesMixin:
         return True
 
     def _push_private_revealed_cards(self, session, bstate, owner_id, rows,
-                                     pl_t, ai_t):
-        """Send a controller-only CardsRevealed packet for a PvP look effect.
+                                     pl_t, ai_t, to_opponent=False):
+        """Send a recipient-only CardsRevealed packet for a PvP reveal.
 
         ``CardsRevealedSessionEventArgs`` is recipient-scoped by delivery, not
         by the ``player_id`` field inside the event.  A shared PvP packet would
         therefore disclose a "look at" effect to the opponent.  The reveal
         visibility comes from the extracted RevealCards effect metadata; this
         helper only handles the protocol delivery and card definitions.
+        ``to_opponent`` sends the packet to the other PvP player (C#
+        ``m_PlayerRevealTargets=Opponents``) instead of the owner.
         """
         import hconnect_server as _hc
         if not (bstate or {}).get("pvp"):
@@ -909,9 +911,15 @@ class PendingChoicesMixin:
         if chooser_pid not in pids:
             return False
         opponent_pid = next((p for p in pids if int(p) != chooser_pid), 0)
+        viewer_pid = opponent_pid if to_opponent else chooser_pid
+        if not viewer_pid:
+            return False
+        other_pid = chooser_pid if to_opponent else opponent_pid
+        # ``chooser`` stays the card owner; ``viewer`` is the recipient.
         chooser = _hc.game_engine.UID.make(244, chooser_pid)
-        opponent = _hc.game_engine.UID.make(244, opponent_pid)
-        private = _hc.game_engine.Game(int(session.session_id), chooser, opponent)
+        viewer = _hc.game_engine.UID.make(244, viewer_pid)
+        opponent = _hc.game_engine.UID.make(244, other_pid)
+        private = _hc.game_engine.Game(int(session.session_id), viewer, opponent)
         ids = []
         positions = []
         for card_uid, position, template_guid, _user_id, card_state in rows:
@@ -931,9 +939,9 @@ class PendingChoicesMixin:
         ev.owning_players = [chooser] * len(ids)
         ev.positions = positions
         private._push(ev)
-        handler = player_handlers.get(chooser_pid)
+        handler = player_handlers.get(viewer_pid)
         if handler is not None:
-            _send_pvp_packet(handler, session, private, chooser,
+            _send_pvp_packet(handler, session, private, viewer,
                              "private-reveal")
         bstate["private_reveal_sent"] = True
         return True
