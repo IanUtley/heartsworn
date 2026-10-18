@@ -669,6 +669,9 @@ def _flag_from_typed_intattr(attribute):
         "cantgainhealth": {"cant_gain_health"},
         "cantlosehealth": {"cant_lose_health"},
         "cantplaycards": {"cant_play_cards"},
+        "cantplaycardsfromhand": {"cant_play_cards_from_hand"},
+        "cantdrawcards": {"cant_draw_cards"},
+        "skipsdrawphase": {"skips_draw_phase"},
         "unlimitedhandsize": {"no_max_hand_size"},
         "preventcombatdamage": {"prevent_combat_damage"},
         "preventnoncombatdamage": {"prevent_noncombat_damage"},
@@ -1026,18 +1029,22 @@ def aura_deltas(db, session_id, bstate, card_uid):
                                              tt["player_filter"])
                 # Stored names recorded by the source card's abilities (Oath of
                 # Valor's HasName-with-UseStoredName aura).
-                src_stored = []
+                # The port reads stored names per ability guid.
+                src_stored = {}
                 try:
                     for ag2 in json.loads(ab_json or "[]"):
-                        src_stored.extend(
+                        src_stored[ag2.lower()] = list(
                             (bstate or {}).get("stored_names", {}).get(
                                 ag2.lower(), []))
                 except Exception:
                     pass
+                src_card = {"card_uid": int(src_uid), "user_id": owner}
                 pool = [c for c in _cards_in_zones(db, session_id, target_owner,
                                                    zones)
-                        if evaluate_card_filter(c, tt["filter_json"], src_uid,
-                                                src_stored)]
+                        if evaluate_card_filter(
+                            c, tt["filter_json"], src_uid, src_stored,
+                            source_card=src_card,
+                            ability_state={"resolving_ability": ag})]
                 if int(card_uid) not in {c["card_uid"] for c in pool}:
                     continue
                 # This card is inside the aura's target pool — apply its leaves.

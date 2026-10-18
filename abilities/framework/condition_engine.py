@@ -46,6 +46,16 @@ def _side_of(user_id):
     return "ai" if not user_id else "player"
 
 
+def _owner_is(ctx, owner, expected):
+    """PvP-aware ownership comparison (mirrors rules_port.conditions)."""
+    if (getattr(ctx, "bstate", None) or {}).get("pvp"):
+        try:
+            return int(owner or 0) == int(expected or 0)
+        except (TypeError, ValueError):
+            return False
+    return _side_of(owner) == _side_of(expected)
+
+
 def _champion_owner_ids(ctx, source_owner):
     """Return the champion owners visible to a health condition.
 
@@ -429,6 +439,15 @@ class ConditionContext:
             return 0
 
 
+def _with_source_owner(source, ctx):
+    """The ability source card with its controller spelled out, which the
+    ownership filters need (a card read from the context has no owner key)."""
+    owner = source.get("user_id")
+    if owner is None:
+        owner = ctx.ability_source_owner_id
+    return {**source, "user_id": owner}
+
+
 def evaluate_condition(node, ctx):
     """Evaluate one condition tree node (dict from gamedata JSON)."""
     if not isinstance(node, dict):
@@ -465,9 +484,7 @@ def evaluate_condition(node, ctx):
         trigger_owner = (ctx.trigger_owner_id
                          if ctx.trigger_owner_id is not None
                          else ctx.ability_source_owner_id)
-        if ctx.bstate.get("pvp"):
-            return int(card["user_id"]) == int(trigger_owner or 0)
-        return (_side_of(card["user_id"]) == _side_of(trigger_owner))
+        return _owner_is(ctx, card["user_id"], trigger_owner)
     if t == "TriggerAbilityIsChargePower":
         # CardActivatedEvent carries the activated template in the transient
         # battle state.  Champion abilities and granted talent abilities use
@@ -485,12 +502,12 @@ def evaluate_condition(node, ctx):
         card = ctx.card(ctx.trigger_uid)
         if card is None:
             return True
-        return _side_of(card["user_id"]) == _side_of(ctx.ability_source_owner_id)
+        return _owner_is(ctx, card["user_id"], ctx.ability_source_owner_id)
     if t == "TriggerPlayerControlsTarget":
         card = ctx.card(ctx.extra_target)
         if card is None:
             return True
-        return _side_of(card["user_id"]) == _side_of(ctx.ability_source_owner_id)
+        return _owner_is(ctx, card["user_id"], ctx.ability_source_owner_id)
     if t == "TriggerCardMatchesFilter":
         # The client's TriggerCondition tests either the event's SOURCE card
         # (TriggerSource — for CardDrawnEvent the drawing champion), its TARGET
@@ -803,14 +820,15 @@ def evaluate_condition(node, ctx):
         source = ctx.card(ctx.ability_source_uid)
         return (evaluate_card_filter(
                     source, fjson, ctx.ability_source_uid,
-                    source_card=source)
+                    source_card=_with_source_owner(source, ctx))
                 if source is not None else True)
     if t == "RequiresSourcePassesFilterCondition":
         card = ctx.card(ctx.ability_source_uid)
         if card is None:
             return True
         return evaluate_card_filter(card, node.get("m_Filter") or {},
-                                    ctx.ability_source_uid)
+                                    ctx.ability_source_uid,
+                                    source_card=_with_source_owner(card, ctx))
     if t == "RequiresChampionHealth":
         source_owner = ctx.ability_source_owner_id
         player_filter = (node.get("m_PlayerFilter") or "Self")

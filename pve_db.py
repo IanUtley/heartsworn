@@ -271,7 +271,8 @@ def db_claim_arena_rewards(user_id, conn=None):
         challengers = db_get_fra_challengers(user_id, conn=connection)
         history = db_get_arena_fight_history(user_id, conn=connection)
         sack_count = max(0, int(arena.get("gold_earned", 0) or 0))
-        if not int(arena.get("deck_id", 0) or 0) or not sack_count:
+        chests = max(0, int(arena.get("chests_earned", 0) or 0))
+        if not int(arena.get("deck_id", 0) or 0):
             return {
                 "success": False, "error": 2,
                 "error_message": "There are no FRA rewards to claim.",
@@ -281,8 +282,10 @@ def db_claim_arena_rewards(user_id, conn=None):
 
         loot = _fra_gold_rewards(history, sack_count)
         gold = sum(int(item.get("gold", 0) or 0) for item in loot)
-        new_gold, _new_platinum = db_adjust_user_currency(
-            user_id, gold_delta=gold, conn=connection)
+        new_gold = None
+        if gold:
+            new_gold, _new_platinum = db_adjust_user_currency(
+                user_id, gold_delta=gold, conn=connection)
         db_update_arena_state(
             user_id, conn=connection, deck_id=0, wins=0, losses=0,
             challenger_index=0, fight_history="[]", gold_earned=0,
@@ -291,7 +294,7 @@ def db_claim_arena_rewards(user_id, conn=None):
         return {
             "success": True, "error": 0, "error_message": "",
             "gold": gold, "loot": loot, "challengers": challengers,
-            "new_gold": new_gold,
+            "new_gold": new_gold, "chests": chests,
         }
 
 
@@ -781,6 +784,20 @@ def db_campaign_for_champion(champion_id, campaign_type="PANORAMA", conn=None):
     ).fetchone()
 
 
+def db_campaign_for_champion_template(champion_id, template_name, conn=None):
+    """Return the newest campaign matching a champion and template name.
+
+    ``camp.dungeon NAME`` creates one campaign per authored dungeon template;
+    looking up by campaign type alone would accidentally reuse Crayburn.
+    Returns ``(id, camp_uid_lo, is_started, state_json, campaign_type)``.
+    """
+    return _connection(conn).execute(
+        "SELECT id, camp_uid_lo, is_started, state_json, campaign_type "
+        "FROM campaigns WHERE champion_id=? AND lower(template_name)=lower(?) "
+        "ORDER BY id DESC LIMIT 1",
+        (int(champion_id), str(template_name or ""))).fetchone()
+
+
 def db_latest_campaign_for_champion(champion_id, campaign_type, conn=None):
     """Return the newest campaign identity/state without creating one."""
     return _connection(conn).execute(
@@ -837,6 +854,16 @@ def db_campaign_update_state(campaign_id, state_json, conn=None, *, started=None
     )
 
 
+def db_campaign_set_zone(campaign_id, campaign_type, template_name,
+                         state_json, conn=None, *, is_started=True):
+    """Point a campaign row at another zone (type, template and state)."""
+    _connection(conn).execute(
+        "UPDATE campaigns SET campaign_type=?, template_name=?, is_started=?, "
+        "state_json=? WHERE id=?",
+        (campaign_type, template_name, int(bool(is_started)), state_json,
+         campaign_id))
+
+
 def db_promote_campaign_to_dungeon(campaign_id, state_json, conn=None):
     """Promote an existing campaign row to the Crayburn dungeon."""
     _connection(conn).execute(
@@ -852,6 +879,25 @@ def db_latest_quest_state(champion_id, conn=None):
         "AND campaign_type='QUEST' ORDER BY id DESC LIMIT 1", (champion_id,)
     ).fetchone()
     return row
+
+
+def db_user_campaign_states(user_id, conn=None):
+    """Return ``(campaign_id, champion_id, campaign_type, template_name,
+    is_started, state_json)`` for every campaign owned by one profile."""
+    return _connection(conn).execute(
+        "SELECT c.id, c.champion_id, c.campaign_type, c.template_name, "
+        "c.is_started, c.state_json FROM campaigns c "
+        "JOIN champions ch ON ch.id=c.champion_id "
+        "WHERE ch.user_id=? ORDER BY c.id DESC", (int(user_id),)).fetchall()
+
+
+def db_campaign_owner_user_id(campaign_id, conn=None):
+    """Return the profile id owning one campaign, or None."""
+    row = _connection(conn).execute(
+        "SELECT ch.user_id FROM campaigns c JOIN champions ch "
+        "ON ch.id=c.champion_id WHERE c.id=?",
+        (int(campaign_id),)).fetchone()
+    return int(row[0]) if row and row[0] is not None else None
 
 
 def db_latest_campaign_any(champion_id, conn=None):
@@ -873,6 +919,16 @@ def db_campaign_clear_state(campaign_id, conn=None):
     """Clear a saved state for an explicit campaign reset operation."""
     _connection(conn).execute(
         "UPDATE campaigns SET state_json=NULL WHERE id=?", (campaign_id,))
+
+
+def db_campaign_delete_for_champion(champion_id, conn=None):
+    """Delete every campaign row of a champion (restart from the AZ0 start)."""
+    connection = _connection(conn)
+    count = connection.execute(
+        "DELETE FROM campaigns WHERE champion_id=?", (champion_id,)).rowcount
+    connection.execute(
+        "UPDATE champions SET last_campaign_id=0 WHERE id=?", (champion_id,))
+    return count
 
 
 def db_campaign_set_last_campaign(champion_id, campaign_id, conn=None):
@@ -1062,7 +1118,7 @@ def db_panorama_quest_rows(node, conn=None):
     return _connection(conn).execute(
         "SELECT qc.quest_script, qc.conversation_guid, qc.role, qc.faction, "
         "qc.npc, qc.priority, COALESCE(NULLIF(qc.start_hook, ''), "
-        "NULLIF(qt.start_hook, ''), '') "
+        "NULLIF(qt.start_hook, ''), ''), COALESCE(qc.conditions_json, '{}') "
         "FROM quest_conversations qc "
         "LEFT JOIN quest_templates qt ON qt.script_name=qc.quest_script "
         "WHERE qc.campaign_template='AZ1' AND qc.node_id=? "
@@ -1089,6 +1145,47 @@ def db_node_conversation_rows(node, campaign_template="AZ1", conn=None):
         (str(campaign_template or "AZ1"), str(node))).fetchall()
 
 
+def db_conversation_name(conversation_guid, conn=None):
+    """Return the authored name of a catalogued campaign conversation."""
+    guid = str(conversation_guid or "").lower()
+    connection = _connection(conn)
+    for table in ("campaign_node_conversations", "quest_conversations"):
+        row = connection.execute(
+            f"SELECT conversation_name FROM {table} "
+            "WHERE LOWER(conversation_guid)=? LIMIT 1", (guid,)).fetchone()
+        if row and row[0]:
+            return row[0]
+    return None
+
+
+def db_conversation_action_tables(conversation_guid, conn=None):
+    """Return the editor's ending-action tables (``{ending|"*": [action]}``)
+    authored on a conversation's node and quest rows."""
+    guid = str(conversation_guid or "").lower()
+    connection = _connection(conn)
+    tables = []
+    for sql in ("SELECT trigger_json FROM campaign_node_conversations "
+                "WHERE LOWER(conversation_guid)=? AND enabled=1",
+                "SELECT conditions_json FROM quest_conversations "
+                "WHERE LOWER(conversation_guid)=? AND enabled=1"):
+        for (raw,) in connection.execute(sql, (guid,)).fetchall():
+            try:
+                actions = (json.loads(raw or "{}") or {}).get("actions")
+            except (TypeError, ValueError, AttributeError):
+                continue
+            if isinstance(actions, dict):
+                tables.append(actions)
+    return tables
+
+
+def db_quest_template_start(quest_script, conn=None):
+    """Return ``(start_hook, campaign_group)`` for a quest template, or None."""
+    return _connection(conn).execute(
+        "SELECT COALESCE(start_hook, ''), COALESCE(campaign_group, 'AREA') "
+        "FROM quest_templates WHERE script_name=?",
+        (str(quest_script),)).fetchone()
+
+
 def db_panorama_npc_quest_scripts(node, npc, conn=None):
     """Return quest scripts associated with an AZ1 node/NPC pair."""
     return _connection(conn).execute(
@@ -1105,6 +1202,14 @@ def db_encounter_scene_rewards(scene_guid, conn=None):
     return row[0] if row else None
 
 
+def db_encounter_scene_actions(scene_guid, conn=None):
+    """Serialized ``{"pre"|"victory"|"defeat": [action]}`` for one scene."""
+    row = _connection(conn).execute(
+        "SELECT actions_json FROM encounter_scenes WHERE guid=?",
+        (str(scene_guid),)).fetchone()
+    return row[0] if row else None
+
+
 def db_void_tamed_troop_rows(session_id, player_user_id, owner, conn=None):
     """Return voided troop templates/markers for reward conditions."""
     owner_sql = "gc.user_id=?" if str(owner).lower() in {
@@ -1115,6 +1220,46 @@ def db_void_tamed_troop_rows(session_id, player_user_id, owner, conn=None):
         "AND LOWER(COALESCE(gc.card_type,'')) LIKE '%troop%' AND " + owner_sql +
         " ORDER BY gc.card_uid", (int(session_id), int(player_user_id))
     ).fetchall()
+
+
+def db_card_in_warzone(session_id, player_user_id, template_guid, owner="opponent", conn=None):
+    """True while a card of ``template_guid`` is in the owner's warzone."""
+    owner_sql = "gc.user_id=?" if str(owner).lower() in {
+        "player", "self", "champion"} else "gc.user_id<>?"
+    return _connection(conn).execute(
+        "SELECT 1 FROM game_cards gc WHERE gc.session_id=? AND LOWER(COALESCE(gc.location,''))='warzone' "
+        "AND LOWER(gc.template_guid)=? AND " + owner_sql + " LIMIT 1",
+        (int(session_id), str(template_guid).lower(), int(player_user_id))).fetchone() is not None
+
+
+def db_campaign_rows_for_champion(champion_id, conn=None):
+    """``(id, campaign_type, template_name, state_json)`` of every campaign row."""
+    return _connection(conn).execute(
+        "SELECT id, campaign_type, template_name, state_json FROM campaigns "
+        "WHERE champion_id=? ORDER BY id", (int(champion_id),)).fetchall()
+
+
+def db_campaign_progress_rows(champion_id, conn=None):
+    """``{zone: state_json}`` of a champion's rules-driven campaign progress."""
+    return dict(_connection(conn).execute(
+        "SELECT zone, state_json FROM campaign_progress WHERE champion_id=?",
+        (int(champion_id),)).fetchall())
+
+
+def db_campaign_progress_save(champion_id, rows, conn=None):
+    """Upsert ``{zone: state_json}`` progress rows (the caller commits)."""
+    _connection(conn).executemany(
+        "INSERT INTO campaign_progress (champion_id, zone, state_json, updated_at) "
+        "VALUES (?, ?, ?, datetime('now')) ON CONFLICT(champion_id, zone) DO "
+        "UPDATE SET state_json=excluded.state_json, updated_at=excluded.updated_at",
+        [(int(champion_id), str(zone), state_json)
+         for zone, state_json in rows.items()])
+
+
+def db_campaign_progress_delete(champion_id, conn=None):
+    """Forget a champion's rules progress (campaign restart)."""
+    _connection(conn).execute(
+        "DELETE FROM campaign_progress WHERE champion_id=?", (int(champion_id),))
 
 
 def db_campaign_identity_state(campaign_id, conn=None):
@@ -1160,6 +1305,14 @@ def db_campaign_battle_profile(campaign_id, conn=None):
         "ch.champion_class, ch.gender, c.state_json, ch.talents "
         "FROM campaigns c JOIN champions ch ON ch.id=c.champion_id "
         "WHERE c.id=?", (campaign_id,)).fetchone()
+
+
+def db_champion_battle_profile(champion_id, conn=None):
+    """``(name, last_deck_id, race, class, gender, talents)`` of a champion,
+    for a battle with no campaign row (the campaign editor's Play)."""
+    return _connection(conn).execute(
+        "SELECT champion_name, last_deck_id, race, champion_class, gender, "
+        "talents FROM champions WHERE id=?", (champion_id,)).fetchone()
 
 
 def db_first_deck_id_for_user(user_id, conn=None):
@@ -1247,7 +1400,8 @@ def db_quest_start_rows(conversation_guid, campaign_template, conn=None):
 def db_quest_node_rows(node, conn=None):
     """Return enabled AZ1 quest conversations for one node."""
     return _connection(conn).execute(
-        "SELECT quest_script, conversation_guid, role, faction "
+        "SELECT quest_script, conversation_guid, role, faction, "
+        "COALESCE(conditions_json, '{}') "
         "FROM quest_conversations WHERE campaign_template='AZ1' "
         "AND node_id=? AND enabled=1 ORDER BY priority, conversation_guid",
         (str(node),)).fetchall()
@@ -1258,6 +1412,13 @@ def db_conversation_reward(conversation_guid, conn=None):
     return _connection(conn).execute(
         "SELECT reward_json, one_time, enabled FROM conversation_rewards "
         "WHERE conversation_guid=?", (str(conversation_guid),)).fetchone()
+
+
+def db_quest_template_reward(quest_script, conn=None):
+    """``(rewards_json, enabled)`` for a quest's completion reward, or None."""
+    return _connection(conn).execute(
+        "SELECT rewards_json, enabled FROM quest_templates WHERE script_name=?",
+        (str(quest_script),)).fetchone()
 
 
 def db_fortune_card_guids(set_guid, conn=None):
@@ -1274,6 +1435,15 @@ def db_encounter_scene_runtime(scene_guid, conn=None):
         "SELECT guid, name, title, gameboard, ai_deck_guid, "
         "ai_champion_guid, ai_deck_personality FROM encounter_scenes "
         "WHERE guid=?", (str(scene_guid),)).fetchone()
+
+
+def db_encounter_scene_player_override(scene_guid, conn=None):
+    """``(player_champion_guid, player_deck_guid)`` for a scene; blank means
+    the player keeps their own champion and deck."""
+    row = _connection(conn).execute(
+        "SELECT COALESCE(player_champion_guid, ''), COALESCE(player_deck_guid, '') "
+        "FROM encounter_scenes WHERE guid=?", (str(scene_guid),)).fetchone()
+    return (row[0] or None, row[1] or None) if row else (None, None)
 
 
 def db_campaign_template_name(campaign_id, conn=None):

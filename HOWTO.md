@@ -13,7 +13,7 @@ end, not in a dated work log.
 
 Use the sources in this order:
 
-1. The original client disassembly in `HexClient/` and client `Data/gamedata`
+1. The original client disassembly in `hex-private/HexClient/` and client `Data/gamedata`
    define wire types, event expectations, and metadata when compatibility is
    uncertain.
 2. `RULES.md` defines the server's intended gameplay behavior and records
@@ -28,6 +28,13 @@ Use the sources in this order:
    disagree with a document, fix the implementation and the document together;
    do not silently establish a new rule in code.
 
+The records snapshot and C# disassembly are stored at `hex-private/Records/`
+and `hex-private/HexClient/` in the private `hex-private/` submodule. Clone with
+`--recurse-submodules` or run `git submodule update --init hex-private` before
+using code or tools that read those sources.
+Campaign runtime, authored rules/data, and the campaign-specific asset tools
+live under `campaign/` at the project root, not in the submodule.
+
 When reverse-engineering a behavior, record the observation, the inferred
 contract, and an acceptance test. A future implementation should be generated
 from the contract rather than from a card-name or endpoint-name guess.
@@ -41,9 +48,17 @@ bash restart.sh
 ```
 
 The server listens on TCP `9933`; the HTTP compatibility/auth proxy listens on
-`8081`. `restart.sh` initializes or upgrades the database, runs one-off
-`migration.py` work when present, compiles the runtime, and starts HConnect,
-the proxy, tournament service, and replay worker.
+`8081`. The campaign editor (`campaign_editor/`) edits the campaign source in
+`campaign/` (override with `HEX_CAMPAIGN_ROOT`); when that
+source is present, `restart.sh` starts it on `127.0.0.1:8765`. The Docker image
+runs it on container port `8765` when that source is present. `restart.sh` initializes or
+upgrades the database, runs one-off `migration.py` work when present, compiles
+the runtime, and starts HConnect, the proxy, tournament service, replay
+worker, and the available campaign editor.
+The database bootstrap runs the schema and seed pass once before those services
+start; they inherit `HEX_DB_BOOTSTRAPPED=1` and reuse the prepared database.
+Starting a service directly without that marker keeps the schema-initialization
+fallback.
 
 Reload-only modules can be refreshed without restarting HConnect:
 
@@ -51,8 +66,9 @@ Reload-only modules can be refreshed without restarting HConnect:
 kill -USR1 "$(pgrep -f '[h]connect_server.py' | head -n1)"
 ```
 
-Supervisor owns all four long-running processes by default after installing
-the dependencies from `requirements.txt`:
+Supervisor owns the four server processes by default after installing the
+dependencies from `requirements.txt`; `restart.sh` also starts the campaign
+editor under Supervisor when its source is available:
 
 ```bash
 bash restart.sh
@@ -60,10 +76,11 @@ supervisorctl -c supervisord.conf status
 ```
 
 The Docker entrypoint runs the same `supervisord.conf` in the foreground after
-database bootstrap. Supervisor restarts a failed service and writes the
-service logs under `/tmp`; use `supervisorctl` for targeted stop, start, or
-restart operations. Set `HEX_USE_SUPERVISOR=0` when a direct-process restart is
-needed for local troubleshooting.
+database bootstrap. It binds the editor to the container interfaces on port
+`8765`; map that port when launching the container. Supervisor restarts a
+failed service and writes the service logs under `/tmp`; use `supervisorctl`
+for targeted stop, start, or restart operations. Set `HEX_USE_SUPERVISOR=0`
+when a direct-process restart is needed for local troubleshooting.
 
 Use a full restart after changing `hconnect_server.py`, startup wiring,
 encoders, schema initialization, or process configuration. Do not run tests in
@@ -122,7 +139,7 @@ Use hex mcp if installed.
 ```toml
 [mcp_servers.hex]
 command = "/usr/bin/python3"
-args = ["/home/ianutley/Hex/hex_mcp.py"]
+args = ["/location/of/hex_mcp.py"]
 ```
 
 ## 4. Module ownership
@@ -135,6 +152,11 @@ same chooser. The C# CreateCard ability case covers manual troop-summoning
 abilities, while its EndPhase handler passes and its combat QuickAction fallback
 does not select troop-summoning hand cards.
 
+For an authored `CardCostModifier` that reduces cost, the shared Python AI
+targets the eligible hand card with the highest current effective cost. Ties
+retain legal-target order; determine this from ability metadata, not card names
+or display text.
+
 | Module | Owns |
 |---|---|
 | `hconnect_server.py` | TCP framing, connection lifecycle, legacy transaction compatibility, and protocol glue |
@@ -144,12 +166,14 @@ does not select troop-summoning hand cards.
 | `services/auction.py` | retained Auction House API surface; currently an intentional stub |
 | `game_engine.py` | session event types, event construction, and event serialization |
 | `battle_engine.py` | legacy rollback implementation for turn phases, priority, auto-pass, chain state, and phase persistence; normal live gameplay uses `rules_port/` |
-| `rules_port/` | Semantic port of HexClient/Game.Shared rules; owns C#-ordered session/action, phase, priority, chain, combat, transaction, ability, trigger, and target primitives |
+| `rules_port/` | Semantic port of hex-private/HexClient/Game.Shared rules; owns C#-ordered session/action, phase, priority, chain, combat, transaction, ability, trigger, and target primitives |
 | `game_session.py` | session lifecycle and DB-backed session state |
 | `ai.py` | AI turn, card-choice, and combat decisions |
 | `abilities/` | metadata-driven ability parsing, targeting, conditions, effect leaves, and the shared `EffectContext`/`AbilityBuilder` adapters |
 | `ability.py` | compatibility facade for the `abilities/` package |
 | `campaign.py` | campaign protocol and authored campaign state; campaign SQL migration into `pve_db` remains work in progress |
+| `campaign/campaign_runtime/` | runs zones whose `campaign/campaign_rules/<zone>.json` says `"runtime": "rules"` from the campaign editor's rules (shared rules loader, projection, progress in `campaign_progress`); see `docs/CAMPAIGN.md` "Rules runtime" |
+| `campaign_source.py` | adds the `campaign/` source root to Python's import path for server modules |
 | `gamemodes/` | mode-specific orchestration (PVP, FRA, tournament) |
 | `static.py` | all schema DDL and server-owned seed/configuration data |
 | `db.py` | one SQLite connection, transactions, and compatibility persistence facade |
@@ -163,6 +187,12 @@ does not select troop-summoning hand cards.
 | `replay_server.py` | polling worker only; no replay business logic |
 | `encoder.py` | ObjFmt response and binary event encoding |
 | `proxy.py` | HTTP authentication, payment-link compatibility, news, and static proxy endpoints |
+
+The campaign editor's pure rules engine (`campaign/campaign_rules.py`) keeps counters
+in each zone's simulation state. Hooks change them with
+`increment_counter: {name, amount}` effects; tags read them with
+`counter(Name)` (at least 1) or `counter(Name,N)` (at least N). Keep dungeon
+counters in that dungeon's rules state so values do not leak between zones.
 
 `practice.py` is not a service: Practice is one client action and follows the
 normal session path. The old `services/practice.py` and replay browser module
@@ -237,21 +267,53 @@ usage in `battle_state["champion_ability_uses"]`, and per-turn usage in
 `battle_state["champion_ability_uses_per_turn"]`; resolve controller identity
 with `rules_port.runtime_helpers.champion_owner_id` / `champion_uid_for_owner`
 instead of converting a participant UID (`game_engine.UID` has no `__int__`).
+Per-player state (health, charges, resources, thresholds, active player,
+per-turn counters) must be read through `runtime_helpers.participant_value`,
+`participant_side`, `is_active_participant` and
+`participant_turn_counter_key`. In PvP both participants are nonzero raw IDs,
+and `pvp_view.to_effect_view` puts the *resolving* participant on `player`
+(often `pids[1]`), so neither the PvE `bool(owner)` mapping nor a `pids[0]`
+mapping is valid there; the view's `pvp_health_map` is the authority.
 Manual champion powers are accepted, paid, and queued by the port
 (`MetadataCardTransactionExecutor`), which also gates and spends their
 authored `m_UsesPerGame` and `m_UsesPerTurn`; the legacy HConnect
 champion-ability handler is not the live path, so a rule added only there
-never runs. A phase-entry resolver
+never runs. The PvP payer (`native_activation_cost_payer`) also applies the
+card costs (void/sacrifice/exhaust/discard) at activation, as C# does; the
+executor always queues a `ProjectedChainAbility`, so deferring them to the
+resolver meant they were never paid. Every resolver of a manual-ability item
+must pass the descriptor's `cost_target_map` and `variables` to
+`resolve_port_ability`: `NativeEffectBackend` rebuilds the paid-card lists
+(`ExhaustedCards`, `VoidedCards`, `SacrificedCards`, `DiscardedCards`) from it,
+which "for each troop exhausted this way" (Dread Factory) and "the voided
+troop's [ATK]" (Bun'jitsu) read. A nested "discard a card" prompt goes to the
+controller of the parent ActivateAbility effect's target (`You` → activator;
+"target/each opposing champion" → that champion's controller); see
+`_pvp_discard_prompt_pid`. A phase-entry resolver
 (`set_turn_phase_entry_resolver`) must publish the wire events its projection
-queued: readiness is applied at Prep, and leaving those events queued until
-the drive stops made Unity untap troops when Main began instead.
+queued: the Prep refill/cooldown events, and leaving those events queued
+until the drive stops made Unity update the board only when Main began.
+The ready step (C# `ReadyState`: StartTurn `BeginningOfOwnersTurn` expiry,
+`ReadyAllCardsThatCanBeReadied`, `ResetArmor`) runs at StartTurn *before*
+`TurnStartedEvent` is dispatched (`rules_port.lifecycle.ready_step_for_turn`,
+via `_ready_side_for_turn` in PvE and `_pvp_ready_step` in PvP), so a
+start-of-turn trigger that exhausts its own card (Ravenous Zombies) leaves it
+exhausted. `battle_state["_readied_for"]` (`{side: turn_number}`) records it;
+Prep readies only a side not yet readied this turn.
 Champion counters must be published as a `CardUpdated` for the champion
 carrying `counters`, with the collection the champion already sits in
 (`None_`): Unity derives the champion HUD effect icons (Stealth, Burning,
 Dazed, Vulnerable) from the cached `CardRepresentation` counters, and only a
 `CardUpdated` stores them. `ECardCollections.Champions` is both suppressed by
 `push_card_updated` and read as a card move, so `CardCountersChanged` alone
-never reaches the portrait.
+never reaches the portrait. Champion IntAttrs (`battle_state["champion_int_attrs"]`)
+follow the same rule: `GoChampionEffects` maps the `Toxified` IntAttr (not a
+counter; Records has no Toxic counter template) to the Toxify HUD icon, so
+`EffectContext._push_champion_intattrs` publishes a champion `CardUpdated`
+carrying `int_attrs`, and `_push_champions_warm` copies them onto the rebuilt
+champion CardDefs so later champion re-pushes keep them. `SessionCardId`
+hashes by identity: look up a champion CardDef by its raw UID, not by a
+freshly built `SessionCardId`.
 
 When an `ActivateAbility` child waits on a picker, the authored `InZone` card
 filter selects which one: `Choosing` opens the built-in ChooseAndPlay picker,
@@ -397,8 +459,16 @@ cost, target, and transaction identity before mutating state.
   so only scanning the entering card's own champion leaves the opposing
   champion's trait unfired. The authored trigger conditions still decide what
   actually fires.
-- When moving a card, send `CardUpdated` with the destination collection before
-  `CardMoved`. `CardDrawn` does not change the client's zone by itself.
+- A `CardUpdated` with a changed collection or controller causes
+  `ClientStateCache.Update` to derive the UI `CardMoved` before forwarding the
+  update to `UIBattle`. Do not also send an explicit class-50 `CardMoved` for
+  that same zone/controller transition: `UIBattle.OnCardMoved` processes both
+  and repeats the view move and move sound. `CardDrawn` is a separate sound/deck
+  event and does not change the client's zone. For a movement that does not
+  change collection or controller, `UIBattle.OnCardUpdated` still moves the
+  view home. The C# cache does not derive class 50 for a position-only change,
+  and this checkout has no separate C# class-50 producer; do not add a wire
+  event for an inferred reorder without a concrete client path requiring it.
 - A `CardUpdated` that re-announces a trigger source must carry its current
   card-state bits. Omitting `state` defaults to `None`, which makes a tapped
   attacking troop render ready until a later state refresh.
@@ -406,6 +476,11 @@ cost, target, and transaction identity before mutating state.
   persisted stack item, `AbilityPushedOnChain`, `TopOfChainResolved`, and
   `RemovedTopOfChain`. Card plays may use the client's built-in
   `PLAY_CARD_ABILITY_TEMPLATE_ID` as the chain-rendering template.
+- A permanent chain descriptor must preserve the card instance's automatic
+  cast ability GUIDs, activation data, X value, hand-play context, and voided
+  cost UIDs. Resolve those cast graphs while the card is still in `CastSpells`,
+  before publishing `CardEnteredZoneEvent`, so an additional-cost ability can
+  grant an entry trigger for the Warzone scan to discover.
 - A trigger chain item carries the card that raised the event in
   `trigger_target_uid` and the card chosen for the ability's input-bearing
   target in `target_uid`. Resolve the input target from `target_uid`: the event
@@ -467,7 +542,7 @@ cost, target, and transaction identity before mutating state.
   the combat plan renumbers `phase_idx` and strands the client's next pass.
 - Client-derived tables (`card_templates`, `ability_effects`,
   `card_abilities_meta`, `champion_abilities`, encounter scenes/decks, ...) are
-  a projection of `Records/`, and an existing database is never re-seeded:
+  a projection of `hex-private/Records/`, and an existing database is never re-seeded:
   `seed_database` is insert-if-missing and only fresh databases run it. When the
   snapshot moves on, the projection rots silently — a modifier leaf keeps an old
   lossy `param` JSON, a new champion ability never arrives — and a card behaves
@@ -511,12 +586,14 @@ cost, target, and transaction identity before mutating state.
 The server's normalized `game_cards.location` values are `deck`, `hand`,
 `warzone`, `PlayedResources`, `void`, and `discard`. The ordered `position`
 column is scoped by session, owner, and location. A zone mutation updates the
-DB first, then publishes the appropriate `CardUpdated`, movement, draw, play,
-resource, or combat events in client-compatible order.
+DB first, then publishes a destination `CardUpdated`; the client cache derives
+the corresponding UI move when collection or controller changes. Publish
+separate draw, play, resource, or combat events where the C# path does so, and
+do not duplicate a cache-derived move with an explicit class-50 event.
 
 ## 7. Gamedata and generated data
 
-The original client `Data/gamedata` is the primary source. `Records/` is the
+The original client `Data/gamedata` is the primary source. `hex-private/Records/` is the
 checked-in extraction fallback. The seed pipeline is:
 
 ```text
@@ -542,6 +619,36 @@ template with `m_IsAutoTarget` is never a player picker: every activation —
 human, AI, or server-driven — resolves it to its whole legal pool, bounded
 only by `m_MaximumTargetCount` (unset means all). Only an input-bearing
 (explicit) target is picked singly when the server drives an AI activation.
+An authored effect condition is evaluated against that effect instance's own
+resolved target (`RequiresTargetPassesFilterCondition` in particular), so the
+condition context must expose the effect target; otherwise the condition falls
+back to an earlier stored target — Vampire King's "It is a troop" tested the
+damaged champion instead of the revealed card. A reveal's collection is the
+first `InZone` leaf anywhere in the authored filter tree, with `Deck` applied
+only when the filter names no collection: assuming `Deck` made "reveal a
+random card from their hand" look in the deck. A random reveal that enumerates
+through `MatchSecondaryTargetTemplate` must still restrict its sample to the
+previous target's controller's cards.
+
+A card reaching the Warzone decides Tapped through
+`static_rules.card_enters_play_exhausted` (the instance's own
+`EntersPlayExhausted` bit, printed or granted such as Storm Cloud's, then the
+opposing champions' `Opposing*TroopsEnterPlayExhausted` flags). Every entry
+path uses it: cast resolution, MoveCardToZone, Lifebound and summons (which
+also honour `SummonTokenTroop.m_EntersPlayExhausted`). The entering
+`CardUpdated` must carry the persisted state, or Unity renders the troop
+ready.
+
+Effect durations come from the mapping (`effect_lifetimes.mapping_duration`,
+which reads the typed graph effect). A stat or cost `CardModifier` lasting
+"until the start of your next turn" (`BeginningOfOwnersTurn`) or until the
+ready step is applied as a permanent delta plus a `temporary_card_stats` entry
+that the owner's boundary reverses. `temporary_buffs` is wiped at end of turn
+and is only for `EndOfTurn`. The PvP effect view (`pvp_view.to_effect_view`)
+aliases the list-valued lifetime ledgers (`temporary_ability_grants`,
+`temporary_card_int_attrs`, `temporary_champion_int_attrs`,
+`temporary_card_stats`) so a grant recorded while resolving reaches the
+checkpoint that the turn boundary expires.
 
 A resolved trigger is owned by the trigger engine. The death path emits the
 warzone→discard `CardEnteredZoneEvent` and lets trigger discovery resolve the

@@ -44,6 +44,18 @@ def _number(value):
         return 0
 
 
+def seed_ability_stats(state, values, *, instance_id):
+    """Seed a fresh ability instance's IntAttrs without overwriting any value
+    the instance already holds (a resumed or re-entered resolution)."""
+    if not isinstance(state, dict) or not values:
+        return
+    with _STATS_LOCK:
+        current = state.setdefault("ability_runtime_state", {}).setdefault(
+            str(int(instance_id or 0)), {})
+        for name, amount in values.items():
+            current.setdefault(str(name), _number(amount))
+
+
 def add_ability_stat(state, name, amount, *, instance_id=None):
     """Apply ``AbilityInstance.Add(IntAttrs, amount)`` to a live instance."""
     if not isinstance(state, dict) or not name or not amount:
@@ -279,3 +291,17 @@ def record_ability_card_list(state, name, card_uid):
         values = flat.setdefault(str(name), [])
         if uid not in values:
             values.append(uid)
+        # Some C# nested effect APIs write the result to Chain.PeekAbility(),
+        # which is the invoking ability instance rather than the child that
+        # performed the leaf (BuryCard is the relevant case for Xarlox). Keep
+        # that chain-owner list alongside the child-local list so following
+        # parent effects can evaluate CountListAttr/SourceBuried targets.
+        parent = state.get("_choice_parent")
+        parent_guid = (str(parent.get("ability_guid") or "").lower()
+                       if isinstance(parent, dict) else "")
+        if parent_guid and parent_guid != guid:
+            scoped = state.setdefault("list_attrs", {}).setdefault(
+                parent_guid, {})
+            parent_values = scoped.setdefault(str(name), [])
+            if uid not in parent_values:
+                parent_values.append(uid)

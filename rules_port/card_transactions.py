@@ -23,8 +23,13 @@ CARD_TRANSACTION_KINDS = frozenset({
 
 
 def automatic_instance_ability_guids(db, session_id, card_uid,
-                                     ability_guids=()):
+                                     ability_guids=(), *, in_play=True):
     """Include automatic abilities currently granted to this card instance.
+
+    ``in_play`` is True for a card that stays on the battlefield (a troop),
+    where a permanent CardModifier with a card filter is a continuous aura
+    and is not resolved on play.  A spell (``in_play=False``) resolves its
+    permanent CardModifier once, as its cast effect, then goes to the crypt.
 
     The static Records card graph does not contain runtime-granted keywords
     such as Runic. C# ``CastSpell`` calls ``CreateAutomaticAbilities`` on the
@@ -41,9 +46,9 @@ def automatic_instance_ability_guids(db, session_id, card_uid,
             int(session_id), int(card_uid), conn=db)
         values = json.loads(payload or "[]")
     except (TypeError, ValueError, json.JSONDecodeError):
-        return result
+        return _without_continuous_auras(result) if in_play else result
     if not isinstance(values, list):
-        return result
+        return _without_continuous_auras(result) if in_play else result
 
     for value in values:
         if isinstance(value, Mapping):
@@ -64,7 +69,33 @@ def automatic_instance_ability_guids(db, session_id, card_uid,
             continue
         result.append(guid)
         seen.add(guid)
-    return result
+    return _without_continuous_auras(result) if in_play else result
+
+
+def _without_continuous_auras(guids):
+    """Drop continuous card auras from a play-time automatic list.
+
+    A permanent, untriggered CardModifier with a card-filter target is a
+    continuous static (its stat effect is computed from the board).  Resolving
+    it once on play would store the same buff on the targets a second time.
+
+    An ability with an explicit (player-chosen) target is a one-shot cast
+    effect, never a board aura: Time Ripple's permanent "cost +2" rider on
+    its chosen card must resolve with the play."""
+    from gamedata import DEFAULT_RECORD_STORE, ability_graph
+    kept = []
+    for guid in guids:
+        graph = ability_graph(DEFAULT_RECORD_STORE, guid)
+        if graph is not None and not graph.trigger_event_type and any(
+                effect.concrete_type == "CardModifierAbilityEffectTemplate" and
+                str(effect.duration).lower() in ("permanent", "whilecardinplay")
+                for effect in graph.effects) and any(
+                target.card_filter for target in graph.targets) and not any(
+                target.explicit and not target.is_random
+                for target in graph.targets):
+            continue
+        kept.append(guid)
+    return kept
 
 
 @dataclass(frozen=True)
@@ -226,20 +257,54 @@ class MetadataCardTransactionExecutor(CardTransactionExecutor):
                         card.template_guid, int(cast(Any, card_uid)),
                         int(cast(Any, owner_id)))
                     values = []
-                    for activation in payload.get("ability_data") or ():
+                    cost_target_map: dict[int, list[int]] = {}
+                    ability_data = payload.get("ability_data") or ()
+                    cast_ability_guids = {
+                        ability.ability_guid.lower()
+                        for ability in plan.cast_abilities
+                    }
+                    for activation in ability_data:
                         if not isinstance(activation, Mapping):
                             continue
+                        ability_guid = activation.get(
+                            "ability_template_id",
+                            activation.get("ability_guid", ""))
+                        if isinstance(ability_guid, Mapping):
+                            ability_guid = ability_guid.get(
+                                "guid", ability_guid.get("m_Guid", ""))
+                        is_cast_ability = (
+                            str(ability_guid or "").lower()
+                            in cast_ability_guids)
                         target_map = activation.get("target_map", {}) or {}
                         for selected in target_map.values():
                             selected = selected if isinstance(
                                 selected, (list, tuple, set)) else (selected,)
                             values.extend(int(getattr(value, "uid64", value))
                                            for value in selected)
+                        # Additional card costs arrive separately from
+                        # TargetMap (XCostData.CardsToSacrifice).  Keep them
+                        # distinct so the cost never consumes an effect target
+                        # (Abominate).
+                        if is_cast_ability:
+                            continue
+                        for index, selected in (activation.get(
+                                "cost_target_map") or {}).items():
+                            try:
+                                index = int(index)
+                            except (TypeError, ValueError):
+                                continue
+                            selected = selected if isinstance(
+                                selected, (list, tuple, set)) else (selected,)
+                            cost_target_map.setdefault(index, []).extend(
+                                int(getattr(value, "uid64", value))
+                                for value in selected)
                     x_cost = max((int(item.get("x_cost", 0) or 0)
                                   for item in (payload.get("ability_data") or ())
                                   if isinstance(item, Mapping)), default=0)
                     activations, cost_map = plan.activation_bundle(
-                        values, x_cost=x_cost)
+                        values, x_cost=x_cost,
+                        cost_target_map=cost_target_map or None,
+                        ability_data=ability_data)
                     if plan.validate(
                             variable_cost=x_cost,
                             activations=activations,

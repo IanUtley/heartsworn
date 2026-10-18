@@ -16,7 +16,7 @@ def _deck_templates():
     if _DECK_TEMPLATES is not None:
         return _DECK_TEMPLATES
     result = {}
-    path = pathlib.Path(__file__).resolve().parents[1] / "Records" / "DeckTemplate.jsonl"
+    path = pathlib.Path(__file__).resolve().parents[1] / "hex-private" / "Records" / "DeckTemplate.jsonl"
     if path.exists():
         try:
             for line in path.open(encoding="utf-8", errors="replace"):
@@ -101,13 +101,12 @@ def move_deck_card_to_hand(context, card_uid, owner_id):
     _tpl, card_type, _name, cost, attack, defense, gems = \
         context.handler._card_full_data(
             context.game, scid, details[0], details[1])
-    context.game.push_card_moved(
-        scid, recipient, game_engine.ECardCollections.Hand,
-        game_engine.ECardLocations.Top, 1)
-    context.game.push_card_drawn(scid, recipient, 1)
     context.game.push_card_updated(
         scid, recipient, game_engine.ECardCollections.Hand, card_type,
         template_id=details[0], cost=cost, attack=attack,
         defense=defense, gems=gems,
         nulling=raw_uid(recipient) != raw_uid(context.player_uid))
+    # ClientStateCache.Update emits the matching client-side CardMoved when
+    # this CardUpdated changes the card's collection, as in the C# client.
+    context.game.push_card_drawn(scid, recipient, 1)
     return f"searched deck card {hex(int(card_uid))} to hand"

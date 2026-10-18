@@ -85,10 +85,17 @@ chain/stack model when the path supports responses:
 3. Publish resolution/removal events, then grant priority for the next item.
 4. When the chain is empty, apply state-based effects and continue the phase.
 
+An ability that ignores the chain (authored `m_IgnoresChain`, or a trigger with
+no explicit target template) still takes its stack position and resolves in
+order, but gets no priority window. The client shows such an item as a flash of
+its source card instead of a chain entry, so the server publishes
+`AbilityPushedOnChain` with `ignores_chain=True` for it.
+
 Within one ability, effect groups execute in the metadata's
 `m_AbilityEffectList` order. Those leaves are not separate priority items.
-Some legacy trigger paths still resolve directly; they are compatibility gaps,
-not a reason to add a new card-name special case.
+The legacy trigger scanner remains for non-attached compatibility callers.
+Attached gameplay dispatches through RulesPort and must fail closed instead of
+falling back to that scanner.
 
 The live RulesPort is the migration boundary for these gameplay transactions.
 Typed card/ability activations, choices, costs, combat declarations, and phase
@@ -150,10 +157,20 @@ zone, owner, mutable state, and affordability determine playability.
 
 Normalized locations are `deck`, `hand`, `warzone`, `PlayedResources`, `void`,
 and `discard`. A card move updates the authoritative DB and ordered position,
-then sends the destination `CardUpdated` before `CardMoved`. A draw needs both a
-zone/card representation update and the draw animation event. Permanent cards
-normally enter the warzone; actions resolve through the cast-spell path and
-then leave for the appropriate destination. A card with the `CantReady`,
+then sends a destination `CardUpdated`. When collection or controller changes,
+the C# client cache derives the UI `CardMoved` from that update, so the server
+must not also send a duplicate class-50 event for the same transition. A
+same-collection position change does not produce a cache-derived `CardMoved`;
+`UIBattle.OnCardUpdated` still moves the view home, and this checkout has no
+separate C# class-50 producer. Do not add a standalone event for an inferred
+reorder without a concrete client path requiring it. A draw needs the
+zone/card representation update and the separate draw animation event.
+Permanent cards
+normally enter the warzone; actions resolve through the cast-spell path. At
+`FinishResolvingCard`, a card still on CastSpells enters Warzone when its
+current effective type is Troop, Artifact, or Constant; other cards enter
+Discard. An effect that already moved the card keeps that destination. A card
+with the `CantReady`,
 `CantReadyNormally`, or `CantReadyNormallyHidden` IntAttr is not readied at its
 controller's Ready step. When a player buries cards, every other player's
 champion `BuryBonus` adds to the number buried. Cards with
@@ -182,7 +199,11 @@ offer its Play-or-Tunnel choice. A card with only the manual route receives
   player, and has begun a turn on that side, unless it has Speed/haste. It is
   normally exhausted on attack unless Steadfast applies.
 - Any legal untapped defender may block; summoning sickness does not prevent
-  blocking. The attacker chooses damage order among multiple blockers.
+  blocking. A troop blocks at most one attacker per combat (the client's
+  `Card.CanBlock` returns `InCombat` while `ECardStates.Blocking` is set and
+  `Session.AssignBlocker` refuses an already blocking blocker), while several
+  blockers may block the same attacker. The attacker chooses damage order
+  among multiple blockers.
 - First-strike damage resolves in phases 16/17, then normal damage resolves in
   phase 18. A blocker deals its legal combat damage back to the attacker.
 - Crush/Trample carries excess damage through blockers to the defending
@@ -261,6 +282,15 @@ Deathcry does not trigger while any opponent's champion has
 cards into the target player's choice zone and activates the built-in
 choose/play ability; `VerdictChoice` gives the caster the choice instead.
 
+A choice-zone target selection is not itself a play: its child ability decides
+the card's destination. The built-in choose/play path moves the selected
+choice card to `PlayedResources` and activates that card's automatic
+abilities, with the selected card as the activation source. Automatic here
+matches the client definition: the ability is not manual, has no trigger event,
+has no indexed activation, and has effects. Event-triggered abilities remain
+with trigger dispatch. Generated choice cards retain their originating
+ability-source link for authored source and choice-override targeting.
+
 The Records ability interpreter has shared paths for the shipped effect
 leaves, target and condition metadata, output variables, duration boundaries,
 usage limits, cooldowns, and trigger dispatch. The remaining parity work is
@@ -270,6 +300,19 @@ ability field and card-text audits are evidence about the current Records
 snapshot; they do not prove every event path or Unity projection. A new gap
 should be fixed in its shared metadata or event layer and covered by a focused
 acceptance scenario.
+
+Encounter setup cards (scene mods with a start-of-game grant, or targeted at
+the AI) are hidden battleboard cards in the `mod` collection. A card that an
+encounter mod's granted ability creates for a hand keeps its authored Hand
+destination, so the player can play it: Canyon Heat Wave's "Each champion gets
+... 5% chance you create a Heat Wave and put it into your hand. It gets cost
+-2" puts a playable Heat Wave in the owner's hand. The mod card itself is not
+materialized in the `mod` zone for a plain (untargeted) scene mod; its granted
+ability is applied as a scene-wide passive. Any client refresh of a card in
+the `mod` zone is published in the hidden `ECardCollections.Mod` collection
+(`card_collection_for_location`), never Warzone, so the card never shows on the
+board. Implemented in `services/legacy_loadbalancer.py` (scene setup) and
+`rules_port/token_effects.py` (summon); PvP has no scene mods.
 
 ## PVE, PVP, AI, and tournaments
 
@@ -282,10 +325,11 @@ AI decisions are server-side. The AI must take legal actions, publish the same
 authoritative state/events as a player, and respect waits that require a human
 transaction. Campaign encounter metadata may select Aggressive, Comfortable,
 or Defensive behavior; it must not be replaced by a card-name guess.
-Attack selection should consider a favorable damage race as a group: when
-eligible attackers' combined unblocked damage exceeds the opponent's legal
-ready-troop attack power, prefer attacking with the positive-power group. The
-client's `MinimumXValue` applies to X-cost card play, not troop attack power.
+Attack selection should score legal blocker assignments for the attacker
+group, including the value of attackers those blockers can kill. A favorable
+no-block damage race may select a group only when its block-aware combat value
+is positive. The client's `MinimumXValue` applies to X-cost card play, not
+troop attack power.
 
 Tournament registration, matching, results, forfeit, and participant-scoped
 history are separate domain operations. Auction remains an unimplemented API

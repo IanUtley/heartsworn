@@ -5,13 +5,31 @@ the legacy ``db`` facade for now so callers can migrate without a flag day;
 new profile/economy code should import this module directly.
 """
 
+from contextlib import contextmanager
 from datetime import datetime, timezone
 import json
+import threading
 
 import db as _db_layer
 
 
 RECKONING_FLAG_ARENA_TIER1_PERFECT = "ARENA_TIER1_PERFECT"
+
+CHAT_COMMANDS_MAIL_SUBJECT = "New ! chat commands"
+CHAT_COMMANDS_MAIL_BODY = (
+    "Chat commands\n\n"
+    "Type a command in any chat room, starting with ! (for example !help).\n\n"
+    "!help / !commands — list the commands you can use\n"
+    "!version — show the server version\n"
+    "!arena-cleanup — clear your Frost Ring Arena run\n"
+    "!account-cleanup — reset your account, keeping PvE and alt-art cards\n"
+    "!collection-fix [apply] — report, or with apply correct, collection counts "
+    "that disagree with the cards you own (log out and back in afterwards)\n"
+    "!campaign-cleanup — repair your campaign when a scene has no options\n"
+    "!issue <title> — open a GitHub issue prefilled with diagnostics\n\n"
+    "Developer commands appear in !help only for accounts with the developer "
+    "console enabled."
+)
 
 WELCOME_MAIL_SUBJECT = "Welcome to Hex"
 WELCOME_MAIL_BODY = (
@@ -129,6 +147,61 @@ def db_get_or_create_user(name, steam_id=None, conn=None):
             "level": 1, "flags": "{}"}
 
 
+def _collection_count_differences(user_id, conn=None):
+    """Return ``{template_guid: (collection_qty, instance_count)}`` where they differ.
+
+    ``card_instances`` rows are the owned physical cards that decks and the
+    client refer to, so they are the reference; ``collections.quantity`` is
+    the counter the deck builder and the collection view read.
+    """
+    connection = _profile_connection(conn)
+    instances = dict(connection.execute(
+        "SELECT template_guid, COUNT(*) FROM card_instances "
+        "WHERE user_id=? GROUP BY template_guid", (int(user_id),)).fetchall())
+    collected = dict(connection.execute(
+        "SELECT card_template_id, quantity FROM collections WHERE user_id=?",
+        (int(user_id),)).fetchall())
+    differences = {}
+    for guid in set(instances) | set(collected):
+        have = int(collected.get(guid) or 0)
+        owned = int(instances.get(guid) or 0)
+        if have != owned:
+            differences[guid] = (have, owned)
+    return differences
+
+
+def db_collection_count_report(user_id, conn=None):
+    """Return ``(guid, name, collection_qty, instance_count)`` rows that disagree."""
+    connection = _profile_connection(conn)
+    rows = []
+    for guid, (have, owned) in sorted(
+            _collection_count_differences(user_id, conn=connection).items()):
+        name_row = connection.execute(
+            "SELECT name FROM card_templates WHERE guid=?", (guid,)).fetchone()
+        rows.append((guid, name_row[0] if name_row else "", have, owned))
+    return rows
+
+
+def db_fix_collection_counts(user_id, conn=None):
+    """Set each mismatched collection quantity to its instance count.
+
+    Only ``collections`` is written: instance rows are never removed or
+    changed, so no deck loses a card. The caller owns the transaction.
+    Returns the number of templates changed.
+    """
+    connection = _profile_connection(conn)
+    differences = _collection_count_differences(user_id, conn=connection)
+    for guid, (_have, owned) in differences.items():
+        cursor = connection.execute(
+            "UPDATE collections SET quantity=? WHERE user_id=? AND card_template_id=?",
+            (owned, int(user_id), guid))
+        if cursor.rowcount == 0 and owned > 0:
+            connection.execute(
+                "INSERT INTO collections (user_id, card_template_id, quantity) "
+                "VALUES (?, ?, ?)", (int(user_id), guid, owned))
+    return len(differences)
+
+
 def db_reset_account(user_id, conn=None):
     """Reset mutable account/game state and apply fresh-player grants.
 
@@ -218,6 +291,35 @@ def db_set_reckoning_flag(user_id, name, progress=0, maximum=0,
     if conn is None:
         connection.commit()
     return bool(cursor.rowcount)
+
+
+def db_ensure_reckoning_flag_minimum(user_id, name, minimum_progress,
+                                    default_maximum=0, conn=None):
+    """Raise a Reckoning flag to a minimum without lowering concurrent values.
+
+    The UPSERT makes the monotonic update atomic for profile rewards that may
+    resolve on different campaign champions at the same time. Returns the
+    resulting flag and whether this call changed it.
+    """
+    connection = _profile_connection(conn)
+    cursor = connection.execute(
+        "INSERT INTO reckoning_flags "
+        "(user_id, name, progress, maximum, completed) VALUES (?,?,?,?,0) "
+        "ON CONFLICT(user_id, name) DO UPDATE SET "
+        "progress=excluded.progress "
+        "WHERE reckoning_flags.progress < excluded.progress",
+        (int(user_id), str(name), int(minimum_progress),
+         int(default_maximum)))
+    row = connection.execute(
+        "SELECT name, progress, maximum, completed FROM reckoning_flags "
+        "WHERE user_id=? AND name=?", (int(user_id), str(name))).fetchone()
+    if conn is None:
+        connection.commit()
+    if row is None:
+        return None, bool(cursor.rowcount)
+    return ({"name": row[0], "progress": int(row[1] or 0),
+             "maximum": int(row[2] or 0), "completed": bool(row[3])},
+            bool(cursor.rowcount))
 
 
 # --- Social persistence ----------------------------------------------------
@@ -519,8 +621,8 @@ def db_create_treasure_chest(user_id, set_guid, rarity, conn=None,
 
 def db_get_unopened_chests_full(user_id, conn=None):
     return _profile_connection(conn).execute(
-        "SELECT id, set_guid, chest_rarity, template_guid FROM treasure_chests "
-        "WHERE user_id=? AND opened=0", (user_id,)).fetchall()
+        "SELECT id, set_guid, chest_rarity, template_guid, wof_status, wof_spun "
+        "FROM treasure_chests WHERE user_id=? AND opened=0", (user_id,)).fetchall()
 
 
 def db_get_chest_by_id(chest_db_id, user_id, conn=None):
@@ -610,6 +712,29 @@ def db_get_inventory(user_id, conn=None):
         (user_id,)).fetchall()]
 
 
+def db_get_inventory_items(user_id):
+    """Return every inventory row with a stable, unique client UID."""
+    items = []
+    with _db_layer.transaction() as connection:
+        rows = connection.execute(
+            "SELECT id, template_guid, quantity, client_item_uid "
+            "FROM player_inventory WHERE user_id=? ORDER BY id",
+            (user_id,)).fetchall()
+        seen_uids = set()
+        for row_id, template_guid, quantity, stored_uid in rows:
+            client_uid = int(stored_uid or 0)
+            if client_uid <= 0 or client_uid in seen_uids:
+                client_uid = db_next_inventory_client_uid(
+                    user_id, conn=connection)
+                connection.execute(
+                    "UPDATE player_inventory SET client_item_uid=? WHERE id=?",
+                    (client_uid, int(row_id)))
+            seen_uids.add(client_uid)
+            items.append((int(row_id), template_guid, int(quantity or 0),
+                          client_uid))
+    return items
+
+
 def db_inventory_item(user_id, template_guid, conn=None):
     """Return one inventory item as ``(id, quantity, client_item_uid)``."""
     return _profile_connection(conn).execute(
@@ -672,10 +797,67 @@ def db_consume_inventory_row(row_id, quantity=1, conn=None):
 
 
 def db_next_inventory_client_uid(user_id, conn=None):
-    row = _profile_connection(conn).execute(
-        "SELECT COALESCE(MAX(client_item_uid), 0) + 1 AS next_uid "
-        "FROM player_inventory WHERE user_id=?", (user_id,)).fetchone()
-    return int(_row_value(row, "next_uid", 0) or 1)
+    connection = _profile_connection(conn)
+    used = {
+        int(_row_value(row, "client_item_uid", 0) or 0)
+        for row in connection.execute(
+            "SELECT client_item_uid FROM player_inventory WHERE user_id=?",
+            (user_id,)).fetchall()
+    }
+    # 9000+ belongs to treasure_chests IDs projected in chest_bits. Keep
+    # inventory-item UIDs below that boundary so the two client UID sources
+    # cannot alias. Preserve the established 1000+ range when it has room.
+    next_uid = max((uid for uid in used if 1000 <= uid < 9000),
+                   default=999) + 1
+    if next_uid < 9000:
+        return next_uid
+    for lower, upper in ((1000, 9000), (1, 1000)):
+        for candidate in range(lower, upper):
+            if candidate not in used:
+                return candidate
+    raise RuntimeError("player inventory has exhausted client item UIDs")
+
+
+def db_add_inventory_with_unique_client_uid(user_id, template_guid,
+                                             quantity=1, conn=None):
+    """Grant inventory and return its unique, stable client item UID.
+
+    Store item IDs are not inventory instance IDs.  Deriving one from the
+    store row can collide with an inventory item previously granted from a
+    different source, causing client requests to address the wrong item.
+    Callers supply a transaction connection so allocation and persistence are
+    serialized with the purchase.
+    """
+    connection = _profile_connection(conn)
+    row = connection.execute(
+        "SELECT id, quantity, client_item_uid FROM player_inventory "
+        "WHERE user_id=? AND template_guid=? ORDER BY id LIMIT 1",
+        (user_id, template_guid)).fetchone()
+    if row:
+        row_id = int(_row_value(row, "id", 0) or 0)
+        current_uid = int(_row_value(row, "client_item_uid", 2) or 0)
+        duplicate = False
+        if current_uid > 0:
+            duplicate = connection.execute(
+                "SELECT 1 FROM player_inventory WHERE user_id=? "
+                "AND client_item_uid=? AND id<>? LIMIT 1",
+                (user_id, current_uid, row_id)).fetchone() is not None
+        client_uid = (db_next_inventory_client_uid(user_id, conn=connection)
+                      if current_uid <= 0 or duplicate else current_uid)
+        connection.execute(
+            "UPDATE player_inventory SET quantity=quantity+?, "
+            "client_item_uid=? WHERE id=?",
+            (int(quantity), client_uid, row_id))
+    else:
+        client_uid = db_next_inventory_client_uid(user_id, conn=connection)
+        connection.execute(
+            "INSERT INTO player_inventory "
+            "(user_id, template_guid, quantity, client_item_uid) "
+            "VALUES (?, ?, ?, ?)",
+            (user_id, template_guid, int(quantity), client_uid))
+    if conn is None:
+        connection.commit()
+    return client_uid
 
 
 def db_upsert_inventory_item(user_id, template_guid, quantity=1,
@@ -798,12 +980,13 @@ def db_get_decks(user_id, conn=None):
     """Return saved decks in the profile projection used by the client."""
     rows = _profile_connection(conn).execute(
         "SELECT id, deck_name, cards, pve_champion_id, pvp_champion_guid, "
-        "active_gems, deck_sleeve_guid, gameboard_guid, coin_guid "
+        "active_gems, deck_sleeve_guid, gameboard_guid, coin_guid, equipment "
         "FROM decks WHERE user_id=? ORDER BY id", (user_id,)).fetchall()
     return [{"id": row[0], "name": row[1], "cards": row[2],
              "pve_champion_id": row[3], "pvp_champion_guid": row[4],
              "active_gems": row[5], "deck_sleeve_guid": row[6],
-             "gameboard_guid": row[7], "coin_guid": row[8]}
+             "gameboard_guid": row[7], "coin_guid": row[8],
+             "equipment": row[9]}
             for row in rows]
 
 
@@ -838,6 +1021,23 @@ def db_find_user_by_name(name, conn=None):
     return _profile_connection(conn).execute(
         "SELECT id, name FROM users WHERE LOWER(name)=LOWER(?) LIMIT 1",
         (str(name).strip(),)).fetchone()
+
+
+def db_ensure_chat_commands_mail(user_id, conn=None):
+    """Send the chat-commands mail unless this user already has the current text.
+
+    A user who received an older version gets the current one. Returns True
+    when a mail was sent; the caller owns the transaction.
+    """
+    connection = _profile_connection(conn)
+    rows = connection.execute(
+        "SELECT body FROM emails WHERE user_id=? AND subject=?",
+        (int(user_id), CHAT_COMMANDS_MAIL_SUBJECT)).fetchall()
+    if any(row[0] == CHAT_COMMANDS_MAIL_BODY for row in rows):
+        return False
+    db_send_email(int(user_id), CHAT_COMMANDS_MAIL_SUBJECT,
+                  CHAT_COMMANDS_MAIL_BODY, sender="SYSTEM", conn=connection)
+    return True
 
 
 def db_send_email(user_id, subject, body, sender="SYSTEM", gold_delivered=0,
@@ -1017,6 +1217,29 @@ def db_latest_champion_for_user(user_id, conn=None):
         "AND is_deleted=0 ORDER BY id DESC LIMIT 1", (int(user_id),)).fetchone()
 
 
+def db_last_played_champion_for_user(user_id, conn=None):
+    """Return the champion and deck most recently played by a profile.
+
+    Champions never played fall back to the newest created, so a fresh
+    account still resolves to a champion.
+    """
+    import db as _db_layer
+    return (conn or _db_layer._db).execute(
+        "SELECT id, last_deck_id FROM champions WHERE user_id=? "
+        "AND is_deleted=0 ORDER BY last_played_at IS NULL, "
+        "last_played_at DESC, id DESC LIMIT 1", (int(user_id),)).fetchone()
+
+
+def db_mark_champion_played(champion_id, conn=None):
+    """Stamp a champion as just played; see db_last_played_champion_for_user."""
+    import db as _db_layer
+    connection = conn or _db_layer._db
+    connection.execute(
+        "UPDATE champions SET last_played_at=datetime('now') WHERE id=?",
+        (int(champion_id),))
+    connection.commit()
+
+
 def db_latest_deck_for_user(user_id, conn=None):
     """Return the newest non-deleted saved deck ID for a profile."""
     import db as _db_layer
@@ -1155,6 +1378,23 @@ def db_card_instance_for_encoded_deck(user_id, instance_id, conn=None):
     return db_card_instance_art(user_id, instance_id, conn=conn)
 
 
+def db_spend_user_gold(user_id, amount, conn=None):
+    """Atomically take up to ``amount`` gold (never below zero); returns the
+    new ``(gold, platinum)`` balances. The caller owns the transaction when
+    ``conn`` is supplied."""
+    import db as _db_layer
+    connection = conn or _db_layer._db
+    connection.execute(
+        "UPDATE users SET gold=gold-MIN(MAX(gold, 0), ?) WHERE id=?",
+        (max(0, int(amount)), int(user_id)))
+    row = connection.execute(
+        "SELECT gold, platinum FROM users WHERE id=?", (int(user_id),)
+    ).fetchone()
+    if conn is None:
+        connection.commit()
+    return (int(row[0] or 0), int(row[1] or 0)) if row else (0, 0)
+
+
 def db_get_user_currency(user_id, currency, conn=None):
     if currency not in {"gold", "platinum"}:
         raise ValueError(f"unsupported currency: {currency}")
@@ -1195,14 +1435,15 @@ def db_update_deck(deck_id, user_id, deck_name=None, cards_json=None,
                    pve_champion_id=None, pvp_champion_guid=None,
                    active_gems_json=None, gem_abilities_json=None,
                    deck_sleeve_guid=None, gameboard_guid=None, coin_guid=None,
-                   conn=None):
+                   equipment_json=None, conn=None):
     values = (("deck_name", deck_name), ("cards", cards_json),
               ("pve_champion_id", pve_champion_id),
               ("pvp_champion_guid", pvp_champion_guid),
               ("active_gems", active_gems_json),
               ("gem_abilities", gem_abilities_json),
               ("deck_sleeve_guid", deck_sleeve_guid),
-              ("gameboard_guid", gameboard_guid), ("coin_guid", coin_guid))
+              ("gameboard_guid", gameboard_guid), ("coin_guid", coin_guid),
+              ("equipment", equipment_json))
     selected = [(column, value) for column, value in values if value is not None]
     if not selected:
         return False
@@ -1220,15 +1461,190 @@ def db_update_deck(deck_id, user_id, deck_name=None, cards_json=None,
 def db_get_deck_by_id(deck_id, conn=None):
     row = _profile_connection(conn).execute(
         "SELECT id, deck_name, cards, pve_champion_id, pvp_champion_guid, "
-        "active_gems, deck_sleeve_guid, gameboard_guid, coin_guid "
+        "active_gems, deck_sleeve_guid, gameboard_guid, coin_guid, equipment "
         "FROM decks WHERE id=?", (deck_id,)).fetchone()
     if not row:
         return None
     fields = ("id", "deck_name", "cards", "pve_champion_id",
               "pvp_champion_guid", "active_gems", "deck_sleeve_guid",
-              "gameboard_guid", "coin_guid")
+              "gameboard_guid", "coin_guid", "equipment")
     return {field: _row_value(row, field, index)
             for index, field in enumerate(fields)}
+
+
+def db_deck_equipment(deck_id, conn=None):
+    """Return a deck's equipped item GUIDs."""
+    row = _profile_connection(conn).execute(
+        "SELECT equipment FROM decks WHERE id=?", (int(deck_id),)).fetchone()
+    try:
+        value = json.loads(_row_value(row, "equipment", 0) or "[]") if row else []
+    except (TypeError, ValueError):
+        return []
+    return [str(guid).lower() for guid in value] if isinstance(value, list) else []
+
+
+# ── Wheels of Fate chest state ────────────────────────────────────────
+
+def db_chest_spin_state(chest_db_id, conn=None):
+    """Return ``(wof_spun, wof_status)`` of a treasure chest row."""
+    row = _profile_connection(conn).execute(
+        "SELECT wof_spun, wof_status FROM treasure_chests WHERE id=?",
+        (int(chest_db_id),)).fetchone()
+    if not row:
+        return 0, 0
+    return (int(_row_value(row, "wof_spun", 0) or 0),
+            int(_row_value(row, "wof_status", 1) or 0))
+
+
+def db_save_chest_spin(chest_db_id, spin_status, chest_rarity, conn=None):
+    """Record a Wheels of Fate spin: the re-spin it left and the new rarity."""
+    _profile_connection(conn).execute(
+        "UPDATE treasure_chests SET wof_spun=1, wof_status=?, chest_rarity=? "
+        "WHERE id=?", (int(spin_status), chest_rarity, int(chest_db_id)))
+
+
+def db_booster_packs_for_set(set_guid, conn=None):
+    """The set's standard booster pack GUIDs (not full-set or Primal packs)."""
+    return [_row_value(row, "pack_guid", 0) for row in _profile_connection(conn).execute(
+        "SELECT pack_guid FROM pack_set_map WHERE set_guid=? "
+        "AND is_full_set=0 AND is_primal=0 ORDER BY pack_guid",
+        (set_guid,)).fetchall()]
+
+
+# ── Mercenary parties and profile deck templates ──────────────────────
+
+def db_champion_party_rows(user_id, conn=None):
+    """Return the stored ChampionParty JSON strings of a player."""
+    return [_row_value(row, "party_json", 0) for row in _profile_connection(conn).execute(
+        "SELECT party_json FROM champion_parties WHERE user_id=? "
+        "ORDER BY champion_id", (user_id,)).fetchall()]
+
+
+def db_save_champion_party(champion_id, user_id, party_json, conn=None):
+    _profile_connection(conn).execute(
+        "INSERT INTO champion_parties (champion_id, user_id, party_json) "
+        "VALUES (?,?,?) ON CONFLICT(champion_id) DO UPDATE SET "
+        "user_id=excluded.user_id, party_json=excluded.party_json",
+        (int(champion_id), user_id, party_json))
+
+
+_DECK_TEMPLATE_COLUMNS = ("id", "name", "champion_guid", "sleeve_guid",
+                          "gameboard_guid", "personality", "equipment_json",
+                          "updated_at")
+_DECK_TEMPLATE_CARD_COLUMNS = ("card_guid", "quantity", "gem_types_list_json",
+                               "flags_json")
+_DECK_TEMPLATE_LOCK = threading.RLock()
+
+
+@contextmanager
+def _deck_template_transaction(conn=None):
+    """Serialize a template write on the shared connection and commit it atomically."""
+    connection = _profile_connection(conn)
+    lock = getattr(connection, "_retry_lock", _DECK_TEMPLATE_LOCK)
+    with lock:
+        owns_transaction = not getattr(connection, "in_transaction", False)
+        if owns_transaction:
+            connection.execute("BEGIN IMMEDIATE")
+        try:
+            yield connection
+            if owns_transaction:
+                connection.commit()
+        except BaseException:
+            if owns_transaction:
+                connection.rollback()
+            raise
+
+
+def _deck_template_cards(connection, template_id):
+    return [{column: _row_value(row, column, index)
+             for index, column in enumerate(_DECK_TEMPLATE_CARD_COLUMNS)}
+            for row in connection.execute(
+                "SELECT card_guid, quantity, gem_types_list_json, flags_json "
+                "FROM player_deck_template_cards WHERE template_id=? "
+                "ORDER BY rowid", (int(template_id),)).fetchall()]
+
+
+def _deck_template_row(connection, row):
+    template = {column: _row_value(row, column, index)
+                for index, column in enumerate(_DECK_TEMPLATE_COLUMNS)}
+    template["cards"] = _deck_template_cards(connection, template["id"])
+    return template
+
+
+def db_profile_deck_templates(user_id, conn=None):
+    """Return a player's deck templates: column dicts, each with ``cards``
+    (``card_guid, quantity, gem_types_list_json, flags_json`` dicts)."""
+    connection = _profile_connection(conn)
+    rows = connection.execute(
+        f"SELECT {', '.join(_DECK_TEMPLATE_COLUMNS)} FROM player_deck_templates "
+        "WHERE user_id=? ORDER BY id", (user_id,)).fetchall()
+    return [_deck_template_row(connection, row) for row in rows]
+
+
+def db_profile_deck_template(user_id, template_id, conn=None):
+    """Return one of a player's deck templates (as above) or None."""
+    connection = _profile_connection(conn)
+    row = connection.execute(
+        f"SELECT {', '.join(_DECK_TEMPLATE_COLUMNS)} FROM player_deck_templates "
+        "WHERE id=? AND user_id=?", (int(template_id or 0), user_id)).fetchone()
+    return _deck_template_row(connection, row) if row else None
+
+
+def db_save_profile_deck_template(user_id, template_id, columns, card_rows,
+                                  conn=None):
+    """Insert or update a deck template and replace its cards atomically.
+
+    ``columns`` holds name, champion_guid, sleeve_guid, gameboard_guid,
+    personality and equipment_json; ``card_rows`` are ``(card_guid, quantity,
+    gem_types_list_json, flags_json)``.  Returns the template id.
+    """
+    names = ("name", "champion_guid", "sleeve_guid", "gameboard_guid",
+             "personality", "equipment_json")
+    values = tuple(columns.get(name, "{}" if name == "equipment_json" else "")
+                   for name in names)
+    with _deck_template_transaction(conn) as connection:
+        existing = template_id and connection.execute(
+            "SELECT 1 FROM player_deck_templates WHERE id=? AND user_id=?",
+            (int(template_id), user_id)).fetchone()
+        if existing:
+            template_id = int(template_id)
+            connection.execute(
+                f"UPDATE player_deck_templates SET "
+                f"{', '.join(f'{name}=?' for name in names)}, "
+                "updated_at=datetime('now') WHERE id=?",
+                values + (template_id,))
+            connection.execute(
+                "DELETE FROM player_deck_template_cards WHERE template_id=?",
+                (template_id,))
+        else:
+            template_id = connection.execute(
+                f"INSERT INTO player_deck_templates (user_id, {', '.join(names)}) "
+                f"VALUES (?{',?' * len(names)})", (user_id,) + values).lastrowid
+        connection.executemany(
+            "INSERT INTO player_deck_template_cards (template_id, card_guid, "
+            "quantity, gem_types_list_json, flags_json) VALUES (?,?,?,?,?)",
+            [(template_id,) + tuple(row) for row in card_rows])
+    return template_id
+
+
+def db_delete_profile_deck_template(user_id, template_id, conn=None):
+    with _deck_template_transaction(conn) as connection:
+        if connection.execute(
+                "SELECT 1 FROM player_deck_templates WHERE id=? AND user_id=?",
+                (int(template_id or 0), user_id)).fetchone():
+            connection.execute(
+                "DELETE FROM player_deck_template_cards WHERE template_id=?",
+                (int(template_id),))
+            connection.execute(
+                "DELETE FROM player_deck_templates WHERE id=?",
+                (int(template_id),))
+
+
+def db_card_template_named(name, conn=None):
+    """True when a card template has this name (case-insensitive)."""
+    return _profile_connection(conn).execute(
+        "SELECT 1 FROM card_templates WHERE lower(name)=lower(?) LIMIT 1",
+        (str(name),)).fetchone() is not None
 
 
 def db_find_deck_owner(deck_id, conn=None):
@@ -1280,18 +1696,31 @@ def db_record_purchase(user_id, item_name, template_id, price, currency, conn=No
         connection.commit()
 
 
-def db_redeem_code(code, conn=None):
+def db_redeem_code(code, user_id, conn=None):
+    """Validate and record one redemption for a single account.
+
+    Usage limits are per account: each redemption is recorded as a
+    ``store_purchases`` row (``currency='Redeem'``) and ``max_uses`` is
+    compared against the caller's own redemption count, never a global total.
+    """
     connection = _profile_connection(conn)
     row = connection.execute(
-        "SELECT id, gold_delta, platinum_delta, uses, max_uses "
+        "SELECT id, gold_delta, platinum_delta, max_uses "
         "FROM redeem_codes WHERE code=?", (code,)).fetchone()
     if not row:
         return {"redeemed": False, "error_message": "Invalid redeem code."}
-    if _row_value(row, "uses", 3) >= _row_value(row, "max_uses", 4):
+    used = connection.execute(
+        "SELECT COUNT(*) FROM store_purchases "
+        "WHERE user_id=? AND item_template_id=? AND currency='Redeem'",
+        (int(user_id), str(code))).fetchone()[0]
+    if used >= int(_row_value(row, "max_uses", 3) or 0):
         return {"redeemed": False,
                 "error_message": "This redeem code has already been redeemed or expired."}
-    connection.execute("UPDATE redeem_codes SET uses=uses+1 WHERE id=?",
-                       (_row_value(row, "id", 0),))
+    connection.execute(
+        "INSERT INTO store_purchases "
+        "(user_id, item_name, item_template_id, price, currency) "
+        "VALUES (?, ?, ?, 0, 'Redeem')",
+        (int(user_id), f"Redeem: {code}", str(code)))
     if conn is None:
         connection.commit()
     return {"code": str(code),

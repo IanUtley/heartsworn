@@ -80,6 +80,27 @@ TPL_CEREBRAL_FULMINATION = "8bf3184f-b2b4-4646-b2e9-ac39079978c9"
 AG_CEREBRAL_FULMINATION = "87a0cbaf-85f8-2555-3261-1c373bea1e77"
 TPL_BOOBY_TRAP = "9c1acda8-778b-4dd0-b278-7fee21e203af"
 AG_BOOBY_TRAP = "1a5c43ec-2c65-85f0-0310-8395ec405acf"
+# Survival of the Fittest (PvP/common): "Target troop you control battles
+# target opposing troop." — two explicit authored target templates.
+TPL_SURVIVAL = "c7cac7d9-05a6-44c8-bb2f-51f3700764e6"
+AG_SURVIVAL = "a211532e-8cf5-7fd5-838a-19263b22e6e0"
+TPL_UNDYING_WEAVER = "f5ae3964-d91c-4dc9-aa01-b6b7bc54e4ce"
+AG_WEAVER_SCROUNGE = "4c23c929-3239-722b-a59f-3027fbd218f5"
+TID_WEAVER_CRYPT_TROOPS = "34a67f1a-4ae8-875c-2cd3-e8441a16cca8"
+# Wailing Banshee: "This can't be blocked except by artifact troops and/or
+# blood troops."  The exception filter is IsColor against the blocker.
+TPL_WAILING_BANSHEE = "5338219e-a902-463f-bd39-9e8b69c5af94"
+TPL_BLOOD_VANILLA = "0213f65b-2868-4ddd-aeaa-2501ec198c22"
+TPL_NONBLOOD_VANILLA = "0052a5d0-f815-4c90-8570-621a135ae86c"
+# Graven Geist grants "Scrounge 2: +2/+2" to your other troops in all zones.
+AG_GEIST_GRANTED_SCROUNGE = "a70ad247-2014-50fc-5f86-b4c5c39d84c3"
+# Echoclaw Terminus: "[ONE-SHOT]: Deploy - Summon a copy of this."
+TPL_ECHOCLAW = "31099f84-08c6-4bb4-a351-64403308605b"
+AG_ECHOCLAW_ONESHOT_COPY = "5c8a6da1-4dab-2b3f-05e2-1245b48e7ae7"
+# Bleak Bladetwister: "Deploy - Destroy each opposing damaged troop."
+TPL_BLADETWISTER = "d25c2bdd-b675-4dc5-b9db-e653ebc9f2e5"
+# Grove Whisperer: "While this is socketed with a minor gem, +1/+1."
+TPL_GROVE_WHISPERER = "75c6dc11-8424-4260-a5ce-02fe708b4d49"
 
 
 def _pl_ai():
@@ -129,6 +150,101 @@ def test_card_battled_dispatch_is_directional(db):
     assert dispatch.call_count == 1
     assert dispatch.call_args.args[7:9] == ("CardBattledEvent", 101)
     assert dispatch.call_args.kwargs["extra_target"] == 202
+
+
+def test_spell_finish_uses_the_effective_post_resolution_type(db):
+    from unittest import mock
+    from rules_port.chain_items import resolve_card_item
+
+    pl_t, ai_t = _pl_ai()
+    uid = 907001
+    original_action = "f0000000-0000-0000-0000-000000000001"
+    db.execute(
+        "INSERT OR REPLACE INTO card_templates (guid, name, card_type, cost, "
+        "attack, defense, attributes, abilities_json, threshold_json, subtype, "
+        "variable_cost, variable_cost_minimum, rage_value) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        (original_action, "Generated Action", "BasicAction", 1, 0, 0, 0,
+         "[]", "[]", "", 0, 0, 0))
+    add_card(
+        db, uid, 5, original_action, loc="CastSpells",
+        state=int(game_engine.ECardStates.Tapped |
+                  game_engine.ECardStates.StartedATurnOnYourSide))
+    db.commit()
+
+    handler = HandlerStub(db)
+    arrivals = []
+    handler.chain_mark_warzone_entry = (
+        lambda _session, card_uid: arrivals.append(int(card_uid)))
+    session = SessionStub()
+    game = game_engine.Game(session.session_id, pl_t, ai_t)
+    state = {"pvp": False}
+    dispatches = []
+    def transform_source(*_args, **_kwargs):
+        db.execute(
+            "UPDATE game_cards SET template_guid=?, card_template_id=?, "
+            "card_type='Troop', card_attributes=? "
+            "WHERE session_id=1 AND card_uid=?",
+            (TPL_GLADIATOR, TPL_GLADIATOR,
+             int(game_engine.ECardAttributes.EntersPlayExhausted), uid))
+        db.commit()
+
+    with mock.patch(
+            "rules_port.chain_items.dispatch",
+            side_effect=lambda *args, **_kwargs: dispatches.append(args[6])):
+        with mock.patch(
+                "rules_port.resolution.resolve_port_played_spell",
+                side_effect=transform_source):
+            resolve_card_item(
+                handler, session, db, game, state,
+                {"kind": "spell", "source_uid": uid,
+                 "ability_guids": []}, pl_t, ai_t)
+
+    row = db.execute(
+        "SELECT location, card_state, original_template_guid, template_guid "
+        "FROM game_cards WHERE session_id=1 AND card_uid=?", (uid,)
+    ).fetchone()
+    assert row[0] == "warzone", row
+    assert row[2] == original_action, row
+    assert row[3] == TPL_GLADIATOR, row
+    assert row[1] & game_engine.ECardStates.CameOutThisTurn, row
+    assert row[1] & game_engine.ECardStates.Tapped, row
+    updated = [event for event in game.events if isinstance(
+        event, game_engine.CardUpdatedSessionEventArgs)]
+    assert len(updated) == 1, game.events
+    assert updated[0].collection == game_engine.ECardCollections.Warzone
+    assert updated[0].card_type & game_engine.ECardTypes.Troop
+    assert updated[0].state & game_engine.ECardStates.CameOutThisTurn
+    assert updated[0].state & game_engine.ECardStates.Tapped
+    assert (updated[0].attributes &
+            game_engine.ECardAttributes.EntersPlayExhausted)
+    assert arrivals == [uid], arrivals
+    assert dispatches == ["CardExitedZoneEvent", "CardEnteredZoneEvent"], dispatches
+
+    spell_uid = uid + 1
+    add_card(db, spell_uid, 5, original_action, loc="CastSpells")
+    db.commit()
+    discard_game = game_engine.Game(session.session_id, pl_t, ai_t)
+    discard_dispatches = []
+    with mock.patch(
+            "rules_port.chain_items.dispatch",
+            side_effect=lambda *args, **_kwargs:
+            discard_dispatches.append(args[6])):
+        resolve_card_item(
+            handler, session, db, discard_game, {"pvp": False},
+            {"kind": "spell", "source_uid": spell_uid}, pl_t, ai_t,
+            bom_completed=True)
+    location = db.execute(
+        "SELECT location FROM game_cards WHERE session_id=1 AND card_uid=?",
+        (spell_uid,)).fetchone()
+    assert location and location[0] == "discard", location
+    discarded_updates = [event for event in discard_game.events if isinstance(
+        event, game_engine.CardUpdatedSessionEventArgs)]
+    assert len(discarded_updates) == 1, discard_game.events
+    assert (discarded_updates[0].collection ==
+            game_engine.ECardCollections.Discard)
+    assert discard_dispatches == [
+        "CardExitedZoneEvent", "CardEnteredZoneEvent"], discard_dispatches
 
 
 def test_lose_life_modifier_is_not_damage(db):
@@ -226,11 +342,18 @@ def test_brood_creeper_does_not_fire_on_own_champion(db):
     pl_t, ai_t = _pl_ai()
     game = game_engine.Game(1, pl_t, ai_t)
     handler = HandlerStub(db)
-    bstate = {"player_health": 20, "ai_health": 20, "turn_number": 1}
     ai_champ_uid = int(handler._ai_champ_scid.uid.uid64)
-    resolve_triggers(db, handler, game, SessionStub(), pl_t, ai_t, bstate,
-                     "CardDealtDamageEvent", 101, 0,
-                     extra_target=ai_champ_uid)
+    # The controller gate needs each champion's owner, as in a live battle.
+    bstate = {"player_health": 20, "ai_health": 20, "turn_number": 1,
+              "champ_map": {"0": ai_champ_uid,
+                            "5": int(handler._player_champ_scid.uid.uid64)}}
+    from rules_port.triggers import dispatch_native_trigger
+    dispatch_native_trigger(
+        db=db, handler=handler, game=game, session=SessionStub(),
+        player_uid=pl_t, ai_uid=ai_t, battle_state=bstate,
+        event_type="CardDealtDamageEvent", source_card_id=101,
+        source_player_id=0, target_card_id=ai_champ_uid,
+        target_player_id=0)  # the damaged champion's owner (the AI)
     assert not (bstate.get("stack") or []), "own-champion hit must not fire"
 
 
@@ -278,6 +401,155 @@ def test_runeweb_infiltrator_puts_two_spiderling_eggs_in_opponent_deck(db):
         "WHERE template_guid=? GROUP BY user_id, location",
         (TPL_SPIDERLING_EGG,)).fetchall()
     assert eggs == [(5, "deck", 2)], (result, eggs, bstate)
+
+
+def test_vampire_king_steals_a_random_troop_from_the_damaged_hand(db):
+    """Vampire King's damage trigger reveals a random card from the damaged
+    champion's controller's hand.
+
+    A revealed troop is transformed into a Vampire and put into play under the
+    King's controller; a revealed non-troop is left where it was.  The reveal
+    must read the *hand* collection (a nested ``InZone`` filter) and the
+    "It is a troop" condition must test the revealed card, not the damaged
+    champion.
+    """
+    from unittest import mock
+    from rules_port.triggers import dispatch_native_trigger
+    from rules_port.resolution import resolve_port_trigger
+
+    TPL_KING = "46c02066-29af-4b7d-bbcb-41ba76e8120f"
+    TPL_VAMPIRE = "8b5adb92-22fc-4c6d-aefa-95dca4c8fe7a"
+    for guid in (TPL_KING, TPL_VAMPIRE, TPL_GLADIATOR, TPL_INCANTATION):
+        _copy_card(db, guid)
+    # The AI (owner 0) controls the King and holds decoy cards; the player
+    # (owner 5) holds the cards the reveal is allowed to look at.
+    add_card(db, 101, 0, TPL_KING, loc="warzone")
+    add_card(db, 301, 0, TPL_GLADIATOR, loc="hand")
+    add_card(db, 302, 0, TPL_VAMPIRE, loc="hand")
+    add_card(db, 201, 5, TPL_GLADIATOR, loc="hand")
+    db.commit()
+
+    pl_t, ai_t = _pl_ai()
+    game = game_engine.Game(1, pl_t, ai_t)
+    handler = HandlerStub(db)
+    player_champ_uid = int(handler._player_champ_scid.uid.uid64)
+    bstate = {"player_health": 20, "ai_health": 20, "turn_number": 1,
+              "stack": [],
+              "champ_map": {5: player_champ_uid,
+                            0: int(handler._ai_champ_scid.uid.uid64)}}
+    handler._current_bstate = bstate
+
+    def deal_damage():
+        dispatch_native_trigger(
+            db=db, handler=handler, game=game, session=SessionStub(),
+            player_uid=pl_t, ai_uid=ai_t, battle_state=bstate,
+            event_type="CardDealtDamageEvent", source_card_id=101,
+            source_player_id=0, target_card_id=player_champ_uid)
+        for item in list(bstate.get("stack") or []):
+            bstate["stack"].remove(item)
+            resolve_port_trigger(
+                handler, game, SessionStub(), db, pl_t, ai_t, bstate, item)
+
+    # Pin the "random" pick to the first legal candidate so a reveal that
+    # samples the King controller's hand is caught deterministically.  The
+    # correct implementation restricts the pool to the damaged hand first, so
+    # the first owned troop is still card 201.
+    with mock.patch("rules_port.reveal_effects.random.choice",
+                    side_effect=lambda seq: list(seq)[0]):
+        deal_damage()
+    assert bstate.get("revealed_cards") == [201], bstate.get("revealed_cards")
+    stolen = db.execute(
+        "SELECT user_id, template_guid, location FROM game_cards "
+        "WHERE card_uid=201").fetchone()
+    assert stolen == (0, TPL_VAMPIRE, "warzone"), stolen
+
+    # A revealed non-troop is left untouched ("if it is a troop" gate).
+    add_card(db, 202, 5, TPL_INCANTATION, loc="hand")
+    # add_card stores every fixture as a Troop; make the type authoritative.
+    db.execute("UPDATE game_cards SET card_type='Constant' WHERE card_uid=202")
+    db.commit()
+    with mock.patch("rules_port.reveal_effects.random.choice",
+                    side_effect=lambda seq: list(seq)[0]):
+        deal_damage()
+    assert bstate.get("revealed_cards") == [202], bstate.get("revealed_cards")
+    untouched = db.execute(
+        "SELECT user_id, template_guid, location FROM game_cards "
+        "WHERE card_uid=202").fetchone()
+    assert untouched == (5, TPL_INCANTATION, "hand"), untouched
+
+
+def test_vampire_prince_rewards_buried_opponent_resource(db):
+    """Both authored Prince variants use the damaged champion's deck.
+
+    The nested bury child records ``BuriedCards`` on the parent ability.
+    The parent condition must read that live list count so a buried resource
+    is transformed to Bloodstone and moved to the Prince controller's hand.
+    """
+    from rules_port.triggers import dispatch_native_trigger
+    from rules_port.resolution import resolve_port_trigger
+
+    source = sqlite3.connect(SRC)
+    princes = [row[0] for row in source.execute(
+        "SELECT guid FROM card_templates WHERE name='Vampire Prince' "
+        "ORDER BY guid")]
+    resource_guid = source.execute(
+        "SELECT guid FROM card_templates WHERE card_type='Resource' "
+        "AND name!='Bloodstone' ORDER BY name,guid LIMIT 1").fetchone()[0]
+    source.close()
+    tpl_bloodstone = "452ced33-880a-4a3f-9cf6-0f56c23b948a"
+
+    assert len(princes) == 2, princes
+    for prince_guid in princes:
+        for guid in (prince_guid, resource_guid, tpl_bloodstone,
+                     TPL_GLADIATOR):
+            _copy_card(db, guid)
+        add_card(db, 101, 0, prince_guid, loc="warzone")
+        add_card(db, 201, 5, resource_guid, loc="deck")
+        # A deck card owned by the Prince controller catches an incorrect
+        # fallback to the source owner's deck.
+        add_card(db, 202, 0, TPL_GLADIATOR, loc="deck")
+        db.execute(
+            "UPDATE game_cards SET card_type=(SELECT card_type FROM "
+            "card_templates ct WHERE ct.guid=game_cards.template_guid)")
+        db.execute(
+            "UPDATE game_cards SET position=0 WHERE card_uid IN (201,202)")
+        db.commit()
+
+        pl_t, ai_t = _pl_ai()
+        game = game_engine.Game(1, pl_t, ai_t)
+        handler = HandlerStub(db)
+        player_champ_uid = int(handler._player_champ_scid.uid.uid64)
+        bstate = {
+            "player_health": 20, "ai_health": 20, "turn_number": 1,
+            "stack": [],
+            "champ_map": {
+                5: player_champ_uid,
+                0: int(handler._ai_champ_scid.uid.uid64),
+            },
+            "_rules_port_attached": True,
+        }
+        handler._current_bstate = bstate
+        dispatch_native_trigger(
+            db=db, handler=handler, game=game, session=SessionStub(),
+            player_uid=pl_t, ai_uid=ai_t, battle_state=bstate,
+            event_type="CardDealtDamageEvent", source_card_id=101,
+            source_player_id=0, target_card_id=player_champ_uid)
+        while bstate.get("stack"):
+            item = bstate["stack"].pop(0)
+            resolve_port_trigger(
+                handler, game, SessionStub(), db, pl_t, ai_t, bstate, item)
+
+        rewarded = db.execute(
+            "SELECT user_id,template_guid,location FROM game_cards "
+            "WHERE card_uid=201").fetchone()
+        assert rewarded == (0, tpl_bloodstone, "hand"), (
+            prince_guid, rewarded, bstate)
+        decoy = db.execute(
+            "SELECT user_id,template_guid,location FROM game_cards "
+            "WHERE card_uid=202").fetchone()
+        assert decoy == (0, TPL_GLADIATOR, "deck"), (prince_guid, decoy)
+        db.execute("DELETE FROM game_cards")
+        db.commit()
 
 
 def test_queued_trigger_source_projection_preserves_combat_state(db):
@@ -467,7 +739,6 @@ def test_countermagic_offered_in_ai_chain_window(db):
     import db as dbmod
     _copy_card(db, TPL_COUNTERMAGIC)
     _copy_card(db, TPL_SPAWN)
-    db.execute("ALTER TABLE card_templates ADD COLUMN sacrifice_target TEXT DEFAULT ''")
     db.commit()
     add_card(db, 101, 5, TPL_COUNTERMAGIC, loc="hand")
     add_card(db, 202, 0, TPL_SPAWN, loc="CastSpells")  # AI troop on the chain
@@ -551,6 +822,65 @@ def test_strength_of_redwood_targets_combat_troop(db):
         assert targets, "Strength of the Redwood needs a troop target"
         assert any(102 in [int(x.uid.uid64) for x in candidate_uids]
                    for _, _, _, candidate_uids in targets), targets
+    finally:
+        dbmod._db, hcs._db = old_db, old_hcs
+
+
+def test_multi_target_play_card_keeps_all_target_instances(db):
+    """Survival of the Fittest exposes both authored targets to the client.
+
+    The client's ``PlayerOptions.Update`` keys target instances by
+    ``(card, ability)`` and clears the stored list on every ``OptionInstance``
+    with the same ``opt_id`` (PlayerOptions.cs).  Emitting one OptionInstance
+    per target template dropped the friendly target, so the client only
+    prompted for the opposing troop and the pending battle never resolved.
+    """
+    import hconnect_server as hcs
+    import db as dbmod
+    _copy_card(db, TPL_SURVIVAL)
+    _copy_card(db, TPL_SPAWN)
+    add_card(db, 101, 5, TPL_SURVIVAL, loc="hand")
+    add_card(db, 102, 5, TPL_SPAWN, loc="warzone")   # friendly troop
+    add_card(db, 202, 0, TPL_SPAWN, loc="warzone")   # opposing troop
+    pl_t, ai_t = _pl_ai()
+    old_db, old_hcs = dbmod._db, hcs._db
+    dbmod._db, hcs._db = db, db
+    try:
+        h = object.__new__(hcs.HCPHandler)
+        h._db = db
+        h.user_profile = {"id": 5}
+        h._player_champ_scid = game_engine.SessionCardId(
+            game_engine.UID.make(244, 5))
+        h._ai_champ_scid = game_engine.SessionCardId(
+            game_engine.UID.make(3, 1000))
+        h._current_bstate = {"player_health": 20, "ai_health": 20,
+                             "turn_number": 1, "active_player_id": 5}
+        game = game_engine.Game(1, pl_t, ai_t)
+        ev = game._make_event(game_engine.PlayerOptionListSessionEventArgs)
+        ev.player_id = pl_t
+        opt = game._make_event(game_engine.PlayerOptionSessionEventArgs)
+        opt.card = game_engine.SessionCardId(game_engine.UID(101))
+        opt.state = game_engine.ECardUsage.Play
+        play = game._make_event(game_engine.OptionInstanceSessionEventArgs)
+        play.opt_id = game_engine.ResourceId.from_str(
+            game_engine.PLAY_CARD_ABILITY_TEMPLATE_ID)
+        opt.instances.append(play)
+        ev.options.append(opt)
+        game._push(ev)
+        h._add_play_target_options(game, SessionStub(), pl_t, ai_t)
+        ability_instances = [inst for inst in opt.instances
+                             if str(inst.opt_id.guid) == AG_SURVIVAL]
+        # Exactly one OptionInstance for the ability so the client does not
+        # erase the first target when it processes the second.
+        assert len(ability_instances) == 1, ability_instances
+        inst = ability_instances[0]
+        assert [t.target_index for t in inst.target_instances] == [0, 1]
+        assert [int(c.uid.uid64)
+                for c in inst.target_instances[0].targets] == [102]
+        assert [int(c.uid.uid64)
+                for c in inst.target_instances[1].targets] == [202]
+        assert list(inst.min_target_counts) == [1, 1]
+        assert list(inst.max_target_counts) == [1, 1]
     finally:
         dbmod._db, hcs._db = old_db, old_hcs
 
@@ -702,6 +1032,136 @@ def test_bunjitsu_void_cost_is_a_cost_instance(db):
         dbmod._db, hcs._db = old_db, old_hcs
 
 
+def test_undying_weaver_offers_scrounge_cost_during_card_play(db):
+    """Weaver's on-cast Scrounge 2 is an optional, ability-level void cost."""
+    import hconnect_server as hcs
+    import db as dbmod
+    import services.tournament_game as tournament_game
+    from domain.events import CostInstanceSessionEventArgs
+    from gamedata import DEFAULT_RECORD_STORE, PlayPlan
+
+    _copy_card(db, TPL_UNDYING_WEAVER)
+    _copy_card(db, TPL_GLADIATOR)
+    add_card(db, 101, 5, TPL_UNDYING_WEAVER, loc="hand")
+    add_card(db, 201, 5, TPL_GLADIATOR, loc="discard")
+    add_card(db, 202, 5, TPL_GLADIATOR, loc="discard")
+    old_db, old_hcs, old_tournament_db = (
+        dbmod._db, hcs._db, tournament_game._db)
+    dbmod._db, hcs._db, tournament_game._db = db, db, db
+    try:
+        h = object.__new__(hcs.HCPHandler)
+        h._db = db
+        h.user_profile = {"id": 5}
+        h._player_champ_scid = game_engine.SessionCardId(
+            game_engine.UID.make(244, 5))
+        h._ai_champ_scid = game_engine.SessionCardId(
+            game_engine.UID.make(3, 1000))
+        h._current_bstate = {"player_health": 20, "ai_health": 20}
+        # This focused schema omits FRA-only arena metadata used by the
+        # optional gem display lookup; card-cost mutation needs only the zone
+        # rows and emitted card updates.
+        h._card_full_data = lambda *_args, **_kwargs: None
+        pl_t, ai_t = _pl_ai()
+        game = game_engine.Game(1, pl_t, ai_t)
+        option_list = game._make_event(
+            game_engine.PlayerOptionListSessionEventArgs)
+        option_list.player_id = pl_t
+        option = game._make_event(game_engine.PlayerOptionSessionEventArgs)
+        option.card = game_engine.SessionCardId(game_engine.UID(101))
+        option.state = game_engine.ECardUsage.Play
+        play_instance = game._make_event(
+            game_engine.OptionInstanceSessionEventArgs)
+        play_instance.opt_id = game_engine.ResourceId.from_str(
+            game_engine.PLAY_CARD_ABILITY_TEMPLATE_ID)
+        option.instances.append(play_instance)
+        option_list.options.append(option)
+        game._push(option_list)
+
+        h._add_play_target_options(game, SessionStub(), pl_t, ai_t)
+        scrounge_instances = [
+            instance for instance in option.instances
+            if str(instance.opt_id.guid) == AG_WEAVER_SCROUNGE]
+        assert len(scrounge_instances) == 1, option.instances
+        cost_instances = [target for target in
+                          scrounge_instances[0].target_instances
+                          if isinstance(target, CostInstanceSessionEventArgs)]
+        assert len(cost_instances) == 1, scrounge_instances[0].target_instances
+        cost = cost_instances[0]
+        assert cost.cost_type == 16  # VoidAbilityCostType
+        assert str(cost.target_template_id.guid) == TID_WEAVER_CRYPT_TROOPS
+        assert {int(card.uid.uid64) for card in cost.targets} == {201, 202}
+        assert getattr(cost, "min_target_count", None) == 2
+        assert getattr(cost, "max_target_count", None) == 2
+
+        pvp_game = game_engine.Game(1, pl_t, ai_t)
+        pvp_options = pvp_game._make_event(
+            game_engine.PlayerOptionListSessionEventArgs)
+        pvp_options.player_id = pl_t
+        pvp_option = game_engine.PlayerOptionSessionEventArgs()
+        pvp_option.card = game_engine.SessionCardId(game_engine.UID(101))
+        pvp_option.state = game_engine.ECardUsage.Play
+        pvp_play = game_engine.OptionInstanceSessionEventArgs()
+        pvp_play.opt_id = game_engine.ResourceId.from_str(
+            game_engine.PLAY_CARD_ABILITY_TEMPLATE_ID)
+        pvp_option.instances.append(pvp_play)
+        pvp_options.options.append(pvp_option)
+        pvp_game._push(pvp_options)
+        tournament_game._pvp_add_play_target_options(
+            pvp_game, SessionStub(),
+            {"pids": [5, 6], "turn_pid": 5, "champ_map": {}},
+            pl_t, ai_t, 5)
+        pvp_scrounge = next(
+            instance for instance in pvp_option.instances
+            if str(instance.opt_id.guid) == AG_WEAVER_SCROUNGE)
+        pvp_cost = next(
+            target for target in pvp_scrounge.target_instances
+            if isinstance(target, CostInstanceSessionEventArgs))
+        assert pvp_cost.cost_type == 16
+        assert {int(card.uid.uid64) for card in pvp_cost.targets} == {201, 202}
+
+        plan = PlayPlan.from_card(
+            DEFAULT_RECORD_STORE, TPL_UNDYING_WEAVER,
+            source_uid=101, owner_id=5)
+        declined, no_card_costs = plan.activation_bundle([])
+        assert no_card_costs == {}
+        assert plan.validate(
+            activations=declined, cost_target_map=no_card_costs) == ()
+        activations, card_costs = plan.activation_bundle([], ability_data=[{
+            "ability_template_id": AG_WEAVER_SCROUNGE,
+            "opted_in_set": True,
+            "opted": True,
+            "x_cost_data": {"cards_to_void": [201, 202]},
+        }])
+        assert plan.validate(
+            activations=activations, cost_target_map=card_costs) == ()
+        payment, used = h._ability_card_play_cost_selections(
+            SessionStub(), plan, 101, activations, owner_id=5,
+            battle_state=h._current_bstate)
+        assert payment is not None
+        assert [(spec["kind"], selected) for spec, selected in payment] == [
+            ("void", (201, 202))]
+        assert used == {201, 202}
+
+        from unittest import mock
+        dispatched = []
+        payment_state = {"ability_lists": {}}
+        with mock.patch(
+                "rules_port.triggers.dispatch_native_trigger",
+                side_effect=lambda **event:
+                    dispatched.append(event["event_type"])):
+            h._apply_card_play_costs(
+                game, SessionStub(), payment_state, pl_t, ai_t, payment,
+                source_uid=101, expected_owner_id=5, scrounge=True)
+        assert [row[0] for row in db.execute(
+            "SELECT location FROM game_cards WHERE card_uid IN (201, 202) "
+            "ORDER BY card_uid")] == ["void", "void"]
+        assert payment_state["ability_lists"]["VoidedCards"] == [201, 202]
+        assert "CardScroungedEvent" in dispatched
+    finally:
+        dbmod._db, hcs._db, tournament_game._db = (
+            old_db, old_hcs, old_tournament_db)
+
+
 def test_practice_ability_chain_window_reaches_the_client(db):
     """An ability that leaves a chain item must offer the client its resolve
     window.
@@ -789,6 +1249,53 @@ def test_practice_ability_chain_window_reaches_the_client(db):
             not hasattr(builtins, instruction.argval))}
 
 
+def test_block_exception_reads_the_blockers_template_shards(db):
+    """A block-immunity exception filtered by colour sees the blocker's shards.
+
+    The combat card projection omitted the template threshold, so every troop
+    looked colourless: a Blood blocker could not block Wailing Banshee and
+    the native phase graph skipped DeclareDefense entirely.
+    """
+    from rules_port.combat_rules import can_block
+    for template in (TPL_WAILING_BANSHEE, TPL_BLOOD_VANILLA,
+                     TPL_NONBLOOD_VANILLA):
+        _copy_card(db, template)
+    add_card(db, 101, 5, TPL_WAILING_BANSHEE,
+             state=game_engine.ECardStates.StartedATurnOnYourSide)
+    add_card(db, 201, 1000, TPL_BLOOD_VANILLA)
+    add_card(db, 202, 1000, TPL_NONBLOOD_VANILLA)
+    bstate = {"player_health": 20, "ai_health": 20}
+    assert can_block(db, 1, bstate, 101, 201)
+    assert not can_block(db, 1, bstate, 101, 202)
+
+
+def test_granted_scrounge_joins_the_card_play_plan(db):
+    """A live granted cast ability (Graven Geist) is part of the play plan.
+
+    Declining the optional Scrounge keeps the card playable; opting in binds
+    the client's XCostData void list to that ability's authored cost index.
+    """
+    from gamedata import DEFAULT_RECORD_STORE, PlayPlan
+    granted = AG_GEIST_GRANTED_SCROUNGE
+    base = PlayPlan.from_card(
+        DEFAULT_RECORD_STORE, TPL_NONBLOOD_VANILLA, source_uid=101,
+        owner_id=5)
+    assert not base.cast_abilities
+    plan = PlayPlan.from_card(
+        DEFAULT_RECORD_STORE, TPL_NONBLOOD_VANILLA, source_uid=101,
+        owner_id=5, instance_ability_guids=(granted,))
+    assert [a.ability_guid.lower() for a in plan.cast_abilities] == [granted]
+    declined, _ = plan.activation_bundle([])
+    assert not declined[granted].opted
+    assert plan.validate(variable_cost=0, activations=declined) == ()
+    opted, _ = plan.activation_bundle([], ability_data=[{
+        "ability_template_id": granted,
+        "x_cost_data": {"m_CardsToVoid": [201, 202]}}])
+    assert opted[granted].opted
+    assert opted[granted].cost_target_map == {0: (201, 202)}
+    assert plan.validate(variable_cost=0, activations=opted) == ()
+
+
 def test_champion_power_offer_requires_its_authored_cost_and_target(db):
     """Bunoshi's charge power is offered only when it can actually be paid.
 
@@ -813,18 +1320,20 @@ def test_champion_power_offer_requires_its_authored_cost_and_target(db):
                 "filter_json, target_kind FROM target_templates "
                 "WHERE template_id=?", (tid,)).fetchone()
             assert row, tid
-            db.execute("INSERT INTO target_templates VALUES "
+            db.execute("INSERT OR REPLACE INTO target_templates VALUES "
                        "(?,?,?,?,?,?,?,?,?,?,?,?)", row)
     finally:
         src.close()
-    db.execute("CREATE TABLE talent_abilities (ability_guid TEXT, "
+    db.execute("CREATE TABLE IF NOT EXISTS talent_abilities (ability_guid TEXT, "
                "charge_cost INTEGER, spell_cost INTEGER, "
                "activatable_phases INTEGER, casting_behavior INTEGER)")
-    db.execute("CREATE TABLE champion_abilities (ability_guid TEXT, "
+    db.execute("CREATE TABLE IF NOT EXISTS champion_abilities (ability_guid TEXT, "
                "charge_cost INTEGER, spell_cost INTEGER, "
                "casting_behavior INTEGER, thresholds_json TEXT)")
-    db.execute("INSERT INTO champion_abilities VALUES (?,?,?,?,?)",
-               (ability_guid, 3, 0, game_engine.ECardTypes.BasicAction,
+    db.execute("INSERT OR REPLACE INTO champion_abilities (champion_guid, "
+               "champion_name, ability_guid, charge_cost, spell_cost, "
+               "casting_behavior, thresholds_json) VALUES (?,?,?,?,?,?,?)",
+               ("", "", ability_guid, 3, 0, game_engine.ECardTypes.BasicAction,
                 json.dumps([{"color": "Blood", "quantity": 1}])))
     add_card(db, 501, 5, TPL_GLADIATOR, loc="underground")
     add_card(db, 601, 0, TPL_GLADIATOR, loc="warzone")
@@ -963,7 +1472,7 @@ def test_summon_zero_count_does_not_crash(db):
     from tests.tests_cards_fixes import _copy_card
     _copy_card(db, "a9ebe40e-ef30-4c9e-b4dd-1b414dc35d0c")  # Spiderspawn
     db.execute(
-        "INSERT INTO card_abilities_meta (ability_guid, is_triggered, "
+        "INSERT OR REPLACE INTO card_abilities_meta (ability_guid, is_triggered, "
         "trigger_event_type, game_text, raw_json, casting_behavior, is_manual, "
         "activation_cost, uses_per_game, uses_per_turn, target_template_ids, "
         "exhausts_on_use) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
@@ -1279,7 +1788,6 @@ def test_void_leaf_publishes_the_voided_troops_stats(db):
     hopper = "fe2472ed-4ff8-455b-8b18-b7e0033cd896"      # Battle Hopper 0/1
     # The focused fixture predates the combat columns the static card reader
     # needs (same workaround as the Lethal test in tests_combat).
-    db.execute("ALTER TABLE card_templates ADD COLUMN lethal INTEGER DEFAULT 0")
     _copy_card(db, hopper)
     _copy_ability(db, charge_power)
     add_card(db, 901, 5, hopper, loc="discard")          # a troop in a crypt
@@ -1480,11 +1988,11 @@ def test_pvp_champion_trigger_discovery_uses_raw_participant_id(db):
         "thresholds_json TEXT DEFAULT '[]', "
         "target_template_ids TEXT DEFAULT '[]')")
     db.execute(
-        "INSERT INTO champion_abilities (champion_guid, champion_name, "
+        "INSERT OR REPLACE INTO champion_abilities (champion_guid, champion_name, "
         "ability_guid) VALUES (?,?,?)",
         (champion_guid, "Corinth the Iconoclast", ability_guid))
     db.execute(
-        "INSERT INTO card_abilities_meta (ability_guid, trigger_event_type) "
+        "INSERT OR REPLACE INTO card_abilities_meta (ability_guid, trigger_event_type) "
         "VALUES (?,?)",
         (ability_guid, "Game.Shared.Mechanics.TurnEndedEvent"))
     add_card(db, 9001, 1001, champion_guid, loc="warzone")
@@ -1526,11 +2034,11 @@ def test_pvp_champion_trigger_condition_uses_raw_participant_owner(db):
         "thresholds_json TEXT DEFAULT '[]', "
         "target_template_ids TEXT DEFAULT '[]')")
     db.execute(
-        "INSERT INTO champion_abilities (champion_guid, champion_name, "
+        "INSERT OR REPLACE INTO champion_abilities (champion_guid, champion_name, "
         "ability_guid) VALUES (?,?,?)",
         (champion_guid, "Corinth the Iconoclast", ability_guid))
     db.execute(
-        "INSERT INTO card_abilities_meta (ability_guid, trigger_event_type) "
+        "INSERT OR REPLACE INTO card_abilities_meta (ability_guid, trigger_event_type) "
         "VALUES (?,?)",
         (ability_guid, "Game.Shared.Mechanics.TurnEndedEvent"))
     add_card(db, 9001, 1001, champion_guid, loc="champion")
@@ -1593,11 +2101,11 @@ def test_shifted_paradigm_never_moves_champion_when_crypt_empty(db):
         "thresholds_json TEXT DEFAULT '[]', "
         "target_template_ids TEXT DEFAULT '[]')")
     db.execute(
-        "INSERT INTO champion_abilities (champion_guid, champion_name, "
+        "INSERT OR REPLACE INTO champion_abilities (champion_guid, champion_name, "
         "ability_guid) VALUES (?,?,?)",
         (champion_guid, "Corinth the Iconoclast", ability_guid))
     db.execute(
-        "INSERT INTO card_abilities_meta (ability_guid, trigger_event_type) "
+        "INSERT OR REPLACE INTO card_abilities_meta (ability_guid, trigger_event_type) "
         "VALUES (?,?)",
         (ability_guid, "Game.Shared.Mechanics.TurnEndedEvent"))
     add_card(db, 9001, 1001, champion_guid, loc="champion")
@@ -1633,10 +2141,15 @@ def test_shifted_paradigm_never_moves_champion_when_crypt_empty(db):
         "SELECT card_uid, location FROM game_cards").fetchall())
     assert locations[9001] == "champion", locations
     # The ability resolves: hand -> deck, (empty) crypt skipped, draw 4.
-    moves = [(int(ev.session_card_id.uid.uid64), ev.collection)
-             for ev in game.events
-             if isinstance(ev, game_engine.CardMovedSessionEventArgs)]
-    assert (9003, game_engine.ECardCollections.Deck) in moves, moves
+    updates = [(int(ev.session_card_id.uid.uid64), ev.collection)
+               for ev in game.events
+               if isinstance(ev, game_engine.CardUpdatedSessionEventArgs)]
+    assert (9003, game_engine.ECardCollections.Deck) in updates, updates
+    assert not any(
+        int(ev.session_card_id.uid.uid64) == 9003
+        and ev.collection == game_engine.ECardCollections.Deck
+        for ev in game.events
+        if isinstance(ev, game_engine.CardMovedSessionEventArgs))
     drawn = [ev for ev in game.events
              if isinstance(ev, game_engine.CardDrawnSessionEventArgs)]
     assert len(drawn) == 4, drawn
@@ -1661,11 +2174,11 @@ def test_corinth_end_of_turn_ability_resolves_inline(db):
         "thresholds_json TEXT DEFAULT '[]', "
         "target_template_ids TEXT DEFAULT '[]')")
     db.execute(
-        "INSERT INTO champion_abilities (champion_guid, champion_name, "
+        "INSERT OR REPLACE INTO champion_abilities (champion_guid, champion_name, "
         "ability_guid) VALUES (?,?,?)",
         (champion_guid, "Corinth the Iconoclast", ability_guid))
     db.execute(
-        "INSERT INTO card_abilities_meta (ability_guid, trigger_event_type) "
+        "INSERT OR REPLACE INTO card_abilities_meta (ability_guid, trigger_event_type) "
         "VALUES (?,?)",
         (ability_guid, "Game.Shared.Mechanics.TurnEndedEvent"))
     add_card(db, 9001, 1001, champion_guid, loc="champion")
@@ -1701,10 +2214,15 @@ def test_corinth_end_of_turn_ability_resolves_inline(db):
     # Resolved inline: no chain item, and the hand already moved to the deck.
     assert not (bstate.get("stack") or []), bstate.get("stack")
     assert "daf1ed04" in result, result
-    moves = [(int(ev.session_card_id.uid.uid64), ev.collection)
-             for ev in game.events
-             if isinstance(ev, game_engine.CardMovedSessionEventArgs)]
-    assert (9003, game_engine.ECardCollections.Deck) in moves, moves
+    updates = [(int(ev.session_card_id.uid.uid64), ev.collection)
+               for ev in game.events
+               if isinstance(ev, game_engine.CardUpdatedSessionEventArgs)]
+    assert (9003, game_engine.ECardCollections.Deck) in updates, updates
+    assert not any(
+        int(ev.session_card_id.uid.uid64) == 9003
+        and ev.collection == game_engine.ECardCollections.Deck
+        for ev in game.events
+        if isinstance(ev, game_engine.CardMovedSessionEventArgs))
     # It was shuffled into the deck, not left on top where the draw would
     # immediately recover it.
     locations = dict(db.execute(
@@ -1720,6 +2238,7 @@ def test_native_chain_resolves_trigger_without_legacy_fallback(db):
     GameStarted/first-turn trigger queued by ``queue_projected_chain`` then
     aborted the mulligan-keep transaction, so PvE games failed to start.
     """
+    from unittest import mock
     from rules_port.triggers import dispatch_native_trigger
     champion_guid = "93d8a5ca-d999-461d-84d8-30975ef4dfc1"
     ability_guid = "daf1ed04-6035-b4dd-a11b-48f93e4bfdb2"
@@ -1732,11 +2251,11 @@ def test_native_chain_resolves_trigger_without_legacy_fallback(db):
         "thresholds_json TEXT DEFAULT '[]', "
         "target_template_ids TEXT DEFAULT '[]')")
     db.execute(
-        "INSERT INTO champion_abilities (champion_guid, champion_name, "
+        "INSERT OR REPLACE INTO champion_abilities (champion_guid, champion_name, "
         "ability_guid) VALUES (?,?,?)",
         (champion_guid, "Corinth the Iconoclast", ability_guid))
     db.execute(
-        "INSERT INTO card_abilities_meta (ability_guid, trigger_event_type) "
+        "INSERT OR REPLACE INTO card_abilities_meta (ability_guid, trigger_event_type) "
         "VALUES (?,?)",
         (ability_guid, "Game.Shared.Mechanics.TurnEndedEvent"))
     add_card(db, 9001, 1001, champion_guid, loc="champion")
@@ -1772,14 +2291,23 @@ def test_native_chain_resolves_trigger_without_legacy_fallback(db):
     old_db, old_hcs = dbmod._db, hcs._db
     dbmod._db, hcs._db = db, db
     try:
-        resolve_trigger_item(
-            handler, SessionStub(), db, game, bstate, item, pl_t, ai_t)
+        with mock.patch(
+                "abilities.framework.resolution.resolve_ability",
+                side_effect=AssertionError(
+                    "native chain entered the legacy ability resolver")):
+            resolve_trigger_item(
+                handler, SessionStub(), db, game, bstate, item, pl_t, ai_t)
     finally:
         dbmod._db, hcs._db = old_db, old_hcs
-    moves = [(int(ev.session_card_id.uid.uid64), ev.collection)
-             for ev in game.events
-             if isinstance(ev, game_engine.CardMovedSessionEventArgs)]
-    assert (9003, game_engine.ECardCollections.Deck) in moves, moves
+    updates = [(int(ev.session_card_id.uid.uid64), ev.collection)
+               for ev in game.events
+               if isinstance(ev, game_engine.CardUpdatedSessionEventArgs)]
+    assert (9003, game_engine.ECardCollections.Deck) in updates, updates
+    assert not any(
+        int(ev.session_card_id.uid.uid64) == 9003
+        and ev.collection == game_engine.ECardCollections.Deck
+        for ev in game.events
+        if isinstance(ev, game_engine.CardMovedSessionEventArgs))
 
 
 def test_trigger_chain_item_does_not_rerun_its_bom_after_a_picker(db):
@@ -1884,7 +2412,7 @@ def test_triggered_chance_branch_stores_the_entering_troop(db):
     add_card(db, troop, 5, TPL_GLADIATOR)
     condition = DEFAULT_RECORD_STORE.get(
         "AbilityEffectConditionTemplate", COND_PSYCHOTIC_CHANCE)
-    db.execute("INSERT INTO ability_effect_conditions VALUES (?,?,?)",
+    db.execute("INSERT OR REPLACE INTO ability_effect_conditions VALUES (?,?,?)",
                (COND_PSYCHOTIC_CHANCE, condition.field("m_Name"),
                 json.dumps(condition.field("m_Condition").to_dict())))
     db.commit()
@@ -1943,7 +2471,7 @@ def test_triggered_attribute_grant_persists_the_speed_bit(db):
     add_card(db, troop, 5, TPL_GLADIATOR)
     condition = DEFAULT_RECORD_STORE.get(
         "AbilityEffectConditionTemplate", COND_PSYCHOTIC_CHANCE)
-    db.execute("INSERT INTO ability_effect_conditions VALUES (?,?,?)",
+    db.execute("INSERT OR REPLACE INTO ability_effect_conditions VALUES (?,?,?)",
                (COND_PSYCHOTIC_CHANCE, condition.field("m_Name"),
                 json.dumps(condition.field("m_Condition").to_dict())))
     db.commit()
@@ -2334,6 +2862,130 @@ def test_one_shot_deathcry_consumes_and_keeps_its_deploy_draw(db):
     assert not (bstate.get("stack") or []), bstate.get("stack")
 
 
+def test_one_shot_copy_of_this_summons_exactly_one_copy(db):
+    """The copy inherits the source's spent ONE-SHOT (C# ``Card.CopyFrom``).
+
+    "[ONE-SHOT]: Deploy - Summon a copy of this" pays its per-game use
+    before the effect runs, and a non-replica copy clones ``m_PerGameUses``.
+    The port copied only the template, so every copy's own Deploy summoned
+    another copy without end.
+    """
+    from rules_port.resolution import resolve_port_trigger
+    from rules_port.triggers import dispatch_native_trigger
+    _copy_card(db, TPL_ECHOCLAW)
+    add_card(db, 701, 5, TPL_ECHOCLAW, loc="warzone")
+    # Only the ONE-SHOT under test; the second Deploy needs an input target.
+    db.execute("UPDATE game_cards SET card_abilities=? WHERE card_uid=701",
+               (json.dumps([AG_ECHOCLAW_ONESHOT_COPY]),))
+    db.commit()
+    pl_t, ai_t = _pl_ai()
+    game = game_engine.Game(1, pl_t, ai_t)
+    handler = HandlerStub(db)
+    bstate = {"player_health": 20, "ai_health": 20, "turn_number": 3,
+              "_rules_port_attached": True, "stack": [],
+              "_next_instance_id": 1, "resolving_owner_id": 5}
+    handler._current_bstate = bstate
+    dispatch_native_trigger(
+        db=db, handler=handler, game=game, session=SessionStub(),
+        player_uid=pl_t, ai_uid=ai_t, battle_state=bstate,
+        event_type="CardEnteredZoneEvent", source_card_id=701,
+        source_player_id=5,
+        data={"event_source_collection": "CastSpells",
+              "event_destination_collection": "warzone"})
+    resolved = []
+    for _ in range(5):
+        if not bstate.get("stack"):
+            break
+        item = bstate["stack"].pop()
+        resolve_port_trigger(handler, game, SessionStub(), db, pl_t, ai_t,
+                             bstate, item)
+        resolved.append(item["ability_guid"])
+    assert resolved == [AG_ECHOCLAW_ONESHOT_COPY], resolved
+    assert not bstate.get("stack"), bstate.get("stack")
+    copies = db.execute(
+        "SELECT card_uid FROM game_cards WHERE session_id=1 "
+        "AND template_guid=? AND location='warzone'",
+        (TPL_ECHOCLAW,)).fetchall()
+    assert len(copies) == 2, copies
+
+
+def test_damage_marks_the_troop_damaged_this_turn(db):
+    """Taking damage sets ECardStates.Damaged; the end-of-turn heal clears it.
+
+    C# ``Session.DealDamage`` sets the bit that ``IsDamagedThisTurn`` reads
+    and ``Card.ResetCardDamage`` clears it. The port only added marked
+    damage, so "each opposing damaged troop" (Bleak Bladetwister) never
+    matched anything.
+    """
+    from gamedata import DEFAULT_RECORD_STORE
+    from gamedata.semantics import ability_graph
+    from pvp_db import db_clear_warzone_damage
+    from rules_port.context import EffectContext
+    from rules_port.damage_effects import deal_damage
+    from rules_port.targeting import legal_targets_for
+    _copy_card(db, TPL_BLADETWISTER)
+    _copy_card(db, TPL_GLADIATOR)
+    abilities = db.execute(
+        "SELECT abilities_json FROM card_templates WHERE guid=?",
+        (TPL_BLADETWISTER,)).fetchone()[0]
+    target = ability_graph(
+        DEFAULT_RECORD_STORE, json.loads(abilities)[0]).targets[0]
+    add_card(db, 101, 5, TPL_BLADETWISTER)
+    add_card(db, 201, 1000, TPL_GLADIATOR)
+    add_card(db, 202, 1000, TPL_GLADIATOR)
+    pl_t, ai_t = _pl_ai()
+    game = game_engine.Game(1, pl_t, ai_t)
+    handler = HandlerStub(db)
+    bstate = {"player_health": 20, "ai_health": 20, "turn_number": 3,
+              "_rules_port_attached": True, "stack": []}
+    handler._current_bstate = bstate
+    context = EffectContext.from_rules_port(
+        game, SessionStub(), db, handler, pl_t, ai_t, bstate, "damage", 101)
+
+    def damaged_targets():
+        return set(legal_targets_for(
+            db, 1, 5, target, 101, both_players=True,
+            battle_state=bstate)) & {201, 202}
+
+    assert damaged_targets() == set()
+    deal_damage(context, 201, 1)
+    state = db.execute(
+        "SELECT card_state FROM game_cards WHERE card_uid=201").fetchone()[0]
+    assert state & int(game_engine.ECardStates.Damaged), state
+    # Writes through a plain sqlite3 connection do not bump the projection's
+    # write counter (the server's wrapped connection does), so drop the memo.
+    from rules_port import targeting as _targeting
+    _targeting._CARD_MEMO.clear()
+    assert damaged_targets() == {201}
+    db_clear_warzone_damage(1, conn=db)
+    db.commit()
+    _targeting._CARD_MEMO.clear()
+    assert damaged_targets() == set()
+
+
+def test_socketed_gem_conditions_see_the_cards_active_gems(db):
+    """Conditions read ActiveGem like C# ``IsSocketed`` does.
+
+    The condition card projection omitted ``gems``, so every "while this is
+    socketed with a minor gem" static and "you control another socketed
+    card" gate evaluated as unsocketed.
+    """
+    from rules_port.static_rules import effective_stats
+    _copy_card(db, TPL_GROVE_WHISPERER)
+    add_card(db, 101, 5, TPL_GROVE_WHISPERER)
+    bstate = {"player_health": 20, "ai_health": 20, "stack": []}
+    base = db.execute(
+        "SELECT attack, defense FROM card_templates WHERE guid=?",
+        (TPL_GROVE_WHISPERER,)).fetchone()
+    # EGemTypesNew slot 1: 5 = Blood_Minor_1, 3 = Wild_Major_1.
+    for gems, bonus in ((0, 0), (5, 1), (3, 0)):
+        db.execute("UPDATE game_cards SET gems=? WHERE card_uid=101", (gems,))
+        db.commit()
+        attack, defense = effective_stats(db, 1, bstate, 101)[:2]
+        assert (attack, defense) == (base[0] + bonus, base[1] + bonus), (
+            gems, attack, defense)
+
+
 def test_deploy_effect_targets_the_chosen_card_not_the_trigger_source(db):
     """A triggered ability's input target outranks the triggering card.
 
@@ -2522,13 +3174,534 @@ def test_booby_trap_damages_its_owners_champion(db):
     assert bstate["player_health"] == 20, bstate
 
 
+def test_construction_plans_count_the_exhausted_troops(db):
+    """"Exhaust one or more Dwarves and/or Robots you control: add a
+    construction counter to this for each troop exhausted this way."  The
+    count comes from the ability's ExhaustedCards list, and the counter goes
+    on the Plans, not on the exhausted troop the client flattened into
+    TargetMap[0]."""
+    from rules_port.resolution import resolve_port_ability
+    plan, bot, hornet = "aa325145-6d3d-474e-b990-608619620fe8", "02ed9695-207a-4c23-a3f8-13c7b001203d", "93cf512d-8b01-4e30-bf22-f02bf81cf12b"
+    db.execute("DELETE FROM game_cards")
+    db.execute("CREATE TABLE IF NOT EXISTS card_counter_templates "
+               "(template_id TEXT PRIMARY KEY, name TEXT, description TEXT)")
+    db.execute("INSERT OR IGNORE INTO card_counter_templates VALUES "
+               "('c277b077-04ae-5020-09fb-d5831d3358b8', 'Construction', '')")
+    for tpl in (plan, bot, hornet):
+        _copy_card(db, tpl)
+    add_card(db, 0x401, 5, plan, loc="warzone")
+    add_card(db, 0x301, 5, bot, loc="warzone")
+    add_card(db, 0x501, 5, bot, loc="warzone")
+    db.commit()
+    pl_t, ai_t = _pl_ai()
+    bstate = {"player_health": 20, "ai_health": 20, "turn_number": 3,
+              "stack": [], "_rules_port_attached": True}
+
+    def activate(*exhausted):
+        # The live chain resolves the saved descriptor: an empty TargetMap and
+        # the exhaust selections in its cost_target_map (string keys, as
+        # persisted).
+        resolve_port_ability(
+            HandlerStub(db), game_engine.Game(1, pl_t, ai_t), SessionStub(), db,
+            pl_t, ai_t, bstate, "257418ed-24ec-98cd-d6f7-faeb02de4d50", 0x401, 5,
+            target_map={}, cost_target_map={"0": list(exhausted)},
+            instance_id=1)
+
+    def plan_row():
+        return db.execute("SELECT template_guid, permanent_buffs FROM game_cards "
+                          "WHERE card_uid=?", (0x401,)).fetchone()
+
+    activate(0x301)
+    assert json.loads(plan_row()[1])["counters"] == {"construction": 1}, plan_row()
+    assert json.loads(db.execute("SELECT permanent_buffs FROM game_cards "
+                                 "WHERE card_uid=?", (0x301,)).fetchone()[0]
+                      or "{}").get("counters", {}) == {}
+    activate(0x501)   # two counters: remove them and become a Hornet Bot
+    assert plan_row()[0] == hornet, plan_row()
+    # Exhausting two troops at once adds two counters in one activation.
+    db.execute("UPDATE game_cards SET template_guid=?, card_template_id=?, "
+               "permanent_buffs='{}', card_state=0 WHERE card_uid=?",
+               (plan, plan, 0x401))
+    db.commit()
+    activate(0x301, 0x501)
+    assert plan_row()[0] == hornet, plan_row()
+
+
+def test_dictionary_with_struct_keys_decodes(db):
+    """A Dictionary whose keys are structs decoded to dict keys and failed
+    the whole transaction with "unhashable type: 'dict'"."""
+    from application.objfmt_wire import _hashable_key
+    assert _hashable_key({"m_UID64": 0x301}) == 0x301
+    assert _hashable_key({"a": 1, "b": 2}) == '{"a": 1, "b": 2}'
+    assert _hashable_key(3) == 3
+    assert hash(_hashable_key([{"m_UID64": 1}, 2])) is not None
+
+
+# A real ActivateAbilityTransaction from the Mono client: Construction Plans:
+# Crank Rocket with two Robots selected in XCostData.CardsToExhaust.
+_TWO_TROOP_EXHAUST_ACTIVATION = bytes.fromhex(
+    "3b303b303b323b506c6179657249643b313b313b313b6d5f55494436343b323b323b303b4634"
+    "36303732304546433144343530363b5472616e73616374696f6e3b333b333b333b6d5f416269"
+    "6c69747941637469766174696f6e446174613b343b343b383b536f757263654361726449643b"
+    "353b353b313b76616c75653b363b313b313b6d5f55494436343b373b323b303b303130393030"
+    "303030303030303030303b4162696c69747954656d706c61746549643b383b363b313b6d5f47"
+    "7569643b393b373b303b33363b63316262636563662d656236622d326436392d333436662d31"
+    "65393231323265333236364162696c697479496e7374616e636549643b31303b383b303b3030"
+    "30303030303030303030303030303b44697361626c653b31313b393b303b304f70746564496e"
+    "3b31323b393b303b314f70746564496e5365743b31333b393b303b3078436f7374446174613b"
+    "31343b31303b373b6d5f53657456616c7565733b31353b31313b313b76616c75655f5f3b3136"
+    "3b31323b303b31303030303030303b6d5f5265736f7572636558436f73743b31373b31323b30"
+    "3b30303030303030303b6d5f436861726765506f696e747358436f73743b31383b31323b303b"
+    "30303030303030303b6d5f5370656c6c506f696e747358436f73743b31393b31323b303b3030"
+    "3030303030303b6d5f4c69666558436f73743b32303b31323b303b30303030303030303b6d5f"
+    "4361726473546f457868617573743b32313b31333b303b313b303b32323b31343b323b6b6579"
+    "3b32333b363b313b6d5f477569643b32343b373b303b33363b38373638613737622d64396134"
+    "2d376466372d656537612d34326364396562643137653976616c75653b32353b31353b303b32"
+    "3b303b32363b353b313b76616c75653b32373b313b313b6d5f55494436343b32383b323b303b"
+    "303131313237303030303030303030303b313b32393b353b313b76616c75653b33303b313b31"
+    "3b6d5f55494436343b33313b323b303b303130383030303030303030303030303b6d5f436f75"
+    "6e74657258436f73743b33323b31323b303b30303030303030303b496e6465783b33333b3132"
+    "3b303b46464646464646463b6d5f506c6179657249643b33343b313b313b6d5f55494436343b"
+    "33353b323b303b463436303732304546433144343530363b6d5f5472616e73616374696f6e49"
+    "643b33363b31323b303b31353030303030303b47616d652e5368617265642e4e6574776f726b"
+    "2e47616d6553657373696f6e2e506c617965725472616e73616374696f6e5265717565737441"
+    "7267733b47616d652e5368617265642e5549443b53797374656d2e55496e7436343b47616d65"
+    "2e5368617265642e4d656368616e6963732e5472616e73616374696f6e732e41637469766174"
+    "654162696c6974795472616e73616374696f6e3b47616d652e5368617265642e4d656368616e"
+    "6963732e4162696c69746965732e4162696c69747941637469766174696f6e446174613b4761"
+    "6d652e5368617265642e53657373696f6e4361726449643b47616d652e5368617265642e5265"
+    "736f7572636549643b53797374656d2e477569643b53797374656d2e496e7436343b53797374"
+    "656d2e426f6f6c65616e3b47616d652e5368617265642e4d656368616e6963732e4162696c69"
+    "746965732e58436f7374446174613b47616d652e5368617265642e4d656368616e6963732e41"
+    "62696c69746965732e58436f7374446174612b4553657456616c7565733b53797374656d2e49"
+    "6e7433323b53797374656d2e436f6c6c656374696f6e732e47656e657269632e44696374696f"
+    "6e61727960322347616d652e5368617265642e5265736f7572636549642153797374656d2e43"
+    "6f6c6c656374696f6e732e47656e657269632e4c69737460312347616d652e5368617265642e"
+    "53657373696f6e4361726449643b53797374656d2e436f6c6c656374696f6e732e47656e6572"
+    "69632e4b657956616c75655061697260322347616d652e5368617265642e5265736f75726365"
+    "49642153797374656d2e436f6c6c656374696f6e732e47656e657269632e4c69737460312347"
+    "616d652e5368617265642e53657373696f6e4361726449643b53797374656d2e436f6c6c6563"
+    "74696f6e732e47656e657269632e4c69737460312347616d652e5368617265642e5365737369"
+    "6f6e4361726449640a3839333b34363b33313b3834303b3733393b36323b34333b33313b3736"
+    "3b35323b34323b31363b31363b31393b3435353b34353b32353b33333b33373b33363b32393b"
+    "3232353b3139383b36343b35333b3132343b35343b34353b33323b35343b34353b33323b3332"
+    "3b32333b35303b33323b3333")
+
+
+def test_two_troop_exhaust_activation_keeps_both_troops(db):
+    """The client sends exhaust costs in XCostData.m_CardsToExhaust.  The
+    ingress normalizer knew only CardsToSacrifice, so a raw fallback kept one
+    card: exhausting two troops exhausted one and added one counter."""
+    from application.objfmt_wire import parse_datawrapper
+    from application.player_transactions import (
+        classify_player_transaction, typed_payload_from_decoded)
+    from rules_port.resolution import build_port_ability, _exhausted_cost_cards
+    raw = _TWO_TROOP_EXHAUST_ACTIVATION
+    decoded = parse_datawrapper(raw, preserve_complex=True)
+    decoded.setdefault("__raw__", raw)
+    payload = typed_payload_from_decoded(classify_player_transaction(raw), decoded)
+    activation = payload["activation_data"]
+    cost = {int(k): list(v) for k, v in activation["cost_target_map"].items()}
+    assert cost == {0: [0x271101, 0x801]}, activation
+    ability = build_port_ability(
+        "c1bbcecf-eb6b-2d69-346f-1e92122e3266", 0x901, 5,
+        target_map=activation.get("target_map"), cost_target_map=cost)
+    # Both troops are paid; neither is left as the automatic "this" target.
+    assert _exhausted_cost_cards(ability) == [0x271101, 0x801]
+    assert dict(ability.activation.target_map) == {}, ability.activation.target_map
+
+
+def test_pterobot_costs_less_for_each_dwarf_and_robot_you_control(db):
+    """"This has cost -1 in all your zones for each Dwarf and/or Robot you
+    control."  Only in-play cards were scanned as static sources, and the
+    count's "you control" filter got no player, so it always cost 7."""
+    from rules_port.static_rules import effective_cost
+    ptero, bot, dwarf = "bef4c375-71cd-4cd7-a8b6-8f7ef6cf6bad", "02ed9695-207a-4c23-a3f8-13c7b001203d", "0260fed3-fceb-40e1-af24-677dcb25fa97"
+    db.execute("DELETE FROM game_cards")
+    for tpl in (ptero, bot, dwarf):
+        _copy_card(db, tpl)
+    add_card(db, 0x101, 5, ptero, loc="hand")
+    db.execute("UPDATE game_cards SET card_abilities=(SELECT abilities_json "
+               "FROM card_templates WHERE guid=?) WHERE card_uid=?", (ptero, 0x101))
+    db.commit()
+    bstate = {"player_health": 20, "ai_health": 20, "turn_number": 3, "stack": []}
+    assert effective_cost(db, 1, bstate, 0x101) == 7
+    add_card(db, 0x201, 5, bot, loc="warzone")
+    add_card(db, 0x301, 5, dwarf, loc="warzone")
+    db.commit()
+    assert effective_cost(db, 1, bstate, 0x101) == 5
+    add_card(db, 0x401, 0, bot, loc="warzone")     # the opponent's Robot
+    db.commit()
+    assert effective_cost(db, 1, bstate, 0x101) == 5
+    # Card creation must not also bake a snapshot of the same modifier
+    # into the card (Pterobot cost 4 with only a Robot and a Dwarf in play).
+    from rules_port.triggers import dispatch_native_trigger
+    pl_t, ai_t = _pl_ai()
+    dispatch_native_trigger(
+        db=db, handler=HandlerStub(db), game=game_engine.Game(1, pl_t, ai_t),
+        session=SessionStub(), player_uid=pl_t, ai_uid=ai_t,
+        battle_state={"stack": [], "ability_lists": {},
+                      "_rules_port_attached": True},
+        event_type="CardCreatedEvent", source_card_id=0x101,
+        source_player_id=5, data={"zones": ()})
+    assert db.execute("SELECT card_cost_mod FROM game_cards WHERE card_uid=?",
+                      (0x101,)).fetchone()[0] in (0, None)
+    assert effective_cost(db, 1, bstate, 0x101) == 5
+
+
+def test_hand_card_shows_its_current_cost(db):
+    """The client shows the cost the server last pushed for a hand card;
+    board-dependent static costs (Pterobot) must be re-pushed."""
+    import hconnect_server as hcs
+    # The cards and the queries that read them must share the test database.
+    hcs._db = db
+    live = db
+    session_id = 97531
+    ptero, bot = "bef4c375-71cd-4cd7-a8b6-8f7ef6cf6bad", "02ed9695-207a-4c23-a3f8-13c7b001203d"
+    live.execute("DELETE FROM game_cards WHERE session_id=?", (session_id,))
+    def put(uid, tpl, loc, owner=5):
+        live.execute(
+            "INSERT INTO game_cards (session_id, user_id, card_uid, template_guid, "
+            "card_template_id, location, position, card_state, card_abilities, "
+            "card_type, card_attributes, card_attack_mod, card_defense_mod, "
+            "card_cost_mod, card_damage, permanent_buffs, temporary_buffs, "
+            "card_uses, original_template_guid) VALUES "
+            "(?,?,?,?,?,?,0,0,(SELECT abilities_json FROM card_templates WHERE guid=?),"
+            "'Troop',0,0,0,0,0,'{}','{}','{}',?)",
+            (session_id, owner, uid, tpl, tpl, loc, tpl, tpl))
+        live.commit()
+    put(0x101, ptero, "hand")
+    pushed = []
+
+    class Game:
+        card_defs = {}
+        def push_card_updated(self, scid, owner, collection, ctype, **kw):
+            pushed.append((int(scid.uid.uid64), kw.get("cost")))
+
+    handler = object.__new__(hcs.HCPHandler)
+    handler.user_profile = {"id": 5}
+    handler._card_full_data = lambda game, scid, tpl, instance_id=None: (
+        tpl, "Troop", "Pterobot", 7, 3, 5, 0)
+    session = type("S", (), {"session_id": session_id})()
+    pl_t, _ai_t = _pl_ai()
+    handler._push_hand_cost_updates(Game(), session, pl_t, {})
+    assert pushed == [], pushed                    # printed cost, nothing new
+    put(0x201, bot, "warzone")
+    handler._push_hand_cost_updates(Game(), session, pl_t, {})
+    assert pushed == [(0x101, 6)], pushed
+    handler._push_hand_cost_updates(Game(), session, pl_t, {})
+    assert pushed == [(0x101, 6)], pushed          # unchanged: not re-sent
+    live.execute("DELETE FROM game_cards WHERE session_id=? AND card_uid=?",
+                 (session_id, 0x201))
+    live.commit()
+    handler._push_hand_cost_updates(Game(), session, pl_t, {})
+    assert pushed[-1] == (0x101, 7), pushed
+    live.execute("DELETE FROM game_cards WHERE session_id=?", (session_id,))
+    live.commit()
+
+
+AG_GEARSMITH_DEPLOY = "8f2d3151-c6c2-1831-27e6-7bc96df000e5"
+AG_GEARSMITH_PICK = "f1a8b50a-cdb2-775b-3c7e-615e2bf221f3"
+
+
+def _template_by_name(name):
+    source = sqlite3.connect(SRC)
+    try:
+        return source.execute(
+            "SELECT guid FROM card_templates WHERE name=? AND rarity!='Epic' "
+            "ORDER BY guid", (name,)).fetchone()[0]
+    finally:
+        source.close()
+
+
+def _gearsmith_board(db, owner, deck_names):
+    """Gearsmith in play and a known deck order (position 0 is the top)."""
+    gearsmith = _template_by_name("Gearsmith")
+    _copy_card(db, gearsmith)
+    _copy_ability(db, AG_GEARSMITH_PICK)
+    add_card(db, 0x3f01, owner, gearsmith, loc="warzone")
+    deck = []
+    for index, name in enumerate(deck_names):
+        tpl = _template_by_name(name)
+        _copy_card(db, tpl)
+        uid = 0x5001 + index * 0x100
+        add_card(db, uid, owner, tpl, loc="deck")
+        db.execute("UPDATE game_cards SET position=? WHERE card_uid=?",
+                   (index, uid))
+        deck.append(uid)
+    db.execute("UPDATE game_cards SET card_type=(SELECT card_type FROM "
+               "card_templates ct WHERE ct.guid=game_cards.template_guid)")
+    db.commit()
+    return deck
+
+
+def _gearsmith_deploy(db, owner, handler=None):
+    from rules_port.resolution import resolve_port_trigger
+    pl_t, ai_t = _pl_ai()
+    game = game_engine.Game(1, pl_t, ai_t)
+    handler = handler or HandlerStub(db)
+    bstate = {"player_health": 20, "ai_health": 20, "turn_number": 3,
+              "stack": [], "_rules_port_attached": True}
+    result = resolve_port_trigger(
+        handler, game, SessionStub(), db, pl_t, ai_t, bstate,
+        {"kind": "trigger", "ability_guid": AG_GEARSMITH_DEPLOY,
+         "source_uid": 0x3f01, "target_uid": 0x3f01,
+         "trigger_target_uid": 0x3f01, "source_owner_uid": owner,
+         "instance_id": 3})
+    return result, game, bstate
+
+
+def _zones(db):
+    return {uid: loc for uid, loc in db.execute(
+        "SELECT card_uid, location FROM game_cards")}
+
+
+def _deck_order(db):
+    return [uid for (uid,) in db.execute(
+        "SELECT card_uid FROM game_cards WHERE location='deck' "
+        "ORDER BY position")]
+
+
+def test_gearsmith_takes_the_revealed_artifact_and_stays_in_play(db):
+    """Gearsmith: "look at the top three cards of your deck, put up to one
+    artifact into your hand, it gets cost -1, put the remaining cards into
+    your deck".  The remaining-cards target excluded every revealed card, so
+    the move fell back to the source and Gearsmith went into the deck, and
+    the revealed cards stayed face-up on top.  The reveal also ran once per
+    revealed card."""
+    top, second, artifact, fourth, fifth = _gearsmith_board(
+        db, 0, ["Ruby Shard", "Construct Foreman", "S.P.A.M. Bot",
+                "Ruby Shard", "Construct Foreman"])
+    result, game, _bstate = _gearsmith_deploy(db, 0)
+    assert str(result).endswith("COMPLETED"), result
+    zones = _zones(db)
+    assert zones[0x3f01] == "warzone", zones
+    assert zones[artifact] == "hand", zones
+    assert all(zones[uid] == "deck" for uid in (top, second, fourth, fifth))
+    order = _deck_order(db)
+    # The cards that were not revealed keep their order (no shuffle).
+    assert [uid for uid in order if uid in (fourth, fifth)] == [fourth, fifth]
+    reveals = [e for e in game.events
+               if isinstance(e, game_engine.CardsRevealedSessionEventArgs)]
+    assert len(reveals) == 1, len(reveals)
+    moves = [e for e in game.events
+             if isinstance(e, game_engine.CardMovedSessionEventArgs)]
+    # Both cards remain in Deck. The C# cache does not synthesize class 50
+    # for a position-only change, and the client update already homes the view.
+    assert not moves, moves
+    hidden = {int(e.session_card_id.uid.uid64) for e in game.events
+              if isinstance(e, game_engine.CardUpdatedSessionEventArgs)
+              and getattr(e, "nulling", False)}
+    assert {top, second} <= hidden, hidden
+
+
+def test_gearsmith_without_an_artifact_returns_all_three(db):
+    """No artifact revealed: nothing goes to hand and Gearsmith stays."""
+    deck = _gearsmith_board(
+        db, 0, ["Ruby Shard", "Construct Foreman", "Ruby Shard",
+                "S.P.A.M. Bot", "Construct Foreman"])
+    result, _game, _bstate = _gearsmith_deploy(db, 0)
+    assert str(result).endswith("COMPLETED"), result
+    zones = _zones(db)
+    assert zones[0x3f01] == "warzone", zones
+    assert all(zones[uid] == "deck" for uid in deck), zones
+
+
+def test_gearsmith_player_picks_the_artifact(db):
+    """The player is asked only for the artifact choice (the "remaining
+    cards" target is automatic); resuming with the pick finishes the move."""
+    from rules_port.resolution import resolve_port_ability
+    top, second, artifact, _fourth, _fifth = _gearsmith_board(
+        db, 5, ["Ruby Shard", "Construct Foreman", "S.P.A.M. Bot",
+                "Ruby Shard", "Construct Foreman"])
+    prompts = []
+    handler = HandlerStub(db)
+    handler._prompt_revealed_choice = (
+        lambda *args, **kwargs: prompts.append((args[8], kwargs)))
+    result, game, bstate = _gearsmith_deploy(db, 5, handler)
+    assert len(prompts) == 1, prompts
+    candidates, kwargs = prompts[0]
+    assert list(candidates) == [artifact], candidates
+    assert kwargs["optional"] is True           # "up to one" may be declined
+    assert _zones(db)[0x3f01] == "warzone"
+    continuation = kwargs["continuation"]
+    target_map = {int(k): v for k, v in continuation["target_map"].items()}
+    target_map[int(continuation["target_index"])] = artifact
+    bstate.pop("resolution_paused", None)
+    pl_t, ai_t = _pl_ai()
+    resolve_port_ability(
+        handler, game, SessionStub(), db, pl_t, ai_t, bstate,
+        continuation["ability_guid"], continuation["source_uid"],
+        continuation["owner_id"], target_map=target_map,
+        variables=continuation["variables"],
+        resume_from_order=continuation["resume_effect_order"],
+        instance_id=continuation["ability_instance_id"])
+    zones = _zones(db)
+    assert zones[0x3f01] == "warzone", zones
+    assert zones[artifact] == "hand", zones
+    assert zones[top] == zones[second] == "deck", zones
+
+
+AG_UNTAMED_AURA = "c49e0fa5-a778-24fc-5483-ac6abcba1754"
+AG_SPHERE_CHANCE = "5cd9dfa2-cb88-915a-3c06-8ef0bf6d8672"
+AG_SPHERE_TAME = "153271a7-9117-301f-e4bb-625d53064bfc"
+TID_UNTAMED_TROOP = "b71b0113-0f8f-9d9c-bf8a-1517143f3cab"
+TPL_DIRE_TOAD = "2a419ce5-5e32-0c2f-5019-e4773544c25f"
+TPL_TAMING_SPHERE = "7a8ab8b5-23c2-4359-b8cb-f560c359da27"
+
+
+def _tamed_board(db):
+    """Taming Sphere (player) and a Dire Toad under the AI's Untamed aura."""
+    from rules_port.triggers import dispatch_native_trigger
+    for tpl in (TPL_DIRE_TOAD, TPL_TAMING_SPHERE):
+        _copy_card(db, tpl)
+    for ability in (AG_UNTAMED_AURA, AG_SPHERE_CHANCE, AG_SPHERE_TAME):
+        _copy_ability(db, ability)
+    handler = HandlerStub(db)
+    handler._champion_granted_ability_guids = {
+        int(handler._ai_champ_scid.uid.uid64): [AG_UNTAMED_AURA]}
+    add_card(db, 0x901, 5, TPL_TAMING_SPHERE, loc="warzone")
+    add_card(db, 0x501, 0, TPL_DIRE_TOAD, loc="warzone")
+    db.execute("UPDATE game_cards SET card_abilities=(SELECT abilities_json "
+               "FROM card_templates WHERE guid=template_guid)")
+    db.commit()
+    pl_t, ai_t = _pl_ai()
+    bstate = {"stack": [], "ability_lists": {}, "_rules_port_attached": True}
+    dispatch_native_trigger(
+        db=db, handler=handler, game=game_engine.Game(1, pl_t, ai_t),
+        session=SessionStub(), player_uid=pl_t, ai_uid=ai_t,
+        battle_state=bstate, event_type="CardEnteredZoneEvent",
+        source_card_id=0x501, source_player_id=0,
+        data={"event_source_collection": "CastSpells",
+              "event_destination_collection": "warzone"})
+    return handler, bstate
+
+
+def _toad(db):
+    location, buffs = db.execute(
+        "SELECT location, permanent_buffs FROM game_cards WHERE card_uid=?",
+        (0x501,)).fetchone()
+    return location, json.loads(buffs or "{}").get("int_attrs", {})
+
+
+def test_untamed_aura_makes_the_toad_a_taming_target(db):
+    """"Your non-Tamed Dire Toads are Untamed" is a constant IntAttrModifier
+    (Set Untamed = m_Value 1).  The native leaf read only "amount", so it set
+    Untamed to 0 and the Taming Sphere never had a legal target."""
+    from rules_port.targeting import legal_targets
+    _handler, bstate = _tamed_board(db)
+    assert _toad(db) == ("warzone", {"Untamed": 1}), _toad(db)
+    assert legal_targets(db, 1, 5, TID_UNTAMED_TROOP, 0x901,
+                         both_players=True, champions=[],
+                         battle_state=bstate) == [0x501]
+
+
+def test_taming_sphere_captures_the_toad(db):
+    """A successful tame marks the troop Tamed, clears Untamed and voids it;
+    the Tamed quest looks for a Tamed troop in the void."""
+    from rules_port.resolution import resolve_port_ability
+    handler, bstate = _tamed_board(db)
+    pl_t, ai_t = _pl_ai()
+    resolve_port_ability(
+        handler, game_engine.Game(1, pl_t, ai_t), SessionStub(), db, pl_t,
+        ai_t, bstate, AG_SPHERE_TAME, 0x901, 5, target_map={0: 0x501})
+    assert _toad(db) == ("void", {"Tamed": 1}), _toad(db)
+
+
+def test_taming_sphere_chance_either_captures_or_leaves_the_toad(db):
+    """The 2-cost ability is a 50% tame: every outcome is a clean capture or
+    an untouched Untamed toad, and both outcomes occur."""
+    from rules_port.resolution import resolve_port_ability
+    pl_t, ai_t = _pl_ai()
+    outcomes = set()
+    for _ in range(40):
+        db.execute("DELETE FROM game_cards")
+        db.commit()
+        handler, bstate = _tamed_board(db)
+        resolve_port_ability(
+            handler, game_engine.Game(1, pl_t, ai_t), SessionStub(), db,
+            pl_t, ai_t, bstate, AG_SPHERE_CHANCE, 0x901, 5,
+            target_map={1: 0x501})
+        location, attrs = _toad(db)
+        assert (location, attrs) in (("void", {"Tamed": 1}),
+                                     ("warzone", {"Untamed": 1})),             (location, attrs)
+        outcomes.add(location)
+        if outcomes == {"void", "warzone"}:
+            break
+    assert outcomes == {"void", "warzone"}, outcomes
+
+
+def test_ai_paid_sacrifice_cost_resolves_and_consumes_the_one_shot(db):
+    """Voracious Zombie: "[ONE-SHOT]: Sacrifice another troop -> ...".
+
+    ``_apply_card_play_costs`` returns an empty tuple after paying a
+    sacrifice (no voided cards).  The AI treated that falsy success as a
+    rejection, so every AI decision point sacrificed another troop without
+    resolving or consuming the ONE-SHOT (session 263414 lost its board).
+    """
+    from unittest import mock
+    import ai
+    tpl_voracious = "3f062f67-80bb-423e-b67b-83d7c6946437"
+    ag_oneshot = "e7263e6d-3d3f-10bd-7d7d-86c11fc93bc7"
+    _copy_card(db, tpl_voracious)
+    _copy_ability(db, ag_oneshot)
+    add_card(db, 701, 0, tpl_voracious, loc="warzone")
+    add_card(db, 702, 0, TPL_GLADIATOR, loc="warzone")
+    ai._db = db
+    pl_t, ai_t = _pl_ai()
+    game = game_engine.Game(1, pl_t, ai_t)
+    bstate = {"ai_resources": 0, "ai_health": 20, "player_health": 20,
+              "turn_number": 3, "stack": [], "_rules_port_attached": True}
+    handler = HandlerStub(db)
+    handler._current_bstate = bstate
+    uses = {}
+    paid = []
+    handler._ability_x_cost_metadata = lambda guid: (0, 0)
+    handler._card_uses = lambda session, uid: uses.get(int(uid), {})
+    handler._bump_card_use = lambda session, uid, guid: uses.setdefault(
+        int(uid), {}).__setitem__(guid, uses.get(int(uid), {}).get(guid, 0) + 1)
+    handler._ability_requires_discard = lambda guid: False
+    handler._remove_one_shot_ability = lambda *a, **k: False
+    handler._send_battle_events = lambda *a, **k: None
+    handler._apply_card_play_costs = (
+        lambda *a, **k: paid.append(a[5]) or ())
+    spec = {"kind": "sacrifice"}
+    with mock.patch.object(ai, "_ai_select_ability_costs",
+                           return_value=([(spec, (702,))], {})), \
+            mock.patch("rules_port.resolution.resolve_port_ability") as resolve, \
+            mock.patch("rules_port.death_effects.state_based_deaths"):
+        assert ai.ai_use_warzone_ability(
+            handler, game, SessionStub(), ai_t, pl_t, bstate) is True
+        assert resolve.call_count == 1
+        assert uses[701][ag_oneshot] == 1
+        # The ONE-SHOT is spent: no second sacrifice is paid.
+        assert ai.ai_use_warzone_ability(
+            handler, game, SessionStub(), ai_t, pl_t, bstate) is False
+    assert len(paid) == 1, paid
+
+
 def _main():
-    tests = (test_brood_creeper_damage_to_opposing_champion_summons,
+    tests = (test_untamed_aura_makes_the_toad_a_taming_target,
+             test_ai_paid_sacrifice_cost_resolves_and_consumes_the_one_shot,
+             test_taming_sphere_captures_the_toad,
+             test_taming_sphere_chance_either_captures_or_leaves_the_toad,
+             test_construction_plans_count_the_exhausted_troops,
+             test_gearsmith_takes_the_revealed_artifact_and_stays_in_play,
+             test_gearsmith_without_an_artifact_returns_all_three,
+             test_gearsmith_player_picks_the_artifact,
+             test_dictionary_with_struct_keys_decodes,
+             test_two_troop_exhaust_activation_keeps_both_troops,
+             test_pterobot_costs_less_for_each_dwarf_and_robot_you_control,
+             test_hand_card_shows_its_current_cost,
+             test_brood_creeper_damage_to_opposing_champion_summons,
              test_cards_attacked_dispatch_uses_group_count_once,
              test_card_battled_dispatch_is_directional,
+             test_spell_finish_uses_the_effective_post_resolution_type,
              test_lose_life_modifier_is_not_damage,
              test_brood_creeper_does_not_fire_on_own_champion,
              test_runeweb_infiltrator_puts_two_spiderling_eggs_in_opponent_deck,
+             test_vampire_king_steals_a_random_troop_from_the_damaged_hand,
+             test_vampire_prince_rewards_buried_opponent_resource,
              test_queued_trigger_source_projection_preserves_combat_state,
              test_generated_card_uid_is_independent_of_row_id,
              test_spawn_of_othuyeg_buries_one_or_five,
@@ -2536,8 +3709,12 @@ def _main():
              test_countermagic_requires_castspells_target,
              test_countermagic_offered_in_ai_chain_window,
              test_strength_of_redwood_targets_combat_troop,
+             test_multi_target_play_card_keeps_all_target_instances,
              test_chronic_madness_buries_escalates_and_returns_to_deck,
              test_bunjitsu_void_cost_is_a_cost_instance,
+             test_undying_weaver_offers_scrounge_cost_during_card_play,
+             test_block_exception_reads_the_blockers_template_shards,
+             test_granted_scrounge_joins_the_card_play_plan,
              test_champion_power_offer_requires_its_authored_cost_and_target,
              test_practice_ability_chain_window_reaches_the_client,
              test_bunjitsu_voided_stats_sum_both_troops,
@@ -2571,6 +3748,9 @@ def _main():
              test_booby_trap_damages_its_owners_champion,
              test_generated_card_pool_offers_only_ownable_castable_cards,
              test_one_shot_deathcry_consumes_and_keeps_its_deploy_draw,
+             test_one_shot_copy_of_this_summons_exactly_one_copy,
+             test_damage_marks_the_troop_damaged_this_turn,
+             test_socketed_gem_conditions_see_the_cards_active_gems,
              test_emberspire_witch_blocks_every_champion_health_gain,
              test_deploy_effect_targets_the_chosen_card_not_the_trigger_source,
              test_replaced_projection_drains_into_the_next_packet_once,
@@ -2592,3 +3772,362 @@ def _main():
 
 if __name__ == "__main__":
     _main()
+
+
+def test_untargeted_trigger_is_flashed_not_chained():
+    """Client ``AbilityTemplate.UntargetedTrigger``: a trigger with no
+    explicit target template is ``IgnoresChain`` (Voracious Vultures' "this
+    gets cost -1" on a Zombie entering play): no priority window, source flash.
+    """
+    from types import SimpleNamespace
+    from gamedata.semantics import AbilityGraph
+
+    class Graph(SimpleNamespace):
+        untargeted_trigger = property(AbilityGraph.untargeted_trigger.fget)
+
+    def graph(event, *explicit, ignores=False):
+        targets = tuple(SimpleNamespace(explicit=flag) for flag in explicit)
+        return Graph(trigger_event_type=event, targets=targets,
+                     ignores_chain=ignores)
+
+    untargeted = AbilityGraph.untargeted_trigger.fget
+    client = AbilityGraph.client_ignores_chain.fget
+    assert untargeted(graph("CardEnteredZoneEvent", False))
+    assert not untargeted(graph("CardEnteredZoneEvent", True))
+    assert not untargeted(graph("", False))
+    assert client(graph("", False, ignores=True))
+    assert not client(graph("CardEnteredZoneEvent", True))
+
+
+def test_pregame_champion_ability_fires_once_per_champion():
+    """PreGameEvent is dispatched once per participant during setup, but a
+    champion's own PreGame ability belongs to its controller's pass only.
+    Chained Goliath's "Before the start of the game, gain [BLOOD][BLOOD]
+    [RUBY][RUBY]" must give 2 Blood and 2 Ruby, not 4 and 4.
+    """
+    from rules_port.triggers import dispatch_native_trigger
+    goliath = "307bf463-0726-43bf-9890-648938314ae1"
+    pure_hatred = "b0e73be4-8543-b70f-a977-12a4441d9a56"
+    db = make_db()
+    db.execute(
+        "INSERT OR IGNORE INTO champion_abilities (champion_guid, "
+        "champion_name, ability_guid) VALUES (?,?,?)",
+        (goliath, "Chained Goliath", pure_hatred))
+    db.execute(
+        "INSERT OR REPLACE INTO card_abilities_meta (ability_guid, "
+        "trigger_event_type) VALUES (?,?)",
+        (pure_hatred, "Game.Shared.Mechanics.PreGameEvent"))
+    add_card(db, 9001, 1001, goliath, loc="champion")
+    db.execute("UPDATE game_cards SET is_champion=1 WHERE card_uid=9001")
+    db.commit()
+    handler = HandlerStub(db)
+    handler.user_profile = {"id": 1001}
+    pl_t = game_engine.UID.make(244, 1001)
+    ai_t = game_engine.UID.make(244, 1002)
+    game = game_engine.Game(1, pl_t, ai_t)
+    bstate = {"pvp": True, "pids": [1001, 1002],
+              "champ_map": {"1001": 9001, "1002": 9002},
+              "stack": [], "turn_pid": 1001}
+    # Mirrors services/legacy_loadbalancer: one dispatch per owner.
+    for owner in (1001, 0):
+        dispatch_native_trigger(
+            db=db, handler=handler, game=game, session=SessionStub(),
+            player_uid=pl_t, ai_uid=ai_t, battle_state=bstate,
+            event_type="PreGameEvent", source_card_id=None,
+            source_player_id=owner, data={"zones": ("deck",)})
+    assert bstate.get("player_threshold") == {4: 2, 8: 2}, bstate
+
+
+def test_pve_ai_champion_without_card_row_transforms():
+    """A PvE champion is a synthetic SessionCardId with no ``game_cards``
+    row.  Chained Goliath's "you transform into Inferno Goliath" targets the
+    AI champion that way; the transform must retarget the handler's champion
+    identity (template, abilities, champ_guid_map) and re-announce it instead
+    of returning "transform: target not found".
+    """
+    from rules_port.context import EffectContext
+    from rules_port.transform_effects import transform_instance
+    chained = "307bf463-0726-43bf-9890-648938314ae1"
+    inferno = "9c0ee4a8-5ec8-44ff-8e2d-1ef4eb3da0d0"
+    db = make_db()
+    handler = HandlerStub(db)
+    ai_uid = int(handler._ai_champ_scid.uid.uid64)
+    handler._ai_champ_guid = chained
+    handler._ai_champ_ability_guids = ["27a22f37-42be-aec5-1304-c8ed7dd7f3ae"]
+    handler._ai_champ_board = (None, None, "Chained Goliath", chained)
+    pl_t = game_engine.UID.make(244, 5)
+    ai_t = game_engine.UID.make(244, 6)
+    game = game_engine.Game(1, pl_t, ai_t)
+    bstate = {"champ_map": {"5": int(handler._player_champ_scid.uid.uid64),
+                            "0": ai_uid},
+              "champ_guid_map": {"0": chained}, "ai_health": 20}
+    context = EffectContext.from_rules_port(
+        game, SessionStub(), db, handler, pl_t, ai_t, bstate, "")
+    assert db.execute("SELECT 1 FROM game_cards WHERE card_uid=?",
+                      (ai_uid,)).fetchone() is None
+    assert transform_instance(context, ai_uid, inferno) == ai_uid
+    assert handler._ai_champ_guid == inferno
+    assert bstate["champ_guid_map"]["0"] == inferno
+    assert "1f1c4b9d-e588-e7df-87fb-14c75d02d572" in \
+        handler._ai_champ_ability_guids
+    kinds = [type(event).__name__ for event in game.events]
+    assert "CardTransformedSessionEventArgs" in kinds, kinds
+    # The client reads the champion's template from its cached card in
+    # OnChampionCardPlayed, so the CardUpdated must precede the re-announce.
+    assert kinds.index("CardUpdatedSessionEventArgs") < \
+        kinds.index("ChampionCardPlayedSessionEventArgs"), kinds
+
+
+def test_start_turn_current_gain_matched_by_total_is_not_a_bonus():
+    """Prep refills current to total, so a StartTurn current gain that came
+    with a matching total gain (Chained Goliath's [L1][R1]) is no bonus, in
+    either effect order.  A current gain with no total gain (Lithe
+    Lyricist's +1) stays a bonus.
+    """
+    from rules_port.resources import record_start_turn_resource_gain
+    key = "start_turn_resource_bonus_1001"
+
+    state = {}
+    record_start_turn_resource_gain(state, key, "currentresource", 1, 2)
+    record_start_turn_resource_gain(state, key, "totalresource", 1, 2)
+    assert state[key] == 0
+
+    state = {}
+    record_start_turn_resource_gain(state, key, "totalresource", 1, 2)
+    record_start_turn_resource_gain(state, key, "currentresource", 1, 2)
+    assert state[key] == 0
+
+    state = {}
+    record_start_turn_resource_gain(state, key, "currentresource", 1, 2)
+    assert state[key] == 1
+
+    # A stale total credit from an earlier turn must not cancel this one.
+    state = {}
+    record_start_turn_resource_gain(state, key, "totalresource", 1, 1)
+    record_start_turn_resource_gain(state, key, "currentresource", 1, 2)
+    assert state[key] == 1
+
+
+def test_inferno_goliath_burning_counters_read_event_damage(db):
+    """Inferno Goliath: "When you or a card you control deals damage to an
+    opposing champion, add a burning counter to that champion for each damage
+    dealt."  The counter amount is an IntAttr ``DamageDealt`` read from the
+    AbilityInstance TAC, which a triggered instance takes from its
+    CardDealtDamageEvent.  It used to read the trigger's own (zero) damage,
+    so an AI troop hitting the player added no counters.
+    """
+    from rules_port.resolution import resolve_port_trigger
+    from rules_port.triggers import dispatch_native_trigger
+    inferno = "9c0ee4a8-5ec8-44ff-8e2d-1ef4eb3da0d0"
+    ag_burning = "c53d4fbf-ccd4-dda2-9d6e-f84fa14ebb5c"
+    burning = "3932ad3a-9807-de2a-e1b9-a8b50e81def9"
+    add_card(db, 101, 0, TPL_GLADIATOR, loc="warzone")
+    db.commit()
+    pl_t, ai_t = _pl_ai()
+    game = game_engine.Game(1, pl_t, ai_t)
+    handler = HandlerStub(db)
+    # The PvE AI champion is synthetic (no game_cards row).
+    handler._ai_champ_guid = inferno
+    handler._ai_champ_ability_guids = [ag_burning]
+    ai_champ = int(handler._ai_champ_scid.uid.uid64)
+    player_champ = int(handler._player_champ_scid.uid.uid64)
+    bstate = {"player_health": 20, "ai_health": 20, "turn_number": 1,
+              "stack": [], "_rules_port_attached": True,
+              "champ_map": {"0": ai_champ, "5": player_champ}}
+    handler._current_bstate = bstate
+    result = dispatch_native_trigger(
+        db=db, handler=handler, game=game, session=SessionStub(),
+        player_uid=pl_t, ai_uid=ai_t, battle_state=bstate,
+        event_type="CardDealtDamageEvent", source_card_id=101,
+        source_player_id=0, target_card_id=player_champ, target_player_id=5,
+        data={"event_tac": {"damage": 3, "DamageDealt": 3,
+                            "is_combat_damage": 1}})
+    assert ag_burning[:8] in result, result
+    for item in list(bstate.get("stack") or []):
+        bstate["stack"].remove(item)
+        resolve_port_trigger(
+            handler, game, SessionStub(), db, pl_t, ai_t, bstate, item)
+    counters = (bstate.get("champion_counters") or {}).get(str(player_champ))
+    assert counters == {burning: 3}, (result, bstate.get("champion_counters"))
+
+
+def test_ravenous_zombies_exhausts_itself_after_voiding_a_crypt_troop(db):
+    """Ravenous Zombies: "At the start of your turn, void a random non-Zombie
+    troop in a crypt.  If you do, exhaust this."  The exhaust's condition is
+    ``VoidedCards >= 1`` over a CountListAttr variable; it read the authored
+    default (0) instead of the ability's live list, so the zombie voided but
+    never exhausted.
+    """
+    from rules_port.triggers import dispatch_native_trigger
+    tpl_zombies = "2e1cdfac-a334-4fb5-9860-f5946206da9c"
+    ag_zombies = "460e8a22-ce4a-df26-a65c-82d60716272c"
+    _copy_card(db, tpl_zombies)
+    _copy_card(db, TPL_GLADIATOR)
+    tapped = int(game_engine.ECardStates.Tapped)
+    add_card(db, 101, 0, tpl_zombies, loc="warzone")
+    add_card(db, 201, 0, TPL_GLADIATOR, loc="discard")
+    # Exhausted last turn (it attacked).
+    db.execute("UPDATE game_cards SET card_state=? WHERE session_id=1 AND "
+               "card_uid=101", (tapped,))
+    db.commit()
+    pl_t, ai_t = _pl_ai()
+    game = game_engine.Game(1, pl_t, ai_t)
+    handler = HandlerStub(db)
+    bstate = {"player_health": 20, "ai_health": 20, "turn_number": 2}
+    handler._current_bstate = bstate
+
+    def zombie_state():
+        return int(db.execute(
+            "SELECT card_state FROM game_cards WHERE session_id=1 AND "
+            "card_uid=101").fetchone()[0])
+
+    # C# order: ReadyState readies the active player's cards before the
+    # Ready window drains the queued TurnStartedEvent.
+    from rules_port.lifecycle import ready_step_for_turn
+    assert ready_step_for_turn(db, 1, 0, bstate, "ai") is not None
+    assert not zombie_state() & tapped
+    result = dispatch_native_trigger(
+        db=db, handler=handler, game=game, session=SessionStub(),
+        player_uid=pl_t, ai_uid=ai_t, battle_state=bstate,
+        event_type="TurnStartedEvent", source_card_id=None,
+        source_player_id=0)
+    assert ag_zombies[:8] in result, result
+    rows = dict(db.execute(
+        "SELECT card_uid, location || ':' || card_state FROM game_cards "
+        "WHERE session_id=1 AND card_uid IN (101, 201)").fetchall())
+    assert rows[201].startswith("void:"), rows
+    assert zombie_state() & tapped, rows
+    # Prep skips the ready step this side already took this turn ...
+    assert ready_step_for_turn(db, 1, 0, bstate, "ai") is None
+    assert zombie_state() & tapped
+    # ... but the side's next turn readies again.
+    bstate["turn_number"] = 3
+    assert ready_step_for_turn(db, 1, 0, bstate, "ai") is not None
+    assert not zombie_state() & tapped
+
+
+
+TPL_TIME_RIPPLE = "222eb50a-09d1-4b22-b3d1-341be464c806"
+
+
+def test_ai_quick_bounce_uses_typed_destination_and_target_policy(db):
+    """Time Ripple's MoveCardToZone keeps its Hand destination only in the
+    typed effect template (the BOM param is empty).  The AI must classify it
+    as hard bounce removal and pick: an attacker first, else the largest
+    opposing troop at its fallback window."""
+    import ai_eval
+
+    _copy_card(db, TPL_TIME_RIPPLE)
+    _copy_card(db, TPL_GLADIATOR)
+    add_card(db, 101, 0, TPL_TIME_RIPPLE, loc="hand")
+    db.execute(
+        "UPDATE game_cards SET card_type='QuickAction' WHERE card_uid=101")
+    db.commit()
+    add_card(db, 201, 5, "11111111-1111-1111-1111-111111111111")
+    add_card(db, 202, 5, TPL_GLADIATOR)
+    pl_t, ai_t = _pl_ai()
+    bstate = {"ai_resources": 2, "ai_threshold": {16: 1}, "turn_number": 3}
+    ev = ai_eval.CardEvaluator(HandlerStub(db), SessionStub(), bstate,
+                               ai_t, pl_t)
+    ripple = next(card for card in ev.hand if card.card_uid == 101)
+    assert ev.hints_for(ripple).removal.hard
+    assert ev.is_bounce_action(ripple)
+    card, target, reason = ev.choose_bounce(attackers=[201], fallback=True)
+    assert (card.card_uid, target, reason) == (101, 201, "bounce_attacker")
+    card, target, reason = ev.choose_bounce(fallback=True)
+    assert (card.card_uid, target, reason) == (101, 202, "bounce_best_target")
+    assert ev.choose_bounce() is None
+
+
+def test_ai_time_ripple_returns_player_troop_with_cost_increase(db):
+    """An AI-cast quick bounce resolves against the player's warzone troop:
+    the troop goes to its controller's hand and costs +2 there."""
+    import ai as ai_mod
+    from ai_eval import CardInfo
+    from rules_port.chain_items import resolve_card_item
+
+    _copy_card(db, TPL_TIME_RIPPLE)
+    _copy_card(db, TPL_GLADIATOR)
+    add_card(db, 101, 0, TPL_TIME_RIPPLE, loc="hand")
+    db.execute(
+        "UPDATE game_cards SET card_type='QuickAction' WHERE card_uid=101")
+    add_card(db, 202, 5, TPL_GLADIATOR)
+    db.commit()
+    abilities = db.execute(
+        "SELECT card_abilities FROM game_cards WHERE card_uid=101"
+    ).fetchone()[0]
+    card = CardInfo((
+        101, TPL_TIME_RIPPLE, "hand", "QuickAction", "Time Ripple", "Common",
+        2, 0, 0, "[]", abilities, 0, "", 0, 0, 0, 0, 0, "{}", "{}", 0))
+    pl_t, ai_t = _pl_ai()
+    game = game_engine.Game(1, pl_t, ai_t)
+    handler = HandlerStub(db)
+    session = SessionStub()
+    bstate = {"ai_resources": 2, "ai_threshold": {16: 1}, "turn_number": 3,
+              "player_health": 20, "ai_health": 20, "_next_instance_id": 4}
+    old_ai_db = ai_mod._db
+    ai_mod._db = db
+    try:
+        assert ai_mod.ai_play_hand_card(
+            handler, game, session, ai_t, bstate, card, target_uid=202)
+    finally:
+        ai_mod._db = old_ai_db
+    item = bstate["stack"].pop()
+    resolve_card_item(handler, session, db, game, bstate, item, pl_t, ai_t)
+    loc, cost_mod = db.execute(
+        "SELECT location, card_cost_mod FROM game_cards "
+        "WHERE card_uid=202").fetchone()
+    assert loc == "hand", loc
+    assert cost_mod == 2, cost_mod
+
+
+def test_choosing_summon_links_choice_card_to_its_source_for_art(db):
+    """Art-less Choice cards borrow the creating card's art client-side.
+
+    GoCardBuilder.UpdateArtOverride uses RelatedCards[0]'s template when a
+    Choice template has no m_CardImagePath (Ancient Thorn Knight's "Lose a
+    Permanent Resource"); with no link the client renders ERROR.
+    """
+    from rules_port.context import EffectContext
+    from rules_port.token_effects import summon_token
+
+    lose_resource = "90ef6802-58d1-4f27-aac2-bbd86de62b3c"
+    _copy_card(db, lose_resource)
+    db.commit()
+    pl_t, ai_t = _pl_ai()
+    game = game_engine.Game(1, pl_t, ai_t)
+    bstate = {"player_health": 20, "ai_health": 20,
+              "resolving_owner_id": 5, "resolving_source_uid": 0x201}
+    context = EffectContext.from_rules_port(
+        game, SessionStub(), db, HandlerStub(db), pl_t, ai_t, bstate,
+        "effect", ability=None)
+    summon_token(context, {"token_guid": lose_resource, "amount": 1,
+                           "collection": "Choosing"})
+    uid = bstate["created_token_uids"][0]
+    updates = [ev for ev in game.events
+               if ev.__class__.__name__ == "CardUpdatedSessionEventArgs" and
+               int(ev.session_card_id.uid.uid64) == uid]
+    assert updates, game.events
+    assert [int(r.uid.uid64) for r in updates[-1].related_cards] == [0x201]
+
+
+def test_choice_picker_advertises_the_authored_child_ability():
+    """The picker title comes from the advertised ability's game text.
+
+    Trial of the Thorn's child is ChooseAndPlay ("Play a card in the choice
+    zone for free"); advertising Iconoclast's copy ability made the client
+    title it "Create a copy of a card in the choice zone ...".
+    """
+    from abilities.framework.effects.choices import (
+        CHOICE_COPY_ABILITY, CHOOSE_AND_PLAY_ABILITY, choice_prompt_ability)
+
+    child = {"kind": "choice_zone_target",
+             "continuation": {"ability_guid": CHOOSE_AND_PLAY_ABILITY}}
+    assert choice_prompt_ability(child) == CHOOSE_AND_PLAY_ABILITY
+    copy = {"kind": "choice_zone_target",
+            "continuation": {"ability_guid": CHOICE_COPY_ABILITY}}
+    assert choice_prompt_ability(copy) == CHOICE_COPY_ABILITY
+    # DoubleChoice activates the built-in ChooseAndPlay, as the C# effect does.
+    assert choice_prompt_ability({"kind": "double_choice",
+                                  "ability_guid": "parent"}) == \
+        CHOOSE_AND_PLAY_ABILITY

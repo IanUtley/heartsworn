@@ -8,7 +8,9 @@ Records filter through the native filter port.
 
 from __future__ import annotations
 
+import copy
 import json
+import threading
 from typing import Any, cast
 
 from rules_port.filters import (records_filter_evaluator,
@@ -255,6 +257,23 @@ def _target_field(template_id, name, default=None):
         return default
 
 
+def ability_source_target_uid(db, session_id, source_uid, template_id,
+                              controller_uid):
+    """Resolve an automatic AbilitySourceCard target to one card uid.
+
+    A target with ``m_ChoiceOverride`` refers to the card that created the
+    source (a Choice card's parent) when that link exists; every other target
+    is the ability's source card.
+    """
+    if source_uid is None:
+        return None
+    if not bool(_target_field(template_id, "m_ChoiceOverride", False)):
+        return int(source_uid)
+    source = _source_card(db, session_id, int(source_uid), controller_uid)
+    parent = int((source or {}).get("parent_uid") or 0)
+    return parent or int(source_uid)
+
+
 def _target_spec(template_id):
     record = _target_record(template_id)
     return getattr(record, "target_spec", None) if record is not None else None
@@ -404,7 +423,56 @@ def implicit_champion_target(db, session, handler, battle_state, *,
         return None
 
 
+# Projected candidate cards, keyed by (session, card, recursion guard).  Each
+# entry is tagged with the database write version it was projected under and
+# is reused only while no write has happened since (see db.board_write_version).
+# Writes are the only thing that changes the projection inputs we can see;
+# the in-memory battle_state fields that a projection also reads are not
+# covered by that tag, so they must not change without a write.
+_CARD_MEMO = {}
+_CARD_MEMO_LOCK = threading.Lock()
+_CARD_MEMO_LIMIT = 50000
+_PLAIN_SCALARS = (str, int, float, bool, type(None))
+
+
+def _copy_projection(value):
+    """Copy a projected card's JSON-like payload; ``deepcopy`` for anything else.
+
+    ``copy.deepcopy`` on every memo hit cost more than the projection it saved.
+    """
+    if isinstance(value, dict):
+        return {key: _copy_projection(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_copy_projection(item) for item in value]
+    if isinstance(value, _PLAIN_SCALARS):
+        return value
+    return copy.deepcopy(value)
+
+
 def _card(row, battle_state=None, db=None, session_id=None):
+    """Projected candidate card for one row, reused until the next write."""
+    if db is None or session_id is None:
+        return _project_card(row, battle_state, db, session_id)
+    from db import board_write_version
+    version = board_write_version()
+    guarded = bool((battle_state or {}).get(
+        "_rules_port_suppress_card_properties"))
+    key = (int(session_id), int(row[0]), guarded)
+    # The write counter only moves for writes through the server connection,
+    # so an entry is reusable only on the connection that built it.
+    with _CARD_MEMO_LOCK:
+        entry = _CARD_MEMO.get(key)
+    if entry is not None and entry[0] == version and entry[2] is db:
+        return _copy_projection(entry[1])
+    card = _project_card(row, battle_state, db, session_id)
+    with _CARD_MEMO_LOCK:
+        if len(_CARD_MEMO) >= _CARD_MEMO_LIMIT:
+            _CARD_MEMO.clear()
+        _CARD_MEMO[key] = (version, _copy_projection(card), db)
+    return card
+
+
+def _project_card(row, battle_state=None, db=None, session_id=None):
     row_data: Any = tuple(row)
     if len(row_data) >= 19:
         (uid, card_type, location, owner, template_guid, state, attack, defense,
@@ -485,6 +553,82 @@ def _source_card(db, session_id, source_uid, controller_uid):
             "user_id": int(controller_uid or 0),
             "owner_id": int(controller_uid or 0), "controller_id": int(controller_uid or 0),
             "card_type": "Champion", "attack": 0, "defense": 0}
+
+
+def _champion_filter_cards(champions, battle_state=None):
+    """Project champion targets with their authored template identity.
+
+    Champion session cards do not have ``game_cards`` rows. Filters such as
+    HasASharedClassWithSourceChampionFilter still need to find the responsible
+    player's champion while evaluating an ordinary card candidate, so expose
+    the handler's champion IDs together with the template GUIDs carried by the
+    battle state.
+    """
+    state = battle_state or {}
+    raw_guids = state.get("champ_guid_map") or {}
+    guids = {}
+    if isinstance(raw_guids, dict):
+        for owner, guid in raw_guids.items():
+            try:
+                guids[int(owner)] = str(guid or "").lower()
+            except (TypeError, ValueError):
+                continue
+    cards = []
+    for champion in champions or ():
+        try:
+            uid, owner = int(champion[0]), int(champion[1])
+        except (IndexError, TypeError, ValueError):
+            continue
+        guid = guids.get(owner, "")
+        cards.append({
+            "card_uid": uid, "card_type": "Champion",
+            "location": "champions", "collection": "champions",
+            "user_id": owner, "owner_id": owner,
+            "controller_id": owner, "template_guid": guid,
+            "template_id": guid,
+            "name": champion[2] if len(champion) > 2 else "Champion",
+            "subtype": _champion_subtype(guid),
+            "attack": 0,
+            "defense": int(champion[3] or 0)
+            if len(champion) > 3 else 0,
+        })
+    return cards
+
+
+def _champion_subtype(guid):
+    """The authored race/class subtype line of a champion template.
+
+    C# ``IsSubType`` reads the champion card's ``m_SubType`` ("Human
+    Cleric").  Champions have no ``game_cards`` row, so the projection must
+    carry it from the ChampionTemplate record or race filters ("each
+    opposing Human champion") never match a champion.
+    """
+    if not guid:
+        return ""
+    try:
+        from gamedata import DEFAULT_RECORD_STORE
+    except (ImportError, AttributeError):
+        return ""
+    for kind in ("ChampionTemplate", "CardTemplate"):
+        record = DEFAULT_RECORD_STORE.get(kind, str(guid).lower())
+        if record is None:
+            continue
+        value = record.field("m_SubType")
+        if not value:
+            continue
+        subtype = str(value)
+        # Some champion templates store only the class ("Cleric") and keep the
+        # race in m_Race ("ShinHare"). The race is part of the subtype line
+        # ("Shin'hare Cleric"), so race filters must see it too.
+        race = record.field("m_Race")
+        race_name = _RACE_SUBTYPE_NAMES.get(str(race or ""), str(race or ""))
+        if race_name and race_name != "None" and race_name not in subtype:
+            subtype = f"{race_name} {subtype}"
+        return subtype
+    return ""
+
+
+_RACE_SUBTYPE_NAMES = {"ShinHare": "Shin'hare"}
 
 
 def _parent_uid(serialized_buffs):
@@ -652,6 +796,9 @@ def _legal_targets(db, session_id, controller_uid, template_id, source_uid,
                           for item in global_pool_kinds)
     use_global_pool = use_global_pool or _requires_global_filter_pool(
         filter_json)
+    champion_cards = _champion_filter_cards(champions, state)
+    champion_cards_by_uid = {
+        int(card["card_uid"]): card for card in champion_cards}
     global_cards = list(cards)
     if use_global_pool:
         all_zones = sorted(set(_ZONE_MAP.values()))
@@ -660,22 +807,11 @@ def _legal_targets(db, session_id, controller_uid, template_id, source_uid,
             both_players=True, top_n=False, conn=db)
         global_cards = [_card(row, battle_state, db, session_id)
                         for row in global_rows]
-        for champion in champions or ():
-            try:
-                from domain.enums import ECardCollections
-                uid, owner = int(champion[0]), int(champion[1])
-                global_cards.append({
-                    "card_uid": uid, "card_type": "Champion",
-                    "location": "champions", "user_id": owner,
-                    "owner_id": owner, "controller_id": owner,
-                    "name": champion[2] if len(champion) > 2 else "Champion",
-                    "attack": 0,
-                    "defense": int(champion[3] or 0)
-                    if len(champion) > 3 else 0,
-                    "collection": int(ECardCollections.Champions),
-                })
-            except (IndexError, TypeError, ValueError):
-                continue
+    known_global_uids = {
+        int(candidate.get("card_uid", 0) or 0) for candidate in global_cards}
+    global_cards.extend(
+        card for card in champion_cards
+        if int(card["card_uid"]) not in known_global_uids)
     # One template filter is evaluated against every candidate in the scanned
     # zones, so compile it once per (spec, candidate-pool) pair: rebuilding the
     # Records filter tree per candidate dominated target/static evaluation.
@@ -688,8 +824,16 @@ def _legal_targets(db, session_id, controller_uid, template_id, source_uid,
         predicate = evaluators.get(key)
         if predicate is None:
             context = _FilterContext(battle_state or {})
-            context["cards"] = global_cards if use_global_pool else pool
-            context["all_cards"] = global_cards if use_global_pool else pool
+            filter_cards = global_cards if use_global_pool else pool
+            context["cards"] = filter_cards
+            context_all_cards = list(filter_cards)
+            known_uids = {
+                int(candidate.get("card_uid", 0) or 0)
+                for candidate in context_all_cards}
+            context_all_cards.extend(
+                champion for champion in champion_cards
+                if int(champion["card_uid"]) not in known_uids)
+            context["all_cards"] = context_all_cards
             context["active_player_id"] = (battle_state or {}).get(
                 "active_player_id", controller_uid)
             # The activating player is the authoritative ``player`` operand for
@@ -734,10 +878,11 @@ def _legal_targets(db, session_id, controller_uid, template_id, source_uid,
                                   (not opposing or owner != controller_uid))
             if not player_allowed:
                 continue
-            card = {"card_uid": int(uid), "card_type": "Champion",
-                    "location": "champions", "user_id": owner,
-                    "controller_id": owner, "name": name or "Champion",
-                    "defense": int(health or 0), "attack": 0}
+            card = champion_cards_by_uid.get(int(uid)) or {
+                "card_uid": int(uid), "card_type": "Champion",
+                "location": "champions", "user_id": owner,
+                "controller_id": owner, "name": name or "Champion",
+                "defense": int(health or 0), "attack": 0}
             # PlayerTargetTemplate overrides IsCardValidTarget in C# and
             # checks only champion identity, player filter and its own filter.
             if (not player_target and kind not in {
@@ -1049,6 +1194,7 @@ def revealed_target_uids(db, session_id, owner_id, source_uid, template_id,
             "name": row[8] or "", "cost": int(row[9] or 0),
             "subtype": row[10] or "", "shards": _shards(row[11]),
             "attributes": int(row[12] or 0) | int(row[13] or 0),
+            "gems": int(row[20] or 0) if len(row) > 20 else 0,
             "src_owner_side": "player" if int(owner_id or 0) else "ai",
         }
         context = _FilterContext(battle_state or {})

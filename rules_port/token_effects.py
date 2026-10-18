@@ -9,6 +9,13 @@ from typing import Any
 import game_engine
 
 
+def _truthy(value):
+    """Records booleans arrive as bool, 0/1, or "True"/"1" strings."""
+    if isinstance(value, str):
+        return value.strip().lower() in ("1", "true")
+    return bool(value)
+
+
 def _publish_created_card(context, card_uid, owner_id, card_type):
     """Publish C# creation events and the resolving ability's CreatedCards."""
     if str(card_type or "").lower() != "choice":
@@ -122,9 +129,6 @@ def create_matching_target(context, target, count, collection,
         _tpl, card_type, _name, cost, attack, defense, gems = \
             context.handler._card_full_data(context.game, scid, template_guid)
         collection_value = card_collection_for_location(location)
-        context.game.push_card_moved(
-            scid, recipient, collection_value,
-            game_engine.ECardLocations.Top, 0)
         context.game.push_card_updated(
             scid, recipient, collection_value, card_type,
             template_id=template_guid, cost=cost, attack=attack,
@@ -213,8 +217,14 @@ def _matching_template_candidates(context, card_filter, banned_guids=(),
     candidates = []
     owner = (int(player) if player is not None else
              int(context.bstate.get("resolving_owner_id", 0) or 0))
-    active_thresholds = (context.bstate.get(f"thresh_{owner}")
-                         or context.bstate.get("player_threshold") or {})
+    # Raw per-participant thresholds (PvP checkpoint/view, resource
+    # transitions) win; otherwise the owner's own side.  Falling back to
+    # player_threshold handed the AI the human's thresholds.
+    active_thresholds = context.bstate.get(f"thresh_{owner}")
+    if not isinstance(active_thresholds, dict):
+        from .runtime_helpers import participant_side
+        side = participant_side(context.bstate, owner) or "player"
+        active_thresholds = context.bstate.get(f"{side}_threshold") or {}
     if source_uid is None:
         source_uid = context.bstate.get("resolving_source_uid")
     source_row = db_card_zone_details(
@@ -268,7 +278,12 @@ def _matching_template_candidates(context, card_filter, banned_guids=(),
                                       or threshold_data.get("values") or [])],
                      "thresholds": candidate_thresholds,
                      "subtype": row[6] or "",
-                     "attributes": int(row[7] or 0), "user_id": owner}
+                     "attributes": int(row[7] or 0), "user_id": owner,
+                     # Printed stats for HasAttackValue/HasDefenseValue
+                     # pools (Tashi One-Horn's random 1/1 troop).
+                     "attack": int(row[9] or 0) if len(row) > 9 else 0,
+                     "defense": int(row[10] or 0) if len(row) > 10 else 0,
+                     "_card_template_candidate": True}
         if records_filter_matches(candidate, card_filter,
                                   source=source, context=context,
                                   player={"resource_thresholds":
@@ -558,12 +573,18 @@ def summon_token(context, payload=None):
         count = max(0, int(count or 0))
     except (TypeError, ValueError):
         count = 0
-    collection = str(context.template_value(
-        "m_CardCollection", payload.get("collection", "Warzone")) or
-        "Warzone").rsplit(".", 1)[-1].lower()
-    location = {"deck": "deck", "hand": "hand", "choosing": "choosing",
-                "discard": "discard", "underground": "underground",
-                "void": "void"}.get(collection, "warzone")
+    collection_value = context.template_value(
+        "m_CardCollection", payload.get("collection", "Warzone"))
+    collection = str(collection_value or "Warzone").rsplit(".", 1)[-1].lower()
+    # C# CreateNTokensFromResource keeps an ECardCollections.None token in
+    # the owner's None collection. A later authored MoveCardToZone effect may
+    # then put that exact CreatedCards entry into play. Treating None as
+    # Warzone enters it early and makes the later move a no-op, changing both
+    # zone-trigger order and the persisted effect trace.
+    location = ("none" if collection in {"none", "unknown"} else
+                {"deck": "deck", "hand": "hand", "choosing": "choosing",
+                 "discard": "discard", "underground": "underground",
+                 "void": "void"}.get(collection, "warzone"))
     deck_location = str(context.template_value(
         "m_CardLocation", "") or "").rsplit(".", 1)[-1].lower()
     card_filter = payload.get("card_filter")
@@ -722,9 +743,15 @@ def summon_token(context, payload=None):
             position = 0
         token_state = 0
         if location == "warzone":
-            from .static_rules import opposing_enters_play_exhausted
-            if opposing_enters_play_exhausted(
-                    context.bstate, owner, create_guid):
+            from .static_rules import card_enters_play_exhausted
+            # SummonTokenTroop.m_EntersPlayExhausted ("summon an exhausted
+            # Abomination") taps the token like the printed attribute does.
+            if (_truthy(context.template_value(
+                    "m_EntersPlayExhausted",
+                    payload.get("exhausted", False))) or
+                    card_enters_play_exhausted(
+                        context.db, context.session.session_id,
+                        context.bstate, 0, owner, create_guid)):
                 token_state = int(game_engine.ECardStates.Tapped)
         db_insert_generated_card(
             context.session.session_id, owner, uid, create_guid, location,
@@ -782,21 +809,35 @@ def summon_token(context, payload=None):
             context.session.session_id, owner,
             [uid for uid, _create_guid, _card_type in made], connection=context.db)
     for uid, created_guid, created_card_type in made:
+        _publish_created_card(context, uid, owner, created_card_type)
+        if location == "none":
+            # C# creates the card instance and its CreatedCards entry, but
+            # MoveCard(None) has no client collection projection or entered-
+            # zone event. The following typed zone effect owns that boundary.
+            continue
         scid = game_engine.SessionCardId(game_engine.UID(uid))
         _tpl, card_type, name, cost, attack, defense, gems = \
             context.handler._card_full_data(context.game, scid, created_guid)
         collection_value = card_collection_for_location(location)
-        context.game.push_card_moved(scid, recipient, collection_value,
-                                     game_engine.ECardLocations.Top, 0)
+        from pvp_db import db_card_state_value
+        extra = {}
+        if location == "choosing":
+            # Art-less Choice templates borrow RelatedCards[0]'s art.
+            from .choice_effects import choice_art_related_cards
+            extra["related_cards"] = choice_art_related_cards(
+                context.bstate.get("resolving_source_uid"), uid)
         context.game.push_card_updated(
             scid, recipient, collection_value, card_type,
             template_id=created_guid, card_name=name, cost=cost, attack=attack,
-            defense=defense, gems=gems, nulling=location == "deck")
+            defense=defense, gems=gems, nulling=location == "deck", **extra,
+            # An exhausted summon must render tapped (CardUpdated defaults
+            # to state None).
+            state=int(db_card_state_value(
+                context.session.session_id, uid, conn=context.db) or 0))
         if conscript_thresholds is not None:
             context._push_modifier_card(
                 int(uid), thresholds=[int(value)
                                      for value in conscript_thresholds])
-        _publish_created_card(context, uid, owner, created_card_type)
         dispatch_trigger(context, "CardEnteredZoneEvent", uid, owner,
                          data={"event_destination_collection": location})
         for attribute, previous, current in conscript_gained_attributes.get(
@@ -849,10 +890,16 @@ def create_token_copy(context):
         # CreateTokenCopy contract defaults it to one.
         count = 1
     try:
-        count = max(1, int(count))
+        count = int(count)
     except (TypeError, ValueError):
         raise RuntimeError(
             "RulesPort CreateTokenCopy effect has invalid typed count")
+    # AuthoritativeSessionBase.CreateTokenCopies returns immediately for a
+    # zero or negative amount. Do not coerce a typed zero to one: callers use
+    # zero for variables such as ActionsCastThisTurn, and creating a copy in
+    # that case can recursively retrigger the copied card's enter-play ability.
+    if count <= 0:
+        return "copy: zero copies"
     # C# CreateTokenCopies adds GetCreationBonuses once for the copied
     # template before creating the batch.
     count += _creation_count_bonus(context, row[0])
@@ -907,13 +954,17 @@ def create_token_copy(context):
             apply_replica_mods(context, uid, row[0])
             replica_type, replica_subtype = replica_projection(
                 context.db, context.session.session_id, uid)
+        else:
+            # C# Card.CopyFrom (non-replica) clones the source's per-game,
+            # per-turn and cooldown usage, so a spent ONE-SHOT stays spent.
+            from pvp_db import db_copy_card_uses
+            db_copy_card_uses(context.session.session_id, int(target), uid,
+                              conn=context.db)
         scid = game_engine.SessionCardId(game_engine.UID(uid))
         _tpl, card_type, _name, cost, attack, defense, _gems = \
             context.handler._card_full_data(context.game, scid, row[0])
         from .runtime_helpers import card_collection_for_location
         collection = card_collection_for_location(location)
-        context.game.push_card_moved(scid, recipient, collection,
-                                     game_engine.ECardLocations.Top, 1)
         context.game.push_card_updated(
             scid, recipient, collection, replica_type or card_type,
             template_id=row[0], cost=cost, attack=attack, defense=defense,

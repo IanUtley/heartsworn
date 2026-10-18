@@ -27,8 +27,9 @@ def _drawn_this_turn(context, owner):
 def _record_draw(context, owner):
     turn = int(context.bstate.get("turn_number", 1) or 1)
     store = context.bstate.setdefault("cards_drawn_this_turn", {})
-    store[str(owner)] = {"turn": turn,
-                         "count": _drawn_this_turn(context, owner) + 1}
+    count = _drawn_this_turn(context, owner) + 1
+    store[str(owner)] = {"turn": turn, "count": count}
+    return count
 
 
 def draw_cards(context, count, owner=None):
@@ -36,7 +37,7 @@ def draw_cards(context, count, owner=None):
     from pvp_db import db_deck_top_card_details, db_draw_card_to_hand
     from .runtime_helpers import owner_uid, raw_uid
     from .static_rules import champion_int_attribute, \
-        champion_int_attr_optional
+        champion_int_attr_optional, controller_flags
     count = max(0, int(count or 0))
     if owner is None:
         owner = context.target_owner(default=None)
@@ -45,9 +46,14 @@ def draw_cards(context, count, owner=None):
     owner = int(owner or 0)
     # Session.DrawCard: MaxCardsDrawablePerTurn (-1/absent is unlimited,
     # CantDrawCards forces zero) refuses a draw without a deck-out loss.
+    # A champion's authored "can't draw cards" is a WhileCardInPlay static,
+    # so it arrives as the cant_draw_cards flag rather than a dynamic intattr.
     draw_cap = champion_int_attr_optional(
         context.bstate, owner, "MaxCardsDrawablePerTurn")
-    if champion_int_attribute(context.bstate, owner, "CantDrawCards") > 0:
+    if (champion_int_attribute(context.bstate, owner, "CantDrawCards") > 0
+            or "cant_draw_cards" in controller_flags(
+                context.db, context.session.session_id, context.bstate,
+                owner)):
         draw_cap = 0
     drawn = 0
     for _ in range(count):
@@ -85,24 +91,25 @@ def draw_cards(context, count, owner=None):
         _tpl, card_type, _name, cost, attack, defense, gems = \
             context.handler._card_full_data(
                 context.game, scid, row[3], row[2])
-        context.game.push_card_moved(
-            scid, recipient, game_engine.ECardCollections.Hand,
-            game_engine.ECardLocations.Top, 1)
-        context.game.push_card_drawn(scid, recipient, 1)
         context.game.push_card_updated(
             scid, recipient, game_engine.ECardCollections.Hand, card_type,
             template_id=_tpl, cost=cost, attack=attack, defense=defense,
             gems=gems,
             nulling=raw_uid(recipient) != raw_uid(context.player_uid))
+        # C# ClientStateCache.Update derives the UI CardMoved notification
+        # from this CardUpdated when Collection changes. Sending class 50 as
+        # well would make Unity process the same move twice.
+        context.game.push_card_drawn(scid, recipient, 1)
         context._emit_trigger(
             "CardEnteredZoneEvent", card_uid, owner,
             event_source_collection="deck",
             event_destination_collection="hand")
+        nth_draw = _record_draw(context, owner)
         context._emit_trigger(
             "CardDrawnEvent", _champion_uid(context, owner), owner,
-            target_card_id=card_uid)
+            target_card_id=card_uid,
+            nth_card_drawn_this_turn_by_this_player=nth_draw)
         from .statistics import record_ability_card_list
         record_ability_card_list(context.bstate, "DrawnCards", card_uid)
-        _record_draw(context, owner)
         drawn += 1
     return f"draw {drawn} for owner {owner}"

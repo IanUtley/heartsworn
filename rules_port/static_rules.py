@@ -20,7 +20,7 @@ import game_engine
 def _empty_deltas():
     return {"atk": 0, "def": 0, "cost_mod": 0, "attrs": 0,
             "flags": set(), "rage": 0, "gladiator": 0, "rules": [],
-            "card_properties": {}}
+            "card_properties": {}, "int_attr_modifiers": []}
 
 
 _EMPTY_TARGET_SET = frozenset()
@@ -36,6 +36,9 @@ _CHAMPION_INTATTR_FLAGS = {
     "cantgainhealth": "cant_gain_health",
     "cantlosehealth": "cant_lose_health",
     "cantplaycards": "cant_play_cards",
+    "cantdrawcards": "cant_draw_cards",
+    "cantplaycardsfromhand": "cant_play_cards_from_hand",
+    "skipsdrawphase": "skips_draw_phase",
     "unlimitedhandsize": "no_max_hand_size",
 }
 
@@ -54,7 +57,7 @@ class _ProjectionCache:
 
     __slots__ = ("source_cards", "source_abilities", "ability_leaves",
                  "ability_targets", "target_sets", "card_property_sources",
-                 "card_rows", "scanning")
+                 "card_rows", "card_fields", "card_costs", "scanning")
 
     def __init__(self):
         self.source_cards = {}
@@ -64,6 +67,13 @@ class _ProjectionCache:
         self.target_sets = {}
         self.card_property_sources = {}
         self.card_rows = {}
+        self.card_fields = {}
+        # Payable cost per (session, card) computed inside this scan.  Cost
+        # conditions such as "for each card you control" build a fresh
+        # condition context per candidate, and each context asks for every
+        # candidate's cost again; without this memo each ask re-ran the whole
+        # static cost scan and its DB reads.
+        self.card_costs = {}
         # Cards whose static scan is already on the stack.  A "for each ..."
         # variable can re-enter effective_stats for a card inside its own
         # projection; the client treats that self-reference as no further
@@ -72,6 +82,19 @@ class _ProjectionCache:
 
 
 _projection_local = threading.local()
+
+
+def _is_continuous_source_ability(metadata):
+    """Whether ability metadata describes a currently active static source."""
+    if not metadata:
+        return False
+    trigger_event, is_manual, raw_json = metadata
+    if not trigger_event and not is_manual:
+        return True
+    raw = str(raw_json or "")
+    return ("CardCreatedEvent" in str(trigger_event or "") and
+            all(zone in raw for zone in
+                ("Deck", "Hand", "Warzone", "Discard")))
 
 
 @contextmanager
@@ -106,14 +129,7 @@ def _static_abilities(db, session_id, card_uid, cache=None):
     for value in values:
         guid = str(value).lower()
         metadata = db_ability_static_metadata(guid, conn=db)
-        if not metadata:
-            continue
-        if not metadata[0] and not metadata[1]:
-            result.append(guid)
-            continue
-        raw = str(metadata[2] or "")
-        if ("CardCreatedEvent" in str(metadata[0] or "") and
-                all(zone in raw for zone in ("Deck", "Hand", "Warzone", "Discard"))):
+        if _is_continuous_source_ability(metadata):
             result.append(guid)
     result = tuple(result)
     if cache is not None:
@@ -167,9 +183,15 @@ def _literal_leaf(param, *, extra_properties=()):
         return None
     if param.get("input_variable"):
         return None
-    value = param.get("amount")
+    # C# NumericModifier.GetValue reads m_InputValue when present and falls
+    # back to the deprecated amount only when that field is null. IntAttrModifier
+    # follows the same precedence with m_ValueField. The normalized BOM amount
+    # is often the default zero, so it must not mask an authored EffectConstant.
+    value = param.get("input_value")
     if value in (None, ""):
-        value = param.get("input_value", param.get("value", 0))
+        value = param.get("amount")
+    if value in (None, ""):
+        value = param.get("value", 0)
     try:
         value = int(value or 0)
     except (TypeError, ValueError):
@@ -216,6 +238,47 @@ def _variable_card_candidates(db, session_id, battle_state, source_uid,
     if player_filter == "multipleopponents":
         rows = [row for row in rows if int(row[3] or 0) != scope_owner]
     cards = [_card(row) for row in rows]
+    if "champions" in {str(zone).lower() for zone in zones}:
+        # Live champions have synthetic SessionCardIds and their counters live
+        # in battle state rather than game_cards. C# Player.GetCardCollection
+        # includes those champion cards when a variable enumerates Collections.
+        # Include the same runtime cards here so CounterVariable (and other
+        # typed variables sharing this candidate scan) sees their authored
+        # filters and counters.
+        champion_counters = (battle_state or {}).get("champion_counters") or {}
+        for owner_value, champion_value in (
+                (battle_state or {}).get("champ_map") or {}).items():
+            try:
+                champion_owner = int(owner_value)
+                champion_uid = int(champion_value)
+            except (TypeError, ValueError):
+                continue
+            if not both_players and champion_owner != scope_owner:
+                continue
+            if any(int(card.get("card_uid") or 0) == champion_uid
+                   for card in cards):
+                continue
+            counter_values = champion_counters.get(
+                str(champion_uid), champion_counters.get(champion_uid, {}))
+            counter_values = (counter_values if
+                              isinstance(counter_values, dict) else {})
+            cards.append({
+                "card_uid": champion_uid,
+                "card_type": "Champion",
+                "location": "champions",
+                "user_id": champion_owner,
+                "owner_id": champion_owner,
+                "controller_id": champion_owner,
+                "name": "Champion",
+                "attack": 0,
+                "defense": 0,
+                "cost": 0,
+                "attributes": 0,
+                "counters": counter_values,
+                "counter_guids": {
+                    str(guid).lower(): str(guid).lower()
+                    for guid in counter_values},
+            })
     spec = variable.get("m_CardFilter") or {}
     context = dict(battle_state or {}, cards=cards)
     return [card for card in cards if records_filter_matches(
@@ -411,6 +474,58 @@ def _list_card_uids(db, session_id, state, list_name, source_uid,
         current = all_lists.get(ability_guid, {}) if ability_guid else {}
         if isinstance(current, dict) and leaf_name in current:
             candidates = current[leaf_name]
+    # Session trigger events carry their own TAC.  Session.DiscardCard, for
+    # example, puts the discarded SessionCardId in CardDiscardedEvent.tac as
+    # ListAttrs.DiscardedCards.  C# copies that list onto the triggered
+    # AbilityInstance; the native resolver keeps the original event attached
+    # to its chain item, so read the same event-local list here when the
+    # current ability has no list of its own.
+    if not scoped_to_champions and candidates is None:
+        event_data = state.get("resolving_trigger_event_data") or {}
+        event_tac = (event_data.get("event_tac")
+                     if isinstance(event_data, dict) else None)
+        if event_tac:
+            from .tac import _tac_attr_hash, decode_tac_tree
+            if isinstance(event_tac, str):
+                event_tac = decode_tac_tree(event_tac)
+            if isinstance(event_tac, dict):
+                attr_hash = _tac_attr_hash(leaf_name)
+                raw_values = event_tac.get(
+                    attr_hash, event_tac.get(str(attr_hash),
+                                             event_tac.get(leaf_name)))
+                if isinstance(raw_values, (list, tuple, set)):
+                    id_hash = _tac_attr_hash("Id")
+                    resolved = []
+                    event_uids = tuple(
+                        int(event_data[key]) for key in
+                        ("source_card_id", "target_card_id")
+                        if event_data.get(key) is not None)
+                    for item in raw_values:
+                        if isinstance(item, dict):
+                            value = next((item[key] for key in (
+                                id_hash, str(id_hash), "Id", "id",
+                                "card_uid", "uid") if key in item), None)
+                        else:
+                            value = item
+                        try:
+                            value = int(value)
+                        except (TypeError, ValueError):
+                            continue
+                        # Card TAC stores SessionCardId.InstanceId, while
+                        # RulesPort indexes the full wire UID. Prefer an
+                        # event participant with that instance, then resolve
+                        # the persisted card row, and finally use the normal
+                        # card UID type used by game_cards.
+                        uid = next((candidate for candidate in event_uids
+                                    if candidate >> 8 == value), None)
+                        if uid is None:
+                            row = db.execute(
+                                "SELECT card_uid FROM game_cards WHERE "
+                                "session_id=? AND (card_uid >> 8)=? LIMIT 1",
+                                (int(session_id), value)).fetchone()
+                            uid = int(row[0]) if row else (value << 8) | 1
+                        resolved.append(uid)
+                    candidates = tuple(resolved)
     if (not scoped_to_champions and candidates is None and
             leaf_name in {"StoredTargets", "stored_targets"}):
         for key in ("stored_targets", "stored_targets_this_turn"):
@@ -544,12 +659,15 @@ def _source_player_shards(db, session_id, owner, variable):
 
 
 def _source_player_side(state, owner):
-    """Map a responsible player ID to the shared player/AI view."""
-    state = state if isinstance(state, dict) else {}
-    if state.get("pvp"):
-        pids = [int(pid) for pid in (state.get("pids") or ())]
-        if pids:
-            return "player" if int(owner or 0) == pids[0] else "ai"
+    """Map a responsible player ID to the shared player/AI view.
+
+    A PvP effect view puts its resolving participant on ``player``, which is
+    not necessarily ``pids[0]``; ``participant_side`` reads that mapping.
+    """
+    from .runtime_helpers import participant_side
+    side = participant_side(state, owner)
+    if side is not None:
+        return side
     return "player" if int(owner or 0) else "ai"
 
 
@@ -622,12 +740,10 @@ def _intattr_variable(db, session_id, battle_state, source_uid, owner,
                       variable_name, variable):
     """Read a typed IntAttrAbilityVariable from its authored TAC scope."""
     state = battle_state if isinstance(battle_state, dict) else {}
-    values = state.get("ability_variables") or {}
-    if variable_name in values:
-        try:
-            return int(values[variable_name] or 0)
-        except (TypeError, ValueError):
-            pass
+    # C# IntAttrAbilityVariable.GetValue reads its configured TAC directly;
+    # the inherited AbilityVariable value/default map does not override it.
+    # In particular, triggered ability instances carry the event TAC, so an
+    # authored default of zero must not mask a live DamageDealt value.
     attribute = str(variable.get("m_IntAttrName") or "")
     default = int(variable.get("m_DefaultValue", 0) or 0)
     if not attribute:
@@ -1015,12 +1131,10 @@ def _native_leaf_value(db, session_id, battle_state, source_uid, owner, param,
                 str(param["input_variable"]))
         if value is None:
             return None
-        try:
-            amount = int(param.get("amount") or 0)
-        except (TypeError, ValueError):
-            amount = 0
-        if amount:
-            value = amount * int(value)
+        # NumericModifier.InputValue is the complete operand.  ``amount`` is
+        # only its deprecated fallback when no input field is authored, so
+        # multiplying both double-applies the sign/value (for example M1=-1
+        # with amount=-1 incorrectly becomes +1).
         return str(param.get("property") or "").lower(), int(value)
     literal = _literal_leaf(
         param, extra_properties=("loselife",)
@@ -1113,15 +1227,17 @@ def _ability_target_entries(db, ability_guid, cache):
         # the player filter separately controls whether candidates may come
         # from both sides. Confusing these columns drops #SELF# auras and
         # changes the candidate side for ordinary target templates.
-        text = str(row[3] or "").lower()
+        text = str(row[3] or "").lower().strip()
         player_filter = str(row[1] or "").lower()
+        target_kind = str(row[4] or "").rsplit(".", 1)[-1]
         template = {"collection_flags": row[0] or "",
                     "player_filter": row[1] or "",
                     "filter_json": row[2] or "{}",
-                    "game_text": row[3] or ""}
+                    "game_text": row[3] or "",
+                    "target_kind": target_kind}
         entries.append((template_id,
-                        "this" in text or "#self#" in text or
-                        text.strip() == "you",
+                        target_kind == "AbilitySourceCardTargetTemplate" or
+                        "#self#" in text or text in {"this", "you"},
                         player_filter in {"multipleplayers", "allplayers",
                                           "multipleopponents"},
                         template_targets_champions(template)))
@@ -1181,7 +1297,8 @@ def _static_condition_matches(db, session_id, battle_state, param, source_uid,
     return bool(evaluate_effect_condition(db, condition_id, context))
 
 
-def _native_static_deltas(db, session_id, battle_state, card_uid):
+def _native_static_deltas(db, session_id, battle_state, card_uid, *,
+                          properties=None):
     """Evaluate the supported literal continuous Records leaves natively."""
     with _projection_cache() as cache:
         key = int(card_uid)
@@ -1193,7 +1310,8 @@ def _native_static_deltas(db, session_id, battle_state, card_uid):
         cache.scanning.add(key)
         try:
             return _scan_static_deltas(
-                db, session_id, battle_state, card_uid, cache)
+                db, session_id, battle_state, card_uid, cache,
+                properties=properties)
         finally:
             cache.scanning.discard(key)
 
@@ -1212,6 +1330,55 @@ def _owner_static_sources(db, session_id, owner, cache):
     return cached
 
 
+def _all_static_sources(db, session_id, cache, battle_state=None):
+    """Return in-play cards and synthetic champions that source auras.
+
+    Champion abilities live in ``champion_abilities`` rather than a
+    ``game_cards`` row.  Include them here with their controller and authored
+    ability list so card projections can evaluate champion passives just like
+    continuous abilities on ordinary cards.
+    """
+    state = battle_state if isinstance(battle_state, dict) else {}
+    champion_map = state.get("champ_map") or {}
+    champion_guids = state.get("champ_guid_map") or {}
+    champion_signature = tuple(sorted(
+        (str(owner), str(uid), str(champion_guids.get(owner) or
+                                  champion_guids.get(str(owner)) or ""))
+        for owner, uid in champion_map.items()))
+    key = (int(session_id or 0), -1, champion_signature)
+    cached = cache.source_cards.get(key)
+    if cached is None:
+        from pvp_db import (db_ability_static_metadata,
+                            db_all_cards_in_zones_with_abilities,
+                            db_get_champion_ability_guids)
+        sources = [
+            (int(uid), int(owner or 0), None)
+            for uid, owner, _abilities in db_all_cards_in_zones_with_abilities(
+                session_id, ("warzone", "underground"), conn=db)]
+        for owner, champion_uid in champion_map.items():
+            try:
+                owner_id = int(owner)
+                source_uid = int(champion_uid)
+            except (TypeError, ValueError):
+                continue
+            champion_guid = (champion_guids.get(owner) or
+                             champion_guids.get(str(owner)))
+            if not champion_guid:
+                continue
+            abilities = tuple(
+                guid for guid in (str(value).lower() for value in
+                                  db_get_champion_ability_guids(
+                                      champion_guid, conn=db))
+                if _is_continuous_source_ability(
+                    db_ability_static_metadata(guid, conn=db)))
+            if abilities:
+                sources.append((source_uid, owner_id, abilities))
+        cached = tuple(sorted(sources, key=lambda source: (
+            source[1], source[0])))
+        cache.source_cards[key] = cached
+    return cached
+
+
 def _card_location_row(db, session_id, card_uid, cache):
     """Return ``(owner, location, position)`` for one card, memoized per scan."""
     from pvp_db import db_card_owner_location_position
@@ -1224,7 +1391,19 @@ def _card_location_row(db, session_id, card_uid, cache):
     return cached
 
 
-def _owner_projects_card_properties(db, session_id, owner, cache):
+def _card_fields(db, session_id, card_uid, cache):
+    """The card columns the cost and threshold views read, one query per scan."""
+    key = (int(session_id or 0), int(card_uid))
+    cached = cache.card_fields.get(key, _MISSING)
+    if cached is _MISSING:
+        from pvp_db import db_card_static_fields
+        cached = db_card_static_fields(session_id, int(card_uid), conn=db)
+        cache.card_fields[key] = cached
+    return cached
+
+
+def _owner_projects_card_properties(db, session_id, owner, cache,
+                                    battle_state=None):
     """Whether any source of ``owner`` can change a card's projected view.
 
     Only ``CardThreshold``/``SubType`` leaves feed the threshold/subtype
@@ -1236,39 +1415,112 @@ def _owner_projects_card_properties(db, session_id, owner, cache):
     cached = cache.card_property_sources.get(key)
     if cached is not None:
         return cached
+    sources = _all_static_sources(
+        db, session_id, cache, battle_state=battle_state)
     cached = any(
         str(param.get("property") or "").lower() in _CARD_PROPERTY_LEAVES
-        for source_uid in _owner_static_sources(db, session_id, owner, cache)
-        for ability_guid in _static_abilities(db, session_id, source_uid, cache)
+        for source_uid, _source_owner, source_abilities in sources
+        for ability_guid in (
+            source_abilities if source_abilities is not None else
+            _static_abilities(db, session_id, source_uid, cache))
         for param, _raw in _static_leaves(db, ability_guid, cache))
     cache.card_property_sources[key] = cached
     return cached
 
 
-def _scan_static_deltas(db, session_id, battle_state, card_uid, cache):
+def is_continuous_self_static(graph):
+    """Whether a CardCreated ability is a continuous self modifier.
+
+    Such abilities ("This has cost -1 in all your zones for each Dwarf and/or
+    Robot you control") are projected by this module in every zone, so they
+    must not also resolve once at card creation.
+    """
+    from .metadata import modifier_metadata
+    if graph is None or "CardCreatedEvent" not in str(
+            graph.trigger_event_type or ""):
+        return False
+    zones = {value.lower() for value in
+             str(graph.trigger_collection_flags or "").split("|") if value}
+    if not {"deck", "hand", "warzone", "discard"} <= zones:
+        return False
+    if not graph.targets or not all(
+            target.target_kind == "AbilitySourceCardTargetTemplate"
+            for target in graph.targets):
+        return False
+    if not graph.effects:
+        return False
+    for effect in graph.effects:
+        if (effect.concrete_type != "CardModifierAbilityEffectTemplate" or
+                str(effect.duration).lower() != "permanent"):
+            return False
+        prop = str((modifier_metadata(effect.guid) or {}).get("property") or "")
+        if prop not in {"attack", "defense", "cardcost", "attribute"}:
+            return False
+    return True
+
+
+def _self_static_abilities(db, session_id, card_uid, location, cache):
+    """A card's own continuous abilities that apply to itself where it is.
+
+    Only in-play cards are scanned as aura sources, but "This has cost -1 in
+    all your zones for each Dwarf and/or Robot you control" (Pterobot) must
+    work in the hand.  Admit an ability of the card itself when it targets
+    only its source and its collection flags include the card's zone.
+    """
+    from gamedata import DEFAULT_RECORD_STORE, ability_graph
+    zone = str(location or "").lower()
+    result = []
+    for ability_guid in _static_abilities(db, session_id, card_uid, cache):
+        graph = ability_graph(DEFAULT_RECORD_STORE, ability_guid)
+        if graph is None or not graph.targets:
+            continue
+        if not all(target.target_kind == "AbilitySourceCardTargetTemplate"
+                   for target in graph.targets):
+            continue
+        zones = {value.lower() for value in
+                 str(graph.trigger_collection_flags or "").split("|") if value}
+        if zone in zones:
+            result.append(ability_guid)
+    return result
+
+
+def _scan_static_deltas(db, session_id, battle_state, card_uid, cache,
+                        properties=None):
     row = _card_location_row(db, session_id, card_uid, cache)
     if not row:
         return _empty_deltas(), False
     owner, location, _position = row
     total = _empty_deltas()
-    for source_uid in _owner_static_sources(db, session_id, owner, cache):
-        for ability_guid in _static_abilities(db, session_id, source_uid, cache):
+    sources = list(_all_static_sources(
+        db, session_id, cache, battle_state=battle_state))
+    source_uids = {uid for uid, _source_owner, _abilities in sources}
+    if int(card_uid) not in source_uids:
+        sources.append((int(card_uid), int(owner), _self_static_abilities(
+            db, session_id, card_uid, location, cache)))
+    unsupported = False
+    for source_uid, source_owner, source_abilities in sources:
+        abilities = (source_abilities if source_abilities is not None else
+                     _static_abilities(db, session_id, source_uid, cache))
+        for ability_guid in abilities:
             for param, raw in _static_leaves(db, ability_guid, cache):
-                literal = _native_leaf_value(
-                    db, session_id, battle_state, source_uid, owner, param, raw)
                 property_name = str(param.get("property") or "").lower()
+                if properties is not None and property_name not in properties:
+                    continue
+                literal = _native_leaf_value(
+                    db, session_id, battle_state, source_uid, source_owner,
+                    param, raw)
                 # These modifiers change the target card's typed view rather
                 # than its combat numbers.  Keep them in the same native
                 # projection so a permanent aura cannot force the whole stat
                 # calculation back through the historical static evaluator.
                 if property_name in {"cardthreshold", "subtype"}:
                     if not _target_matches(
-                            db, session_id, source_uid, int(owner),
+                            db, session_id, source_uid, source_owner,
                             int(card_uid), ability_guid, battle_state, cache):
                         continue
                     if not _static_condition_matches(
                             db, session_id, battle_state, param, source_uid,
-                            int(owner), int(card_uid)):
+                            source_owner, int(card_uid)):
                         continue
                     props = total["card_properties"].setdefault(
                         int(card_uid), {"thresholds": None,
@@ -1304,30 +1556,41 @@ def _scan_static_deltas(db, session_id, battle_state, card_uid, cache):
                         "targetingimmunity", "blockimmunity",
                         "blockimmunityexception", "blockrestriction"}:
                     if not _target_matches(
-                            db, session_id, source_uid, int(owner), int(card_uid),
+                            db, session_id, source_uid, source_owner,
+                            int(card_uid),
                             ability_guid, battle_state, cache):
                         continue
                     if _static_condition_matches(
                             db, session_id, battle_state, param, source_uid,
-                            int(owner), int(card_uid)):
+                            source_owner, int(card_uid)):
                         rule = dict(param)
                         if property_name == "damagemultiplier" and literal is not None:
                             rule["value"] = literal[1]
                         total["rules"].append(rule)
                     continue
-                if literal is None:
-                    return total, True
                 if not _target_matches(
-                        db, session_id, source_uid, int(owner), int(card_uid),
+                        db, session_id, source_uid, source_owner,
+                        int(card_uid),
                         ability_guid, battle_state, cache):
                     continue
                 try:
                     if not _static_condition_matches(
                             db, session_id, battle_state, param, source_uid,
-                            int(owner), int(card_uid)):
+                            source_owner, int(card_uid)):
                         continue
                 except RuntimeError:
-                    return total, True
+                    unsupported = True
+                    continue
+                if literal is None:
+                    if property_name == "intattr":
+                        total["int_attr_modifiers"].append({
+                            "attribute": str(param.get("attribute") or ""),
+                            "operation": str(param.get("operation") or "set"),
+                            "value": None,
+                            "double": bool(param.get("double")),
+                        })
+                    unsupported = True
+                    continue
                 prop, value = literal
                 if prop == "attack":
                     total["atk"] += value
@@ -1343,6 +1606,12 @@ def _scan_static_deltas(db, session_id, battle_state, card_uid, cache):
                                            param.get("value", 0))))
                 elif prop == "intattr":
                     attribute = str(param.get("attribute") or "").lower()
+                    total["int_attr_modifiers"].append({
+                        "attribute": str(param.get("attribute") or ""),
+                        "operation": str(param.get("operation") or "set"),
+                        "value": int(value),
+                        "double": bool(param.get("double")),
+                    })
                     if attribute == "rage":
                         total["rage"] += value
                         total["attrs"] |= int(game_engine.ECardAttributes.Rage)
@@ -1361,24 +1630,58 @@ def _scan_static_deltas(db, session_id, battle_state, card_uid, cache):
                     elif attribute == "gladiator":
                         total["gladiator"] += value
                     elif attribute in {"cantgainhealth", "cantlosehealth",
-                                       "cantplaycards", "unlimitedhandsize"}:
+                                       "cantplaycards", "cantdrawcards",
+                                       "cantplaycardsfromhand",
+                                       "skipsdrawphase", "unlimitedhandsize"}:
                         total["flags"].add(_CHAMPION_INTATTR_FLAGS[attribute])
                     elif attribute in {"lethal", "crush"}:
                         total["flags"].add(attribute)
-                    else:
-                        # IntAttr is also the client's storage for many
-                        # ability-local markers (Tamed, Prophesied, and
-                        # similar).  Those are not continuous combat stats;
-                        # the old static layer ignores them, so do the same
-                        # natively instead of delegating the whole projection.
-                        continue
-    return total, False
+    return total, unsupported
+
+
+def effective_card_int_attr(db, session_id, battle_state, card_uid, name,
+                            base_value=0):
+    """Apply authored continuous IntAttr modifiers over a card's runtime value.
+
+    C# ``IntAttrModifier.Apply`` reads the current card context, then applies
+    Double before Add/Remove/Set. Keep that operation order for static auras
+    as well as modifiers already stored in the card's mutation payloads.
+    """
+    static, _unsupported = _native_static_deltas(
+        db, session_id, battle_state or {}, int(card_uid),
+        properties={"intattr"})
+    wanted = str(name or "").lower()
+    value = int(base_value or 0)
+    for modifier in static["int_attr_modifiers"]:
+        if str(modifier.get("attribute") or "").lower() != wanted:
+            continue
+        amount = modifier.get("value")
+        if amount is None:
+            raise RuntimeError(
+                f"RulesPort cannot resolve static IntAttr {name!r} "
+                f"on card {card_uid}")
+        if modifier.get("double"):
+            value += value
+            continue
+        operation = str(modifier.get("operation") or "set").lower()
+        if operation in {"add", "increment"}:
+            value += int(amount)
+        elif operation in {"remove", "removeall", "clear"}:
+            value = 0
+        elif operation == "set":
+            value = int(amount)
+        # C# logs and leaves the context unchanged for unknown operations.
+    return value
 
 
 def rule_modifiers(db, session_id, battle_state, card_uid):
     """Return native typed rule modifiers affecting one card."""
     native, unsupported = _native_static_deltas(
-        db, session_id, battle_state or {}, int(card_uid))
+        db, session_id, battle_state or {}, int(card_uid),
+        properties={"damagemultiplier", "damageimmunity",
+                    "attackimmunity", "targetingimmunity",
+                    "blockimmunity", "blockimmunityexception",
+                    "blockrestriction"})
     from pvp_db import db_card_mutation_field
     result = list(native["rules"])
     for column in ("permanent_buffs", "temporary_buffs"):
@@ -1409,10 +1712,12 @@ def effective_card_properties(db, session_id, battle_state, card_uid):
         props = {}
         with _projection_cache() as cache:
             row = _card_location_row(db, session_id, int(card_uid), cache)
+            fields = _card_fields(db, session_id, int(card_uid), cache)
             if row and _owner_projects_card_properties(
-                    db, session_id, row[0], cache):
+                    db, session_id, row[0], cache, battle_state=state):
                 native, _unsupported = _scan_static_deltas(
-                    db, session_id, state, int(card_uid), cache)
+                    db, session_id, state, int(card_uid), cache,
+                    properties={"cardthreshold", "subtype"})
                 props = native.get("card_properties", {}).get(
                     int(card_uid), {}) or {}
     finally:
@@ -1420,19 +1725,15 @@ def effective_card_properties(db, session_id, battle_state, card_uid):
             state.pop(marker, None)
         else:
             state[marker] = previous
-    from pvp_db import (db_card_mutation_field,
-                        db_card_template_threshold_subtype)
-    row = db_card_template_threshold_subtype(
-        session_id, int(card_uid), conn=db)
     thresholds = []
     subtype = ""
-    if row:
+    if fields is not None and fields["template_guid"] is not None:
         from .targeting import _shards
-        thresholds = list(_shards(row[0]))
-        subtype = str(row[1] or "")
+        thresholds = list(_shards(fields["threshold_json"]))
+        subtype = str(fields["subtype"] or "")
     try:
-        buffs = json.loads(db_card_mutation_field(
-            session_id, int(card_uid), "permanent_buffs", conn=db) or "{}")
+        buffs = json.loads(
+            (fields["permanent_buffs"] if fields is not None else None) or "{}")
     except (TypeError, ValueError, json.JSONDecodeError):
         buffs = {}
     if isinstance(buffs, dict):
@@ -1579,11 +1880,12 @@ def _card_play_for_free(db, session_id, battle_state, card_uid):
     """
     if not isinstance(battle_state, dict) or not battle_state:
         return False
-    from pvp_db import db_card_mutation_field, db_card_owner_id
+    with _projection_cache() as cache:
+        fields = _card_fields(db, session_id, int(card_uid), cache)
     for column in ("permanent_buffs", "temporary_buffs"):
         try:
-            data = json.loads(db_card_mutation_field(
-                session_id, int(card_uid), column, conn=db) or "{}")
+            data = json.loads(
+                (fields[column] if fields is not None else None) or "{}")
         except (TypeError, ValueError, json.JSONDecodeError):
             data = {}
         attrs = data.get("int_attrs") if isinstance(data, dict) else None
@@ -1592,7 +1894,7 @@ def _card_play_for_free(db, session_id, battle_state, card_uid):
                 if (str(name).lower() == "ownercanplayforfree"
                         and int(value or 0) > 0):
                     return True
-    owner = db_card_owner_id(session_id, int(card_uid), conn=db)
+    owner = fields["user_id"] if fields is not None else None
     for name, value in _champion_int_attrs(battle_state, owner).items():
         if (str(name).lower() == "canplaycardsforfree"
                 and int(value or 0) > 0):
@@ -1704,25 +2006,53 @@ def charge_point_cost_modifier(db, session_id, battle_state, owner,
                                source_uid):
     """Card.GetChargePointCostModifier for one ability activation.
 
-    The modifier lives on the ability's source card; champion powers source
-    from the champion, whose runtime intattrs carry modifiers granted by
-    other cards.
+    C# reads the activating card's current context. A champion's dynamic
+    context attributes live in ``champion_int_attrs``; other cards read their
+    own persisted and Records-projected context. A modifier on the champion
+    must not be inherited by every other card that player controls. Match a
+    champion source by its SessionCardId because owner IDs differ across the
+    Python mode adapters; ``owner`` stays in the helper signature for existing
+    cost-resolver callers.
     """
     from .combat_rules import card_int_attr
-    total = 0
-    if source_uid is not None:
-        total += int(card_int_attr(
-            db, session_id, int(source_uid),
-            "ChargePointCostModifier") or 0)
-    champion = None
-    for participant, uid in (battle_state.get("champ_map") or {}).items():
-        if str(participant) == str(owner):
-            champion = int(uid)
-            break
-    if champion is not None and champion != int(source_uid or 0):
-        total += champion_int_attribute(
-            battle_state, owner, "ChargePointCostModifier")
-    return total
+    if source_uid is None:
+        return 0
+
+    source_uid = int(source_uid)
+    source_modifier = int(card_int_attr(
+        db, session_id, source_uid, "ChargePointCostModifier",
+        battle_state=battle_state) or 0)
+    for participant, champion_uid in (
+            (battle_state.get("champ_map") or {}).items()):
+        if int(champion_uid) == source_uid:
+            return source_modifier + champion_int_attribute(
+                battle_state, participant, "ChargePointCostModifier")
+    return source_modifier
+
+
+def card_enters_play_exhausted(db, session_id, battle_state, card_uid,
+                               controller_owner, template_guid):
+    """Session.MoveCard: whether a card reaching the Warzone is tapped.
+
+    The card's own ``EntersPlayExhausted`` attribute (printed, or granted to
+    the instance by a CardModifier such as Storm Cloud's "This enters play
+    exhausted") taps any permanent; otherwise an opposing champion's
+    ``Opposing*TroopsEnterPlayExhausted`` flag taps a troop.
+    """
+    from pvp_db import db_card_attribute_rows
+    rows = (db_card_attribute_rows(session_id, [int(card_uid)], conn=db)
+            if card_uid else [])
+    if not rows and template_guid:
+        # A token being created has no game_cards row yet; its printed
+        # template attributes are the whole answer.
+        rows = db.execute(
+            "SELECT attributes FROM card_templates WHERE guid=?",
+            (str(template_guid),)).fetchall()
+    attributes = int(rows[0][0] or 0) if rows else 0
+    if attributes & int(game_engine.ECardAttributes.EntersPlayExhausted):
+        return True
+    return opposing_enters_play_exhausted(
+        battle_state, controller_owner, template_guid)
 
 
 def opposing_enters_play_exhausted(battle_state, controller_owner,
@@ -1793,24 +2123,44 @@ def mobilize_payment(db, session_id, owner_id, card_uid, payment, mobilized):
 
 
 def effective_cost(db, session_id, battle_state, card_uid):
+    """Payable cost of one card; the card reads share one scan memo."""
+    with _projection_cache() as cache:
+        key = (int(session_id or 0), int(card_uid))
+        cost = cache.card_costs.get(key)
+        if cost is None:
+            cost = _effective_cost(db, session_id, battle_state, card_uid)
+            cache.card_costs[key] = cost
+        return cost
+
+
+def _effective_cost(db, session_id, battle_state, card_uid):
     native, unsupported = _native_static_deltas(
-        db, session_id, battle_state or {}, int(card_uid))
+        db, session_id, battle_state or {}, int(card_uid),
+        # Cost reads happen while condition contexts enumerate cards. Scan
+        # cost leaves only: unrelated stat auras can recurse through a
+        # RequiresCardsControlled condition that reads each candidate's cost.
+        properties={"cardcost"})
     if unsupported:
         raise RuntimeError(
             f"RulesPort static cost has no native handler for card {card_uid}")
     if _card_play_for_free(db, session_id, battle_state, card_uid):
         return 0
-    return _cost_from_deltas(db, session_id, card_uid, native)
+    return _cost_from_deltas(db, session_id, card_uid, native,
+                             battle_state=battle_state)
 
 
-def player_int_attributes(db, session_id, battle_state, owner_id):
-    """Project active Records IntAttr modifiers onto each player's context.
+def player_int_attributes(db, session_id, battle_state, owner_id, *,
+                          target_uid=None, include_runtime=True):
+    """Project active Records IntAttr modifiers onto a player or champion.
 
     Player permissions can come from active deck-top effects or continuous
     abilities on cards in play.  Keep the source zone, duration, target's
     player filter, and effect condition tied to Records metadata so player
     rules such as additional resource plays are available to both AI and
-    transaction validation.
+    transaction validation.  When ``target_uid`` is supplied, authored card
+    target templates are also evaluated against that synthetic champion.  This
+    lets damage resolution share the normal target metadata for effects such
+    as ``OpposingChampions``.
     """
     from gamedata import DEFAULT_RECORD_STORE, ability_graph
     from pvp_db import (db_deck_top_card_details, db_card_ability_list,
@@ -1825,18 +2175,19 @@ def player_int_attributes(db, session_id, battle_state, owner_id):
     # Synthetic champion instance IntAttrs are persisted in the shared
     # checkpoint because champion cards have no game_cards row.
     champion_map = state.get("champ_map") or {}
-    champion_uid = champion_map.get(owner, champion_map.get(str(owner)))
-    try:
-        champion_attrs = (state.get("champion_int_attrs") or {}).get(
-            str(int(champion_uid)), {}) if champion_uid is not None else {}
-    except (TypeError, ValueError):
-        champion_attrs = {}
-    if isinstance(champion_attrs, dict):
-        for name, value in champion_attrs.items():
-            try:
-                result[str(name)] = int(value or 0)
-            except (TypeError, ValueError):
-                continue
+    if include_runtime:
+        champion_uid = champion_map.get(owner, champion_map.get(str(owner)))
+        try:
+            champion_attrs = (state.get("champion_int_attrs") or {}).get(
+                str(int(champion_uid)), {}) if champion_uid is not None else {}
+        except (TypeError, ValueError):
+            champion_attrs = {}
+        if isinstance(champion_attrs, dict):
+            for name, value in champion_attrs.items():
+                try:
+                    result[str(name)] = int(value or 0)
+                except (TypeError, ValueError):
+                    continue
 
     # Each source tuple records which authored duration can currently apply.
     # The top-of-deck source has its own lifetime; ordinary static player
@@ -1888,6 +2239,60 @@ def player_int_attributes(db, session_id, battle_state, owner_id):
             return True
         return False
 
+    def targets_champion(target, source_owner, source_uid):
+        """Match an authored target template against ``target_uid``."""
+        if target_uid is None:
+            return False
+        from .filters import records_filter_matches
+        from .targeting import (
+            _player_filter_accepts,
+            _source_card,
+            target_template,
+            template_targets_champions,
+        )
+
+        if getattr(target, "target_kind", "") == "PlayerTargetTemplate":
+            return targets_player(target.player_filter, source_owner)
+
+        player_filter = str(getattr(target, "player_filter", "") or "")
+        if player_filter and not _player_filter_accepts(
+                player_filter, owner, source_owner):
+            return False
+
+        template = target_template(db, str(getattr(target, "guid", "")))
+        if not template or not template_targets_champions(template):
+            return False
+        filter_json = template.get("filter_json", "{}")
+        if isinstance(filter_json, str):
+            try:
+                filter_json = json.loads(filter_json)
+            except (TypeError, ValueError, json.JSONDecodeError):
+                return False
+        if not isinstance(filter_json, dict):
+            return False
+
+        source_card = _source_card(db, session_id, source_uid, source_owner)
+        target_card = {
+            "card_uid": int(target_uid),
+            "card_type": "Champion",
+            "location": "champions",
+            "user_id": owner,
+            "owner_id": owner,
+            "controller_id": owner,
+            "name": "Champion",
+            "attack": 0,
+            "defense": 0,
+            "attributes": 0,
+            "int_attrs": {},
+        }
+        return records_filter_matches(
+            target_card,
+            filter_json,
+            source=source_card,
+            context=dict(state),
+            player=source_owner,
+        )
+
     for source_owner, source_uid, abilities, active_durations in sources:
         if isinstance(abilities, str):
             try:
@@ -1906,9 +2311,12 @@ def player_int_attributes(db, session_id, battle_state, owner_id):
                         effect.target_index >= len(graph.targets)):
                     continue
                 target = graph.targets[effect.target_index]
-                if target.target_kind != "PlayerTargetTemplate":
-                    continue
-                if not targets_player(target.player_filter, source_owner):
+                if target_uid is None:
+                    if target.target_kind != "PlayerTargetTemplate":
+                        continue
+                    if not targets_player(target.player_filter, source_owner):
+                        continue
+                elif not targets_champion(target, source_owner, source_uid):
                     continue
                 metadata = modifier_metadata(effect.guid)
                 if str(metadata.get("property") or "").lower() != "intattr":
@@ -1960,22 +2368,22 @@ def player_int_attributes(db, session_id, battle_state, owner_id):
     return result
 
 
-def _cost_from_deltas(db, session_id, card_uid, native):
+def _cost_from_deltas(db, session_id, card_uid, native, *,
+                      battle_state=None):
     """Project an effective cost from an already-computed native delta view."""
-    from pvp_db import db_card_cost_location_state, db_card_mutation_field
-    row = db_card_cost_location_state(session_id, int(card_uid), conn=db)
-    if not row:
+    with _projection_cache() as cache:
+        fields = _card_fields(db, session_id, int(card_uid), cache)
+    if fields is None or fields["template_guid"] is None:
         return 0
-    cost = int(row[0] or 0) + int(row[1] or 0)
-    if row[2]:
+    cost = int(fields["cost"] or 0) + int(fields["card_cost_mod"] or 0)
+    if fields["cost_mod_json"]:
         try:
-            value = json.loads(row[2])
+            value = json.loads(fields["cost_mod_json"])
             cost += int(value.get("cost_mod", 0) or 0) if isinstance(value, dict) else 0
         except (TypeError, ValueError, json.JSONDecodeError):
             pass
     try:
-        buffs = json.loads(db_card_mutation_field(
-            session_id, int(card_uid), "temporary_buffs", conn=db) or "{}")
+        buffs = json.loads(fields["temporary_buffs"] or "{}")
     except (TypeError, ValueError, json.JSONDecodeError):
         buffs = {}
     if isinstance(buffs, dict):
@@ -1985,10 +2393,23 @@ def _cost_from_deltas(db, session_id, card_uid, native):
                     cost += int(modifier.get("delta", 0) or 0)
                 except (TypeError, ValueError):
                     continue
+    if str(fields.get("location") or "").lower() == "hand":
+        # Champion built-in Dazed (BuiltInResources 16ffaa33): "While you
+        # are Dazed, non-resource cards in your hand have cost +1."
+        from .builtin_rules import dazed_cost_increase
+        cost += dazed_cost_increase(None, battle_state, fields.get("user_id"),
+                                    fields.get("card_type"))
     return max(0, cost + int(native["cost_mod"]))
 
 
 def effective_option_projection(db, session_id, battle_state, card_uid):
+    """Return ``(attributes, cost)`` for one card; see the helper for details."""
+    with _projection_cache():
+        return _effective_option_projection(db, session_id, battle_state,
+                                            card_uid)
+
+
+def _effective_option_projection(db, session_id, battle_state, card_uid):
     """Return ``(attributes, cost)`` for one hand card from a single scan.
 
     The returned values are the same projections as :func:`effective_attributes`
@@ -2010,7 +2431,8 @@ def effective_option_projection(db, session_id, battle_state, card_uid):
         db, session_id, card_uid, native, battle_state)[2]
     if _card_play_for_free(db, session_id, battle_state, card_uid):
         return attributes, 0
-    return attributes, _cost_from_deltas(db, session_id, card_uid, native)
+    return attributes, _cost_from_deltas(db, session_id, card_uid, native,
+                                         battle_state=battle_state)
 
 
 def _ability_targets_champions(db, ability_guid, cache):

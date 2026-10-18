@@ -38,7 +38,13 @@ def kill_troop(context, target, *, cause="effect"):
     template_guid, owner, attrs = row[0], int(row[1] or 0), int(row[2] or 0)
     if attrs & int(game_engine.ECardAttributes.Immortal) and cause in ("damage", "effect"):
         return "immortal survives"
-    if context._emit_trigger("CardWouldEnterZoneEvent", target, owner):
+    # The would-enter event carries the zone the troop is about to enter, so a
+    # "would die -> void it instead" replacement (Pyre Strike) can match its
+    # destination; the card itself still sits in the warzone at this point.
+    if context._emit_trigger(
+            "CardWouldEnterZoneEvent", target, owner,
+            event_source_collection="warzone",
+            event_destination_collection="discard"):
         return "death replaced"
     db_kill_card_to_discard(
         context.session.session_id, target,
@@ -63,9 +69,6 @@ def kill_troop(context, target, *, cause="effect"):
     from .runtime_helpers import card_collection_for_location, owner_uid
     recipient = owner_uid(owner, context.player_uid, context.ai_uid,
                           context.bstate)
-    context.game.push_card_moved(
-        scid, recipient, card_collection_for_location("discard"),
-        game_engine.ECardLocations.Top, 0)
     context.game.push_card_updated(
         scid, recipient, card_collection_for_location("discard"),
         game_engine.card_type_from_db(card_type), template_id=tpl,
@@ -153,11 +156,17 @@ def state_based_deaths(context):
     return dead
 
 
-def champion_would_lose(context, owner_id):
-    """Dispatch the native champion survival/replacement event once."""
+def champion_would_lose(context, owner_id, *, deduplicate=True):
+    """Dispatch the native champion survival/replacement event.
+
+    Health-based loss checks can be repeated while the champion remains at
+    zero health, so those callers deduplicate by owner. ``Session.DestroyCard``
+    calls ``LoseGame`` for every champion-destroy attempt; that path passes
+    ``deduplicate=False`` to preserve the C# event boundary.
+    """
     owner_id = int(owner_id or 0)
-    seen = context.bstate.setdefault("_champion_would_lose_seen", [])
-    if owner_id in seen:
+    seen = context.bstate.get("_champion_would_lose_seen") or []
+    if deduplicate and owner_id in seen:
         return ""
     if context.bstate.get("pvp"):
         champions = context.bstate.get("champ_map") or {}
@@ -171,14 +180,24 @@ def champion_would_lose(context, owner_id):
                         if champion is not None else None)
     if champion_uid is None:
         return ""
-    seen.append(owner_id)
+    if deduplicate:
+        context.bstate.setdefault(
+            "_champion_would_lose_seen", []).append(owner_id)
     old_native = context.bstate.get("_rules_port_native_effect")
+    replacement_key = "_champion_would_lose_replacement_accepted"
+    old_replacement = context.bstate.get(replacement_key)
+    context.bstate[replacement_key] = False
     context.bstate["_rules_port_native_effect"] = True
     try:
-        return context._emit_trigger(
+        result = context._emit_trigger(
             "ChampionWouldLoseEvent", int(champion_uid), owner_id)
+        return (result if context.bstate.get(replacement_key) else "")
     finally:
         if old_native is None:
             context.bstate.pop("_rules_port_native_effect", None)
         else:
             context.bstate["_rules_port_native_effect"] = old_native
+        if old_replacement is None:
+            context.bstate.pop(replacement_key, None)
+        else:
+            context.bstate[replacement_key] = old_replacement

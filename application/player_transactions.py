@@ -97,6 +97,7 @@ def _normalize_activation_data(value):
         "muid64": "uid64",
         "msessioncardids": "session_card_ids",
         "cardstosacrifice": "cards_to_sacrifice",
+        "cardstoexhaust": "cards_to_exhaust",
         "mplayerids": "player_ids",
         "resourcexcost": "resource_x_cost",
         "chargepointsxcost": "charge_points_x_cost",
@@ -127,8 +128,13 @@ def _normalize_activation_data(value):
     }
     result = {}
     for key, item in value.items():
-        norm = aliases.get(str(key).replace("_", "").lower(), key)
-        result[norm] = _normalize_activation_data(item)
+        compact = str(key).replace("_", "").lower()
+        # C# private members keep their ``m_`` prefix on the wire
+        # (``m_CardsToExhaust``, ``m_ResourceXCost``).
+        norm = aliases.get(compact)
+        if norm is None and str(key).startswith("m_"):
+            norm = aliases.get(str(key)[2:].replace("_", "").lower())
+        result[norm or key] = _normalize_activation_data(item)
     if "x_cost" not in result and isinstance(result.get("x_cost_data"), Mapping):
         nested = result["x_cost_data"]
         for key in ("resource_x_cost", "x_cost", "value", "amount"):
@@ -170,6 +176,20 @@ def _normalize_activation_data(value):
     sacrifice = result.get("cards_to_sacrifice")
     if sacrifice is None and isinstance(result.get("x_cost_data"), Mapping):
         sacrifice = result["x_cost_data"].get("cards_to_sacrifice")
+    # Exhaust costs ("Exhaust one or more Dwarves and/or Robots you control")
+    # arrive as XCostData.CardsToExhaust, a Dictionary keyed by the cost's
+    # target template with a list of the exhausted cards.  Without it the
+    # raw fallback kept a single card, so exhausting two troops exhausted
+    # one and added one construction counter.
+    if sacrifice is None:
+        exhaust = result.get("cards_to_exhaust")
+        if exhaust is None and isinstance(result.get("x_cost_data"), Mapping):
+            exhaust = result["x_cost_data"].get("cards_to_exhaust")
+        if isinstance(exhaust, Mapping):
+            exhaust = [card for selected in exhaust.values()
+                       for card in (selected if isinstance(
+                           selected, (list, tuple)) else (selected,))]
+        sacrifice = exhaust
     if sacrifice is not None and "cost_target_map" not in result:
         if not isinstance(sacrifice, (list, tuple, set)):
             sacrifice = (sacrifice,)
@@ -194,15 +214,34 @@ def _merge_activation_data(raw_value, decoded_value):
     """Merge decoder views of one activation without losing cost targets.
 
     The generic ObjFmt walker can decode ``TargetMap`` while stopping before
-    the nested ``XCostData`` record.  The raw, label-aware recovery path can
-    still recover ``CardsToSacrifice`` in that case.  A shallow payload update
-    used to replace the recovered activation and left RulesPort to infer the
-    sacrifice from the effect target, which is wrong when an ability has both
-    targets (Bunoshi's charge power is the canonical shape).
+    the nested ``XCostData`` record. The raw, label-aware recovery path can
+    still recover the selected cost cards in that case. A shallow payload
+    update used to replace the recovered activation and left RulesPort to
+    infer a cost from the effect target, which is wrong when an ability has
+    both targets (Bunoshi's charge power is the canonical shape).
     """
     if isinstance(raw_value, Mapping) and isinstance(decoded_value, Mapping):
         merged = dict(raw_value)
         for key, value in decoded_value.items():
+            if key == "x_cost_data" and isinstance(merged.get(key), Mapping):
+                # XCostData is a nested ObjFmt record that the generic
+                # decoder can leave as an ``<unhandled type=...>`` scalar.
+                # The raw labelled recovery above can still have the selected
+                # cards. Keep that structured payload when the decoded view
+                # is not a mapping; replacing it with the sentinel drops
+                # costs such as Scrounge's CardsToVoid before plan validation.
+                if not isinstance(value, Mapping):
+                    continue
+                nested = dict(merged[key])
+                for nested_key, nested_value in value.items():
+                    # Keep a raw-labeled selection if the generic decoder
+                    # materialized the corresponding list as empty.
+                    if (str(nested_key).startswith("cards_to_") and
+                            not nested_value and nested.get(nested_key)):
+                        continue
+                    nested[nested_key] = nested_value
+                merged[key] = nested
+                continue
             if key in {"target_map", "cost_target_map", "option_map"}:
                 if isinstance(value, Mapping) and isinstance(
                         merged.get(key), Mapping):
@@ -284,6 +323,108 @@ def typed_payload_from_decoded(command, decoded):
         # decoder for this recovery path; the later choice handler still
         # checks the UID against its persisted legal-choice set.
         from rules_port.wire import extract_session_card_uids
+
+        is_card_play = any(getattr(command, flag, False) for flag in (
+            "is_play_troop", "is_play_artifact", "is_play_spell",
+            "is_play_champion"))
+
+        def labelled_card_uids(section, label):
+            """Read every SessionCardId in one explicitly named field."""
+            start = section.find(label)
+            if start < 0:
+                return ()
+            field_markers = (
+                b"TargetMap", b"OptionMap", b"Variables",
+                b"AbilityTemplateId", b"AbilityInstanceId", b"SourceCardId",
+                b"Disable", b"OptedIn", b"OptedInSet", b"Index",
+                b"ResourceXCost", b"ChargePointsXCost", b"LifeXCost",
+                b"CounterXCost", b"SpellPointsXCost", b"SetValues",
+                b"CardsToDiscard", b"CardsToExhaust", b"CardsToVoid",
+                b"CardsToSacrifice", b"CardsToPutIntoDeck",
+                b"CardsToPutIntoHand", b"CardsToReveal",
+                b"CardsToShuffleIntoDeck", b"CardsToMobilize",
+                b"PlayerId", b"TransactionId",
+            )
+            value_start = start + len(label)
+            end = len(section)
+            for marker in field_markers:
+                marker_pos = section.find(marker, value_start)
+                if marker_pos >= 0:
+                    end = min(end, marker_pos)
+            return extract_session_card_uids(section[start:end])
+
+        def raw_ability_guid(section):
+            """Recover a GUID only from the labeled activation field."""
+            match = re.search(
+                rb"(?:m_)?AbilityTemplateId.*?m_Guid;[^;]*;[^;]*;[^;]*;"
+                rb"(?:[0-9]+;)?([0-9a-fA-F]{32}|"
+                rb"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
+                rb"[0-9a-fA-F]{4}-[0-9a-fA-F]{12});", section)
+            if match is None:
+                match = re.search(
+                    rb"(?:m_)?AbilityTemplateId.*?"
+                    rb"([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-"
+                    rb"[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
+                    rb"[0-9a-fA-F]{12})", section)
+            if match is None:
+                return None
+            value = match.group(1).decode("ascii").lower()
+            if len(value) == 32:
+                return (f"{value[:8]}-{value[8:12]}-{value[12:16]}-"
+                        f"{value[16:20]}-{value[20:]}")
+            return value
+
+        # Card plays serialize activations as AbilityDataList entries. If the
+        # generic ObjFmt decoder stops inside XCostData, recover its explicitly
+        # labeled card selections from each entry. This keeps Scrounge's
+        # CardsToVoid selections in the ability-cost namespace rather than
+        # losing them or treating them as effect targets.
+        if is_card_play:
+            list_pos = raw.find(b"AbilityDataList")
+            if list_pos >= 0:
+                transaction_end = raw.find(b"m_TransactionId", list_pos)
+                if transaction_end < 0:
+                    transaction_end = len(raw)
+                activation_positions = [
+                    list_pos + match.start()
+                    for match in re.finditer(
+                        rb"(?:m_)?AbilityTemplateId(?=;)",
+                        raw[list_pos:transaction_end])
+                ]
+                raw_ability_data = []
+                cost_fields = {
+                    b"CardsToVoid": "cards_to_void",
+                    b"CardsToSacrifice": "cards_to_sacrifice",
+                    b"CardsToExhaust": "cards_to_exhaust",
+                    b"CardsToDiscard": "cards_to_discard",
+                    b"CardsToPutIntoDeck": "cards_to_put_into_deck",
+                    b"CardsToPutIntoHand": "cards_to_put_into_hand",
+                    b"CardsToReveal": "cards_to_reveal",
+                    b"CardsToShuffleIntoDeck": "cards_to_shuffle_into_deck",
+                    b"CardsToMobilize": "cards_to_mobilize",
+                }
+                for index, activation_pos in enumerate(activation_positions):
+                    activation_end = (activation_positions[index + 1]
+                                      if index + 1 < len(activation_positions)
+                                      else transaction_end)
+                    section = raw[activation_pos:activation_end]
+                    ability_guid = raw_ability_guid(section)
+                    if not ability_guid:
+                        continue
+                    recovered = {"ability_template_id": ability_guid}
+                    targets = labelled_card_uids(section, b"TargetMap")
+                    if targets:
+                        recovered["target_map"] = {0: list(targets)}
+                    x_cost_data = {}
+                    for label, field in cost_fields.items():
+                        selected = labelled_card_uids(section, label)
+                        if selected:
+                            x_cost_data[field] = list(selected)
+                    if x_cost_data:
+                        recovered["x_cost_data"] = x_cost_data
+                    raw_ability_data.append(recovered)
+                if raw_ability_data:
+                    raw_payload["ability_data"] = tuple(raw_ability_data)
 
         card_match = re.search(
             rb"(?:m_SessionCardId|SourceCardId|m_SourceCardId).*?"
@@ -369,6 +510,66 @@ def typed_payload_from_decoded(command, decoded):
                 # the typed shape expected by the RulesPort, including no
                 # attackers.
                 raw_payload["declarations"] = ((target, attackers),)
+        # DefenseDeclaration contains two nested card lists and can stop the
+        # generic ObjFmt walker just like AttackDeclaration. Recover only the
+        # explicitly labeled attacker and blocker IDs so the native ingress
+        # receives the same typed declaration the client submitted.
+        if ((getattr(command, "is_commit_defense", False) or
+             b"CommitTroopsToDefenseTransaction" in raw) and
+                b"m_DefenseDeclarations" in raw):
+            declarations_start = raw.find(b"m_DefenseDeclarations")
+            declarations_end = len(raw)
+            for marker in (b"m_PlayerId", b"m_TransactionId"):
+                marker_pos = raw.find(marker, declarations_start +
+                                      len(b"m_DefenseDeclarations"))
+                if marker_pos >= 0:
+                    declarations_end = min(declarations_end, marker_pos)
+            section = raw[declarations_start:declarations_end]
+            attacker_fields = list(re.finditer(
+                rb"(?:m_)?AttackerId;", section))
+            declarations = []
+            for index, attacker_field in enumerate(attacker_fields):
+                next_attacker = (attacker_fields[index + 1].start()
+                                 if index + 1 < len(attacker_fields)
+                                 else len(section))
+                attacker_segment = section[attacker_field.end():next_attacker]
+                attacker_match = re.search(
+                    rb"m_UID64;[^;]*;[^;]*;[^;]*;([0-9A-Fa-f]{16});",
+                    attacker_segment)
+                if attacker_match is None:
+                    continue
+                try:
+                    attacker_uid = struct.unpack(
+                        "<Q", bytes.fromhex(
+                            attacker_match.group(1).decode("ascii")))[0]
+                except (ValueError, UnicodeDecodeError, struct.error):
+                    continue
+                if (attacker_uid & 0xFF) != 1:
+                    continue
+
+                blockers = []
+                blockers_pos = section.find(
+                    b"DefendingCardIds", attacker_field.end(),
+                    attacker_fields[index + 1].start()
+                    if index + 1 < len(attacker_fields) else len(section))
+                if blockers_pos >= 0:
+                    blockers_segment = section[
+                        blockers_pos + len(b"DefendingCardIds"):next_attacker]
+                    for card_match in re.finditer(
+                            rb"m_UID64;[^;]*;[^;]*;[^;]*;"
+                            rb"([0-9A-Fa-f]{16});", blockers_segment):
+                        try:
+                            blocker_uid = struct.unpack(
+                                "<Q", bytes.fromhex(
+                                    card_match.group(1).decode("ascii")))[0]
+                        except (ValueError, UnicodeDecodeError,
+                                struct.error):
+                            continue
+                        if (blocker_uid & 0xFF) == 1:
+                            blockers.append(int(blocker_uid))
+                declarations.append((int(attacker_uid), tuple(blockers)))
+            # An empty declaration list is a valid no-block transaction.
+            raw_payload["declarations"] = tuple(declarations)
         ability_match = re.search(
             rb"(?:AbilityTemplateId|m_AbilityTemplateId).*?"
             rb"([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
@@ -378,7 +579,7 @@ def typed_payload_from_decoded(command, decoded):
         # as 32 hexadecimal characters), rather than the dashed textual
         # form.  The outer label is still authoritative, so normalize only
         # the value immediately following AbilityTemplateId.
-        if ability_match is None:
+        if ability_match is None and not is_card_play:
             guid_match = re.search(
                 rb"(?:AbilityTemplateId|m_AbilityTemplateId).*?"
                 # ResourceId.m_Guid is encoded by the client as
@@ -401,7 +602,7 @@ def typed_payload_from_decoded(command, decoded):
                         f"{ability_match.group(3).decode()}-"
                         f"{ability_match.group(4).decode()}-"
                         f"{ability_match.group(5).decode()}")
-        if ability_match is None:
+        if ability_match is None and not is_card_play:
             # The normal ObjFmt decoder can fail on the nested TargetMap
             # before exposing AbilityTemplateId.  Some client builds emit a
             # dashed GUID in that same envelope, so recover the explicitly
@@ -415,7 +616,7 @@ def typed_payload_from_decoded(command, decoded):
                 ability_match = dashed_guid
                 raw_payload["ability_template_id"] = \
                     dashed_guid.group(1).decode("ascii").lower()
-        if ability_match:
+        if ability_match and not is_card_play:
             raw_payload.setdefault("ability_template_id",
                                    ability_match.group(1).decode("ascii").lower())
             # ActivationData is a typed nested record.  Preserve an explicit
@@ -555,6 +756,23 @@ def typed_payload_from_decoded(command, decoded):
         return tuple(item for item in (numeric_id(item) for item in value)
                      if item is not None)
 
+    def combat_id_value(value):
+        """Convert the client's nested CombatId record to the port key."""
+        value = unwrap(value)
+        if isinstance(value, Mapping):
+            attacker = numeric_id(value.get(
+                "Attacker", value.get("attacker", value.get("attacker_id"))))
+            serial = numeric_id(value.get(
+                "SerialNumber", value.get("serial_number", value.get("serial"))))
+            if attacker is not None and serial is not None:
+                # RulesPort indexes combats by its typed (attacker UID, serial)
+                # value. C# serializes CombatId as those two named fields, not
+                # as a scalar integer that can be safely guessed.
+                from rules_port.combat import CombatId
+
+                return CombatId(attacker, serial)
+        return numeric_id(value)
+
     if getattr(command, "is_set_stops", False):
         payload["self_phases"] = id_list(find(
             "SelfTurnPhases", "m_SelfTurnPhases", "self_phases"))
@@ -615,10 +833,10 @@ def typed_payload_from_decoded(command, decoded):
                            "DamageOrder", "assignments") or ()
         if assignments:
             payload["assignments"] = tuple(
-                (numeric_id(item.get("CombatId", item.get("combat_id"))),
+                (combat_id_value(item.get("CombatId", item.get("combat_id"))),
                  id_list(item.get("CardIds", item.get("card_ids"))))
                 for item in assignments if isinstance(item, Mapping)
-                if numeric_id(item.get("CombatId", item.get("combat_id"))) is not None)
+                if combat_id_value(item.get("CombatId", item.get("combat_id"))) is not None)
         else:
             # An empty order is the valid client representation for a combat
             # with no attackers/blockers. Preserve it as typed payload so the
@@ -627,7 +845,7 @@ def typed_payload_from_decoded(command, decoded):
             payload["assignments"] = ()
     if raw_payload:
         for key, value in payload.items():
-            if key == "activation_data" and key in raw_payload:
+            if key in {"activation_data", "ability_data"} and key in raw_payload:
                 raw_payload[key] = _merge_activation_data(
                     raw_payload[key], value)
             else:
@@ -695,8 +913,14 @@ def classify_player_transaction(inner_bytes, *, typed_payload=None):
     fields = _transaction_fields(raw)
     transaction_id_text = fields.get("m_TransactionId", "?")
     try:
-        transaction_id = (int(transaction_id_text, 16)
-                          if transaction_id_text != "?" else -1)
+        if transaction_id_text == "?":
+            transaction_id = -1
+        else:
+            encoded_transaction_id = bytes.fromhex(transaction_id_text)
+            transaction_id = (
+                struct.unpack("<i", encoded_transaction_id)[0]
+                if len(encoded_transaction_id) == 4
+                else int(transaction_id_text, 16))
     except (TypeError, ValueError):
         transaction_id = -1
 

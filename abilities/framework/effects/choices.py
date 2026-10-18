@@ -27,6 +27,26 @@ CHOICE_COPY_ABILITY = "d5b56bd5-4d06-995d-6487-d1db36e29853"
 CHOICE_TARGET_TEMPLATE = "6f83ae25-2c6d-42af-8635-b7a4174b0405"
 
 
+def choice_prompt_ability(pending):
+    """Return the ability GUID a Choosing-zone picker advertises.
+
+    The client titles the picker from this ability (BattleStateTargetBase.
+    GetAbilityTargetText: the source card's ActivateAbility that invokes it,
+    else its own m_GameText).  An authored ActivateAbility child that waits on
+    the picker is the ability actually being resolved, so advertise it
+    (Iconoclast's child is the copy ability; Trial of the Thorn's is
+    ChooseAndPlay).  DoubleChoice activates the built-in ChooseAndPlay, as
+    DoubleChoiceAbilityEffectTemplate does in C#.
+    """
+    pending = pending or {}
+    if pending.get("kind") == "choice_zone_target":
+        child = str((pending.get("continuation") or {}).get("ability_guid")
+                    or pending.get("ability_guid") or "").lower()
+        if child:
+            return child
+    return CHOOSE_AND_PLAY_ABILITY
+
+
 def ai_choice_prefer_missing(db, session, bstate, choice_uids):
     """Choose a generated resource option whose threshold color is missing.
 
@@ -174,10 +194,13 @@ def _create_choice_cards(game, session, db, handler, pl_t, ai_t, bstate,
         game.push_card_moved(
             scid, player, game_engine.ECardCollections.Choosing,
             game_engine.ECardLocations.Top, 1)
+        from rules_port.choice_effects import choice_art_related_cards
         game.push_card_updated(
             scid, player, game_engine.ECardCollections.Choosing, ctype,
             template_id=template_guid, card_name=name, cost=cost,
-            attack=attack, defense=defense, gems=gems, state=0)
+            attack=attack, defense=defense, gems=gems, state=0,
+            related_cards=choice_art_related_cards(
+                (bstate or {}).get("resolving_source_uid"), card_uid))
     return [card_uid for card_uid, _template_guid, _card_type in cards]
 
 
@@ -343,7 +366,7 @@ def resolve_choice_card_abilities(game, session, db, handler, pl_t, ai_t,
 
 __all__ = [
     "CHOOSE_AND_PLAY_ABILITY", "CHOICE_COPY_ABILITY",
-    "CHOICE_TARGET_TEMPLATE",
+    "CHOICE_TARGET_TEMPLATE", "choice_prompt_ability",
     "extract_card_uids", "double_choice", "play_choice_card",
     "resolve_choice_card_abilities",
 ]

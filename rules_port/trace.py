@@ -21,7 +21,7 @@ _CARD_COLUMNS = (
     "card_abilities", "owner_user_id", "card_uses", "card_attack_mod",
     "card_defense_mod", "card_cost_mod", "card_damage", "permanent_buffs",
     "temporary_buffs", "original_template_guid", "resolved_at",
-    "cost_mod_json", "temporary_attributes", "gems",
+    "cost_mod_json", "temporary_attributes", "gems", "original_gems",
 )
 
 
@@ -44,6 +44,14 @@ def begin_effect(db, session, game, state: dict[str, Any], effect: dict,
         "cards": _cards(db, session.session_id),
         "champions": _champions(state),
         "event_count": len(getattr(game, "events", []) or []),
+        "ability_guid": str(state.get("resolving_ability") or "").lower(),
+        "ability_instance_id": (
+            int(state["resolving_ability_instance_id"])
+            if state.get("resolving_ability_instance_id") is not None
+            else None),
+        "source_uid": (int(state["resolving_source_uid"])
+                       if state.get("resolving_source_uid") is not None
+                       else None),
         "effect_guid": str(effect.get("effect_guid") or "").lower(),
         "effect_type": str(effect.get("effect_type") or ""),
         "effect_order": int(effect.get("effect_order", 0) or 0),

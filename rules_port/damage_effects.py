@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 from dataclasses import dataclass
 from functools import wraps
 from threading import RLock
@@ -10,6 +11,7 @@ import game_engine
 
 
 _DAMAGE_LOCK = RLock()
+_SHIELD_ORDER_FIELD = "rules_port_order"
 
 
 def serialized_damage(function):
@@ -56,47 +58,74 @@ def _consume_shields(context, target, dealer, amount, combat):
     champion_shields = context.bstate.get("damage_shields", {})
     if str(target) in champion_shields:
         stores.append((None, {"damage_shields": champion_shields[str(target)]}))
-    remaining = max(0, int(amount or 0))
-    prevented = []
-    persisted = False
-    for index, data in stores:
-        kept = []
-        changed = False
-        for shield in data["damage_shields"]:
-            if remaining <= 0:
-                kept.append(shield)
-                continue
+
+    # C# stores every DamageShield in one Card.m_DamageShields list. Python
+    # persists indefinite and turn-limited shields in separate JSON columns,
+    # so merge those lists by the add sequence captured on grant. Existing
+    # checkpoints without that sequence retain the former deterministic
+    # permanent-then-temporary order.
+    ordered_shields = []
+    for store_order, (index, data) in enumerate(stores):
+        for position, shield in enumerate(data["damage_shields"]):
             if not isinstance(shield, dict):
                 continue
-            value = max(0, int(shield.get("amount", 0) or 0))
-            if not value or (shield.get("only_combat") and not combat):
-                if value:
-                    kept.append(shield)
-                continue
-            shield_dealer = shield.get("dealer")
-            if ((shield_dealer is not None and dealer is None) or
-                    (shield_dealer is not None and dealer is not None and
-                     int(shield_dealer) != int(dealer))):
+            raw_order = shield.get(_SHIELD_ORDER_FIELD)
+            try:
+                order = int(raw_order) if raw_order is not None else None
+            except (TypeError, ValueError):
+                order = None
+            key = ((0, order, store_order, position) if order is not None
+                   else (1, store_order, position, position))
+            ordered_shields.append((key, index, data, position, shield))
+    ordered_shields.sort(key=lambda item: item[0])
+
+    remaining = max(0, int(amount or 0))
+    prevented = []
+    kept_by_store = {
+        index: [] for index, _data in stores
+    }
+    changed_by_store = {
+        index: False for index, _data in stores
+    }
+    for _key, index, _data, _position, shield in ordered_shields:
+        kept = kept_by_store[index]
+        if remaining <= 0:
+            kept.append(shield)
+            continue
+        value = max(0, int(shield.get("amount", 0) or 0))
+        if not value or (shield.get("only_combat") and not combat):
+            if value:
                 kept.append(shield)
-                continue
-            blocked = min(remaining, value)
-            remaining -= blocked
-            prevented.append(blocked)
-            changed = True
-            value -= blocked
-            if value and not shield.get("one_shot"):
-                shield["amount"] = value
-                kept.append(shield)
-        if changed:
-            data["damage_shields"] = kept
-            if index is None:
-                champion_shields[str(target)] = kept
-            else:
-                db_set_card_mutation_field(
-                    context.session.session_id, int(target),
-                    "permanent_buffs" if index == 0 else "temporary_buffs",
-                    json.dumps(data), conn=context.db)
-                persisted = True
+            continue
+        shield_dealer = shield.get("dealer")
+        if ((shield_dealer is not None and dealer is None) or
+                (shield_dealer is not None and dealer is not None and
+                 int(shield_dealer) != int(dealer))):
+            kept.append(shield)
+            continue
+        blocked = min(remaining, value)
+        remaining -= blocked
+        prevented.append(blocked)
+        changed_by_store[index] = True
+        value -= blocked
+        if value and not shield.get("one_shot"):
+            shield["amount"] = value
+            kept.append(shield)
+
+    persisted = False
+    for index, data in stores:
+        if not changed_by_store[index]:
+            continue
+        kept = kept_by_store[index]
+        data["damage_shields"] = kept
+        if index is None:
+            champion_shields[str(target)] = kept
+        else:
+            db_set_card_mutation_field(
+                context.session.session_id, int(target),
+                "permanent_buffs" if index == 0 else "temporary_buffs",
+                json.dumps(data), conn=context.db)
+            persisted = True
     if persisted:
         context.db.commit()
     # Persist consumption before trigger discovery can inspect/re-enter it.
@@ -107,6 +136,40 @@ def _consume_shields(context, target, dealer, amount, combat):
                 context.target_owner(dealer, default=None), target_card_id=int(target),
                 event_tac={"DamagePrevented": blocked})
     return remaining
+
+
+def assign_damage_shield_order(buff_stores, new_entry):
+    """Append one shield to the C# add order across both JSON stores.
+
+    ``buff_stores`` is ordered permanent first, temporary second. Legacy
+    entries without an order receive a stable fallback order before the new
+    shield; existing ordered entries keep their relative order.
+    """
+    existing = []
+    for store_index, buffs in enumerate(buff_stores):
+        entries = buffs.get("damage_shields")
+        if not isinstance(entries, list):
+            continue
+        for position, shield in enumerate(entries):
+            if not isinstance(shield, dict):
+                continue
+            raw_order = shield.get(_SHIELD_ORDER_FIELD)
+            try:
+                order = int(raw_order) if raw_order is not None else None
+            except (TypeError, ValueError):
+                order = None
+            key = ((0, order, store_index, position) if order is not None
+                   else (1, store_index, position, position))
+            existing.append((key, store_index, shield))
+    existing.sort(key=lambda item: item[0])
+
+    changed_stores = set()
+    for sequence, (_key, store_index, shield) in enumerate(existing):
+        if shield.get(_SHIELD_ORDER_FIELD) != sequence:
+            shield[_SHIELD_ORDER_FIELD] = sequence
+            changed_stores.add(store_index)
+    new_entry[_SHIELD_ORDER_FIELD] = len(existing)
+    return changed_stores
 
 
 def card_damage_multiplier(db, session_id, state, uid, combat):
@@ -347,6 +410,34 @@ def _additive_adjustment(context, target, dealer, combat, is_champion):
         "CombatDamageReceivedModifier" if combat
         else "NonCombatDamageReceivedModifier"))
     delta += _int_attr(context, target, "DamageReceivedModifier")
+    if is_champion:
+        # Champions are synthetic cards, so their authored continuous
+        # modifiers do not exist in the normal per-card IntAttr store.  Ask
+        # the shared metadata projection for this exact champion target; the
+        # runtime store above remains separate so persisted modifiers are not
+        # counted twice.
+        from .static_rules import player_int_attributes
+        target_owner = context.target_owner(target, default=None)
+        if target_owner is not None:
+            try:
+                authored = player_int_attributes(
+                    context.db, context.session.session_id, context.bstate,
+                    int(target_owner), target_uid=int(target),
+                    include_runtime=False)
+            except (AttributeError, KeyError, TypeError, ValueError,
+                    RuntimeError, sqlite3.Error):
+                authored = {}
+
+            def authored_attr(name):
+                lowered = name.lower()
+                return sum(
+                    int(value or 0) for key, value in authored.items()
+                    if str(key).lower() == lowered)
+
+            delta += authored_attr(
+                "CombatDamageReceivedModifier" if combat
+                else "NonCombatDamageReceivedModifier")
+            delta += authored_attr("DamageReceivedModifier")
     if not combat and dealer is not None:
         from .runtime_helpers import champion_uid_for_owner
         owner = context.target_owner(dealer, default=None)
@@ -373,6 +464,28 @@ def _additive_adjustment(context, target, dealer, combat, is_champion):
             delta -= champion_int_attribute(
                 context.bstate, opponent, "NonCombatDamageReduction")
     return delta
+
+
+def _damage_received_multiplier(context, target, combat, is_champion):
+    """C# ``(Non)CombatDamageReceivedMultiplier`` x ``DamageReceivedMultiplier``.
+
+    The champion built-in Vulnerable ability (``79c61378``) is an
+    IntAttrModifier that *Sets* ``DamageReceivedMultiplier`` to 2 on the
+    controller's Vulnerable champion or troops, so it replaces rather than
+    stacks with an authored value.
+    """
+    def value(name):
+        found = _int_attr_optional(context, target, name)
+        return 1 if found is None else max(0, int(found))
+
+    factor = value("NonCombatDamageReceivedMultiplier" if not combat
+                   else "CombatDamageReceivedMultiplier")
+    received = value("DamageReceivedMultiplier")
+    from .builtin_rules import vulnerable_damage_factor
+    vulnerable = vulnerable_damage_factor(context, target, is_champion)
+    if vulnerable != 1:
+        received = vulnerable
+    return factor * received
 
 
 def _source_is_artifact_or_dwarf(context, dealer):
@@ -504,6 +617,11 @@ def deal_damage(context, target, amount, *, outcome=None, only_minimum=False):
         amount *= _damage_multiplier(context, dealer, combat)
         if is_champion and dealer is not None:
             amount *= _champion_damage_multiplier(context, dealer)
+    # Session.DamageCard / DamageChampion then apply the TARGET's received
+    # multipliers for combat and non-combat damage alike.
+    amount *= _damage_received_multiplier(context, target, combat, is_champion)
+    if amount <= 0:
+        return "damage: multiplied to zero"
     before_shields = amount
     amount = _consume_shields(context, target, dealer, amount, combat)
     prevented = before_shields - amount
@@ -673,6 +791,12 @@ def deal_damage(context, target, amount, *, outcome=None, only_minimum=False):
                 if target not in marked:
                     marked.append(target)
             return "survives"
-        context.destroy(target)
-        return "killed"
+        # Effect damage is checked by the state-based sweep once the resolving
+        # effects have finished (rules: deaths are not checked mid-resolution).
+        # A later effect of the same spell can still grant a would-die
+        # replacement (Pyre Strike's "if this would die, void it instead").
+        marked = context.bstate.setdefault("_lethal_damage_uids", [])
+        if target not in marked:
+            marked.append(target)
+        return "dying"
     return "survives"

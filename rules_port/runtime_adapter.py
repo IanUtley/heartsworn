@@ -304,8 +304,20 @@ class PvpRuntimeFacts:
         return True
 
     def can_play_card(self, card: RuntimeCard, player_id, playing_for_free=False) -> bool:
+        return self.play_card_rejection_reason(
+            card, player_id, playing_for_free) == ""
+
+    def play_card_rejection_reason(self, card: RuntimeCard, player_id,
+                                   playing_for_free=False) -> str:
+        """One-line reason ``can_play_card`` refuses this card ('' = legal).
+
+        Every refusal branch reports why, so a dead-ended play transaction can
+        name the sub-check instead of only logging ``False``.
+        """
         if self.play_validator is not None:
-            return bool(self.play_validator(card, player_id, playing_for_free))
+            allowed = bool(self.play_validator(
+                card, player_id, playing_for_free))
+            return "" if allowed else "play-validator"
         player = self.get_player(player_id)
         request_uid = getattr(self, "client_player_uid", self.player_uid)
         if self.battle_state.get("pvp"):
@@ -317,11 +329,12 @@ class PvpRuntimeFacts:
         if owner_id is None:
             owner_id = player.player_id
         if card.owner_id != int(owner_id):
-            return False
+            return (f"not-owner(card={card.owner_id} "
+                    f"expected={int(owner_id)})")
         location = str(card.location or "").lower()
         if location != "hand":
             if location != "deck":
-                return False
+                return f"not-in-hand(location={location or '-'})"
             from .static_rules import player_int_attributes
             db = getattr(getattr(self._pvp, "_db_layer", None), "_db", None)
             if db is None:
@@ -330,17 +343,17 @@ class PvpRuntimeFacts:
             attrs = player_int_attributes(
                 db, self.session_id, self.battle_state, owner_id)
             if int(attrs.get("CanPlayTopOfDeck", 0) or 0) <= 0:
-                return False
+                return "not-hand-and-cant-play-top-of-deck"
             top = self._pvp.db_deck_top_card_details(
                 self.session_id, int(owner_id))
             if not top or int(top[1]) != int(card.session_card_id):
-                return False
+                return f"deck-not-top(card={hex(int(card.session_card_id))})"
         if not self._has_thresholds(card, player):
             from .static_rules import champion_int_attribute
             if champion_int_attribute(
                     self.battle_state, owner_id,
                     "CanIgnoreCardsThresholds") <= 0:
-                return False
+                return "thresholds"
         if playing_for_free:
             # C# PlayTroop/Spell/ArtifactTransaction only accept a free play
             # when the card has OwnerCanPlayForFree or the controller's
@@ -350,10 +363,25 @@ class PvpRuntimeFacts:
             if db is None:
                 import db as db_layer
                 db = db_layer._db
-            return bool(_card_play_for_free(
-                db, self.session_id, self.battle_state,
-                int(card.session_card_id)))
-        return bool(player.current_resource_pool >= card.casting_cost)
+            if not _card_play_for_free(
+                    db, self.session_id, self.battle_state,
+                    int(card.session_card_id)):
+                return "not-free"
+            return ""
+        if player.current_resource_pool < card.casting_cost:
+            return (f"cost {int(card.casting_cost)} > "
+                    f"pool {int(player.current_resource_pool)}")
+        return ""
+
+    def card_label(self, card_id, *, stats=True) -> str:
+        """``"0x301 Abominate (0/0)"`` for diagnostics (never raises)."""
+        try:
+            from db import card_label as _card_label
+            return _card_label(self.session_id,
+                               int(getattr(card_id, "uid64", card_id)),
+                               stats=stats)
+        except Exception:
+            return hex(int(getattr(card_id, "uid64", card_id) or 0))
 
     def can_activate_ability(self, card: RuntimeCard, player_id, ability_template_id) -> bool:
         # ``game_cards.owner_user_id`` is the profile/reckoning id, while the
@@ -447,7 +475,7 @@ class PvpRuntimeFacts:
         Champion SessionCardIds are emitted by the protocol but intentionally
         do not live in ``game_cards``.  The HConnect attach seam supplies the
         concrete player/AI champion IDs; ability existence and authored costs
-        remain Records/SQLite metadata checks.
+        remain hex-private/Records/SQLite metadata checks.
         """
         try:
             source_id = int(getattr(source_card_id, "uid64", source_card_id))
@@ -703,6 +731,12 @@ class PvpRuntimeFacts:
         if db is None:
             import db as db_layer
             db = db_layer._db
+        if getattr(costs, "counter_costs", ()):
+            from .costs import plan_source_counter_costs
+            if plan_source_counter_costs(
+                    db, self.session_id, source_uid, costs,
+                    self.battle_state) is None:
+                return False
         charge_mod = charge_point_cost_modifier(
             db, self.session_id, self.battle_state, owner, source_uid)
         if self.battle_state.get("pvp") and owner is not None:
@@ -785,7 +819,8 @@ class PvpRuntimeFacts:
         if (bool(attacker.attributes & ECardAttributes.Defensive) and
                 card_int_attr(None, self.session_id,
                               attacker.session_card_id,
-                              "IgnoresDefensive") <= 0):
+                              "IgnoresDefensive",
+                              battle_state=self.battle_state) <= 0):
             return False
         return True
 
@@ -803,8 +838,10 @@ class PvpRuntimeFacts:
         declared: dict[int, int] = {}
         for attacker_id, blocker_ids in declarations:
             attacker = session.get_card(attacker_id)
-            if attacker is None or not session.combat_manager.combats_with_attacker(attacker):
-                return False
+            if attacker is None:
+                return _block_reject("attacker-not-found", attacker_id, None)
+            if not session.combat_manager.combats_with_attacker(attacker):
+                return _block_reject("no-combat-for-attacker", attacker_id, None)
             try:
                 attacker_key = int(getattr(attacker_id, "uid64", attacker_id))
             except (TypeError, ValueError):
@@ -817,21 +854,28 @@ class PvpRuntimeFacts:
                 except (TypeError, ValueError):
                     return False
                 blocker = session.get_card(blocker_id)
-                if (blocker is None or blocker_key in seen or
-                        blocker.owner_id == attacker.owner_id or
-                        not blocker.in_warzone or not blocker.is_troop or
-                        blocker.is_tapped() or
-                        bool(blocker.attributes & ECardAttributes.CantBlock)):
-                    return False
+                if blocker is None:
+                    return _block_reject("blocker-not-found", attacker_key, blocker_key)
+                if blocker_key in seen:
+                    return _block_reject("blocker-used-twice", attacker_key, blocker_key)
+                if blocker.owner_id == attacker.owner_id:
+                    return _block_reject("blocker-same-owner", attacker_key, blocker_key)
+                if not blocker.in_warzone or not blocker.is_troop:
+                    return _block_reject("blocker-not-troop-in-warzone", attacker_key, blocker_key)
+                if blocker.is_tapped():
+                    return _block_reject("blocker-tapped", attacker_key, blocker_key)
+                if bool(blocker.attributes & ECardAttributes.CantBlock):
+                    return _block_reject("blocker-cant-block", attacker_key, blocker_key)
                 if not can_block(None, self.session_id, state,
                                  attacker_key, blocker_key):
-                    return False
+                    return _block_reject("can-block-rule", attacker_key, blocker_key)
                 seen.add(blocker_key)
         # C# Feral (IntAttrs): an attacker can only be blocked by 2+ troops.
         for attacker_key, count in declared.items():
             if 0 < count < 2 and card_int_attr(
-                    None, self.session_id, attacker_key, "Feral") > 0:
-                return False
+                    None, self.session_id, attacker_key, "Feral",
+                    battle_state=state) > 0:
+                return _block_reject("feral-needs-two", attacker_key, None)
         return True
 
     def validate_x_cost(self, player_id, activation_data) -> bool:
@@ -853,3 +897,10 @@ def attach_pvp_runtime_facts(port_session, game_session, battle_state, *,
                             player_uid=player_uid, ai_uid=ai_uid, **validators)
     port_session.set_runtime_facts(facts)
     return facts
+
+
+def _block_reject(reason, attacker, blocker):
+    """Log why a declared block set was refused (diagnostic)."""
+    import hconnect_server as _hc
+    _hc.log_req(f"    PROBE block reject: {reason} attacker={attacker} blocker={blocker}")
+    return False

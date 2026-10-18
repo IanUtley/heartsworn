@@ -95,7 +95,7 @@ def test_typed_payload_normalizes_csharp_activation_member_names():
     assert payload["activation_data"] == ({
         "ability_instance_id": 4,
         "opted": True,
-        "target_map": {"0": [77]},
+        "target_map": {0: [77]},
         "x_cost_data": {"x_cost": 2},
         "x_cost": 2,
     },)
@@ -472,7 +472,7 @@ def test_session_lifecycle_commands_share_one_transaction():
 
 def test_player_transaction_classifier_is_side_effect_free_and_typed():
     raw = (b"PassPriorityTransaction;AcceptStartingHand;"
-           b"m_TransactionId;0;0;0;0000000a;"
+           b"m_TransactionId;0;0;0;0a000000;"
            b"m_QuitEntireSeries;0;0;0;False;")
     command = classify_player_transaction(raw)
 

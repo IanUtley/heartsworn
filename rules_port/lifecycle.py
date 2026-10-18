@@ -415,7 +415,7 @@ def card_ready_blocked(db, session_id, card_uid):
     return False
 
 
-def ready_cards_for_turn(db, session_id, owner_id):
+def ready_cards_for_turn(db, session_id, owner_id, battle_state=None):
     """Apply the port-owned Prep readiness transition for one controller."""
     from pvp_db import (db_warzone_cards_with_state,
                         db_warzone_card_state_attributes,
@@ -447,6 +447,52 @@ def ready_cards_for_turn(db, session_id, owner_id):
                             previous, new_state))
     db.commit()
     return changed
+
+
+_READIED_FOR = "_readied_for"
+
+
+def readied_this_turn(battle_state, side):
+    """True once ``side`` has had this turn's ready step."""
+    if not isinstance(battle_state, dict):
+        return False
+    marker = battle_state.get(_READIED_FOR)
+    if not isinstance(marker, dict):
+        return False
+    turn = int(battle_state.get("turn_number", 1) or 1)
+    try:
+        return int(marker.get(str(side), -1)) == turn
+    except (TypeError, ValueError):
+        return False
+
+
+def ready_step_for_turn(db, session_id, owner_id, battle_state, side,
+                        handler=None):
+    """C# StartTurn expiry + ReadyState readiness for the active controller.
+
+    StartTurnState removes BeginningOfOwnersTurn effects and enqueues
+    TurnStartedEvent; ReadyState.OnEntry then readies the active player's
+    cards (except CantReady/CantReadyAutomatically) and resets armor before
+    the Ready priority window drains TurnStarted.  Callers run this before
+    dispatching TurnStartedEvent, so a start-of-turn trigger that exhausts its
+    own card leaves it exhausted.  Runs once per side per turn: returns None
+    when ``side`` was already readied this turn (Prep then skips it), else the
+    ``ready_cards_for_turn`` change list.
+    """
+    if not isinstance(battle_state, dict) or readied_this_turn(
+            battle_state, side):
+        return None
+    clear_expired_temporary_attributes(
+        db, session_id, owner_id, "start_turn", clear_stat_buffs=True,
+        battle_state=battle_state, handler=handler)
+    reset_armor(db, session_id, battle_state)
+    changes = ready_cards_for_turn(db, session_id, owner_id,
+                                   battle_state=battle_state)
+    marker = battle_state.get(_READIED_FOR)
+    marker = dict(marker) if isinstance(marker, dict) else {}
+    marker[str(side)] = int(battle_state.get("turn_number", 1) or 1)
+    battle_state[_READIED_FOR] = marker
+    return changes
 
 
 def decrement_ability_cooldowns(db, session_id, owner_id, battle_state=None):

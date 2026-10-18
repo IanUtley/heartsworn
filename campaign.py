@@ -17,12 +17,18 @@ Request types:
   cheat       - Cheat commands
 """
 
+from domain.enums import EGemTypesNew
+import base64
 import json
 import time
+import threading
 import uuid
 import re
 import random
-from pathlib import Path
+
+from campaign_source import ensure_campaign_path
+
+CAMPAIGN_ROOT = ensure_campaign_path()
 
 import game_engine
 
@@ -32,9 +38,10 @@ except ImportError:  # pragma: no cover - deployment fallback
     yaml = None
 
 from encoder import encode_objfmt_response, encode_datawrapper, compress_gzip
+import campaign_rules
 import pve_db
 import pvp_db
-from profile_db import (db_add_collection, db_add_inventory,
+from profile_db import (db_add_stardust,
                         db_inventory_item, db_next_inventory_client_uid,
                         db_upsert_inventory_item, db_reward_card_template,
                         db_grant_card_instance,
@@ -45,9 +52,6 @@ from profile_db import (db_add_collection, db_add_inventory,
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _make_camp_uid(lo, hi=0):
-    """Build a compound UID from lo/hi parts (simulates UID.GetInstanceId())."""
-    return {"lo": lo, "hi": hi}
 
 
 def _new_camp_id(db):
@@ -74,72 +78,45 @@ def _get_champion(db, champion_id):
 
 
 def _find_campaign_for_champion(db, champion_id, campaign_type="PANORAMA"):
-    """Find (or create) a campaign for a champion."""
+    """Find (or create) a champion's starter panorama row on the rules runtime."""
+    from campaign_runtime import locate
+    if campaign_type != "PANORAMA":
+        raise ValueError(f"only starter panoramas are created here, not {campaign_type}")
     row = pve_db.db_campaign_for_champion(champion_id, campaign_type, db)
-    if not row:
-        cid = _new_camp_id(db)
-        inst_id = _generate_inst_id()
-        champ = _get_champion(db, champion_id)
-        race = champ[2] if champ else None
-        champ_name = champ[3] if champ else ""
-        state = _build_initial_gameplay_state(cid, champion_id, campaign_type, race)
-        template_name = "Crayburn Castle" if campaign_type == "DUNGEON" else "AZ1"
-        pve_db.db_create_campaign(
-            cid, inst_id, champion_id, pve_db.db_campaign_user_id(champion_id, db),
-            champ_name, template_name, campaign_type, json.dumps(state), db)
+    if row:
+        pve_db.db_campaign_set_last_campaign(champion_id, row[0], db)
         db.commit()
-        # Keep the champion's LastCampaignID in sync so the client can jump
-        # straight into this campaign after selecting the champion on the globe.
-        pve_db.db_campaign_set_last_campaign(champion_id, cid, db)
-        db.commit()
-        # A DUNGEON campaign always drives a journal quest (the client's
-        # QuestMgr queries getactive with CampType=QUEST and resolves the quest
-        # template by the campaign's TemplateName = quest script name).
-        if campaign_type == "DUNGEON":
-            _ensure_quest_campaign(db, champion_id, "DUNGEON")
-        return (cid, inst_id, 0, state)
-    # Campaign already exists: keep LastCampaignID synced and return its data.
-    # Older development runs could leave a one-node dungeon state attached to
-    # a PANORAMA row (for example after using the dungeon debug path).  The
-    # client trusts the row type from getcampsum but renders the locations from
-    # this state, so that mismatch produces a panorama with no NPCs at all.
-    existing_state = row[4] and json.loads(row[4]) or None
-    if campaign_type == "PANORAMA" and existing_state:
-        public_data = (existing_state.get("PublicState", {}) or {}).get("Data", {}) or {}
-        stale_panorama = (
-            existing_state.get("TempType") != "PANORAMA"
-            or (public_data.get("CampaignGroup") != "PANORAMA" and
-                not existing_state.get("PanoramaSceneGuid"))
-            or public_data.get("IsStarterDungeon")
-        )
-        if stale_panorama:
-            champ = _get_champion(db, champion_id)
-            race = champ[2] if champ else None
-            existing_state = _build_initial_gameplay_state(
-                row[0], champion_id, "PANORAMA", race)
-            pve_db.db_campaign_update_state(
-                row[0], json.dumps(existing_state), db, started=False,
-                template_name="AZ1")
-            db.commit()
-        champ = _get_champion(db, champion_id)
-        cfg = _az0_config(champ[2]) if champ else None
-        if cfg and _normalize_starter_panorama_state(existing_state, cfg):
-            pve_db.db_campaign_update_state(row[0], json.dumps(existing_state), db)
-            db.commit()
-    pve_db.db_campaign_set_last_campaign(champion_id, row[0], db)
+        return (row[0], row[1], row[2], json.loads(row[4] or "{}"))
+    cid = _new_camp_id(db)
+    inst_id = _generate_inst_id()
+    champ = _get_champion(db, champion_id)
+    zone_id = locate.starter_zone(champ[2] if champ else None)
+    if not zone_id:
+        raise ValueError(f"no starter panorama for champion {champion_id}")
+    state = _initial_zone_state(cid, champion_id, zone_id)
+    pve_db.db_create_campaign(
+        cid, inst_id, champion_id, pve_db.db_campaign_user_id(champion_id, db),
+        champ[3] if champ else "", "AZ1", "PANORAMA", json.dumps(state), db)
     db.commit()
-    if campaign_type == "DUNGEON":
-        _ensure_quest_campaign(db, champion_id, "DUNGEON")
-    return (row[0], row[1], row[2], existing_state)
+    # Keep the champion's LastCampaignID in sync so the client can jump
+    # straight into this campaign after selecting the champion on the globe.
+    pve_db.db_campaign_set_last_campaign(champion_id, cid, db)
+    db.commit()
+    return (cid, inst_id, 0, state)
 
 
-def _get_existing_campaign_for_champion(db, champion_id, campaign_type):
-    """Return the newest stored campaign of *campaign_type*, without creating one."""
-    row = pve_db.db_latest_campaign_for_champion(champion_id, campaign_type, db)
-    if not row:
-        return None
-    return (row[0], row[1], row[2], row[3],
-            json.loads(row[4]) if row[4] else None)
+def restart_champion_campaigns(db, champion_id):
+    """Wipe a champion's campaigns and recreate the AZ0 starter panorama.
+
+    The server's normal transitions then carry the champion through the
+    starter panorama and Castle Crayburn into AZ1.  Returns ``(deleted,
+    new_campaign_id)``.
+    """
+    deleted = pve_db.db_campaign_delete_for_champion(champion_id, conn=db)
+    pve_db.db_campaign_progress_delete(champion_id, conn=db)
+    db.commit()
+    cid = _find_campaign_for_champion(db, champion_id, "PANORAMA")[0]
+    return deleted, cid
 
 
 # ---------------------------------------------------------------------------
@@ -464,9 +441,8 @@ def _advance_quest_campaign(db, champ_id, quest_script=None, scene_guid=None):
         if (otype.lower() in {"convo", "conversation"} and
                 quest_template and
                 quest_template.get("campaign_group") == "DUNGEON"):
-            race = _race_name_for_campaign(db, champ_id)
-            conversation_id = (_CRAYBURN_CASTLE.get("races", {})
-                               .get(race, {}).get("quest_end"))
+            conversation_id = _crayburn_quest_end_conv(
+                db, _race_name_for_campaign(db, champ_id))
         elif otype.lower() in {"convo", "conversation"}:
             conversation_id = obj.get("conversation")
         state.setdefault("VisLocs", []).append({
@@ -476,7 +452,11 @@ def _advance_quest_campaign(db, champ_id, quest_script=None, scene_guid=None):
                 "battle": None, "completed": False, "enabled": True, "visible": True,
                 "repeatable": False, "givequest": False, "turninquest": False,
                 "impassable": False, "unknown": False,
-                "encounter": None, "encounter_desc": None, "allow_cancel": False,
+                # Encounter objectives keep their scene link (Tamed's next
+                # capture); the retry/complete bookkeeping matches on it.
+                "encounter": (obj.get("encounter")
+                              if otype.lower() == "encounter" else None),
+                "encounter_desc": None, "allow_cancel": False,
                 "conversationId": conversation_id,
             }
         })
@@ -497,148 +477,6 @@ def _advance_quest_campaign(db, champ_id, quest_script=None, scene_guid=None):
     _save_campaign_state(db, qid, state)
     db.commit()
     return state
-
-
-def _active_area_encounter_guid(db, champ_id):
-    """Return the scene currently being resolved by the champion's area map.
-
-    A few authored encounter objectives contain the all-zero encounter GUID.
-    The area campaign still persists the concrete scene in
-    ``ActiveEncounterGuid`` while the battle is resolving, so use that
-    authoritative active encounter as the compatibility link.
-    """
-    rows = [(row[1],) for row in pve_db.db_campaign_state_rows(
-        champ_id, "AREA", db, newest_first=True)]
-    for (raw_state,) in rows:
-        try:
-            state = json.loads(raw_state or "{}")
-        except (TypeError, ValueError, json.JSONDecodeError):
-            continue
-        scene_guid = state.get("ActiveEncounterGuid")
-        if scene_guid:
-            return str(scene_guid)
-    return None
-
-
-def _advance_quest_encounter_objectives(db, champ_id, scene_guid):
-    """Advance active non-taming quests whose encounter just succeeded.
-
-    Normally the objective carries its authored encounter GUID.  When the
-    source data omitted that GUID, only an encounter objective on the
-    champion's currently active area battle may use the finished scene as its
-    link; ordinary victories cannot advance unrelated journal objectives.
-    """
-    if not scene_guid:
-        return []
-    active_area_scene = _active_area_encounter_guid(db, champ_id)
-    rows = [(pve_db.db_campaign_template_name(row[0], conn=db),)
-            for row in pve_db.db_campaign_state_rows(
-                champ_id, "QUEST", db, exclude_template="az01_tamed")]
-    advanced = []
-    for (script,) in rows:
-        _qid, state = _quest_state_row(db, champ_id, script)
-        if not state or state.get("Finished"):
-            continue
-        flags = state.get("Flags") or {}
-        objectives = _materialize_quest_objectives(
-            db, champ_id, script, flags.get("_quest_objectives") or [])
-        if objectives != (flags.get("_quest_objectives") or []):
-            flags["_quest_objectives"] = objectives
-            _save_campaign_state(db, _qid, state)
-            db.commit()
-        try:
-            index = int(flags.get("_quest_objective_idx", 0))
-        except (TypeError, ValueError):
-            index = 0
-        if index >= len(objectives):
-            continue
-        objective = objectives[index]
-        expected = objective.get("encounter")
-        if not expected:
-            expected = _quest_objective_scene_guid(db, script, objective)
-        if (not expected and
-                str(objective.get("type") or "").lower() == "encounter" and
-                active_area_scene == str(scene_guid)):
-            expected = active_area_scene
-        if expected and str(expected) == str(scene_guid):
-            updated = _advance_quest_campaign(db, champ_id, script, scene_guid)
-            if updated:
-                advanced.append(updated)
-    return advanced
-
-
-def _consume_pending_quest_progress(db, champ_id):
-    """Return one queued quest state that still needs a client refresh.
-
-    A repair performed outside the live request that completed the encounter
-    can fix SQLite without producing the normal ``quest_progress`` notify.
-    Keep that notify pending in the quest state until the champion next asks
-    for campaign state, then consume it after persisting the corrected state.
-    """
-    rows = pve_db.db_campaign_state_rows(champ_id, "QUEST", db)
-    for quest_id, raw_state in rows:
-        try:
-            state = json.loads(raw_state or "{}")
-        except (TypeError, ValueError, json.JSONDecodeError):
-            continue
-        if not state.pop("_quest_progress_notify_pending", False):
-            continue
-        _save_campaign_state(db, quest_id, state)
-        db.commit()
-        state.setdefault("CampID", quest_id)
-        state.setdefault("ChampID", champ_id)
-        return state
-    return None
-
-
-def _advance_quest_conversation_objectives(db, champ_id, conversation_guid):
-    """Advance active quest objectives completed by a conversation.
-
-    QuestTemplate conversation IDs are the authoritative link.  A few older
-    extracts used a champion GUID for Warren's final conversation; the static
-    seed migration normalizes that value, while this matcher also accepts the
-    authored conversation as a compatibility fallback for existing saves.
-    """
-    if not champ_id or not conversation_guid:
-        return []
-    guid = str(conversation_guid)
-    rows = [(pve_db.db_campaign_template_name(row[0], conn=db),)
-            for row in pve_db.db_campaign_state_rows(champ_id, "QUEST", db)]
-    advanced = []
-    for (script,) in rows:
-        _qid, state = _quest_state_row(db, champ_id, script)
-        if not state or state.get("Finished"):
-            continue
-        flags = state.get("Flags") or {}
-        objectives = _materialize_quest_objectives(
-            db, champ_id, script, flags.get("_quest_objectives") or [])
-        if objectives != (flags.get("_quest_objectives") or []):
-            flags["_quest_objectives"] = objectives
-            _save_campaign_state(db, _qid, state)
-            db.commit()
-        try:
-            index = int(flags.get("_quest_objective_idx", 0) or 0)
-        except (TypeError, ValueError):
-            index = 0
-        if not (0 <= index < len(objectives)):
-            continue
-        objective = objectives[index]
-        if str(objective.get("type") or "").lower() not in {
-                "conversation", "convo"}:
-            continue
-        expected = set(_quest_objective_conversation_guids(
-            db, champ_id, script, objective))
-        # Compatibility for the original Cross Zodiac River extract, whose
-        # final objective accidentally contained Warren's champion GUID.
-        if (str(script) == "az01_q_cross_the_river_part2" and
-                "de519b67-1e3c-4fd1-96a1-909d2b6b3c67" in expected):
-            expected.add("08b9b8ab-2100-4f8d-87b0-18369eb4ecb4")
-        if guid not in expected:
-            continue
-        updated = _advance_quest_campaign(db, champ_id, script)
-        if updated:
-            advanced.append(updated)
-    return advanced
 
 
 def _quest_encounter_is_pending(db, champ_id, scene_guid):
@@ -686,150 +524,22 @@ _RACE_NAMES = {
 }
 _RACE_FACTIONS = {1: "Ardent", 2: "Ardent", 3: "Ardent", 4: "Ardent",
                   5: "Underworld", 6: "Underworld", 7: "Underworld", 8: "Underworld"}
+# Race id -> starter panorama config (bundle, NPCs, conversation GUIDs).
 _AZ0_RACE_CONFIG = {
-    1: {  # Human — Wren's Citadel
-        "bundle": "adventurezone01/p_hmm_wrenscastle",
-        "prefab": "p_hmm_wrenscastle",
-        "intro_npc": "CaptainCedric",
-        "trainer_npc": "GarethKay",
-        "quest_npc": "ColonelSterling",
-        "training_node": "TrainingWithGareth",
-        "intro_conv": "a31d27d0-0c2b-4b8b-90ec-25abae6c5987",
-        "battle_conv": "d41a4a46-fd3d-4c98-bafb-a87c30aad05c",
-        "training_success_conv": "bcadcd54-f196-443a-aeea-e77e6aba87b3",
-        "training_fail_conv": "3b42dc53-51cf-411d-b43c-a1841f69272b",
-        "quest_conv": "abdcca36-20fa-4af7-8c24-8b5e0fcb61d3",
-        "transition_conv": "c92ff657-ea66-4fd5-9b90-1f8161ffd964",
-        "training_encounter": "5227b1b0-193a-45e8-a1a3-8215f20ac95b",
-        "ai_champion_guid": "a633844d-bb26-4776-9351-aea16b4c71ba",
-        "gameboard": "CastleExterior",
-        "ai_personality": "Comfortable",
-    },
-    2: {  # Elf — Satyr's Roost
-        "bundle": "adventurezone01/p_elf_satyrsroost",
-        "prefab": "p_elf_satyrsroost",
-        "intro_npc": "Emilia",
-        "trainer_npc": "Nerissa",
-        "quest_npc": "Balthasar",
-        "training_node": "TrainingWithNerissa",
-        "intro_conv": "e33c74c8-8b90-4549-a8f2-25c06c35a7a4",
-        "battle_conv": "ed3b4737-b824-48e6-8a53-cc6269f46b37",
-        "training_success_conv": "557dcfdc-f26c-4b36-94b9-182d1f8c6be3",
-        "training_fail_conv": "7756b814-2c9b-49f1-bb9a-651d2a4f0e43",
-        "quest_conv": "18b84529-d187-46ad-bb98-9a591d5287ea",
-        "transition_conv": "366a9029-5545-4967-95d4-b10f54279b9c",
-        "training_encounter": "e5cd349e-a77d-4175-8cfc-3565395c2eb4",
-        "ai_champion_guid": "11b18575-fab3-49d1-a1ab-2ef6447c99d1",
-        "gameboard": "Forest",
-        "ai_personality": "Defensive",
-    },
-    3: {  # Coyotle — Thunderfield
-        "bundle": "adventurezone01/p_cytl_thunderfield",
-        "prefab": "p_cytl_thunderfield",
-        "intro_npc": "ShortBuffalo",
-        "trainer_npc": "WhisperingBreeze",
-        "quest_npc": "DuskDaughter",
-        "training_node": "TrainingWithWhisperingBreeze",
-        "intro_conv": "04829c2c-b544-4232-bd47-cbd6cb860d91",
-        "battle_conv": "081487f9-c107-4c2f-a085-643aa3f19018",
-        "training_success_conv": "ee681f28-72a9-4e0b-bb25-fb8f45dd3da3",
-        "training_fail_conv": "1d2dac36-6e91-4ed1-b4cc-a0eaf66d55b1",
-        "quest_conv": "0934ceae-03be-436e-b8e5-4f8922e02a0b",
-        "transition_conv": "c5f75a23-4044-47d7-b80f-0615cfd2546c",
-        "training_encounter": "064d32cd-9171-4052-82a2-869eb0017b2a",
-        "ai_champion_guid": "b41ca664-789c-4958-8386-8e7b339825c8",
-        "gameboard": "CanyonDesert",
-        "ai_personality": "Aggressive",
-    },
-    4: {  # Orc — Xamahuac
-        "bundle": "adventurezone01/p_orc_xamahuac",
-        "prefab": "p_orc_xamahuac",
-        "intro_npc": "Xolotl",
-        "trainer_npc": "Moqui",
-        "quest_npc": "Montecuma",
-        "training_node": "TrainingWithMoqui",
-        "intro_conv": "f048e5f8-399c-4fa8-88c2-ceeddd6e6d7e",
-        "battle_conv": "49272f71-1cff-451e-a311-5a6c31c57bf0",
-        "training_success_conv": "ac38b34a-4f16-44fb-ac6f-6950bb20f33b",
-        "training_fail_conv": "875ae8cd-7ed2-4f8a-ad8a-472df8e6f824",
-        "quest_conv": "578dd9ea-c5ab-49a0-93c5-44ad235cf0a9",
-        "transition_conv": "0445cf14-1725-4488-ad78-79642b90e519",
-        "training_encounter": "84cdd061-93ec-4126-a2f6-530ac5217c96",
-        "ai_champion_guid": "cb2e56cd-5502-4e4c-88e0-a9955715569b",
-        "gameboard": "CastleExterior",
-        "ai_personality": "Aggressive",
-    },
-    5: {  # Dwarf — The Quarry (NPCs use generic NodeA-D names)
-        "bundle": "adventurezone01/p_dwrf_thequarry",
-        "prefab": "p_dwrf_thequarry",
-        "intro_npc": "NodeA",
-        "trainer_npc": "NodeB",
-        "quest_npc": "NodeC",
-        "training_node": "TrainingWithGwendower",
-        "intro_conv": "2a606713-1fa8-4253-ade3-c05d1a0bdd3a",
-        "battle_conv": "3e72f03f-150a-4788-9024-08020711cacf",
-        "training_success_conv": "d40ba708-26d2-43cb-a28d-386dcc829bac",
-        "training_fail_conv": "84df3448-eb70-41f0-96d3-d088c8344fb9",
-        "quest_conv": "88fe73d5-a42a-408d-97c2-ca5651affc1b",
-        "transition_conv": "d4a78dc8-2505-484e-8088-245447fa3f9d",
-        "training_encounter": "de641801-55a2-4df8-b298-d2e91c21718d",
-        "ai_champion_guid": "b43e98a6-040e-4447-a576-e8e5bdd3df11",
-        "gameboard": "CastleExterior",
-        "ai_personality": "Comfortable",
-    },
-    6: {  # Shin'hare — Jinguru
-        "bundle": "adventurezone01/p_shnhr_jinguru",
-        "prefab": "p_shnhr_jinguru",
-        "intro_npc": "Mitsuo",
-        "trainer_npc": "Sora",
-        "quest_npc": "Uyuki",
-        "training_node": "TrainingWithSora",
-        "intro_conv": "d6fb2c8c-51a3-4a9d-8761-bb9275f53fd6",
-        "battle_conv": "9c508f59-0c71-4ca6-8cf1-1c5647f3cde4",
-        "training_success_conv": "645e5c27-7ed2-485b-babd-f8bc7856a0b1",
-        "training_fail_conv": "a95cf2a9-a860-4caa-9022-070c24cbc626",
-        "quest_conv": "d89040c9-75c1-4f10-a647-f35679bcff72",
-        "transition_conv": "beb123ef-c255-43c0-bebc-06cd79565f66",
-        "training_encounter": "510ed850-5a3e-437b-875e-7834cacd1865",
-        "ai_champion_guid": "ddc235eb-c6dc-4384-b567-70eb7498b729",
-        "gameboard": "Forest",
-    },
-    7: {  # Vennen — The Hatchery
-        "bundle": "adventurezone01/p_vnnn_thehatchery",
-        "prefab": "p_vnnn_thehatchery",
-        "intro_npc": "Orzh",
-        "trainer_npc": "Zilth",
-        "quest_npc": "Xarlot",
-        "training_node": "TrainingWithZilth",
-        "intro_conv": "c1d936df-518b-4dfa-bdfe-8ce60e6aa278",
-        "battle_conv": "4198e540-3301-42de-a394-a8e1f80b8b64",
-        "training_success_conv": "3ab83907-6db4-4c29-ab0d-5076393dd744",
-        "training_fail_conv": "25b66849-845a-41e9-b0d5-ee11d79879a0",
-        "quest_conv": "782369c4-61c2-4a3e-97ce-660f2d062be7",
-        "transition_conv": "8f27b71d-42ce-4120-8e6f-380a31f273d2",
-        "training_encounter": "f56ba80f-af31-4d75-a4bc-640f899ddd32",
-        "ai_champion_guid": "e7539c3a-0bac-486c-9792-0293db113268",
-        "gameboard": "CastleExterior",
-    },
-    8: {  # Necrotic — The Necropolis
-        "bundle": "adventurezone01/p_ncrtc_necropolis",
-        "prefab": "p_ncrtc_necropolis",
-        "intro_npc": "Drokkord",
-        "trainer_npc": "Iddi",
-        "quest_npc": "Margugram",
-        "training_node": "TrainingWithIddi",
-        "intro_conv": "827e9c9b-7d79-4a01-81ca-1c11907ab24d",
-        "battle_conv": "5ca75696-f381-4d4f-abd9-a6428dfb3cd9",
-        "training_success_conv": "f526e886-6577-4088-8bcc-9dfff3615ada",
-        "training_fail_conv": "6374b9a7-7ead-48b1-9752-e57024d4dec3",
-        "quest_conv": "4cf66046-086b-40f8-8237-4e4d13e64a42",
-        "transition_conv": "263dbbaa-d710-4e4f-b763-e638816bbcfa",
-        "training_encounter": "7b9a5a0d-727f-4df8-923f-1e5a5b24c522",
-        "ai_champion_guid": "b173e3d2-bdd3-44cb-b554-85d1c56b0cd2",
-        "ai_charge_power": "0f72c46b-9fb6-a0e6-9fec-b9e297c3a75c",
-        "gameboard": "CastleExterior",
-    },
-}
+    int(k): v for k, v in json.loads(
+        (CAMPAIGN_ROOT / "campaign_runtime" / "az0_races.json")
+        .read_text(encoding="utf-8")).items()}
+
+
+
+def _crayburn_quest_end_conv(db, race_name):
+    """GUID of the race's "Crayburn Castle - <Race> - Quest End" report
+    conversation (authored in campaign/campaign_data), or None."""
+    row = db.execute(
+        "SELECT conversation_guid FROM campaign_node_conversations "
+        "WHERE conversation_name=? LIMIT 1",
+        (f"Crayburn Castle - {race_name} - Quest End",)).fetchone()
+    return row[0] if row else None
 
 
 def _az0_config(champion_race):
@@ -837,632 +547,166 @@ def _az0_config(champion_race):
     return _AZ0_RACE_CONFIG.get(champion_race)
 
 
-def _convo_location(name, conversation_id, *, givequest=False,
-                    turninquest=False, repeatable=False):
-    return {
-        "Data": {
-            "name": name, "node": name, "type": "Convo",
-            "autostart": False, "autopan": False, "autotrigger": False,
-            "battle": None, "completed": False, "enabled": True, "visible": True,
-            "repeatable": bool(repeatable), "givequest": bool(givequest),
-            "turninquest": bool(turninquest),
-            "impassable": False, "unknown": False, "encounter": None,
-            "encounter_desc": None, "allow_cancel": False,
-            "conversationId": conversation_id,
-        }
-    }
 
 
-def _gaal_camp_nodes(db, campaign_template):
-    """Return authored Gaal camp nodes for an area template.
-
-    The conversation catalog is derived from the extracted ConversationTemplate
-    records, so additional Gaal camps do not require another node-specific
-    branch in the campaign engine.
-    """
-    try:
-        rows = pve_db.db_gaal_nodes(campaign_template, db)
-    except Exception:
-        return set()
-    return {str(row[0]) for row in rows if row and row[0]}
 
 
-def _gaal_fortune_location(db, state, campaign_template, node=None):
-    """Return the authored Gaal camp location for the active operation.
-
-    AZ1 has more than one authored Gaal camp. Prefer the requested/current
-    node; otherwise a pending display can mutate the first camp in VisLocs
-    instead of the camp where the fortune was purchased.
-    """
-    gaal_nodes = _gaal_camp_nodes(db, campaign_template)
-    requested = str(node or "")
-    if requested:
-        for loc in state.get("VisLocs", []):
-            data = loc.get("Data") or {}
-            if data.get("node") == requested and requested in gaal_nodes:
-                return data
-    active = str(state.get("ALoc") or "")
-    for loc in state.get("VisLocs", []):
-        data = loc.get("Data") or {}
-        if data.get("node") in gaal_nodes and (
-                data.get("node") == active or data.get("name") == active):
-            return data
-    for loc in state.get("VisLocs", []):
-        data = loc.get("Data") or {}
-        if data.get("node") in gaal_nodes and data.get("type") == "ModDisplay":
-            return data
-    for loc in state.get("VisLocs", []):
-        data = loc.get("Data") or {}
-        if data.get("node") in gaal_nodes:
-            return data
-    return None
 
 
-def _show_gaal_fortune(db, state, campaign_template, node=None):
-    """Turn the active Gaal camp location into the authored card UI.
-
-    UICampaignGaalCamp is exposed by the client's ``ModDisplay`` location
-    type.  The card is looked up through a PublicState path, while the title
-    and description are localization keys supplied on the location itself.
-    """
-    data = ((state.get("PublicState") or {}).get("Data") or {})
-    fortune_guid = str(data.get("gaal_fortune_guid") or "").lower()
-    location = _gaal_fortune_location(db, state, campaign_template, node=node)
-    if not fortune_guid or location is None:
-        return False
-    location.update({
-        "type": "ModDisplay",
-        "modspath": "/gaal_fortune_guid",
-        "window-title": "Gaal_Window_Title",
-        "window-desc": "Gaal_Window_Text",
-        "conversationId": None,
-        "completed": False,
-        "enabled": True,
-        "visible": True,
-        "autostart": False,
-        "repeatable": False,
-        "gaal_fortune_display": True,
-    })
-    state["ALoc"] = location.get("name") or location.get("node")
-    state["CurState"] = "EXPLORE"
-    return True
 
 
-def _finish_gaal_fortune_display(db, state, campaign_template, node=None):
-    """Close Gaal Camp's card display and leave its conversation repeatable."""
-    location = _gaal_fortune_location(db, state, campaign_template, node=node)
-    if location is None:
-        return False
-    data = ((state.get("PublicState") or {}).get("Data") or {})
-    if (location.get("type") != "ModDisplay" or
-            not location.get("gaal_fortune_display") or
-            not data.get("gaal_fortune_guid")):
-        return False
-    location.update({
-        "type": "Convo",
-        "conversationId": _az1_node_conversation(
-            db, location.get("node"), state, campaign_template),
-        "completed": False,
-        "enabled": True,
-        "visible": True,
-        "autostart": False,
-        "repeatable": _az1_node_is_repeatable(
-            db, location.get("node"), campaign_template),
-    })
-    location.pop("modspath", None)
-    location.pop("window-title", None)
-    location.pop("window-desc", None)
-    location.pop("gaal_fortune_display", None)
-    state["ALoc"] = None
-    state["CurState"] = "EXPLORE"
-    return True
 
 
-def _activate_az1_transition(db, champ_id, cfg):
-    """Expose the race NPC's authored Feralroot travel conversation.
-
-    The Crayburn report is spoken to a faction NPC, while the AZ0->AZ1
-    transition is a separate conversation with the original race NPC.
-    """
-    if not cfg or not cfg.get("transition_conv"):
-        return None
-    row = pve_db.db_latest_campaign_state(champ_id, "PANORAMA", db)
-    if not row:
-        return None
-    pano_id, state_json = row
-    state = json.loads(state_json) if state_json else None
-    if not state:
-        return None
-    intro_npc = cfg["intro_npc"]
-    report_npc = cfg["quest_npc"]
-    # The report has been consumed; replace it with the original NPC's
-    # Feralroot travel conversation and leave the player in explore mode.
-    for loc in state.setdefault("VisLocs", []):
-        data = loc.setdefault("Data", {})
-        node = data.get("node") or data.get("name")
-        if node == report_npc:
-            data.update({"visible": False, "enabled": False, "completed": True})
-        elif node == intro_npc:
-            data.update({"type": "Convo", "conversationId": cfg["transition_conv"],
-                         "visible": True, "enabled": True, "completed": False,
-                         "givequest": True})
-    if not any((loc.get("Data", {}).get("node") or loc.get("Data", {}).get("name")) == intro_npc
-               for loc in state["VisLocs"]):
-        state["VisLocs"].append(_convo_location(intro_npc, cfg["transition_conv"],
-                                                 givequest=True))
-    state["PostCrayburnReport"] = True
-    state["ALoc"] = None
-    state["CurState"] = "EXPLORE"
-    pve_db.db_campaign_update_state(
-        pano_id, json.dumps(state), db, started=True)
-    db.commit()
-    return pano_id, state
 
 
-def _prepare_post_crayburn_report(db, champ_id, state):
-    """Expose the authored report conversation in a completed dungeon handoff.
-
-    The report is hosted by the race panorama, but it is only valid after the
-    Crayburn dungeon has advanced its linked journal quest.  Keep this helper
-    limited to shaping the panorama state; the conversation handler applies
-    the reward and completes the objective when the client sends ``conv_done``.
-    """
-    champ = _get_champion(db, champ_id)
-    cfg = _az0_config(champ[2]) if champ else None
-    if not cfg:
-        return False
-    report_conv = (_CRAYBURN_CASTLE.get("races", {})
-                   .get(_RACE_NAMES.get(champ[2], ""), {})
-                   .get("quest_end"))
-    if not report_conv:
-        return False
-
-    report_npc = cfg["quest_npc"]
-    report_loc = None
-    for loc in state.setdefault("VisLocs", []):
-        data = loc.setdefault("Data", {})
-        if data.get("node") == report_npc or data.get("name") == report_npc:
-            report_loc = data
-            break
-    if report_loc is None:
-        state["VisLocs"].append(
-            _convo_location(report_npc, report_conv, turninquest=True))
-        changed = True
-    else:
-        desired = {
-            "type": "Convo", "conversationId": report_conv,
-            "visible": True, "enabled": True, "completed": False,
-            "givequest": False, "turninquest": True,
-        }
-        changed = any(report_loc.get(key) != value
-                      for key, value in desired.items())
-        report_loc.update(desired)
-    if state.get("PostCrayburnReport") is not True:
-        state["PostCrayburnReport"] = True
-        changed = True
-    if state.get("ALoc") is not None or state.get("CurState") != "EXPLORE":
-        state["ALoc"] = None
-        state["CurState"] = "EXPLORE"
-        changed = True
-    return changed
 
 
-def _activate_az1_area(db, champ_id):
-    """Create/activate the AZ1 overworld campaign at Into The Woods."""
-    row = pve_db.db_latest_campaign_state(
-        champ_id, "AREA", db, template_name="AZ1")
-    if row:
-        cid, lo, hi, raw = row
-        state = json.loads(raw) if raw else {}
-    else:
-        cid, lo, hi = _new_camp_id(db), _generate_inst_id(), 0
-        state = {}
-        champ = _get_champion(db, champ_id)
-        user_id = champ[1] if champ else 0
-        champ_name = champ[3] if champ else ""
-        pve_db.db_create_campaign(
-            cid, lo, champ_id, user_id, champ_name, "AZ1", "AREA", "{}",
-            db, is_started=True)
-    previous_state = state if row and isinstance(state, dict) else {}
-    previous_locations = {
-        (item.get("Data") or {}).get("node"): item.get("Data") or {}
-        for item in previous_state.get("VisLocs", [])
-        if (item.get("Data") or {}).get("node")
-    }
-    previous_public = (
-        (previous_state.get("PublicState") or {}).get("Data") or {}
-    )
-    previous_last_node = previous_state.get("LastNode") or "Node001"
-    champ = _get_champion(db, champ_id)
-    area_locs, area_nodes = _az1_area_scene_state(
-        champ[2] if champ else None, db=db)
-    # Resolve every authored AZ1 encounter by its NODE number.  The map node
-    # owns the encounter reference; scene metadata supplies the GUID,
-    # rewards, and scene type (including all Shroom Haus locations).
-    scenes = pve_db.db_az1_scene_metadata(db)
-    _hydrate_az1_area_scene_metadata(db, area_locs, champ_id=champ_id,
-                                     state={"VisLocs": area_locs,
-                                            "PublicState": {"Data": {}}})
-    # Returning from an authored panorama must resume the existing map, not
-    # reset the player's visited nodes and path progress to Node001. Keep
-    # authored fields from the fresh scene and merge persisted gameplay state.
-    preserved_location_fields = (
-        "completed", "visible", "enabled", "repeatable", "givequest",
-        "turninquest", "conversationId", "autostart", "autopan",
-        "autotrigger", "quest_variant_terminal", "quest_variant_completed",
-        "pre_encounter_completed", "shroomhaus_ready", "quest_start_open",
-        "quest_start_script",
-    )
-    for loc in area_locs:
-        data = loc.get("Data") or {}
-        old_data = previous_locations.get(data.get("node"))
-        if old_data:
-            for field in preserved_location_fields:
-                if field in old_data:
-                    data[field] = old_data[field]
-        # Returning from a panorama must leave its source node selectable.
-        # Older saves often marked the node completed after the first
-        # StartLoc/conv_done sequence, which hides the current-node action
-        # button and makes the player unable to travel back in.
-        _normalize_az1_panorama_location(db, data)
-    # Location.Encounter is a name/reference; the client then looks it up in
-    # GameplayState.Encounters to obtain the scene GUID. Keep this catalog
-    # derived from the authored node references and encounter_scenes table.
-    area_encounters = []
-    for loc in area_locs:
-        guid = (loc.get("Data") or {}).get("encounter")
-        if guid and pve_db.db_encounter_scene_exists(guid, db):
-            if guid not in {x["Name"] for x in area_encounters}:
-                area_encounters.append({"Name": guid, "Data": {"encscene": guid}})
-    state.update({"CampID": cid, "ChampID": champ_id, "TempType": "AREA",
-                  # ALoc is reserved for an active location.  Keeping it
-                  # empty at map entry lets the client select/move from the
-                  # starting node; LastNode identifies the starting tile.
-                  "ALoc": None, "LastNode": previous_last_node,
-                  "CurState": "EXPLORE", "Finished": None,
-                  "PublicState": {"Data": dict(previous_public)},
-                  "PayGroups": [], "CSlide": None,
-                  "Encounters": area_encounters,
-                  "Champions": [],
-                  "Started": _now_utc(), "FinishReason": None, "Wins": 0, "Losses": 0,
-                  "Score": 0, "HealthAdj": 0, "DungeonLifeAdj": 0, "Flags": {},
-                  "VisLocs": area_locs, "LocNodes": area_nodes})
-    state["PublicState"]["Data"]["CampaignGroup"] = "AREA"
-    state["PublicState"]["Data"].setdefault("visited_nodes", ["Node001"])
-    state["PublicState"]["Data"].setdefault("visited_paths", [])
-    # Filled from active quest objectives below; quest encounter GUIDs remain
-    # the source of truth rather than a baked-in node number.
-    state["PublicState"]["Data"].setdefault("quest_nodes", [])
-    _sync_az1_quest_gates(db, champ_id, state)
-    _apply_az1_quest_markers(db, champ_id, state)
-    _az1_reveal_neighbors(db, state, state.get("LastNode") or "Node001")
-    pve_db.db_campaign_update_state(
-        cid, json.dumps(state), db, started=True)
-    # LastCampaignID is the client's reconnect entry point. Returning from a
-    # panorama must move it back to the AREA campaign; otherwise a later
-    # qcur4champ query can reopen the panorama the player just left.
-    pve_db.db_campaign_set_last_campaign(champ_id, cid, db)
-    db.commit()
-    return cid, state
 
 
-def _panorama_npc_for_conversation(db, conversation_guid, node):
-    """Return the authored NPC for a quest conversation at an area node."""
-    row = pve_db.db_panorama_conversation_npc(
-        node, conversation_guid, db)
-    return (row[0], row[1]) if row and row[0] else (None, None)
 
 
-def _panorama_champion_guid(db, npc):
-    """Resolve a panorama NPC's client portrait from authored champion data."""
-    if not npc:
-        return None
-    return pve_db.db_champion_template_guid_by_name(npc, db)
 
 
-def _panorama_npc_from_conversation_name(conversation_name):
-    """Extract an NPC from an authored AZ1 panorama conversation label."""
-    parts = [part.strip() for part in str(conversation_name or "").split("-")]
-    if len(parts) < 3:
-        return None
-    # The extracted AZ1 labels use ``AZ1 - Node NN - NPC - ...``.  Keep this
-    # parser limited to that authored shape; non-NPC labels such as
-    # ``Tranquil Dream`` are filtered later by champion_templates_extended.
-    if parts[0].upper() != "AZ1" or not parts[1].lower().startswith("node"):
-        return None
-    return parts[2] or None
 
 
-def _build_az1_panorama_state(db, cid, champion_id, scene_guid, node,
-                              area_state):
-    """Build client state for an authored AZ1 panorama scene.
 
-    The area scene remains the source of truth for the destination. Panorama
-    NPCs are selected from the authored quest conversation catalog, so every
-    eligible quest giver/turn-in at the destination is rendered rather than
-    only the conversation that happened to be selected on the map node.
-    """
-    area_data = next(
-        ((loc.get("Data") or {}) for loc in area_state.get("VisLocs", [])
-         if (loc.get("Data") or {}).get("node") == node),
-        {},
-    )
-    faction = _quest_faction_for_champion(db, champion_id)
-    candidates = {}
-    rows = pve_db.db_panorama_quest_rows(node, db)
-    for (script, conversation_guid, role, row_faction, npc, priority,
-         start_hook) in rows:
-        if not npc or not conversation_guid or not _quest_row_matches_faction(
-                row_faction, faction):
+
+
+
+
+
+
+
+
+
+# --- editor tags on node conversations -------------------------------------
+# ``trigger_json.tags`` (campaign editor, applied by
+# campaign/campaign_data.py) select
+# a conversation only while every tag holds; see campaign_rules.parse_tag.
+# Rows without tags keep the label/visit heuristics below.
+
+def _conversation_tag_state(db, champ_id, state, node, tags, outcome=None):
+    """The campaign_rules progress view that ``tags`` read."""
+    data = ((state or {}).get("PublicState", {}) or {}).get("Data", {}) or {}
+    champ = _get_champion(db, champ_id) if champ_id is not None else None
+    flags = {str(f) for f in data.get("conversation_flags") or ()}
+    # ``flag(X)`` also reads the area's own boolean markers (gaal_fortune ...).
+    flags |= {str(k) for k, v in data.items() if v is True}
+    quests = {}
+    condition = campaign_rules.tags_condition(tags, str(node or ""))
+    for part in campaign_rules._conditions(condition):
+        script = part.get("quest")
+        if not script or script in quests or champ_id is None:
             continue
-        _quest_id, quest_state = _quest_state_row(
-            db, champion_id, script) if script else (None, None)
-        role = str(role or "").lower()
-        active_objective = False
-        flags = quest_state.get("Flags") or {} if quest_state else {}
-        objectives = flags.get("_quest_objectives") or []
+        _quest_id, quest_state = _quest_state_row(db, champ_id, script)
+        if isinstance(quest_state, dict):
+            quest_flags = quest_state.get("Flags") or {}
+            try:
+                step = int(quest_flags.get("_quest_objective_idx", 0) or 0)
+            except (TypeError, ValueError):
+                step = 0
+            quests[script] = {"status": "finished" if quest_state.get(
+                "Finished") else "active", "step": step}
+    visited = {str(v) for v in data.get("visited_nodes") or ()}
+    nodes = {}
+    for loc in (state or {}).get("VisLocs") or ():
+        loc_data = (loc or {}).get("Data") or {}
+        loc_node = loc_data.get("node")
+        if not loc_node:
+            continue
+        names = {str(loc_node), str(loc_data.get("name") or ""),
+                 str(loc_data.get("title") or "")}
+        nodes[loc_node] = {"visits": 1 if names & visited else 0,
+                           "completed": bool(loc_data.get("completed"))}
+    # talkedAt(Node): conversations finished at the node (NodeR == Node00R).
+    for key, count in (data.get("conversation_visits") or {}).items():
         try:
-            objective_index = int(flags.get("_quest_objective_idx", 0) or 0)
+            count = int(count or 0)
         except (TypeError, ValueError):
-            objective_index = -1
-        current_objective = (
-            objectives[objective_index]
-            if (isinstance(objectives, list) and
-                0 <= objective_index < len(objectives) and
-                isinstance(objectives[objective_index], dict))
-            else {}
-        )
-        objective_is_conversation = (
-            str(current_objective.get("type") or "").lower()
-            in {"conversation", "convo"}
-        )
-        if (script and quest_state and not quest_state.get("Finished") and
-                objective_is_conversation):
-            active_objective = str(conversation_guid) in {
-                str(value) for value in _quest_objective_conversation_guids(
-                    db, champion_id, script, current_objective)
-            }
-        if active_objective:
-            eligible = True
-            rank = 0
-        elif role == "start":
-            # A missing QUEST row is not enough to make every authored start
-            # conversation available.  The catalog contains later AZ1 quest
-            # starts at the same panorama; only rows with an explicit unlock
-            # hook may introduce a new quest here.  Once introduced, the
-            # normal not_complete/complete rows control that NPC.
-            eligible = (
-                quest_state is None and bool(start_hook) and
-                _quest_start_prerequisites_met(db, champion_id, script))
-            rank = 2
-        elif role == "complete":
-            eligible = _quest_is_turnin_ready(quest_state)
-            rank = 1
-        elif role == "not_complete":
-            eligible = bool(quest_state and not quest_state.get("Finished"))
-            rank = 3
-        else:
-            eligible = False
-            rank = 9
-        if not eligible:
-            continue
-        candidate = (rank, int(priority or 0), str(conversation_guid),
-                     str(conversation_guid), role, quest_state,
-                     active_objective)
-        previous = candidates.get(str(npc))
-        if previous is None or candidate[:3] < previous[:3]:
-            candidates[str(npc)] = candidate
-
-    # Some authored panorama dialogue is intentionally not attached to a
-    # quest row.  In particular, the completed-quest repeating conversations
-    # provide the animal-taming hints and the faction-specific Sea Hag/other
-    # NPC follow-ups.  Include one authored repeat conversation when no more
-    # specific quest conversation currently owns that NPC.
-    generic_rows = pve_db.db_panorama_generic_rows(node, db)
-    for conversation_guid, raw_trigger, conversation_name, priority in generic_rows:
-        try:
-            trigger = json.loads(raw_trigger or "{}")
-        except (TypeError, ValueError, json.JSONDecodeError):
-            trigger = {}
-        if (not isinstance(trigger, dict) or
-                str(trigger.get("visit") or "").lower() != "repeat" or
-                not _conversation_matches_faction(conversation_name, faction)):
-            continue
-        npc = _panorama_npc_from_conversation_name(conversation_name)
-        if not npc or not _panorama_champion_guid(db, npc):
-            continue
-        # The generic repeat catalog contains later NPC hint conversations
-        # even before their quest has been introduced.  Associate the NPC
-        # with its authored quest rows and expose the repeat only after one
-        # of those quest campaigns exists (active or finished).
-        npc_quest_scripts = pve_db.db_panorama_npc_quest_scripts(node, npc, db)
-        if (npc_quest_scripts and not any(
-                _quest_state_row(db, champion_id, script)[1] is not None
-                for (script,) in npc_quest_scripts)):
-            continue
-        if str(npc) in candidates:
-            continue
-        candidates[str(npc)] = (
-            4, int(priority or 0), str(conversation_guid),
-            str(conversation_guid), "repeat", None, False)
-
-    # Keep a conversation-only authored location as a compatibility fallback
-    # for older saves whose quest metadata predates the AZ1 catalog migration.
-    if not candidates:
-        conversation_guid = area_data.get("conversationId")
-        npc, role = _panorama_npc_for_conversation(
-            db, conversation_guid, node)
-        if npc and conversation_guid:
-            candidates[str(npc)] = (
-                2, 0, str(conversation_guid), str(conversation_guid),
-                str(role or ""), None, False)
-
-    locations = []
-    nodes = []
-    for npc, candidate in candidates.items():
-        (_rank, _priority, _sort_guid, conversation_guid, role, quest_state,
-         active_objective) = candidate
-        locations.append(_convo_location(
-            npc, conversation_guid,
-            givequest=(role == "start" and
-                       (quest_state is None or active_objective)),
-            turninquest=(role == "complete" and
-                         (_quest_is_turnin_ready(quest_state) or
-                          active_objective)),
-            repeatable=(role in {"repeat", "not_complete"})))
-        nodes.append({
-            "Name": npc,
-            "Data": {
-                "id": npc,
-                "type": "DEFAULT",
-                "championId": _panorama_champion_guid(db, npc),
-            },
-        })
-
-    npc = None
-    campaign_group = (((area_state.get("PublicState") or {}).get("Data") or {})
-                       .get("CampaignGroup") or "AREA")
-
-    return {
-        "CampID": cid,
-        "ChampID": champion_id,
-        "TempType": "PANORAMA",
-        "PayGroups": [],
-        "CSlide": None,
-        # Do not select the NPC on scene entry.  The panorama VM treats an
-        # ALoc matching a visible conversation as an active location and
-        # immediately launches it.  Keep the NPC in VisLocs so its portrait
-        # and quest indicators are visible; the player starts the conversation
-        # by interacting with that portrait.
-        "ALoc": None,
-        "VisLocs": locations,
-        "LocNodes": nodes,
-        "Encounters": [],
-        "Champions": [],
-        "CurState": "EXPLORE",
-        "LastNode": npc,
-        "PublicState": {"Data": {
-            # QuestTracker filters the client's cached quests by this value.
-            # Authored AZ1 quests use the AREA campaign group even while the
-            # player is temporarily in the destination panorama.
-            "CampaignGroup": campaign_group,
-            # UIPanoramaZoneViewModel defaults this flag to hidden when it is
-            # absent.  Authored AZ1 panoramas contain their NPC interactables
-            # in the scene, so explicitly keep their portraits actionable.
-            "HideQuickNavigation": False,
-            "PanoramaSceneGuid": str(scene_guid),
-            "PanoramaNode": node,
-        }},
-        "PanoramaSceneGuid": str(scene_guid),
-        "PanoramaNode": node,
-        "Started": _now_utc(),
-        "Finished": None,
-        "FinishReason": None,
-        "Wins": 0,
-        "Losses": 0,
-        "Score": 0,
-        "HealthAdj": 0,
-        "DungeonLifeAdj": 0,
-        "Flags": {},
-    }
+            count = 0
+        short = re.fullmatch(r"Node00([A-Z])", str(key))
+        long_ = re.fullmatch(r"Node([A-Z])", str(key))
+        for alias in {str(key), f"Node{short.group(1)}" if short else "",
+                      f"Node00{long_.group(1)}" if long_ else ""} - {""}:
+            entry = nodes.setdefault(alias, {})
+            entry["talks"] = max(int(entry.get("talks", 0)), count)
+    if outcome:
+        nodes.setdefault(str(node), {})["outcome"] = outcome
+    counters = data.get("counters") or {}
+    return {"flags": sorted(flags), "quests": quests, "nodes": nodes,
+            "counters": counters,
+            # cameFrom(Node) / a let_pass() for this visit (campaign_rules).
+            "came_from": str(data.get("came_from") or ""),
+            "pass": str(data.get("pass_node") or ""),
+            "keywords": campaign_rules._keyword_names(
+                data.get("keywords") or data.get("champion_keywords")),
+            "faction": _RACE_FACTIONS.get(champ[2], "") if champ else "",
+            "race": _RACE_NAMES.get(champ[2], "") if champ else "",
+            "current": str(node or "")}
 
 
-def _activate_az1_panorama(db, champion_id, scene_guid, node, area_state):
-    """Activate the panorama represented by an authored AZ1 scene."""
-    pano_id, _inst, _started, _existing = _find_campaign_for_champion(
-        db, champion_id, "PANORAMA")
-    state = _build_az1_panorama_state(
-        db, pano_id, champion_id, scene_guid, node, area_state)
-    pve_db.db_campaign_update_state(
-        pano_id, json.dumps(state), db, started=True)
-    pve_db.db_campaign_set_last_campaign(champion_id, pano_id, db)
-    db.commit()
-    return pano_id, state
-
-
-def _az1_scene_for_node(db, node):
-    """Resolve the authored AZ1 scene for a map node.
-
-    Scene names are authored as ``AZ 1 - NODE NN - ...``.  The map state uses
-    the same node identifier, so this lookup is shared by newly-created and
-    older persisted area campaigns.
-    """
-    def node_key(value):
-        text = re.sub(r"[^0-9A-Z_]", "", str(value or "").upper())
-        text = re.sub(r"^NODE", "", text)
-        match = re.fullmatch(r"0*(\d+)([A-Z_][0-9A-Z_]*)?", text)
-        if not match:
-            return text
-        number, suffix = match.groups()
-        return f"{int(number)}{suffix or ''}"
-
-    wanted = node_key(node)
-    if not wanted:
-        return None
-    rows = pve_db.db_az1_scene_metadata(db)
-    for row in rows:
-        match = re.search(
-            r"\bNODE\s*-?\s*([0-9A-Z_]+(?:\s+[A-Z0-9_]+)?)\s*-",
-            row[1] or "", re.I)
-        if match and node_key(match.group(1)) == wanted:
-            return row
-    return None
-
-
-def _normalize_az1_panorama_location(db, data):
-    """Make an authored AZ1 panorama node a reusable map portal.
-
-    The Unity map hides the current-node action when ``completed`` is true and
-    treats an auto-starting location as already in progress.  A panorama node
-    is neither one-shot content nor a conversation on the AREA map: it is a
-    reusable Travel/Explore portal into the authored panorama scene.
-    """
-    if not isinstance(data, dict):
-        return False
-    scene = _az1_scene_for_node(db, data.get("node") or data.get("name"))
-    if not scene or "PANORAMA" not in str(scene[1] or "").upper():
-        return False
-    data.update({
-        "type": "Panorama",
-        "encounter": scene[0],
-        "conversationId": None,
-        "completed": False,
-        "repeatable": True,
-        "autostart": False,
-    })
-    return True
-
-
-def _az1_node_conversation_rows(db, node, campaign_template="AZ1"):
-    """Return authored conversations for an area node with decoded triggers.
-
-    ConversationTemplate names abbreviate the map's padded alphabetic branch
-    IDs (for example, ``Node R``), while the AZ1 map identifies that same
-    location as ``Node00R``.  Prefer an exact metadata match, then fall back
-    to the authored abbreviation so existing databases need no data rewrite.
-    """
-    node_ids = [str(node or "")]
-    padded_branch = re.fullmatch(r"Node0+([A-Za-z]+)", node_ids[0], re.I)
-    if padded_branch:
-        node_ids.append(f"Node{padded_branch.group(1)}")
+def _conversation_tags_hold(db, champ_id, state, node, tags, outcome=None):
+    if not tags:
+        return True
     try:
-        rows = []
-        for node_id in node_ids:
-            rows = pve_db.db_node_conversation_rows(
-                node_id, campaign_template, db)
-            if rows:
-                break
-    except Exception:
-        return []
-    result = []
-    for guid, raw_trigger, priority, conversation_name in rows:
-        try:
-            trigger = json.loads(raw_trigger or "{}")
-        except (TypeError, ValueError, json.JSONDecodeError):
-            trigger = {}
-        result.append((guid, trigger if isinstance(trigger, dict) else {},
-                       priority, conversation_name))
-    return result
+        view = _conversation_tag_state(db, champ_id, state, node, tags, outcome)
+        return campaign_rules.evaluate(tags, view, str(node or ""))
+    except campaign_rules.RulesError as exc:
+        print(f"[campaign] ignoring conversation tags {tags}: {exc}")
+        return False
+
+
+# Client-protocol SendEvent names; anything else is an answer's
+# ServerScriptEvent (the only way the client reports a conversation choice).
+_CAMPAIGN_PROTOCOL_EVENTS = frozenset({
+    "accept", "boat_fail_shown", "cancel", "conv_done", "count_choice",
+    "display_done", "empty_done", "enc_cancel", "force_move", "pass_node",
+    "path_reveal_complete", "return_parent", "shroom_choice", "start",
+    "visit_node", "visit_path", "warp_move",
+})
+_conversation_event_lock = threading.RLock()
+_TRANQUIL_DREAM_ANSWER_POINTS = {
+    "one_point_answer": 1,
+    "two_point_answer": 2,
+    "three_point_answer": 3,
+}
+_DYNAMIC_SCORE_FLAG = re.compile(r"^score_(\d+)$")
+
+
+def _record_dungeon_script_score(state, template_name, script_name):
+    """Record Tranquil Dream's accumulated answer score as ``score_N``.
+
+    The campaign row is one dungeon run, so keeping this boolean in its
+    PublicState makes the score local to that dungeon. Replacing the previous
+    score flag leaves one unambiguous value for ``flag(score_N)`` conditions.
+    """
+    if str(template_name or "").strip().casefold() != "the tranquil dream":
+        return None
+    points = _TRANQUIL_DREAM_ANSWER_POINTS.get(str(script_name or ""))
+    if points is None:
+        return None
+
+    data = state.setdefault("PublicState", {}).setdefault("Data", {})
+    score_flags = []
+    current_score = 0
+    for key, value in data.items():
+        match = _DYNAMIC_SCORE_FLAG.fullmatch(str(key))
+        if match:
+            score_flags.append(key)
+            if value:
+                current_score = max(current_score, int(match.group(1)))
+    for key in score_flags:
+        data.pop(key, None)
+    total = current_score + points
+    data[f"score_{total}"] = True
+    return total
+
+
+def _conversation_name(db, conversation_guid):
+    row = pve_db.db_conversation_name(conversation_guid, db)
+    return str(row or "").strip()
+
+
 
 
 def _conversation_matches_faction(conversation_name, faction):
@@ -1478,990 +722,14 @@ def _conversation_matches_faction(conversation_name, faction):
     return explicit is None or explicit == str(faction).lower()
 
 
-def _has_faction_variants(rows):
-    """Whether authored rows contain explicit faction-labelled variants."""
-    return any(
-        "ardent" in str(row[3] or "").lower() or
-        "aria" in str(row[3] or "").lower() or
-        "underworld" in str(row[3] or "").lower()
-        for row in rows
-    )
-
-
 _AZ1_MASKED_ARMY_QUESTS = (
     ("az01_q_fort_romor", "Underworld"),
     ("az01_q_usurper", "Ardent"),
 )
 
 
-def _az1_masked_army_variant(db, champ_id, node="Node00R"):
-    """Return the authored Node R branch for a faction quest state.
-
-    The source conversation names carry the predicates, while the quest
-    campaign rows carry the state.  Keep those two pieces separate: the
-    selection remains driven by authored conversation labels and does not
-    depend on the GUID ordering of the extracted records.
-
-    The third value says that the faction quest is finished.  That branch is
-    still retryable before it is entered, but closing it is the terminal
-    conversation for Vale of Oberon and may complete the node.
-    """
-    if champ_id is None:
-        return None
-    rows = _az1_node_conversation_rows(db, node)
-    for quest_script, faction in _AZ1_MASKED_ARMY_QUESTS:
-        if not _quest_row_matches_faction(
-                faction, _quest_faction_for_champion(db, champ_id)):
-            continue
-        _quest_id, quest_state = _quest_state_row(
-            db, champ_id, quest_script)
-        if not isinstance(quest_state, dict):
-            continue
-        finished = bool(quest_state.get("Finished"))
-        wanted = ("finished faction quest" if finished else
-                  "has faction quest")
-        for guid, trigger, priority, name in rows:
-            label = str(trigger.get("label") or name or "").lower()
-            if wanted in label:
-                return guid, quest_script, finished
-    return None
 
 
-def _az1_node_conversation(db, node, state=None, campaign_template="AZ1",
-                           champ_id=None):
-    """Select the authored conversation for the node's current visit.
-
-    SceneData can provide a first-visit conversation, a repeat conversation,
-    and a state-specific variant (for example Milosh's "already has fortune"
-    text). The selection is based on persisted area state, not a node-specific
-    GUID in campaign.py.
-    """
-    rows = _az1_node_conversation_rows(db, node, campaign_template)
-    if not rows:
-        return None
-    if (str(campaign_template or "").upper() == "AZ1" and
-            str(node or "").lower() in {"noder", "node00r"}):
-        variant = _az1_masked_army_variant(db, champ_id, node=node)
-        if variant:
-            return variant[0]
-    faction = _quest_faction_for_champion(db, champ_id) if champ_id else None
-    if faction:
-        faction_rows = [
-            row for row in rows
-            if _conversation_matches_faction(row[3], faction)
-        ]
-        if faction_rows:
-            rows = faction_rows
-    data = ((state or {}).get("PublicState", {}) or {}).get("Data", {}) or {}
-    visits = data.get("conversation_visits") or {}
-    try:
-        visit_count = int(visits.get(str(node), 0) or 0)
-    except (TypeError, ValueError):
-        visit_count = 0
-    has_fortune = bool(data.get("gaal_fortune"))
-    # A node's authored baseline dialogue wins on its first visit.  This
-    # prevents a fortune earned at another location from replacing Winston's
-    # initial bridge-closed conversation with the optional Milosh variant.
-    if visit_count <= 1:
-        for guid, trigger, _priority, _name in rows:
-            if (str(trigger.get("visit") or "").lower() == "first" and
-                    str(trigger.get("state") or "").strip() == ""):
-                return guid
-        for guid, trigger, _priority, name in rows:
-            label = str(trigger.get("label") or name or "")
-            if re.search(r"\bstep\s*1(?:\D|$)", label, re.I):
-                return guid
-    # A state-qualified variant must win over an ordinary first/repeat
-    # conversation.  Some authored records carry both predicates (for
-    # example "First encounter - Player already has fortune"), while others
-    # use only ``state=fortune`` for the post-reading branch.  Match the visit
-    # qualifier when present, but allow an unqualified fortune variant to be
-    # the fallback for either visit count.
-    if has_fortune:
-        for guid, trigger, _priority, _name in rows:
-            if str(trigger.get("state") or "").lower() != "fortune":
-                continue
-            visit = str(trigger.get("visit") or "").lower()
-            if ((visit_count <= 0 and visit == "first") or
-                    (visit_count > 0 and visit == "repeat")):
-                return guid
-        for guid, trigger, _priority, _name in rows:
-            if (str(trigger.get("state") or "").lower() == "fortune" and
-                    not str(trigger.get("visit") or "").strip()):
-                return guid
-    if visit_count <= 0:
-        for guid, trigger, _priority, _name in rows:
-            if (str(trigger.get("visit") or "").lower() == "first" and
-                    str(trigger.get("state") or "").strip() == ""):
-                return guid
-    if visit_count > 0:
-        for guid, trigger, _priority, _name in rows:
-            if str(trigger.get("visit") or "").lower() == "repeat":
-                return guid
-    fallback = None
-    for guid, trigger, _priority, _name in rows:
-        if fallback is None:
-            fallback = guid
-    return fallback
-
-
-def _az1_node_is_repeatable(db, node, campaign_template="AZ1"):
-    """Whether authored node conversations include a repeat/state variant."""
-    return any(
-        str(trigger.get("visit") or "").lower() == "repeat" or
-        bool(str(trigger.get("state") or "").strip())
-        for _guid, trigger, _priority, _name in _az1_node_conversation_rows(
-            db, node, campaign_template)
-    )
-
-
-def _az1_pre_encounter_conversation(db, node, champ_id=None):
-    """Select an authored pre-battle conversation for an AZ1 node.
-
-    Encounter scenes and their opening narration are authored separately in
-    the client data.  A scene name does not always contain ``DIALOG`` (for
-    example Node009's Cockatwice scene), so use the conversation catalog to
-    identify a first-visit prelude instead of maintaining a node allow-list.
-    Outcome and quest-turn-in conversations are deliberately excluded; those
-    are selected by their respective result/quest flows.
-    """
-    rows = _az1_node_conversation_rows(db, node)
-    candidates = []
-    for guid, trigger, _priority, _name in rows:
-        name = str(trigger.get("label") or "").lower()
-        if trigger.get("outcome"):
-            continue
-        if any(term in name for term in (
-                "quest start", "quest end", "quest not complete",
-                "quest completed", "completed repeating", "repeat encounter",
-                "repeating until", "success", "fail")):
-            continue
-        if str(trigger.get("visit") or "").lower() == "repeat":
-            continue
-        candidates.append((guid, trigger, name))
-    if not candidates:
-        return None
-
-    # Prefer an explicitly authored first/step-one conversation.  For
-    # faction branches, prefer the branch matching the champion's faction.
-    faction = _quest_faction_for_champion(db, champ_id) if champ_id else None
-    scored = []
-    for guid, trigger, name in candidates:
-        score = 0
-        visit = str(trigger.get("visit") or "").lower()
-        if visit == "first":
-            score += 100
-        step = re.search(r"\bstep\s*([0-9]+)", name)
-        if step:
-            score += max(1, 20 - int(step.group(1)))
-        if "first encounter" in name or "first visit" in name:
-            score += 20
-        if any(term in name for term in (
-                "revert", "player has", "player did", "installed",
-                "no gnomes", "wormoid queen", "surfaces", "tunnels")):
-            score -= 40
-        if "ardent" in name or "underworld" in name:
-            if faction and str(faction).lower() in name:
-                score += 25
-            else:
-                score -= 25
-        scored.append((score, guid))
-    scored.sort(key=lambda item: (-item[0], item[1]))
-    return scored[0][1]
-
-
-def _az1_outcome_conversation(db, node, won, champ_id=None):
-    """Select an authored encounter result conversation for an AZ1 node."""
-    outcome = "success" if won else "fail"
-    rows = [
-        row for row in _az1_node_conversation_rows(db, node)
-        if str(row[1].get("outcome") or "").lower() == outcome
-    ]
-    if not rows:
-        return None
-    faction = _quest_faction_for_champion(db, champ_id) if champ_id else None
-    if faction:
-        faction_rows = [row for row in rows
-                        if _conversation_matches_faction(row[3], faction)]
-        if faction_rows:
-            rows = faction_rows
-    return rows[0][0]
-
-
-def _az1_path_fork_ids(db):
-    """Return authored AZ1 path-fork nodes from the persisted map topology."""
-    try:
-        rows = pve_db.db_az1_edges(db)
-    except Exception:
-        return set()
-    return {
-        str(node)
-        for row in rows
-        for node in row
-        if node and str(node).lower().startswith("fork")
-    }
-
-
-def _az1_append_path_forks(db, locations, nodes):
-    """Add non-interactive prefab path forks to a campaign state.
-
-    Path forks are real client map nodes, but they have no SceneData location
-    of their own.  They still need a state Location/Node pair in GameplayState
-    so the client can render them and reveal the paths that pass through them
-    (for example Fork001 at the Zila bridge).
-    """
-    if locations is None or nodes is None:
-        return False
-    existing_locations = {
-        str((loc.get("Data") or {}).get("node") or "")
-        for loc in locations
-    }
-    existing_nodes = {
-        str(node.get("Name") or (node.get("Data") or {}).get("id") or "")
-        for node in nodes
-    }
-    changed = False
-    for fork in sorted(_az1_path_fork_ids(db)):
-        if fork not in existing_locations:
-            locations.append({"Data": {
-                "name": fork, "node": fork, "type": "Empty",
-                "autostart": False, "autopan": False,
-                "autotrigger": False, "battle": None,
-                # A path fork is connective geometry, not quest content. It
-                # stays rendered so the client can reveal and traverse the
-                # paths leading to whichever real locations are unlocked,
-                # but remains disabled as a campaign destination.
-                "visible": True, "enabled": False,
-                "completed": False, "repeatable": False,
-                "givequest": False, "turninquest": False,
-                "impassable": False, "unknown": False,
-                "encounter": None, "encounter_desc": None,
-                "description": None, "title": fork,
-                "conversationId": None,
-            }})
-            changed = True
-        else:
-            # A path fork is rendered by the client's dedicated FORK node
-            # prefab, but is never a selectable campaign location.
-            for loc in locations:
-                data = loc.get("Data") or {}
-                if data.get("node") == fork:
-                    if data.get("visible") is not True:
-                        data["visible"] = True
-                        changed = True
-                    if data.get("enabled") is not False:
-                        data["enabled"] = False
-                        changed = True
-                    break
-        if fork not in existing_nodes:
-            nodes.append({"Name": fork,
-                          "Data": {"id": fork, "type": "FORK"}})
-            changed = True
-        else:
-            for node in nodes:
-                if str(node.get("Name") or
-                       (node.get("Data") or {}).get("id") or "") == fork:
-                    node_data = node.setdefault("Data", {})
-                    if node_data.get("id") != fork:
-                        node_data["id"] = fork
-                        changed = True
-                    if node_data.get("type") != "FORK":
-                        node_data["type"] = "FORK"
-                        changed = True
-                    break
-    return changed
-
-
-def _hydrate_az1_area_scene_metadata(db, locations, champ_id=None, state=None):
-    """Apply authored scene type/conversation data to AZ1 map locations.
-
-    Older area campaigns were created before encounter scenes were seeded and
-    therefore retained ``Empty`` locations with no scene GUID.  Hydrating on
-    every response repairs those states and, importantly, makes a DIALOG scene
-    (such as Node007's Gaal Camp) a conversation instead of a Shroom Haus.
-    """
-    if state is not None:
-        _az1_append_path_forks(
-            db, locations, state.setdefault("LocNodes", []))
-    gaal_nodes = _gaal_camp_nodes(db, "AZ1")
-    public_data = (((state or {}).get("PublicState") or {}).get("Data") or {})
-    blockade_cleared = bool(public_data.get("blockade_cleared"))
-    for loc in locations or []:
-        data = loc.get("Data") or {}
-        node = data.get("node") or ""
-        scene = _az1_scene_for_node(db, node)
-        if not scene:
-            # Not every authored conversation has an accompanying encounter
-            # scene.  Vale of Oberon, for example, is a conversation-only
-            # map node whose ConversationTemplate uses the abbreviated
-            # ``Node R`` identifier.  Hydrate it directly instead of leaving
-            # the client with an inert Empty location.
-            authored_conversation = _az1_node_conversation(
-                db, node, state, champ_id=champ_id)
-            if authored_conversation:
-                visits = (((state or {}).get("PublicState", {}) or {}).get(
-                    "Data", {}) or {}).get("conversation_visits", {})
-                try:
-                    visit_count = int(visits.get(str(node), 0) or 0)
-                except (TypeError, ValueError):
-                    visit_count = 0
-                # NodeR (Vale of Oberon) is conversation-only, but follows
-                # the same unfinished-node rule as a pre-encounter: if it is
-                # still incomplete, revisiting it must start its authored
-                # conversation even when an earlier visit was recorded.
-                is_node_r = str(node).lower() in {"noder", "node00r"}
-                masked_army_variant = (
-                    _az1_masked_army_variant(db, champ_id, node=node)
-                    if is_node_r else None
-                )
-                if (masked_army_variant and
-                        not data.get("quest_variant_completed")):
-                    data["completed"] = False
-                retryable_visit = visit_count > 0
-                data.update({
-                    "type": "Convo",
-                    "conversationId": authored_conversation,
-                    "repeatable": (
-                        retryable_visit and
-                        (_az1_node_is_repeatable(db, node) or
-                         bool(masked_army_variant and
-                              not data.get("quest_variant_completed")))
-                    ),
-                    "quest_variant_terminal": bool(
-                        masked_army_variant and masked_army_variant[2] and
-                        not data.get("quest_variant_completed")),
-                    "autostart": (not bool(data.get("completed")) and
-                                  (visit_count <= 0 or is_node_r)),
-                })
-                # A quest-giver conversation is intentionally left actionable
-                # after the quest is accepted. The client uses the node's
-                # completion flag to lower bridges and unlock exits; the
-                # quest turn-in conversation is what should complete this
-                # node later.
-                if (data.get("quest_start_open") and
-                        not data.get("completed")):
-                    data["repeatable"] = True
-                # Closing Brink Ridge's ordinary blockade explanation does
-                # not clear the road.  Only the successful blockade encounter
-                # sets blockade_cleared, so repair older states that marked
-                # this conversation complete and keep the node actionable.
-                if (str(node) == "Node019" and not blockade_cleared):
-                    data["completed"] = False
-            continue
-        guid, name, rewards_json = scene
-        upper_name = str(name or "").upper()
-        if "PANORAMA" in upper_name:
-            # PANORAMA scenes are reusable map portals. They must remain
-            # actionable after returning from the scene instead of becoming a
-            # completed Encounter/Convo location on the AREA map.
-            _normalize_az1_panorama_location(db, data)
-        elif "SHROOM HAUS" in upper_name:
-            # Kooo's introductory conversation precedes the card-choice
-            # window. Keep the authored Shroom Haus choices attached, but
-            # expose the conversation on the first visit.
-            data["type"] = ("Convo" if (not data.get("completed") and
-                                         not data.get("shroomhaus_ready"))
-                            else "ShroomHaus")
-            if data["type"] == "Convo":
-                data["conversationId"] = _az1_node_conversation(
-                    db, node, state, champ_id=champ_id)
-                data["shroomhaus_convo"] = True
-                data["repeatable"] = False
-                data["autostart"] = True
-            try:
-                choices = [x["guid"] for x in
-                           (json.loads(rewards_json or "{}").get("card_choice") or [])
-                           if isinstance(x, dict) and x.get("guid")]
-                if choices:
-                    data["choices"] = choices
-            except (TypeError, ValueError, json.JSONDecodeError):
-                pass
-        elif "DIALOG" in upper_name:
-            # Dialogue scenes are map conversations, not battles.  The client
-            # tries to build an encounter champion panel whenever this field
-            # is present; authored dialogue scenes intentionally have no AI
-            # champion/deck, which makes that panel throw before the convo can
-            # start.  Keep the scene GUID in the encounter catalog for
-            # protocol compatibility, but omit it from the map location.
-            data["encounter"] = None
-            # A Gaal camp is temporarily represented by the authored Gaal Camp
-            # ModDisplay after a paid Milosh reading.  Do not let normal AZ1
-            # scene hydration turn that active card window back into the
-            # conversation before the client has acknowledged it.
-            public_data = (((state or {}).get("PublicState") or {}).get("Data")
-                           or {})
-            if (node in gaal_nodes and
-                    data.get("type") == "ModDisplay" and
-                    public_data.get("gaal_fortune_guid")):
-                data.update({
-                    "modspath": "/gaal_fortune_guid",
-                    "window-title": "Gaal_Window_Title",
-                    "window-desc": "Gaal_Window_Text",
-                    "conversationId": None,
-                    "enabled": True,
-                    "visible": True,
-                    "autostart": False,
-                    "gaal_fortune_display": True,
-                })
-                continue
-            data["type"] = "Convo"
-            authored_conversation = _az1_node_conversation(
-                db, node, state, champ_id=champ_id)
-            authored_rows = _az1_node_conversation_rows(db, node)
-            if (authored_conversation and
-                    (_has_faction_variants(authored_rows) or
-                     not data.get("conversationId"))):
-                data["conversationId"] = authored_conversation
-            else:
-                data["conversationId"] = data.get("conversationId")
-            visits = (((state or {}).get("PublicState", {}) or {}).get(
-                "Data", {}) or {}).get("conversation_visits", {})
-            try:
-                visit_count = int(visits.get(str(node), 0) or 0)
-            except (TypeError, ValueError):
-                visit_count = 0
-            data["repeatable"] = (
-                visit_count > 0 and _az1_node_is_repeatable(db, node))
-            masked_army_variant = (
-                _az1_masked_army_variant(db, champ_id, node=node)
-                if str(node).lower() in {"noder", "node00r"} else None
-            )
-            if (masked_army_variant and
-                    not data.get("quest_variant_completed") and
-                    visit_count > 0):
-                data["completed"] = False
-                data["repeatable"] = True
-            data["quest_variant_terminal"] = bool(
-                masked_army_variant and masked_army_variant[2] and
-                not data.get("quest_variant_completed"))
-            if (data.get("quest_start_open") and
-                        not data.get("completed")):
-                data["repeatable"] = True
-            # The map token starts a conversation when it reaches an
-            # unfinished node. Without AutoStart the client only records the
-            # path and leaves the player at the prior location. Repeatable
-            # conversations intentionally remain unfinished so they can be
-            # entered again. After a completed visit, StartLoc re-enables the
-            # flag when the player deliberately returns to this node; keeping
-            # it off here prevents the client from reopening the conversation
-            # immediately after conv_done (or after a reconnect).
-            try:
-                visit_count = int(visits.get(str(node), 0) or 0)
-            except (TypeError, ValueError):
-                visit_count = 0
-            data["autostart"] = (not bool(data.get("completed")) and
-                                 visit_count <= 0)
-        elif (str(data.get("type") or "").lower() in
-              {"", "empty", "encounter"} or data.get("pre_encounter")):
-            data["encounter"] = guid
-            # A completed encounter may have a one-shot authored result
-            # conversation queued by _apply_gameend. Preserve that state on
-            # every getcampstate/visit hydration; otherwise the pre-encounter
-            # completion marker below turns it back into an Encounter and the
-            # client offers the battle again instead of the result dialogue.
-            if (data.get("outcome_conversation") and
-                    data.get("conversationId")):
-                data.update({
-                    "type": "Convo",
-                    "encounter": None,
-                    "completed": False,
-                    "repeatable": False,
-                    "autostart": True,
-                    "enabled": True,
-                    "visible": True,
-                })
-                continue
-            # Some battle scenes have an authored opening conversation but do
-            # not carry ``DIALOG`` in their scene name (for example Node009's
-            # Cockatwice prelude). Bind that conversation before exposing the
-            # battle. The marker lets conv_done promote the same location back
-            # to Encounter without a node-specific special case.
-            prelude = (None if "PANORAMA" in upper_name else
-                       _az1_pre_encounter_conversation(db, node, champ_id))
-            # Once the authored prelude is closed, keep the node as an
-            # Encounter so the player can start the battle.  The completion
-            # marker prevents hydration/reconnects from reopening the
-            # conversation; an unfinished battle remains startable until its
-            # game-end event marks the node completed.
-            if (prelude and not data.get("pre_encounter_completed") and
-                    not data.get("completed")):
-                data.update({
-                    "type": "Convo",
-                    "conversationId": prelude,
-                    "pre_encounter": True,
-                    "repeatable": False,
-                    "autostart": (not bool(data.get("completed"))),
-                })
-            else:
-                # Battles and authored dungeon/panorama scenes are actionable
-                # map encounters. Preserve explicit Convo/ShroomHaus overrides.
-                data["type"] = "Encounter"
-                if (data.get("completed") or
-                        data.get("pre_encounter_completed")):
-                    data["autostart"] = False
-                if data.get("pre_encounter_completed"):
-                    data["conversationId"] = None
-    if champ_id is not None and state is not None:
-        _sync_az1_quest_gates(db, champ_id, state)
-        _apply_az1_quest_markers(db, champ_id, state)
-
-
-def _az1_area_scene_state(champion_race=None, rewards_json=None, db=None):
-    """Build client locations from the authored Howling Plains SceneData."""
-    try:
-        raw = Path(__file__).parent.joinpath("Records", "SceneData.jsonl").read_text()
-        record = yaml.safe_load(json.loads(raw.splitlines()[4])) if yaml else None
-        items = (record or {}).get("m_ItemData", [])
-    except Exception:
-        items = []
-    if not items:
-        items = [{"m_MapNodeId": "Node001", "m_Name": "001 - Into the Woods",
-                  "m_Title": "Into The Woods", "m_Descriptions": [],
-                  "m_TotemType": "None"}]
-    locs, nodes = [], []
-    for i, item in enumerate(items):
-        node = item.get("m_MapNodeId") or f"Node{i+1:03d}"
-        title = item.get("m_Title") or item.get("m_Name") or node
-        desc = next((d.get("m_Description", "") for d in item.get("m_Descriptions", [])
-                     if d.get("m_Type") == "SingleClick"), "")
-        # Keep the authored starting node and its immediate map neighbors
-        # available; the map prefab supplies the connecting lines.
-        visible = i < 2
-        locs.append({"Data": {"name": title, "node": node, "type": "Empty",
-            "autostart": False, "autopan": False, "autotrigger": False,
-            "battle": None, "visible": visible, "enabled": visible,
-            "completed": (node == "Node001"), "repeatable": False, "givequest": False,
-            "turninquest": False, "impassable": False, "unknown": False,
-            "encounter": None, "encounter_desc": desc, "description": desc,
-            "title": title, "conversationId": None}})
-        nodes.append({"Name": node, "Data": {"id": node, "type": "DEFAULT"}})
-    for loc in locs:
-        if loc["Data"]["node"] == "Node002":
-            loc["Data"].update({"type": "Convo", "conversationId": None,
-                                 "givequest": True})
-        elif loc["Data"]["node"] == "Node004":
-            loc["Data"].update({"type": "ShroomHaus",
-                                 # Card choices are filled from the matching
-                                 # encounter_scenes.rewards_json record when
-                                 # the area state is activated.  Do not bake
-                                 # a particular Haus's cards into campaign
-                                 # logic; AZ1 has several distinct locations.
-                                 "choices": [],
-                                 "selection-type": "Shroomkin_Haus",
-                                 "selection-desc": "Shroomkin_Instructions"})
-    if db is not None:
-        _az1_append_path_forks(db, locs, nodes)
-    return locs, nodes
-
-
-def _az1_neighbors(db, node):
-    """Return AZ1 node IDs directly connected to *node* in the map graph."""
-    if not node:
-        return set()
-    rows = [(row[1],) for row in pve_db.db_az1_edges(db)
-            if str(row[0]) == str(node)]
-    return {str(row[0]) for row in rows if row and row[0]}
-
-
-def _az1_failed_nodes(state):
-    """Return AZ1 encounter nodes whose latest attempt was a loss."""
-    pdata = ((state or {}).get("PublicState", {}) or {}).get("Data", {}) or {}
-    values = list(pdata.get("failed_nodes") or [])
-    # Accept the singular form from any short-lived development saves.
-    if pdata.get("failed_node"):
-        values.append(pdata["failed_node"])
-    return {
-        _resolve_node(state, str(node))
-        for node in values
-        if node
-    }
-
-
-def _az1_node_opens_neighbors(state, node, failed_nodes=None):
-    """Whether an already visited AZ1 node may expose its outgoing paths.
-
-    Arrival alone is not completion for an action node.  In particular, an
-    encounter's prelude or active battle must not draw the paths beyond it;
-    the client should get those paths only after the node completes or is
-    returned to the map as retryable.  ``repeatable`` with AutoStart cleared
-    is the persisted retryable/re-enterable state used by AZ1 encounters and
-    repeatable conversations.  Plain map locations retain the historical
-    arrival-based reveal behaviour.
-    """
-    canonical = _resolve_node(state, str(node or ""))
-    data = next(
-        ((loc.get("Data") or {}) for loc in state.get("VisLocs", [])
-         if _resolve_node(state, str((loc.get("Data") or {}).get("node") or
-                                     (loc.get("Data") or {}).get("name") or ""))
-         == canonical),
-        None,
-    )
-    if data is None:
-        return True
-    if data.get("completed"):
-        return True
-    # A retryable encounter or a repeatable conversation is left incomplete,
-    # but it is no longer auto-starting after its result/conversation closes.
-    return bool(data.get("repeatable") and not data.get("autostart"))
-
-
-def _az1_path_name(from_node, to_node, stored_name=""):
-    """Return the client prefab path name for an authored AZ1 edge.
-
-    Older databases may contain the opening edges with an empty ``path_name``
-    because the seed was added before those rows were populated.  The client
-    path objects use the stable ``Path_<start>_<end>`` convention, so derive
-    that name when no stored name is available.
-    """
-    if stored_name:
-        return str(stored_name)
-    left, right = sorted((str(from_node), str(to_node)))
-    return f"Path_{left}_{right}"
-
-
-def _az1_locked_paths(db, state, visited=None):
-    """Return AZ1 paths that must stay hidden behind unfinished locations.
-
-    Node visibility is cumulative, so an unvisited destination can become
-    visible through a completed alternate route.  The Unity client otherwise
-    renders every path whose endpoints are visible.  Lock only the individual
-    path joining an incomplete real location to an unvisited real location;
-    already travelled paths and prefab-only forks are never locked here.
-    """
-    pdata = state.setdefault("PublicState", {}).setdefault("Data", {})
-    if visited is None:
-        visited = {
-            _resolve_node(state, str(node))
-            for node in (pdata.get("visited_nodes") or [])
-            if node
-        }
-    visited_paths = {
-        str(path) for path in (pdata.get("visited_paths") or []) if path
-    }
-    explicitly_unlocked = {
-        _resolve_node(state, str(node))
-        for node in (pdata.get("unlocked_nodes") or [])
-        if node
-    }
-    path_forks = _az1_path_fork_ids(db)
-    failed_nodes = _az1_failed_nodes(state)
-    location_data = {}
-    for loc in state.get("VisLocs", []):
-        data = loc.get("Data") or {}
-        node = data.get("node") or data.get("name")
-        if node:
-            location_data[_resolve_node(state, str(node))] = data
-
-    def incomplete(node):
-        data = location_data.get(node)
-        return (node not in path_forks and data is not None and
-                not _az1_node_opens_neighbors(state, node, failed_nodes))
-
-    def unvisited(node):
-        return node not in path_forks and node not in visited
-
-    rows = pve_db.db_az1_edges(db)
-    # A path is represented by two directed rows.  Evaluate it once so a
-    # blank legacy row cannot produce a different lock name from its reverse.
-    grouped = {}
-    for from_node, to_node, stored_name in rows:
-        start = _resolve_node(state, str(from_node))
-        end = _resolve_node(state, str(to_node))
-        path = _az1_path_name(start, end, stored_name)
-        grouped.setdefault(path, set()).add((start, end))
-
-    locked = set()
-    for path, endpoints in grouped.items():
-        if path in visited_paths:
-            continue
-        if any((incomplete(start) and unvisited(end)) or
-               (incomplete(end) and unvisited(start))
-               for start, end in endpoints):
-            # An explicit quest unlock opens the edge from a visited node
-            # that is already allowed to expose neighbours.  Do not treat an
-            # unlocked source as an unlock for its own unfinished exits:
-            # Node013 -> Node016 and Node015 -> Node016 must remain closed
-            # until those nodes open their neighbours.
-            forced_open = any(
-                (end in explicitly_unlocked and start in visited and
-                 _az1_node_opens_neighbors(state, start, failed_nodes)) or
-                (start in explicitly_unlocked and end in visited and
-                 _az1_node_opens_neighbors(state, end, failed_nodes))
-                for start, end in endpoints
-            )
-            if not forced_open:
-                locked.add(path)
-                continue
-        # A client-only fork is always present for map geometry, but its
-        # connecting segment should not appear as an alternate route to an
-        # unvisited real node when that node already has an open ordinary
-        # neighbour.  For example, Node012 is reached directly from the
-        # completed/retryable Node00R route; keep Fork001 -> Node012 hidden
-        # until the bridge itself has been visited, while allowing the direct
-        # Node00R -> Node012 path to draw.
-        real_endpoints = {
-            node for pair in endpoints for node in pair
-            if node not in path_forks
-        }
-        if len(real_endpoints) != 1:
-            continue
-        real_node = next(iter(real_endpoints))
-        if real_node in visited:
-            continue
-        if real_node in explicitly_unlocked:
-            continue
-        if any(
-                neighbour not in path_forks and neighbour in visited and
-                _az1_node_opens_neighbors(state, neighbour, failed_nodes)
-                for neighbour in _az1_neighbors(db, real_node)):
-            locked.add(path)
-    return sorted(locked)
-
-
-def _az1_is_adjacent(db, start_node, end_node):
-    """Whether two AZ1 locations are joined by an authored map path.
-
-    The client walks through prefab-only path forks (such as ``Fork001``)
-    while the server receives only the destination Location.  Treat a
-    location pair joined by one such fork as adjacent for movement validation.
-    """
-    path_forks = _az1_path_fork_ids(db)
-    # Forks are client-only geometry. They may participate in a route, but
-    # neither endpoint of a server movement request may be a fork itself.
-    if start_node in path_forks or end_node in path_forks:
-        return False
-    if not start_node or not end_node or start_node == end_node:
-        return start_node == end_node
-    if pve_db.db_az1_edge_exists(start_node, end_node, db):
-        return True
-    return pve_db.db_az1_fork_edge_exists(start_node, end_node, db)
-
-
-def _az1_has_safe_visited_route(db, state, destination, visited=None):
-    """Whether *destination* is adjacent to a previously visited safe node.
-
-    A failed encounter only blocks travel to a destination that can be reached
-    solely through that failed node. A destination with an alternate path from
-    any other visited node remains travelable (for example Node014 is
-    reachable from both Node013 and the already-visited Node012 bridge).
-    Retryable nodes may still draw their outgoing paths; this helper controls
-    whether a new destination may be entered through a failed route.
-    """
-    destination = _resolve_node(state, str(destination or ""))
-    if not destination:
-        return False
-    if visited is None:
-        pdata = state.setdefault("PublicState", {}).setdefault("Data", {})
-        visited = {
-            _resolve_node(state, str(node))
-            for node in (pdata.get("visited_nodes") or [])
-            if node
-        }
-    failed = _az1_failed_nodes(state)
-    return any(
-        node not in failed and _az1_is_adjacent(db, node, destination)
-        for node in visited
-    )
-
-
-def _az1_reveal_neighbors(db, state, current_node=None):
-    """Reveal the current AZ1 node and eligible graph neighbours.
-
-    The client owns the static NodesPrefab (positions, paths, and FOW
-    visuals), while this state controls which of those nodes are known. Keep
-    every visited node visible, but do not reveal paths beyond an active or
-    unfinished action node until it is completed or retryable.
-    """
-    if not isinstance(state, dict):
-        return
-    current = _resolve_node(
-        state, current_node or state.get("ALoc") or state.get("LastNode"))
-    pdata = state.setdefault("PublicState", {}).setdefault("Data", {})
-    visited = {
-        _resolve_node(state, str(node))
-        for node in (pdata.get("visited_nodes") or [])
-        if node
-    }
-    if current:
-        visited.add(current)
-    failed_nodes = _az1_failed_nodes(state)
-    pdata["locked_paths"] = _az1_locked_paths(db, state, visited)
-    # Revealed map space is cumulative. Keep neighbours of every completed or
-    # retryable visited node, not only the node occupied on the latest
-    # response; otherwise travelling from Dunnwood to a side location would
-    # hide the still-discovered Node007 branch again. An unfinished encounter
-    # is intentionally visible itself but does not open its outgoing paths.
-    reveal = set(visited)
-    for node in visited:
-        if _az1_node_opens_neighbors(state, node, failed_nodes):
-            reveal.update(_az1_neighbors(db, node))
-    blocked = {
-        _resolve_node(state, str(node))
-        for node in (pdata.get("blocked_nodes") or [])
-        if node
-    }
-    forced_visible = {
-        _resolve_node(state, str(node))
-        for node in ((pdata.get("quest_reveal_nodes") or []) +
-                     (pdata.get("unlocked_nodes") or []))
-        if node
-    }
-    forced_hidden = {
-        _resolve_node(state, str(node))
-        for node in (pdata.get("quest_hidden_nodes") or [])
-        if node
-    }
-    # Brink Ridge's opening conversation explains that the northern road is
-    # closed by a blockade.  The authored graph stores those destinations as
-    # Node021, Node023, and Node077; the client map represents Node023 as its
-    # two authored variants, Node023A/Node023B.  Keep the connections hidden
-    # until a successful Brink Ridge encounter explicitly clears the blockade;
-    # merely closing its explanatory conversation is not enough.
-    blockade_data = next(
-        ((loc.get("Data") or {}) for loc in state.get("VisLocs", [])
-         if (loc.get("Data") or {}).get("node") == "Node019"),
-        None,
-    )
-    blockade_cleared = bool(pdata.get("blockade_cleared"))
-    if blockade_data is not None and not blockade_cleared:
-        northbound = {
-            str(node) for node in _az1_neighbors(db, "Node019")
-            if str(node) != "Node016"
-        }
-        blocked.update(northbound)
-        for loc in state.get("VisLocs", []):
-            node = str((loc.get("Data") or {}).get("node") or "")
-            if node in northbound or ("Node023" in northbound and
-                                      node.startswith("Node023")):
-                forced_hidden.add(node)
-                # Persist the concrete client node IDs as well as the
-                # canonical graph ID so stale visit_node requests cannot
-                # bypass the blockade after the conversation closes.
-                if node not in blocked:
-                    blocked.add(node)
-        blocked_values = [str(value) for value in (pdata.get("blocked_nodes") or [])
-                          if value]
-        for node in blocked:
-            if node not in blocked_values:
-                blocked_values.append(node)
-        pdata["blocked_nodes"] = blocked_values
-    elif blockade_data is not None:
-        northbound = {
-            str(node) for node in _az1_neighbors(db, "Node019")
-            if str(node) != "Node016"
-        }
-        blocked = {
-            value for value in blocked
-            if value not in northbound and not (
-                "Node023" in northbound and str(value).startswith("Node023"))
-        }
-        pdata["blocked_nodes"] = [
-            str(value) for value in (pdata.get("blocked_nodes") or [])
-            if str(value) not in northbound and not (
-                "Node023" in northbound and str(value).startswith("Node023"))
-        ]
-    path_forks = _az1_path_fork_ids(db)
-
-    def _node_set_contains(values, node):
-        if node in values:
-            return True
-        # Node023 is represented by two authored client locations in the
-        # current map data, so a canonical Node023 gate/reveal applies to
-        # both variants.
-        return ("Node023" in values and
-                str(node or "").startswith("Node023"))
-
-    for loc in state.get("VisLocs", []):
-        data = loc.get("Data") or {}
-        node = data.get("node")
-        if not node:
-            continue
-        # A quest gate can hide an authored neighbour even when the static
-        # map graph says it is adjacent.  A previously visited node remains
-        # visible so reconnects never erase discovered map space.
-        known = (node in path_forks or _node_set_contains(visited, node) or
-                 bool(data.get("completed")) or
-                 _node_set_contains(reveal, node) or
-                 _node_set_contains(forced_visible, node))
-        if (_node_set_contains(blocked, node) and
-                not _node_set_contains(visited, node) and
-                node not in path_forks):
-            known = False
-        if _node_set_contains(forced_hidden, node) and node not in path_forks:
-            known = False
-        data["visible"] = known
-        data["enabled"] = False if node in path_forks else known
-
-
-def _az1_set_node_gate(state, node, blocked):
-    """Add/remove a quest-controlled AZ1 map gate idempotently."""
-    pdata = state.setdefault("PublicState", {}).setdefault("Data", {})
-    values = [str(value) for value in (pdata.get("blocked_nodes") or []) if value]
-    unlocked = [str(value) for value in (pdata.get("unlocked_nodes") or []) if value]
-    node = str(node)
-    if blocked and node not in values:
-        if node not in unlocked:
-            values.append(node)
-    elif not blocked:
-        values = [value for value in values if value != node]
-        if node not in unlocked:
-            unlocked.append(node)
-    pdata["blocked_nodes"] = values
-    pdata["unlocked_nodes"] = unlocked
-
-
-def _az1_set_quest_route(db, state, visible_node, hidden_node):
-    """Expose one faction quest destination and hide its counterpart.
-
-    ``quest_nodes`` is the client-facing map marker.  The separate reveal and
-    hidden lists make the requested visibility survive the normal neighbour
-    recalculation and reconnects without pretending the destination was
-    already visited.
-    """
-    pdata = state.setdefault("PublicState", {}).setdefault("Data", {})
-    visible_node = str(visible_node)
-    hidden_node = str(hidden_node)
-
-    def _node_list(key):
-        return [str(value) for value in (pdata.get(key) or [])
-                if value and str(value) not in {visible_node, hidden_node}]
-
-    quest_nodes = _node_list("quest_nodes")
-    quest_nodes.append(visible_node)
-    pdata["quest_nodes"] = quest_nodes
-
-    reveal_nodes = _node_list("quest_reveal_nodes")
-    reveal_nodes.append(visible_node)
-    pdata["quest_reveal_nodes"] = reveal_nodes
-
-    hidden_nodes = _node_list("quest_hidden_nodes")
-    hidden_nodes.append(hidden_node)
-    pdata["quest_hidden_nodes"] = hidden_nodes
-
-    blocked_nodes = _node_list("blocked_nodes")
-    blocked_nodes.append(hidden_node)
-    pdata["blocked_nodes"] = blocked_nodes
-
-    unlocked_nodes = [str(value) for value in (pdata.get("unlocked_nodes") or [])
-                      if value and str(value) != hidden_node]
-    if visible_node not in unlocked_nodes:
-        unlocked_nodes.append(visible_node)
-    pdata["unlocked_nodes"] = unlocked_nodes
-
-    _az1_reveal_neighbors(db, state,
-                          state.get("LastNode") or state.get("ALoc"))
-    # The destination is intentionally visible even when it is not adjacent
-    # to the player's current node.  The opposing branch remains hidden even
-    # if it was previously revealed by normal map exploration.
-    for loc in state.get("VisLocs", []):
-        data = loc.get("Data") or {}
-        node = data.get("node")
-        if node == visible_node:
-            data["visible"] = True
-            data["enabled"] = True
-        elif node == hidden_node:
-            data["visible"] = False
-            data["enabled"] = False
 
 
 def _quest_state_row(db, champ_id, quest_script):
@@ -2514,676 +782,18 @@ _AZ1_QUEST_START_PREREQUISITES = {
 }
 
 
-def _quest_start_prerequisites_met(db, champ_id, quest_script):
-    for prerequisite in _AZ1_QUEST_START_PREREQUISITES.get(
-            str(quest_script or ""), ()):
-        _qid, state = _quest_state_row(db, champ_id, prerequisite)
-        if not state or not state.get("Finished"):
-            return False
-    return True
+# Named quest-start content hooks (``quest_templates.start_hook``).  Map
+# gates come from campaign/campaign_rules via campaign_gates and quest content from
+# the editor data; none are registered now.
+_QUEST_START_HOOKS = {}
 
 
-def _quest_hook_az1_tamed_start(db, champ_id, state):
-    """Tamed quest: keep gated branches closed until their quests unlock."""
-    before = json.dumps(state, sort_keys=True)
-    _az1_set_node_gate(state, "Node005", True)
-    # Shadowgrove is the first objective of Cross the Zodiac River. Keep it
-    # hidden until Wallace actually starts that quest.
-    zodiac_rows = pve_db.db_campaign_state_rows(
-        champ_id, "QUEST", db, template_name="az01_q_cross_the_river_part2",
-        require_state=True, newest_first=True)
-    zodiac_row = zodiac_rows[0][1:2] if zodiac_rows else None
-    try:
-        zodiac_active = bool(
-            zodiac_row and not json.loads(zodiac_row[0] or "{}").get("Finished")
-        )
-    except (TypeError, ValueError, json.JSONDecodeError):
-        zodiac_active = False
-    if not zodiac_active:
-        _az1_set_node_gate(state, "Node018", True)
-        _az1_gate_zodiac_west_bridge(db, state, True)
-        pdata = state.setdefault("PublicState", {}).setdefault("Data", {})
-        hidden = [str(value) for value in (pdata.get("quest_hidden_nodes") or [])
-                  if value and str(value) != "Node018"]
-        hidden.append("Node018")
-        pdata["quest_hidden_nodes"] = hidden
-    # The west half of the Zila bridge is opened only after the Savage Lord
-    # route is resolved; it must not appear on a fresh AZ1 map.
-    _az1_set_node_gate(state, "Node015", True)
-    pdata = state.setdefault("PublicState", {}).setdefault("Data", {})
-    # A stale save may contain a prior west-bridge visit.  While the gate is
-    # active, purge that visit/path so reconnect hydration cannot resurrect
-    # the node merely because it was once discovered.
-    pdata["visited_nodes"] = [
-        value for value in (pdata.get("visited_nodes") or [])
-        if str(value) not in {"Node015", "Bridge over the Zila - West"}
-    ]
-    pdata["visited_paths"] = [
-        value for value in (pdata.get("visited_paths") or [])
-        if "Node015" not in str(value)
-    ]
-    if isinstance(pdata.get("conversation_visits"), dict):
-        pdata["conversation_visits"].pop("Node015", None)
-    _az1_reveal_neighbors(db, state, state.get("LastNode"))
-    for loc in state.get("VisLocs", []):
-        data = loc.get("Data") or {}
-        if data.get("node") == "Node015" or (
-                data.get("node") == "Node018" and not zodiac_active):
-            data.update({"visible": False, "enabled": False})
-    return json.dumps(state, sort_keys=True) != before
 
 
-def _az1_unlock_west_bridge(state):
-    """Open the west Zila bridge after the Savage Lord resolution."""
-    _az1_set_node_gate(state, "Node015", False)
 
 
-def _az1_gate_zodiac_west_bridge(db, state, blocked):
-    """Hide or reveal the AZ1 West Zodiac bridge behind Wallace's handoff.
-
-    Node038 is a normal graph neighbour of Node030, so ordinary cumulative
-    neighbour revealing would expose it before the Cross Zodiac quest reaches
-    its Wallace turn-in objective. Keep the gate explicit and remove stale
-    discovery/path state while it is closed.
-    """
-    pdata = state.setdefault("PublicState", {}).setdefault("Data", {})
-    node_id = "Node038"
-    unlocked = [str(value) for value in (pdata.get("unlocked_nodes") or [])
-                if str(value) != node_id]
-    pdata["unlocked_nodes"] = unlocked
-    _az1_set_node_gate(state, node_id, bool(blocked))
-    hidden = [str(value) for value in (pdata.get("quest_hidden_nodes") or [])
-              if str(value) != node_id]
-    if blocked:
-        hidden.append(node_id)
-        pdata["quest_hidden_nodes"] = hidden
-        pdata["visited_nodes"] = [
-            value for value in (pdata.get("visited_nodes") or [])
-            if str(value) not in {node_id, "Bridge over the Zodiac - West"}
-        ]
-        pdata["visited_paths"] = [
-            value for value in (pdata.get("visited_paths") or [])
-            if node_id not in str(value)
-        ]
-        if isinstance(pdata.get("conversation_visits"), dict):
-            pdata["conversation_visits"].pop(node_id, None)
-    else:
-        pdata["quest_hidden_nodes"] = hidden
-    _az1_reveal_neighbors(db, state, state.get("LastNode") or state.get("ALoc"))
-    if blocked:
-        for loc in state.get("VisLocs", []):
-            data = loc.get("Data") or {}
-            if data.get("node") == node_id:
-                data["visible"] = False
-                data["enabled"] = False
 
 
-def _quest_hook_az1_find_horwich_sea_start(db, champ_id, state):
-    """Find Horwich Sea: open the previously blocked Fonferek branch."""
-    before = json.dumps(state, sort_keys=True)
-    _az1_set_node_gate(state, "Node005", False)
-    _az1_reveal_neighbors(db, state, state.get("LastNode"))
-    return json.dumps(state, sort_keys=True) != before
-
-
-def _quest_hook_az1_cross_the_river_start(db, champ_id, state):
-    """Cross the Zila River: reveal its authored route and objective nodes."""
-    before = json.dumps(state, sort_keys=True)
-    pdata = state.setdefault("PublicState", {}).setdefault("Data", {})
-    # Fork001 is connective prefab geometry and is always visible.  The quest
-    # reveals only its two authored destinations; the first encounter uses a
-    # zero GUID in source data, so these node IDs cannot be inferred from it.
-    reveal = ("Node013", "Node014")
-    path_forks = _az1_path_fork_ids(db)
-    for key in ("quest_nodes", "quest_reveal_nodes", "unlocked_nodes"):
-        values = [str(value) for value in (pdata.get(key) or []) if value]
-        if key in {"quest_reveal_nodes", "unlocked_nodes"}:
-            values = [value for value in values if value not in path_forks]
-        for node in reveal:
-            if node not in values:
-                values.append(node)
-        pdata[key] = values
-    _az1_reveal_neighbors(db, state, state.get("LastNode"))
-    return json.dumps(state, sort_keys=True) != before
-
-
-def _quest_hook_az1_cross_zodiac_start(db, champ_id, state):
-    """Cross the Zodiac River: open Shadowgrove and mark its encounter."""
-    before = json.dumps(state, sort_keys=True)
-    _quest_id, quest_state = _quest_state_row(
-        db, champ_id, "az01_q_cross_the_river_part2")
-    flags = (quest_state or {}).get("Flags") or {}
-    try:
-        objective_index = int(flags.get("_quest_objective_idx", 0) or 0)
-    except (TypeError, ValueError):
-        objective_index = 0
-    # Step 2 is Wallace's authored "Return to Wallace" conversation. West is
-    # not available until that objective is complete (Step 3 is active).
-    _az1_gate_zodiac_west_bridge(db, state, objective_index < 2)
-    _az1_set_node_gate(state, "Node018", False)
-    pdata = state.setdefault("PublicState", {}).setdefault("Data", {})
-    pdata["quest_hidden_nodes"] = [
-        str(value) for value in (pdata.get("quest_hidden_nodes") or [])
-        if str(value) != "Node018"
-    ]
-    _az1_reveal_neighbors(db, state, state.get("LastNode") or state.get("ALoc"))
-    for loc in state.get("VisLocs", []):
-        data = loc.get("Data") or {}
-        if data.get("node") == "Node018":
-            data.update({"visible": True, "enabled": True})
-    return json.dumps(state, sort_keys=True) != before
-
-
-def _quest_hook_az1_smoldering_dead_start(db, champ_id, state):
-    """Make Brink Ridge launch the active Smoldering Dead encounter.
-
-    The source quest records the first objective as a dungeon objective, while
-    the AZ1 map places the encounter behind the Brink Ridge conversation.  At
-    quest start, replace that conversation with the authored encounter scene;
-    the normal area game-end path then completes the location and advances the
-    journal objective.  Once the objective changes to the report conversation,
-    this hook leaves Brink Ridge alone so its normal map conversation is
-    restored by hydration.
-    """
-    before = json.dumps(state, sort_keys=True)
-    _quest_id, quest_state = _quest_state_row(db, champ_id, "q_smoldering_dead")
-    if not quest_state or quest_state.get("Finished"):
-        return False
-    flags = quest_state.get("Flags") or {}
-    objectives = flags.get("_quest_objectives") or []
-    try:
-        index = int(flags.get("_quest_objective_idx", 0) or 0)
-    except (TypeError, ValueError):
-        index = 0
-    if not (0 <= index < len(objectives)):
-        return False
-    objective = objectives[index]
-    if str(objective.get("type") or "").lower() not in {"dungeon", "encounter"}:
-        return False
-    encounter = str(objective.get("encounter") or "")
-    if not encounter:
-        return False
-
-    for loc in state.get("VisLocs", []):
-        data = loc.get("Data") or {}
-        if data.get("node") != "Node019":
-            continue
-        data.update({
-            "type": "Encounter",
-            "encounter": encounter,
-            "conversationId": None,
-            "completed": False,
-            "repeatable": False,
-            "pre_encounter": False,
-            "pre_encounter_completed": False,
-            "outcome_conversation": False,
-            "autostart": True,
-            "enabled": True,
-            "visible": True,
-        })
-        break
-    _az1_reveal_neighbors(db, state, state.get("LastNode") or state.get("ALoc"))
-    return json.dumps(state, sort_keys=True) != before
-
-
-def _quest_hook_az1_find_cave_in_start(db, champ_id, state):
-    """Find the Cave-In: reveal Node017; hide the opposing route and grotto."""
-    before = json.dumps(state, sort_keys=True)
-    _az1_set_node_gate(state, "Node025", True)  # Lena Grotto
-    _az1_set_quest_route(db, state, "Node017", "Node034")
-    return json.dumps(state, sort_keys=True) != before
-
-
-def _quest_hook_az1_find_ambling_mesa_start(db, champ_id, state):
-    """Find Ambling Mesa: reveal Node034; hide the opposing route and grotto."""
-    before = json.dumps(state, sort_keys=True)
-    _az1_set_node_gate(state, "Node025", True)  # Lena Grotto
-    _az1_set_quest_route(db, state, "Node034", "Node017")
-    return json.dumps(state, sort_keys=True) != before
-
-
-def _az1_apply_masked_army_branch(db, champ_id, state):
-    """Open Lena Grotto and keep Vale retryable for its faction branch."""
-    variant = _az1_masked_army_variant(db, champ_id)
-    if not variant:
-        return False
-    before = json.dumps(state, sort_keys=True)
-    pdata = state.setdefault("PublicState", {}).setdefault("Data", {})
-
-    # Find Cave-In/Ambling Mesa use the same map gate for their opposing
-    # route.  Once the faction quest has supplied the Masked Army branch,
-    # Lena Grotto is an authored destination in its own right.
-    _az1_set_node_gate(state, "Node025", False)
-    for key in ("quest_hidden_nodes", "blocked_nodes"):
-        pdata[key] = [
-            str(value) for value in (pdata.get(key) or [])
-            if str(value) != "Node025"
-        ]
-    unlocked = [str(value) for value in (pdata.get("unlocked_nodes") or [])
-                if value]
-    if "Node025" not in unlocked:
-        unlocked.append("Node025")
-    pdata["unlocked_nodes"] = unlocked
-
-    # A previous generic Vale conversation must not remain terminal after a
-    # faction quest changes the available authored conversation.
-    for loc in state.get("VisLocs", []):
-        data = loc.get("Data") or {}
-        node = str(data.get("node") or "")
-        if node == "Node00R":
-            terminal_consumed = bool(
-                variant[2] and data.get("quest_variant_completed"))
-            data.update({
-                "completed": terminal_consumed,
-                "repeatable": not terminal_consumed,
-                "quest_variant_terminal": bool(
-                    variant[2] and not terminal_consumed),
-                "visible": True,
-                "enabled": True,
-            })
-        elif node == "Node025":
-            data.update({"visible": True, "enabled": True})
-    _az1_reveal_neighbors(db, state, state.get("LastNode") or state.get("ALoc"))
-    # The explicit quest destination must remain visible even when the latest
-    # location is not adjacent to it.
-    for loc in state.get("VisLocs", []):
-        data = loc.get("Data") or {}
-        if data.get("node") == "Node025":
-            data.update({"visible": True, "enabled": True})
-    return json.dumps(state, sort_keys=True) != before
-
-
-_QUEST_START_HOOKS = {
-    "az1_tamed_start": _quest_hook_az1_tamed_start,
-    "az1_cross_the_river_start": _quest_hook_az1_cross_the_river_start,
-    "az1_cross_zodiac_start": _quest_hook_az1_cross_zodiac_start,
-    "az1_smoldering_dead_start": _quest_hook_az1_smoldering_dead_start,
-    "az1_find_horwich_sea_start": _quest_hook_az1_find_horwich_sea_start,
-    "az1_find_cave_in_start": _quest_hook_az1_find_cave_in_start,
-    "az1_find_ambling_mesa_start": _quest_hook_az1_find_ambling_mesa_start,
-    # Backwards-compatible alias for databases seeded by the earlier schema.
-    "az1_sea_witch_start": _quest_hook_az1_find_horwich_sea_start,
-}
-
-
-def _run_quest_start_hook(db, champ_id, hook_name):
-    """Run a named, whitelisted metadata hook against the champion's AZ1 area."""
-    hook = _QUEST_START_HOOKS.get(str(hook_name or ""))
-    if hook is None:
-        return False
-    row = pve_db.db_active_area_campaign(champ_id, conn=db)
-    if not row:
-        return False
-    try:
-        state = json.loads(row[1] or "{}")
-    except (TypeError, ValueError, json.JSONDecodeError):
-        return False
-    changed = bool(hook(db, champ_id, state))
-    if changed:
-        _save_campaign_state(db, row[0], state)
-        db.commit()
-    return changed
-
-
-def _sync_az1_quest_gates(db, champ_id, state):
-    """Reapply active quest start hooks after reconnects or state rebuilds.
-
-    The quest script is deliberately not interpreted here.  Each active quest
-    contributes the named function stored in ``quest_templates.start_hook``;
-    hooks are replayed in grant order so a later unlock hook can override an
-    earlier blocking hook while the persisted ``unlocked_nodes`` flag keeps an
-    unlocked path open on future loads.
-    """
-    if not isinstance(state, dict):
-        return False
-    before = json.dumps(state, sort_keys=True)
-    hooks = pve_db.db_active_quest_hooks(champ_id, conn=db)
-    for _quest_id, hook_name in hooks:
-        try:
-            hook_state = json.loads(
-                pve_db.db_campaign_state(_quest_id, conn=db) or "{}")
-        except (TypeError, ValueError, json.JSONDecodeError):
-            continue
-        if hook_state.get("Finished"):
-            continue
-        hook = _QUEST_START_HOOKS.get(str(hook_name or ""))
-        if hook:
-            hook(db, champ_id, state)
-    _az1_apply_masked_army_branch(db, champ_id, state)
-    _az1_reveal_neighbors(db, state, state.get("LastNode") or state.get("ALoc"))
-    return json.dumps(state, sort_keys=True) != before
-
-
-def _grant_quests_for_conversation(db, champ_id, campaign_template,
-                                   conversation_guid):
-    """Grant all eligible quest-start rows for a completed conversation."""
-    if not conversation_guid:
-        return [], []
-    faction = _quest_faction_for_champion(db, champ_id)
-    rows = pve_db.db_quest_start_rows(
-        conversation_guid, campaign_template, conn=db)
-    spawned, hooks = [], []
-    for script, hook, row_faction, campaign_group in rows:
-        if not _quest_row_matches_faction(row_faction, faction):
-            continue
-        existing_id, _existing_state = _quest_state_row(db, champ_id, script)
-        quest_id = _ensure_quest_campaign(db, champ_id, campaign_group, script)
-        if not quest_id:
-            continue
-        if existing_id is None:
-            qstate = pve_db.db_campaign_state(quest_id, conn=db)
-            if qstate:
-                spawned.append((quest_id, script, json.loads(qstate)))
-            if hook:
-                hooks.append(hook)
-    for hook in hooks:
-        _run_quest_start_hook(db, champ_id, hook)
-    return spawned, hooks
-
-
-def _apply_az1_quest_markers(db, champ_id, state):
-    """Apply authored quest flags and objective markers to an AZ1 area.
-
-    The client expects ``PublicState.Data.quest_nodes`` to contain map node
-    IDs.  Quest metadata, however, identifies encounter objectives by scene
-    GUID (and conversation objectives by conversation GUID), so resolve those
-    references against the hydrated area locations at runtime.  This keeps
-    quest markers correct for every authored quest and avoids node-specific
-    campaign code.  All incomplete objectives are marked; undiscovered ones
-    remain hidden by the normal fog-of-war visibility state and acquire their
-    marker when the node is revealed.
-    """
-    if not isinstance(state, dict):
-        return False
-    faction = _quest_faction_for_champion(db, champ_id)
-    changed = False
-
-    # Resolve authored objective references to actual AZ1 map nodes.  The
-    # area location owns the encounter/conversation GUID after hydration.
-    encounter_nodes = {}
-    conversation_nodes = {}
-    for loc in state.get("VisLocs", []):
-        data = loc.setdefault("Data", {})
-        node = data.get("node") or data.get("name")
-        if not node or not str(node).lower().startswith("node"):
-            continue
-        encounter = data.get("encounter")
-        if encounter:
-            encounter_nodes.setdefault(str(encounter), set()).add(str(node))
-        # Dialogue-backed encounter nodes intentionally omit the encounter
-        # field from the client location to avoid opening the champion panel.
-        # The authored node scene remains the objective link.
-        scene = _az1_scene_for_node(db, node)
-        if scene and scene[0]:
-            encounter_nodes.setdefault(str(scene[0]), set()).add(str(node))
-        conversation = data.get("conversationId")
-        if conversation:
-            conversation_nodes.setdefault(str(conversation), set()).add(str(node))
-    # A location's currently selected conversation may be the generic first
-    # visit variant, while an active quest objective points at another
-    # authored conversation on the same node (for example Winston Step 3 at
-    # Node012).  Resolve every authored conversation GUID as well so quest
-    # markers and active-objective overrides use the source catalog.
-    try:
-        authored_rows = pve_db.db_az1_node_conversation_ids(conn=db)
-    except Exception:
-        authored_rows = []
-    for node, conversation in authored_rows:
-        if node and conversation:
-            conversation_nodes.setdefault(str(conversation), set()).add(str(node))
-
-    quest_nodes = set()
-    active_objective_conversations = set()
-    quest_rows = pve_db.db_started_quest_states(champ_id, conn=db)
-    for quest_script, raw_state in quest_rows:
-        try:
-            quest_state = json.loads(raw_state or "{}")
-        except (TypeError, ValueError, json.JSONDecodeError):
-            continue
-        if not isinstance(quest_state, dict) or quest_state.get("Finished"):
-            continue
-        flags = quest_state.setdefault("Flags", {})
-        old_objectives = flags.get("_quest_objectives") or []
-        objectives = _materialize_quest_objectives(
-            db, champ_id, quest_script, old_objectives)
-        if objectives != old_objectives:
-            flags["_quest_objectives"] = objectives
-            quest_id = pve_db.db_quest_campaign_id(
-                champ_id, quest_script, conn=db)
-            if quest_id:
-                _save_campaign_state(db, quest_id, quest_state)
-            db.commit()
-        try:
-            objective_index = int(flags.get("_quest_objective_idx", 0) or 0)
-        except (TypeError, ValueError):
-            objective_index = -1
-        if 0 <= objective_index < len(objectives):
-            current = objectives[objective_index]
-            if isinstance(current, dict):
-                active_objective_conversations.update(
-                    _quest_objective_conversation_guids(
-                        db, champ_id, quest_script, current))
-        completed = {
-            str((loc.get("Data") or {}).get("node") or
-                (loc.get("Data") or {}).get("name"))
-            for loc in quest_state.get("VisLocs", [])
-            if (loc.get("Data") or {}).get("completed")
-        }
-        for objective in objectives:
-            if not isinstance(objective, dict):
-                continue
-            objective_id = str(objective.get("id") or "")
-            if objective_id and objective_id in completed:
-                continue
-            encounter = objective.get("encounter") or _quest_objective_scene_guid(
-                db, quest_script, objective)
-            if encounter:
-                quest_nodes.update(encounter_nodes.get(str(encounter), set()))
-            conversations = _quest_objective_conversation_guids(
-                db, champ_id, quest_script, objective)
-            for conversation in conversations:
-                quest_nodes.update(conversation_nodes.get(str(conversation), set()))
-
-    pdata = state.setdefault("PublicState", {}).setdefault("Data", {})
-    # Preserve map order so the payload remains stable for clients and tests.
-    # The client turns these IDs into quest objectives on the map, so do not
-    # advertise an objective while its location is still hidden by fog of war.
-    ordered_quest_nodes = [
-        str((loc.get("Data") or {}).get("node"))
-        for loc in state.get("VisLocs", [])
-        if str((loc.get("Data") or {}).get("node")) in quest_nodes
-        and bool((loc.get("Data") or {}).get("visible"))
-    ]
-    if pdata.get("quest_nodes") != ordered_quest_nodes:
-        pdata["quest_nodes"] = ordered_quest_nodes
-        changed = True
-
-    for loc in state.get("VisLocs", []):
-        data = loc.setdefault("Data", {})
-        node = data.get("node") or data.get("name")
-        if not node or str(node).lower().startswith("node") is False:
-            continue
-        rows = pve_db.db_quest_node_rows(node, conn=db)
-        give = False
-        turnin = False
-        selected = None
-        fallback = None
-        for script, guid, role, row_faction in rows:
-            if not _quest_row_matches_faction(row_faction, faction):
-                continue
-            if fallback is None:
-                fallback = guid
-            _qid, qstate = _quest_state_row(db, champ_id, script)
-            if role == "start" and qstate is None:
-                give = True
-                selected = selected or guid
-            elif role == "complete" and _quest_is_turnin_ready(qstate):
-                turnin = True
-                selected = guid
-            elif role == "not_complete" and qstate and not qstate.get("Finished"):
-                selected = selected or guid
-        if selected is None:
-            selected = fallback
-        if selected and data.get("conversationId") != selected:
-            data["conversationId"] = selected
-            changed = True
-        if bool(data.get("givequest")) != give:
-            data["givequest"] = give
-            changed = True
-        if bool(data.get("turninquest")) != turnin:
-            data["turninquest"] = turnin
-            changed = True
-
-    # The active quest conversation wins over a generic first/repeat variant
-    # on the same map node.  This must run after the quest-giver selector
-    # above, since that selector may otherwise put the generic Step 1 dialog
-    # back onto a node hosting the current quest turn-in.
-    for loc in state.get("VisLocs", []):
-        data = loc.setdefault("Data", {})
-        node = str(data.get("node") or data.get("name") or "")
-        # Quest conversations at PANORAMA destinations are rendered by the
-        # panorama NPC bundle, not as an AREA map conversation. Do not turn
-        # the reusable portal back into an auto-starting Convo location.
-        panorama_scene = _az1_scene_for_node(db, node)
-        if (panorama_scene and
-                "PANORAMA" in str(panorama_scene[1] or "").upper()):
-            continue
-        matching = sorted(
-            guid for guid in active_objective_conversations
-            if node in conversation_nodes.get(guid, set())
-        )
-        if not matching or data.get("completed"):
-            continue
-        conversation = matching[0]
-        if data.get("conversationId") != conversation:
-            data["conversationId"] = conversation
-            changed = True
-        if data.get("type") != "Convo":
-            data["type"] = "Convo"
-            changed = True
-        if data.get("autostart") is not True:
-            data["autostart"] = True
-            changed = True
-        if data.get("turninquest") is not True:
-            data["turninquest"] = True
-            changed = True
-    return changed
-
-
-def _normalize_starter_panorama_state(state, cfg):
-    """Repair client-facing NPC metadata in an existing starter panorama.
-
-    Early campaign states did not include the trainer's champion template ID
-    and marked actionable NPCs as not giving a quest.  The panorama client
-    uses the former for the profile portrait (especially once a conversation
-    has become an encounter) and the latter for the quest marker, so repair
-    those fields whenever an older state is returned.
-    """
-    # A non-starter panorama is authored by an AREA panorama scene.  Its
-    # locations must not be repaired as though they were the AZ0 tutorial
-    # NPCs; the scene-specific state was deliberately built by the area
-    # transition helper.
-    if state.get("PanoramaSceneGuid"):
-        return False
-    # A completed dungeon hands off to the panorama with a report NPC.  Do
-    # not rebuild that intentionally post-dungeon state as a fresh tutorial.
-    if state.get("PostCrayburnReport"):
-        return False
-    changed = False
-    trainer_npc = cfg["trainer_npc"]
-    quest_npc = cfg["quest_npc"]
-    trainer_guid = cfg.get("ai_champion_guid")
-    intro_completed = False
-    trainer_data = None
-    quest_data = None
-
-    for node in state.setdefault("LocNodes", []):
-        data = node.setdefault("Data", {})
-        node_id = data.get("id") or node.get("Name")
-        if node_id == trainer_npc and trainer_guid and data.get("championId") != trainer_guid:
-            data["championId"] = trainer_guid
-            changed = True
-
-    for loc in state.get("VisLocs", []):
-        data = loc.setdefault("Data", {})
-        node_id = data.get("node") or data.get("name")
-        if node_id == cfg["intro_npc"]:
-            intro_completed = bool(data.get("completed"))
-            if intro_completed and data.get("autostart"):
-                data["autostart"] = False
-                changed = True
-        elif node_id == trainer_npc:
-            trainer_data = data
-        elif node_id == quest_npc:
-            quest_data = data
-        if node_id in (trainer_npc, quest_npc) and not data.get("completed"):
-            if not data.get("givequest"):
-                data["givequest"] = True
-                changed = True
-
-    # Recover a starter panorama after a rejected NPC StartLoc.  The old
-    # template-name-only AZ1 movement gate could leave the intro completed
-    # while hiding the trainer again; restore the next authored conversation
-    # when no later quest-giver or victory transition exists.
-    if (intro_completed and trainer_npc and not quest_data and
-            not state.get("TrainingVictoryPending")):
-        if trainer_data is None:
-            state.setdefault("VisLocs", []).append(
-                _convo_location(trainer_npc, cfg["battle_conv"], givequest=True))
-        else:
-            trainer_data.update({
-                "type": "Convo", "conversationId": cfg["battle_conv"],
-                "encounter": None, "completed": False,
-                "enabled": True, "visible": True, "givequest": True,
-                "autostart": False,
-            })
-        changed = True
-    return changed
-
-
-def _training_location(cfg):
-    return {
-        "Data": {
-            "name": cfg["training_node"], "node": cfg["training_node"], "type": "Encounter",
-            "autostart": False, "autopan": False, "autotrigger": False,
-            "battle": None, "completed": False, "enabled": True, "visible": True,
-            "repeatable": False, "givequest": False, "turninquest": False,
-            "impassable": False, "unknown": False,
-            "encounter": cfg["training_encounter"], "encounter_desc": None,
-            "allow_cancel": False, "conversationId": None,
-        }
-    }
-
-
-def _mark_location_completed(state, name_or_node):
-    """Mark a VisLoc as completed by matching node or name."""
-    for loc in state.get("VisLocs", []):
-        data = loc.get("Data", {})
-        if data.get("node") == name_or_node or data.get("name") == name_or_node:
-            data["completed"] = True
-            return True
-    return False
-
-
-def _transition_to_dungeon(state, cfg):
-    """Switch the AZ0 panorama campaign to the Castle Crayburn dungeon.
-
-    Called when the quest-giver's quest-start conversation ends. Replaces the
-    current GameplayState in-place with the Crayburn Castle state (7 nodes with
-    real encounter GUIDs + the race's per-node conversations). The campaign
-    row's type is switched by the caller so getcampsum/getactive return the
-    matching TypeInfo.
-    """
-    # The campaign presents as a DUNGEON (Castle Crayburn map). (A PANORAMA
-    # experiment to dodge the client's missing 'DungeonMapNode' script didn't
-    # render, so we stay DUNGEON.)
-    dungeon = _build_initial_gameplay_state(
-        state.get("CampID"), state.get("ChampID"), "DUNGEON",
-        _race_for_cfg(cfg))
-    state.clear()
-    state.update(dungeon)
-    # Preserve started-ness so the client treats this as in-progress.
-    state["Started"] = state.get("Started") or _now_utc()
 
 
 def _now_utc():
@@ -3235,43 +845,12 @@ _CASTLE_NODE_CONV = {
     "PenworthTower": "Tower of Penworth",
 }
 
-def _crayburn_node_data(race_name, node):
-    """Return the per-node conversation/encounter dict from gamedata, or {}."""
-    conv_name = _CASTLE_NODE_CONV.get(node)
-    if not conv_name:
-        return {}
-    return _CRAYBURN_CASTLE["races"].get(race_name or "Necrotic", {}) \
-        .get("nodes", {}).get(conv_name, {})
 
 
-def _crayburn_node_is_encounter(race_name, node):
-    """True if the castle node fires a battle (race data has success+fail
-    conversations — the data-driven discriminator)."""
-    nd = _crayburn_node_data(race_name, node)
-    if not nd:
-        return False
-    return "success" in nd and "fail" in nd
 
 
-def _crayburn_node_is_conversation(race_name, node):
-    """True if the node has a conversation but NOT a battle encounter."""
-    nd = _crayburn_node_data(race_name, node)
-    return bool(nd.get("conv")) and not _crayburn_node_is_encounter(race_name, node)
 
-def _is_location_completed(state, node):
-    for loc in state.get("VisLocs", []):
-        d = loc.get("Data", {})
-        if d.get("node") == node or d.get("name") == node:
-            return bool(d.get("completed", False))
-    return False
 
-def _node_name(state, node_id):
-    """Return the VisLoc `name` (display name) for a node id, or the id."""
-    for loc in state.get("VisLocs", []):
-        d = loc.get("Data", {})
-        if d.get("node") == node_id:
-            return d.get("name", node_id)
-    return node_id
 
 def _resolve_node(state, key):
     """Map a VisLoc name or node id back to the canonical node id."""
@@ -3283,193 +862,16 @@ def _resolve_node(state, key):
             return d.get("node") or key
     return key
 
-def _note_visited(state, node):
-    pdata = state.setdefault("PublicState", {}).setdefault("Data", {})
-    visited = pdata.setdefault("visited_nodes", [])
-    if node not in visited:
-        visited.append(node)
 
 
-def _az1_activate_direct_path_destination(db, state, path_values, champ_id):
-    """Activate an AZ1 destination when the client omits its StartLoc event.
-
-    The map client normally reports ``visit_path`` followed by ``StartLoc``.
-    Some direct path animations only send the former, leaving the server on
-    the previous node and the client with no conversation to auto-start.  The
-    path list is ordered along the travelled route, so resolve its final
-    endpoint by walking each edge from the persisted current node and accept
-    it only when every step is a visible, unblocked, visitable adjacent
-    location.
-    """
-    if not isinstance(path_values, (list, tuple)) or not path_values:
-        return None
-    current = _resolve_node(
-        state, state.get("ALoc") or state.get("LastNode") or "")
-    destination = current
-    for path_value in path_values:
-        match = re.fullmatch(
-            r"Path_([^_]+)_([^_]+)", str(path_value or ""))
-        if not match:
-            return None
-        endpoints = [
-            _resolve_node(state, match.group(1)),
-            _resolve_node(state, match.group(2)),
-        ]
-        if destination not in endpoints:
-            return None
-        next_node = (endpoints[1] if endpoints[0] == destination
-                     else endpoints[0])
-        if not _az1_is_adjacent(db, destination, next_node):
-            return None
-        destination = next_node
-    if destination == current or destination in _az1_path_fork_ids(db):
-        return None
-
-    location_data = next(
-        ((loc.get("Data") or {}) for loc in state.get("VisLocs", [])
-         if (loc.get("Data") or {}).get("node") == destination),
-        None,
-    )
-    if not location_data or not location_data.get("visible", True):
-        return None
-    pdata = state.setdefault("PublicState", {}).setdefault("Data", {})
-    blocked = {
-        _resolve_node(state, str(value))
-        for value in (pdata.get("blocked_nodes") or []) if value
-    }
-    if destination in blocked:
-        return None
-
-    state["LastNode"] = destination
-    state["ALoc"] = location_data.get("name") or destination
-    state["CurState"] = "EXPLORE"
-    _note_visited(state, destination)
-    location_data["visible"] = True
-    location_data["enabled"] = True
-
-    _hydrate_az1_area_scene_metadata(
-        db, state.get("VisLocs", []), champ_id=champ_id, state=state)
-    _apply_az1_quest_markers(db, champ_id, state)
-    destination_data = next(
-        ((loc.get("Data") or {}) for loc in state.get("VisLocs", [])
-         if (loc.get("Data") or {}).get("node") == destination),
-        location_data,
-    )
-    if destination_data.get("type") == "Convo":
-        destination_data["autostart"] = True
-    _az1_reveal_neighbors(db, state, destination)
-    return destination
-
-def _set_crayburn_autostart(state, node):
-    """Mark a VisLoc for auto-trigger (no force-move warp — the client's
-    dungeon VM auto-plays conversations when ALoc changes to a Convo node)."""
-    for loc in state.get("VisLocs", []):
-        d = loc.get("Data", {})
-        if d.get("node") == node:
-            d["autostart"] = True
 
 
-def _crayburn_first_incomplete(state):
-    """Return the first unfinished authored castle node, if any."""
-    return next(
-        (node for node in _CASTLE_CHAIN[1:]
-         if not _is_location_completed(state, node)),
-        None,
-    )
 
 
-def _crayburn_return_node(state, node):
-    """Return the latest completed map node before an encounter."""
-    try:
-        idx = _CASTLE_CHAIN.index(node)
-    except ValueError:
-        return "Entrance"
-    for candidate in reversed(_CASTLE_CHAIN[:idx]):
-        if _is_location_completed(state, candidate):
-            return candidate
-    return _CASTLE_CHAIN[max(0, idx - 1)]
 
 
-def _reveal_crayburn_node(state, node):
-    """Synchronize castle fog-of-war with the first unfinished node.
 
-    The client renders an enabled/visible node as a legal destination.  Keep
-    the next node hidden until the current encounter or conversation has been
-    completed, including after a failed encounter is restored for retry.
-    """
-    first_incomplete = _crayburn_first_incomplete(state)
-    frontier = (len(_CASTLE_CHAIN) - 1 if first_incomplete is None else
-                _CASTLE_CHAIN.index(first_incomplete))
-    for idx, n in enumerate(_CASTLE_CHAIN):
-        for loc in state.get("VisLocs", []):
-            d = loc.get("Data", {})
-            if d.get("node") == n:
-                allowed = idx <= frontier
-                d["visible"] = allowed
-                d["enabled"] = allowed
-                if not allowed:
-                    d["autostart"] = False
-                break
 
-def _advance_crayburn(state, race_name, from_node, won):
-    """Advance the Castle Crayburn dungeon chain from `from_node`.
-
-    Returns the next step for the caller to act on:
-      ("conv", node)      — a conversation-only node: ALoc is set to the
-                            node so the client launches the conversation from
-                            the cmpupdate state.
-      ("encounter", guid) — an ENCOUNTER node: ALoc is set; launch the battle.
-      ("arrival_conv", node) — StartLoc received at a conversation node;
-                               ALoc is set so the client auto-plays the conv.
-      None                — the castle is beaten.
-
-    Pass-through nodes (e.g. the Entrance, no conversation and no encounter)
-    are auto-completed. On `won` the just-finished `from_node` is marked
-    completed first; on a loss it stays uncompleted so the same step retries.
-    """
-    chain = _CASTLE_CHAIN
-    if from_node:
-        from_node = _resolve_node(state, from_node)
-    try:
-        start = chain.index(from_node) if from_node else 0
-    except ValueError:
-        start = 0
-    if won and from_node in chain:
-        _mark_location_completed(state, from_node)
-        _note_visited(state, from_node)
-        state["ALoc"] = ""  # clear ALoc so client doesn't chase completed node
-    for node in chain[start:]:
-        if _is_location_completed(state, node):
-            continue
-        if _crayburn_node_is_encounter(race_name, node):
-            state["ALoc"] = node
-            state["LastNode"] = node
-            state["CurState"] = "EXPLORE"
-            _reveal_crayburn_node(state, node)
-            _set_crayburn_autostart(state, node)
-            return ("encounter", _crayburn_scene_for_node(race_name, node))
-        nd = _crayburn_node_data(race_name, node)
-        if nd.get("conv"):
-            # Activate the conversation in the state sent to the client.  The
-            # dungeon VM only launches a conversation when ALoc matches the
-            # current location; a private pending marker is not consumed by
-            # the client during a campaign transition.
-            state.pop("_pending_travel", None)
-            state["ALoc"] = node
-            state["LastNode"] = node
-            state["CurState"] = "EXPLORE"
-            _reveal_crayburn_node(state, node)
-            _set_crayburn_autostart(state, node)
-            return ("conv", node)
-        # Pass-through node (no conversation, no encounter) — auto-complete.
-        _mark_location_completed(state, node)
-        _note_visited(state, node)
-    # Reached the end of the chain — the castle is beaten.
-    state["Finished"] = _now_utc()
-    state["FinishReason"] = "Complete"
-    state["ALoc"] = ""
-    state["CurState"] = "EXPLORE"
-    return None
 
 def _race_name_for_campaign(db, camp_id):
     race = pve_db.db_campaign_champion_race(camp_id, conn=db)
@@ -3477,350 +879,12 @@ def _race_name_for_campaign(db, camp_id):
         return "Necrotic"
     return _RACE_NAMES.get(race, "Necrotic")
 
-def advance_crayburn_step(handler, db, camp_id, won, comp, session_id,
-                          target, instance, conh, uid, auto_activate=True):
-    """Advance the Castle Crayburn dungeon by one step.
-
-    Resolves everything from the campaign row, persists the updated state, then
-    acts on the returned step: a ("conv") step pushes a cmpupdate so the client
-    shows the node's conversation; an ("encounter") step pushes a 'gamestarted'
-    launching the battle. Returns the step tuple, or None when the dungeon is
-    finished / not a DUNGEON campaign. On `won=False` the current node is kept
-    uncompleted so an encounter loss retries the same battle.
-    """
-    log = getattr(handler, "_log_req", print)
-    row = pve_db.db_campaign_runtime_row(camp_id, conn=db)
-    if not row:
-        return None
-    state_json, ctype = row
-    if (ctype or "").upper() != "DUNGEON":
-        return None
-    state = json.loads(state_json) if state_json else None
-    if state is None:
-        champ_row = pve_db.db_campaign_identity_state(camp_id, conn=db)
-        state = _build_initial_gameplay_state(
-            camp_id, champ_row[0] if champ_row else 0, "DUNGEON",
-            _race_name_for_campaign(db, camp_id))
-    # Rebuild stale state (built before the Crayburn seed had race-conversation
-    # data) so VisLocs carry correct types and conversationIds.
-    state = _prepare_dungeon_state(state, _race_name_for_campaign(db, camp_id))
-
-    race_name = _race_name_for_campaign(db, camp_id)
-
-    # Once the player has completed a node (conversation or battle), return
-    # them to the castle map.  The avatar must physically travel to the next
-    # node; setting ALoc to a later encounter here silently bypasses the map
-    # movement and can start (for example) Tower Gatehouse early.
-    if not auto_activate:
-        current = state.get("ALoc") or state.get("LastNode") or "Entrance"
-        current = _resolve_node(state, current)
-        if won and current in _CASTLE_CHAIN and not state.get("_pending_encounter_success"):
-            success_conv = (_crayburn_node_data(race_name, current) or {}).get("success")
-            if success_conv:
-                for loc in state.setdefault("VisLocs", []):
-                    data = loc.get("Data", {})
-                    if data.get("node") == current or data.get("name") == current:
-                        data.update({
-                            "type": "Convo", "conversationId": success_conv,
-                            "encounter": None, "completed": False,
-                            "enabled": True, "visible": True,
-                        })
-                        break
-                state["_pending_encounter_success"] = current
-                state["ALoc"] = current
-                state["LastNode"] = current
-                state["CurState"] = "EXPLORE"
-                _save_campaign_state(db, camp_id, state)
-                db.commit()
-                push_campupdate(handler, db, camp_id,
-                                state.get("ChampID") or 0,
-                                "crayburn_victory", "DUNGEON", False,
-                                state, comp, session_id, target, instance,
-                                conh, uid)
-                return ("success_conv", current)
-        if not won:
-            # Encounter nodes carry authored defeat conversations in the
-            # campaign metadata. Keep the node retryable, but convert it to a
-            # conversation and point ALoc at it so the client enqueues the
-            # defeat scene before the player retries the battle.
-            fail_conv = (_crayburn_node_data(race_name, current) or {}).get("fail")
-            if fail_conv:
-                for loc in state.setdefault("VisLocs", []):
-                    data = loc.get("Data", {})
-                    if data.get("node") == current or data.get("name") == current:
-                        data.update({
-                            "type": "Convo", "conversationId": fail_conv,
-                            "encounter": None, "completed": False,
-                            "enabled": True, "visible": True,
-                        })
-                        break
-                state["ALoc"] = current
-                state["LastNode"] = current
-                state["CurState"] = "EXPLORE"
-                _save_campaign_state(db, camp_id, state)
-                db.commit()
-                push_campupdate(handler, db, camp_id,
-                                state.get("ChampID") or 0,
-                                "crayburn_defeat", "DUNGEON", False,
-                                state, comp, session_id, target, instance,
-                                conh, uid)
-                return ("fail_conv", current)
-        if won and current in _CASTLE_CHAIN:
-            state.pop("_pending_encounter_success", None)
-            _mark_location_completed(state, current)
-            _note_visited(state, current)
-        state["ALoc"] = ""
-        state["CurState"] = "EXPLORE"
-        next_node = next((n for n in _CASTLE_CHAIN[1:]
-                          if not _is_location_completed(state, n)), None)
-        quest_state = None
-        panorama_state = None
-        panorama_id = None
-        if next_node is None:
-            # The final encounter completed the dungeon.  Keep the player on
-            # the map, but also finish the dungeon and advance the linked
-            # journal quest so its follow-up conversation becomes visible.
-            state["Finished"] = _now_utc()
-            state["FinishReason"] = "Complete"
-            quest_state = _advance_quest_campaign(db, state.get("ChampID") or 0)
-            # Completing the final castle conversation transitions the client
-            # back to the race panorama.  A non-transitioning dungeon update
-            # alone leaves the player looking at the completed castle map.
-            champ_id = state.get("ChampID") or 0
-            panorama_id, _pi, _ps, panorama_state = \
-                _find_campaign_for_champion(db, champ_id, "PANORAMA")
-            if panorama_state is not None:
-                _prepare_post_crayburn_report(db, champ_id, panorama_state)
-                pve_db.db_campaign_update_state(
-                    panorama_id, json.dumps(panorama_state), db, started=True)
-                db.commit()
-        if next_node:
-            _reveal_crayburn_node(state, next_node)
-        _save_campaign_state(db, camp_id, state)
-        db.commit()
-        champ_id = state.get("ChampID") or 0
-        push_campupdate(handler, db, camp_id, champ_id, "crayburn_travel",
-                        "DUNGEON", False, state, comp, session_id, target,
-                        instance, conh, uid)
-        if quest_state:
-            push_campupdate(handler, db, quest_state.get("CampID") or 0,
-                            quest_state.get("ChampID") or champ_id,
-                            "quest_complete", "QUEST", False, quest_state,
-                            comp, session_id, target, instance, conh, uid)
-        if panorama_state is not None:
-            push_campupdate(handler, db, panorama_id,
-                            panorama_state.get("ChampID") or champ_id,
-                            "dungeon_complete", "PANORAMA", True,
-                            panorama_state, comp, session_id, target,
-                            instance, conh, uid)
-        return ("await_travel", next_node) if next_node else None
-
-    from_node = state.get("ALoc") or state.get("LastNode") or "Entrance"
-    step = _advance_crayburn(state, race_name, from_node, won)
-
-    _save_campaign_state(db, camp_id, state)
-    db.commit()
-
-    if not step:
-        log(f"    Crayburn castle beaten (camp={camp_id})")
-        # The fallen shard has been found — reveal the next quest objective
-        # ("Report your success") in the journal.
-        try:
-            _advance_quest_campaign(db, state.get("ChampID") or 0)
-        except Exception as e:
-            log(f"    quest advance failed: {e}")
-        return None
-
-    kind, value = step
-    if kind == "conv":
-        log(f"    Crayburn: conversation pending at node={value} (camp={camp_id})")
-        champ_id = state.get("ChampID") or 0
-        push_campupdate(handler, db, camp_id, champ_id, "crayburn_travel",
-                        "DUNGEON", False, state, comp, session_id, target,
-                        instance, conh, uid)
-        return step
-
-    champ_id = state.get("ChampID") or 0
-    deck_db_id = pve_db.db_champion_last_deck_id(champ_id, conn=db)
-    deck_uid64 = (deck_db_id << 8) | 17 if deck_db_id else 0
-    log(f"    Crayburn: launching encounter {value} (camp={camp_id})")
-    _launch_encounter(handler, db, camp_id, champ_id, value, deck_uid64,
-                      comp, session_id, target, instance, conh, uid)
-    return step
 
 
-def _race_for_cfg(cfg):
-    for race, c in _AZ0_RACE_CONFIG.items():
-        if c is cfg or c.get("prefab") == cfg.get("prefab"):
-            return _RACE_NAMES.get(race)
-    return None
 
 
-def _build_starter_panorama_state(cid, champion_id, cfg):
-    """Build the AZ0 starter panorama for a race.
-
-    Only the intro NPC is visible initially. The trainer and training
-    encounter are added to VisLocs as the intro conversation chain advances
-    (see _handle_sendevent).
-    """
-    intro_npc = cfg["intro_npc"]
-    trainer_npc = cfg["trainer_npc"]
-    quest_npc = cfg["quest_npc"]
-    training_node = cfg["training_node"]
-    nodes = [intro_npc, trainer_npc, quest_npc, training_node]
-    locnodes = []
-    for node in nodes:
-        data = {"id": node, "type": "DEFAULT"}
-        # Panorama portraits are resolved from Node.championId when a
-        # conversation has already become an encounter and no longer has a
-        # ConversationID.  The training opponent's champion template is the
-        # authoritative profile for the trainer NPC.
-        if node == trainer_npc and cfg.get("ai_champion_guid"):
-            data["championId"] = cfg["ai_champion_guid"]
-        locnodes.append({"Name": node, "Data": data})
-    return {
-        "CampID": cid,
-        "ChampID": champion_id,
-        "TempType": "PANORAMA",
-        "PayGroups": [],
-        "CSlide": None,
-        "ALoc": intro_npc,
-        # Keep the trainer, quest-giver and training node hidden until
-        # their conversations authorize them.
-        "VisLocs": [_convo_location(intro_npc, cfg["intro_conv"])],
-        "LocNodes": locnodes,
-        "Encounters": [{"Name": cfg["training_encounter"],
-                        "Data": {"encscene": cfg["training_encounter"]}}],
-        "Champions": [],
-        "CurState": "EXPLORE",
-        "LastNode": intro_npc,
-        "PublicState": {"Data": {
-            "CampaignGroup": "PANORAMA",
-            "IsStarterPano": True,
-            "HideQuickNavigation": False,
-            "RaceTutorialBattleUnlocked": False,
-        }},
-        # TutorialDone: while False the training battle is treated as the
-        # tutorial (player always wins the coin toss and goes first). It is
-        # set True by _apply_gameend once the training battle is won, after
-        # which subsequent battles randomize the turn player.
-        "TutorialDone": False,
-        "Started": None, "Finished": None, "FinishReason": None,
-        "Wins": 0, "Losses": 0, "Score": 0, "HealthAdj": 0, "DungeonLifeAdj": 0,
-        "Flags": {},
-    }
 
 
-def _build_initial_gameplay_state(cid, champion_id, campaign_type, champion_race=None):
-    """Build a minimal GameplayState for the campaign."""
-    # champion_race may be an int (race id from DB) or a string (race name).
-    # The AZ0 config is keyed by numeric race ID, while the Crayburn data is
-    # keyed by display name, so retain both forms during construction.
-    race_id = champion_race
-    if isinstance(champion_race, str):
-        race_id = next(
-            (rid for rid, name in _RACE_NAMES.items()
-             if name.lower() == champion_race.lower()),
-            None)
-    race_key = int(race_id) if isinstance(race_id, int) else 0
-    race_name = _RACE_NAMES.get(race_key, champion_race)
-    if campaign_type == "PANORAMA":
-        cfg = _az0_config(race_key)
-        if cfg:
-            return _build_starter_panorama_state(cid, champion_id, cfg)
-
-    castle_nodes = ["Entrance", "WatchTower", "Drawbridge", "CastleGate", "InnerBailey", "TowerGate", "PenworthTower"]
-    castle_names = ["001 - Entrance", "002 - Outer Watchtower", "003 - The Drawbridge",
-                    "004 - Castle Gatehouse", "005 - Inner Bailey", "006 - Tower Gatehouse",
-                    "007 - Tower of Penworth"]
-    # Campaign node -> the matching Crayburn Castle conversation node name.
-    castle_conv_node = {
-        "Entrance": None,
-        "WatchTower": "The Watchtower",
-        "Drawbridge": "The Drawbridge",
-        "CastleGate": "Castle Gatehouse",
-        "InnerBailey": "Inner Bailey",
-        "TowerGate": "Tower Gatehouse",
-        "PenworthTower": "Tower of Penworth",
-    }
-    if campaign_type == "DUNGEON":
-        nodes = castle_nodes
-        node_names = castle_names
-        # Encounter GUIDs are shared across races; the per-node CONVERSATIONS
-        # are race-specific (gamedata names "Crayburn Castle - <Race> - <Node>").
-        race_data = _CRAYBURN_CASTLE["races"].get(race_name or "Necrotic", {})
-        castle_convs = race_data.get("nodes", {})
-        encounter_guids = _crayburn_scene_guids(race_name)
-        vislocs = []
-        for i, (nid, name) in enumerate(zip(nodes, node_names)):
-            conv_name = castle_conv_node.get(nid)
-            conv_id = castle_convs.get(conv_name, {}).get("conv") if conv_name else None
-            is_enc = _crayburn_node_is_encounter(race_name or "Necrotic", nid)
-            # Conv-only nodes are type "Convo" so the client's dungeon VM
-            # auto-plays the conversation when ALoc matches their Name (the
-            # panorama-intro mechanism). Encounter nodes stay "Encounter".
-            # Only the Entrance and its immediate neighbour start visible;
-            # the rest are hidden until the player reaches them.
-            loc_visible = (i == 0 or i == 1)
-            loc = {
-                "Data": {
-                    "name": nid, "node": nid,
-                    "type": "Convo" if conv_id and not is_enc else ("Encounter" if i > 0 else "Dungeon"),
-                    "autostart": False, "autopan": False, "autotrigger": False,
-                    "battle": None, "completed": False, "enabled": loc_visible,
-                    "visible": loc_visible,
-                    "repeatable": False, "givequest": False, "turninquest": False,
-                    "impassable": False, "unknown": False,
-                    "encounter": _crayburn_scene_for_node(race_name, nid)
-                    if is_enc else None,
-                    "encounter_desc": None, "allow_cancel": False,
-                    "conversationId": conv_id,
-                }
-            }
-            vislocs.append(loc)
-        locnodes = [{"Name": n, "Data": {"id": n, "type": "DEFAULT"}}
-                    for i, n in enumerate(nodes)]
-        encounter_list = [{"Name": g, "Data": {"encscene": g}} for g in encounter_guids]
-        # ALoc = the Entrance node id so the player spawns at the castle
-        # entrance. The server-driven chain (advance_crayburn_step) then moves
-        # ALoc to the first conversation node and pushes a cmpupdate, which is
-        # when the client auto-plays it (the client only launches conversations
-        # from a state change while not mid-transition, so the initial load
-        # must not point at a convo node).
-        aloc = "Entrance" if len(nodes) > 1 else nodes[0]
-    else:
-        nodes = ["Node001"]
-        node_names = ["The Bridge"]
-        encounters = ["Encounter1"]
-        vislocs = [{"Data": {"name": node_names[0], "node": nodes[0], "type": "Dungeon",
-            "autostart": False, "autopan": False, "autotrigger": False, "battle": None,
-            "completed": False, "enabled": True, "visible": True, "repeatable": False,
-            "givequest": False, "turninquest": False, "impassable": False, "unknown": False,
-            "encounter": encounters[0], "encounter_desc": None, "allow_cancel": False, "conversationId": None}}]
-        locnodes = [{"Name": nodes[0], "Data": {"id": nodes[0], "type": "Dungeon"}}]
-        encounter_list = [{"Name": encounters[0], "Data": {"encscene": ""}}]
-        aloc = nodes[0]
-    return {
-        "CampID": cid,
-        "ChampID": champion_id,
-        "TempType": campaign_type,
-        "PayGroups": [],
-        "CSlide": None,
-        "ALoc": aloc,
-        "VisLocs": vislocs,
-        "LocNodes": locnodes,
-        "Encounters": encounter_list,
-        "Champions": [],
-        "CurState": "EXPLORE",
-        "LastNode": nodes[0],
-        "PublicState": {"Data": {
-            "CampaignGroup": "DUNGEON",
-            "visited_nodes": ["Entrance"],
-            "IsStarterDungeon": True,
-        }},
-        "Started": None, "Finished": None, "FinishReason": None,
-        "Wins": 0, "Losses": 0, "Score": 0, "HealthAdj": 0, "DungeonLifeAdj": 0, "Flags": {},
-    }
 
 
 def _build_input_response(cid, state, success=True, applied=None):
@@ -3834,80 +898,45 @@ def _build_input_response(cid, state, success=True, applied=None):
     }
 
 
-def _prepare_dungeon_state(state, race_name=None):
-    """Normalize a fresh Castle Crayburn DUNGEON state for delivery to the
-    client. If the stored state is stale (built before the per-node
-    conversations were seeded), rebuild it from _build_initial_gameplay_state
-    so every node carries its race conversationId. A started dungeon with no
-    completed node beyond the entrance is also repaired to the first
-    conversation node; this recovers runs saved by the old deferred-travel
-    implementation."""
-    if not state or state.get("TempType") != "DUNGEON":
-        return state
-    # Detect stale states (pre-Crayburn-seed): no node has a conversationId.
-    stale = all(
-        not (l.get("Data", {}) or {}).get("conversationId")
-        for l in state.get("VisLocs", []))
-    if stale:
-        cid = state.get("CampID", 0)
-        champ_id = state.get("ChampID", 0)
-        state = _build_initial_gameplay_state(cid, champ_id, "DUNGEON",
-                                              race_name or "Necrotic")
-    _normalize_crayburn_encounters(state, race_name)
-    completed = [l.get("Data", {}).get("node") for l in state.get("VisLocs", [])
-                 if l.get("Data", {}).get("completed")]
-    non_entrance_done = [n for n in completed if n and n != "Entrance"]
-    if non_entrance_done:
-        # A failed encounter returns to the preceding map tile with ALoc
-        # empty.  Preserve that position while still repairing stale fog of
-        # war from older states that exposed a later node.
-        first_incomplete = _crayburn_first_incomplete(state)
-        last_node = _resolve_node(state, state.get("LastNode") or "")
-        if (state.get("ALoc") in (None, "") and
-                last_node == first_incomplete and
-                _crayburn_node_is_encounter(race_name, first_incomplete)):
-            # Older saves recorded a failed encounter's restored node as the
-            # physical position.  Convert that shape to the current map
-            # contract so the player is returned to the completed predecessor.
-            state["LastNode"] = _crayburn_return_node(state, first_incomplete)
-        _reveal_crayburn_node(
-            state, state.get("ALoc") or state.get("LastNode") or "Entrance")
-        return state  # mid-run dungeon — leave ALoc as-is
-    # A deferred marker can be left behind by an interrupted transition.  If
-    # the run has started, expose that node directly so rejoining the dungeon
-    # resumes at the conversation rather than returning to the map with no
-    # active location.
-    pending = _resolve_node(state, state.pop("_pending_travel", ""))
-    first_pending = next(
-        (node for node in _CASTLE_CHAIN[1:]
-         if not _is_location_completed(state, node)), None)
-    if state.get("Started") and first_pending:
-        last_node = _resolve_node(state, state.get("LastNode") or "")
-        # A failed encounter has already returned the token to a completed
-        # predecessor.  Do not reactivate the pending encounter on reconnect;
-        # the player must explicitly travel back to it from the map.
-        returned_to_map = (
-            state.get("ALoc") in (None, "") and
-            last_node in _CASTLE_CHAIN[1:] and
-            _CASTLE_CHAIN.index(last_node) <
-            _CASTLE_CHAIN.index(first_pending))
-        if returned_to_map:
-            _reveal_crayburn_node(state, last_node)
-        else:
-            node = pending if pending and not _is_location_completed(state, pending) \
-                else first_pending
-            state["ALoc"] = node
-            state["LastNode"] = node
-            state["CurState"] = "EXPLORE"
-            _reveal_crayburn_node(state, node)
-            _set_crayburn_autostart(state, node)
-    elif state.get("ALoc") in (None, ""):
-        # Before StartCamp, keep the player at the physical entrance.  The
-        # startcamp handler advances to the first conversation itself.
-        state["ALoc"] = "Entrance"
-        if state.get("LastNode") in (None, ""):
-            state["LastNode"] = "Entrance"
-    return state
+# ---------------------------------------------------------------------------
+# Broken-state diagnostics
+#
+# A campaign state can be structurally valid JSON yet leave the player with
+# nothing to click: a panorama whose NPC conversations are all completed, a
+# location whose node name has no matching LocNode, etc.  The client renders
+# the scene and silently waits, which reads as a soft-lock in bug reports.
+# These helpers surface that condition in the session log (captured by
+# ``!issue``) and through the ``!campaign`` developer command.
+# ---------------------------------------------------------------------------
+
+_CAMPAIGN_DIAG_LOCK = threading.Lock()
+_CAMPAIGN_DIAG_WARNED = {}
+_CAMPAIGN_DIAG_WARN_LIMIT = 256
+
+
+
+
+
+
+
+
+
+
+def repair_user_campaigns(db, user_id, camp_id=None):
+    """Repair pass for ``!campaign-cleanup``.
+
+    Every campaign row is now a rules zone or a quest journal, and the rules
+    runtime owns the state of a zone, so there is no legacy state to repair.
+    ``camp_id`` is still checked against the profile, so a chat command cannot
+    touch another player's campaign: None means it is not theirs.
+    """
+    if camp_id is not None:
+        owner = pve_db.db_campaign_owner_user_id(int(camp_id), conn=db)
+        if owner is None or owner != int(user_id):
+            return None
+    return []
+
+
 
 
 def _empty_applied_updates():
@@ -3943,23 +972,42 @@ _AZ1_PANORAMA_BUNDLE_MAP = {
 }
 
 
-def _az1_panorama_assets(panorama_node, champion_race=None):
-    """Return the authored panorama assets for an AZ1 handoff node."""
-    assets = _AZ1_PANORAMA_BUNDLE_MAP.get(str(panorama_node or ""))
-    if assets:
-        return assets
-    # Preserve compatibility with older panorama states that predate the node
-    # marker. New authored AZ1 handoffs must be added above instead of relying
-    # on the travelling champion's race.
-    race_key = (int(champion_race)
-                if isinstance(champion_race, int) else -1)
-    return _RACE_BUNDLE_MAP.get(race_key, ("", ""))
 
 # When _launch_encounter pushes a gamestarted, the scene GUID is stored
 # here keyed by session_name so the battle session setup can resolve the
 # correct AI deck/name (resolve_encounter uses this to override
 # the race's training encounter with the actual launched scene).
 _last_encounter_scene = {}
+# camp_id -> (champion_id, InventoryMercenaryData GUID) chosen in the latest
+# 'start' event ("merc=<guid>" in OParms); read by resolve_battle_config.
+_active_mercenary = {}
+_active_mercenary_lock = threading.Lock()
+
+
+def _remember_mercenary_choice(handler, db, camp_id, oparms):
+    """Record the party member chosen for an encounter.
+
+    The party selector sends the chosen mercenary as "merc=<item guid>"; the
+    zero GUID (or no parameter) means the champion fights with their own
+    deck.
+    """
+    try:
+        camp_id = int(camp_id or 0)
+    except (TypeError, ValueError):
+        return
+    merc_guid = next((str(p)[5:] for p in oparms or []
+                      if str(p).startswith("merc=")), "")
+    with _active_mercenary_lock:
+        if not (merc_guid and merc_guid.strip("0-")):
+            _active_mercenary.pop(camp_id, None)
+            return
+    row = pve_db.db_campaign_protocol_row(camp_id, conn=db)
+    if not row:
+        return
+    with _active_mercenary_lock:
+        _active_mercenary[camp_id] = (row[0], merc_guid.lower())
+    getattr(handler, "_log_req", print)(
+        f"    Campaign start with mercenary {merc_guid} (camp={camp_id})")
 
 # Race-specific Castle Crayburn EncounterScene IDs from the client data.
 # The shared dungeon template supplies the map, but these scenes supply the
@@ -4009,56 +1057,51 @@ _CRAYBURN_RACE_SCENE_IDS = {
 }
 
 
-def _crayburn_scene_guids(race_name):
-    """Return the client-known encounter scenes for a race route."""
-    return _CRAYBURN_RACE_SCENE_IDS.get(
-        race_name, tuple(_CRAYBURN_CASTLE.get("encounters", ())))
 
 
 _CRAYBURN_ENCOUNTER_NODES = ("CastleGate", "TowerGate", "PenworthTower")
 
 
-def _crayburn_scene_for_node(race_name, node):
-    """Return the client-known scene for a race's battle node."""
+
+
+
+def _az1_panorama_bundle(state_json):
+    """The AssetBundle of the AZ1 panorama a campaign row is standing in.
+
+    The row's ``RulesZone`` names the panorama (Cave-In, Ambling Mesa, ...);
+    its catalog bundle is the one the client must load, not the race's AZ0
+    starter panorama.  Returns ``(bundle, prefab)`` or None.
+    """
     try:
-        return _crayburn_scene_guids(race_name)[
-            _CRAYBURN_ENCOUNTER_NODES.index(node)]
-    except (ValueError, IndexError):
+        zone_id = (json.loads(state_json or "{}") or {}).get("RulesZone")
+    except (TypeError, ValueError):
         return None
+    if not zone_id:
+        return None
+    from campaign_runtime import catalog_data
+    try:
+        entry = catalog_data.zone(zone_id)
+    except LookupError:
+        return None
+    if (entry.get("kind") != "panorama" or entry.get("server_template") != "AZ1"
+            or not entry.get("bundle")):
+        return None
+    return entry["bundle"], entry["bundle"].rsplit("/", 1)[-1]
 
 
-def _normalize_crayburn_encounters(state, race_name):
-    """Replace legacy shared scene IDs with the route-specific client IDs."""
-    if not state or race_name not in _CRAYBURN_RACE_SCENE_IDS:
-        return False
-    changed = False
-    scene_guids = _crayburn_scene_guids(race_name)
-    for loc in state.get("VisLocs", []):
-        data = loc.get("Data", {}) or {}
-        expected = _crayburn_scene_for_node(race_name, data.get("node"))
-        if expected and data.get("encounter") != expected:
-            data["encounter"] = expected
-            changed = True
-    expected_list = [{"Name": guid, "Data": {"encscene": guid}}
-                     for guid in scene_guids]
-    if state.get("Encounters") != expected_list:
-        state["Encounters"] = expected_list
-        changed = True
-    return changed
-
-def _build_camp_summary(cid, inst_id, campaign_type="PANORAMA", template_name="AZ1", champion_race=None, panorama_scene=None, panorama_node=None):
+def _build_camp_summary(cid, inst_id, campaign_type="PANORAMA", template_name="AZ1", champion_race=None,
+                        state_json=None):
     """Build a CampSummary JSON dict."""
     bundle, prefab = "", ""
     cfg = _az0_config(champion_race)
-    if ((campaign_type or "").upper() == "PANORAMA" and
-            panorama_scene):
-        # AZ1 handoffs use the authored node destination (for example
-        # Node017 -> p_dwrf_cavein), not the travelling champion's race.
-        bundle, prefab = _az1_panorama_assets(panorama_node, champion_race)
-    elif cfg:
+    if cfg:
         bundle, prefab = cfg["bundle"], cfg["prefab"]
     elif champion_race and champion_race in _RACE_BUNDLE_MAP:
         bundle, prefab = _RACE_BUNDLE_MAP[champion_race]
+    if (campaign_type or "PANORAMA").upper() == "PANORAMA":
+        zone_bundle = _az1_panorama_bundle(state_json)
+        if zone_bundle:
+            bundle, prefab = zone_bundle
 
     is_panorama = (campaign_type or "PANORAMA").upper() == "PANORAMA"
     if is_panorama:
@@ -4072,15 +1115,22 @@ def _build_camp_summary(cid, inst_id, campaign_type="PANORAMA", template_name="A
         campaign_template_id = "742c6fc1-77e5-4029-bf9e-4e8af387857a"
         bundle, prefab = "", ""
     else:
-        # Castle Crayburn dungeon. The background/nodes prefabs are the real
-        # castle assets (resolve via Resources.Load); the AssetBundle+LevelPrefab
-        # are deliberately left empty so OnStartUp_GetSummary skips the async
-        # bundle-level load (UICampaignZoneVMBase.cs:635 -> 642 else) and calls
-        # OnPrefabLoaded() directly — the p_* panorama level prefab is not a
-        # dungeon scene and its load NREs in UIDungeonZoneViewModel.
-        background_prefab = "campaign/az01/crayburncastle/prefabs/background"
-        nodes_prefab = "campaign/az01/crayburncastle/prefabs/nodes"
-        campaign_template_id = "5bcba43a-95c7-44b4-ba09-a3555a5edf05"
+        # A dungeon. The background/nodes prefabs are the client's own
+        # (Resources.Load), found from the zone data; the AssetBundle and
+        # LevelPrefab are deliberately left empty so OnStartUp_GetSummary
+        # skips the async bundle load (UICampaignZoneVMBase.cs:635 -> 642
+        # else) and calls OnPrefabLoaded() directly - a p_* panorama level
+        # prefab is not a dungeon scene and its load NREs in
+        # UIDungeonZoneViewModel.
+        from campaign_runtime import catalog_data
+        zone = next((z for z in catalog_data.zones()
+                     if z.get("kind") == "dungeon" and z.get("prefab_root") and
+                     z.get("server_template") == template_name), None)
+        root = (zone or {}).get("prefab_root") or "campaign/az01/crayburncastle"
+        background_prefab = f"{root}/prefabs/background"
+        nodes_prefab = f"{root}/prefabs/nodes"
+        campaign_template_id = ((zone or {}).get("campaign_template_id")
+                                or "5bcba43a-95c7-44b4-ba09-a3555a5edf05")
         bundle, prefab = "", ""
 
     return {
@@ -4285,159 +1335,64 @@ def handle_campaign_request(handler, _db, inner_obj, comp, session_id, reqid,
     elif req_type == "cheat":
         return _handle_cheat(handler, _db, env_json, comp, session_id,
                               reqid, target, instance, conh, uid)
+    elif req_type == "partysave":
+        return _handle_partysave(handler, _db, env_json, comp, session_id,
+                                 reqid, target, instance, conh, uid)
+    elif req_type == "partyload":
+        return _handle_partyload(handler, _db, env_json, comp, session_id,
+                                 reqid, target, instance, conh, uid)
     else:
-        log(f"    Unhandled campaign request: {req_type}")
+        log(f"    Unhandled campaign request: {req_type} "
+            f"{json.dumps(env_json, default=str)[:4000]}")
         return
+
+
+def _handle_partysave(handler, db, env_json, comp, session_id,
+                      reqid, target, instance, conh, uid):
+    """Party.SaveRequest: persist the champion's mercenary party.
+
+    The client deserializes the response envelope as the saved
+    CampSysGeneral+Party+ChampionParty and hands it to its callback.
+    """
+    from services import mercenaries
+    log = getattr(handler, "_log_req", print)
+    log(f"    partysave {json.dumps(env_json, default=str)[:2000]}")
+    user_id = handler.user_profile["id"] if handler.user_profile else 0
+    party = mercenaries.save_party(db, user_id, env_json.get("Party") or {})
+    db.commit()
+    return _send_response(handler, json.dumps(party), comp, session_id,
+                          reqid, target, instance, conh, uid)
+
+
+def _handle_partyload(handler, db, env_json, comp, session_id,
+                      reqid, target, instance, conh, uid):
+    """Party.LoadRequest: return the requested champions' parties."""
+    from services import mercenaries
+    log = getattr(handler, "_log_req", print)
+    log(f"    partyload {json.dumps(env_json, default=str)[:2000]}")
+    user_id = handler.user_profile["id"] if handler.user_profile else 0
+    wanted = {int(c) for c in env_json.get("Champs") or []}
+    parties = [party for party in mercenaries.get_parties(db, user_id)
+               if not wanted or party["ChampionID"] in wanted]
+    return _send_response(handler, json.dumps(parties), comp, session_id,
+                          reqid, target, instance, conh, uid)
 
 
 def _handle_qcur4champ(handler, db, env_json, comp, session_id,
                         reqid, target, instance, conh, uid):
     """QueryCurrentForChampion: returns the champion's current campaign state."""
     champ_id = env_json.get("ChampID", 0)
-    # A champion can retain its completed Panorama after accepting the
-    # Crayburn quest.  Prefer an active dungeon on reconnect; otherwise this
-    # query always recreated/selected Panorama and silently took the player
-    # out of the dungeon.
-    dungeon = _get_existing_campaign_for_champion(db, champ_id, "DUNGEON")
-    d_state = dungeon[4] if dungeon else None
-    if dungeon:
-        d_cid, d_inst_id, d_inst_hi, d_started, d_state = dungeon
-        if d_state and (d_started or d_state.get("Started")) \
-                and not d_state.get("Finished"):
-            original = json.dumps(d_state, sort_keys=True)
-            d_state = _prepare_dungeon_state(
-                d_state, _race_name_for_campaign(db, d_cid))
-            if json.dumps(d_state, sort_keys=True) != original:
-                _save_campaign_state(db, d_cid, d_state)
-                db.commit()
-            resp = _build_input_response(d_cid, d_state, success=True)
-            return _send_response(handler, json.dumps(resp), comp, session_id,
-                                  reqid, target, instance, conh, uid)
-
-    # Authored AZ1 panoramas are the active campaign while the player is in
-    # Cave-In/Ambling Mesa/etc.  The AREA row remains persisted underneath so
-    # return_parent can resume it, but reconnect must follow LastCampaignID
-    # back into the panorama rather than reopening the map.
-    authored_panorama = _get_existing_campaign_for_champion(
+    # A champion whose last campaign is run from the rules goes back there.
+    last_campaign = pve_db.db_champion_last_campaign_id(champ_id, conn=db)
+    zone_id = _rules_zone(db, last_campaign) if last_campaign else None
+    if zone_id:
+        from campaign_runtime import runtime
+        return runtime.handle_query(handler, db, zone_id,
+                                    dict(env_json, CampID=last_campaign), comp,
+                                    session_id, reqid, target, instance, conh, uid)
+    # Otherwise the champion's starter panorama is the current campaign.
+    cid, _inst_id, _started, state = _find_campaign_for_champion(
         db, champ_id, "PANORAMA")
-    panorama_state = authored_panorama[4] if authored_panorama else None
-    last_campaign_id = pve_db.db_champion_last_campaign_id(
-        champ_id, conn=db)
-    if (authored_panorama and last_campaign_id == authored_panorama[0] and
-            isinstance(panorama_state, dict) and
-            panorama_state.get("PanoramaSceneGuid")):
-        area = _get_existing_campaign_for_champion(db, champ_id, "AREA")
-        if area and area[4]:
-            p_cid = authored_panorama[0]
-            p_state = panorama_state
-            p_state = _build_az1_panorama_state(
-                db, p_cid, champ_id, p_state.get("PanoramaSceneGuid"),
-                p_state.get("PanoramaNode"), area[4])
-            pve_db.db_campaign_update_state(
-                p_cid, json.dumps(p_state), db, started=True)
-            db.commit()
-            resp = _build_input_response(p_cid, p_state, success=True)
-            return _send_response(handler, json.dumps(resp), comp, session_id,
-                                  reqid, target, instance, conh, uid)
-
-    # Repair saves created before the post-dungeon report marker was added.
-    # Such saves have a completed Crayburn dungeon and an active next journal
-    # objective, but the panorama would otherwise be treated as the old quest
-    # giver state when the player reconnects.
-    if (dungeon and d_state and d_state.get("Finished") and
-            d_state.get("FinishReason") == "Complete"):
-        pending_quest = _get_existing_campaign_for_champion(db, champ_id, "QUEST")
-        if pending_quest:
-            q_cid, _qi, _qh, _qs, q_state = pending_quest
-            q_template = pve_db.db_campaign_template_name(q_cid, conn=db)
-            q_metadata = _quest_template(db, q_template) if q_template else None
-            q_flags = (q_state or {}).get("Flags", {})
-            q_idx = q_flags.get("_quest_objective_idx")
-            q_objectives = q_flags.get("_quest_objectives") or []
-            try:
-                q_idx = int(q_idx)
-            except (TypeError, ValueError):
-                q_idx = -1
-            if (q_state and not q_state.get("Finished") and q_metadata and
-                    q_metadata.get("campaign_group") == "DUNGEON" and
-                    0 < q_idx < len(q_objectives)):
-                panorama = _get_existing_campaign_for_champion(
-                    db, champ_id, "PANORAMA")
-                if panorama:
-                    p_cid, _pi, _ph, _ps, p_state = panorama
-                    if p_state and _prepare_post_crayburn_report(
-                            db, champ_id, p_state):
-                        pve_db.db_campaign_update_state(
-                            p_cid, json.dumps(p_state), conn=db, started=True)
-                        db.commit()
-                    if p_state:
-                        resp = _build_input_response(p_cid, p_state, success=True)
-                        return _send_response(
-                            handler, json.dumps(resp), comp, session_id,
-                            reqid, target, instance, conh, uid)
-
-    # Once the dungeon is complete, the linked quest campaign owns the next
-    # player-facing step (for example Step2: the report-success conversation).
-    # Return that campaign before the persistent panorama so reconnect/current
-    # campaign queries do not silently strand the player in AZ1.
-    quest = _get_existing_campaign_for_champion(db, champ_id, "QUEST")
-    if quest:
-        q_cid, _q_inst_id, _q_inst_hi, _q_started, q_state = quest
-        q_template = pve_db.db_campaign_template_name(q_cid, conn=db)
-        if q_state and not q_state.get("Finished"):
-            q_aloc = q_state.get("ALoc")
-            q_idx = q_state.get("Flags", {}).get("_quest_objective_idx")
-            # Once Crayburn is complete, the report objective is represented
-            # by the race panorama NPC rather than a synthetic QUEST map.
-            # Only the Crayburn journal's report objective is hosted by the
-            # dungeon renderer.  AREA quests (such as az01_tamed) stay in
-            # the quest journal and must never replace the player's current
-            # overworld campaign in QueryCurrentForChampion.
-            q_metadata = _quest_template(db, q_template[0]) if q_template else None
-            if (q_metadata and q_metadata.get("campaign_group") == "DUNGEON" and
-                    (q_aloc or q_idx is not None) and int(q_idx or 0) < 1):
-                # The client has no QUEST campaign game-state transition: it
-                # only knows how to enter DUNGEON/AREA/PANORAMA/STRONGHOLD.
-                # Quest objectives are rendered by the dungeon zone (including
-                # conversation locations), so expose the supported UI type
-                # without changing the persisted campaign_type.
-                q_state = dict(q_state)
-                q_state["TempType"] = "DUNGEON"
-                resp = _build_input_response(q_cid, q_state, success=True)
-                return _send_response(handler, json.dumps(resp), comp, session_id,
-                                      reqid, target, instance, conh, uid)
-
-    area = _get_existing_campaign_for_champion(db, champ_id, "AREA")
-    if area:
-        a_cid, _a_inst_id, _a_inst_hi, a_started, a_state = area
-        if a_state and (a_started or a_state.get("Started")) and not a_state.get("Finished"):
-            if a_state.get("TempType") == "AREA":
-                before = json.dumps(a_state, sort_keys=True)
-                _hydrate_az1_area_scene_metadata(
-                    db, a_state.get("VisLocs", []), champ_id=champ_id,
-                    state=a_state)
-                _az1_reveal_neighbors(db, a_state,
-                                       a_state.get("LastNode") or a_state.get("ALoc"))
-                if json.dumps(a_state, sort_keys=True) != before:
-                    _save_campaign_state(db, a_cid, a_state)
-                    db.commit()
-            pending_quest_progress = _consume_pending_quest_progress(db, champ_id)
-            resp = _build_input_response(a_cid, a_state, success=True)
-            ret = _send_response(handler, json.dumps(resp), comp, session_id,
-                                 reqid, target, instance, conh, uid)
-            if pending_quest_progress:
-                push_campupdate(
-                    handler, db, pending_quest_progress.get("CampID") or 0,
-                    pending_quest_progress.get("ChampID") or champ_id,
-                    "quest_progress", "QUEST", False, pending_quest_progress,
-                    comp, session_id, target, instance, conh, uid)
-            return ret
-
-    cid, inst_id, is_started, state = _find_campaign_for_champion(
-        db, champ_id, "PANORAMA")
-    if state is None:
-        champ = _get_champion(db, champ_id)
-        state = _build_initial_gameplay_state(cid, champ_id, "PANORAMA", champ[2] if champ else None)
     resp = _build_input_response(cid, state, success=True)
     return _send_response(handler, json.dumps(resp), comp, session_id,
                           reqid, target, instance, conh, uid)
@@ -4457,7 +1412,6 @@ def _handle_getactive(handler, db, env_json, comp, session_id,
         ctype = {1: "DUNGEON", 2: "AREA", 3: "WORLD", 4: "QUEST",
                  5: "ACHIEVE", 6: "PANORAMA", 7: "STRONGHOLD"}.get(ctype_int, "AREA")
     template = (env_json.get("Template", "") or "")
-    tname = template.lower()
 
     # Preserve the exact protocol fallback order while keeping SQL in pve_db.
     rows = pve_db.db_active_campaign_candidates(
@@ -4467,20 +1421,67 @@ def _handle_getactive(handler, db, env_json, comp, session_id,
                           reqid, target, instance, conh, uid)
 
 
+def _no_zone_reply(handler, camp_id, comp, session_id, reqid, target,
+                    instance, conh, uid):
+    """Error reply for a campaign row that no rules zone runs."""
+    resp = _build_input_response(camp_id, None, success=False)
+    resp["Errors"] = ["Campaign not found"]
+    return _send_response(handler, json.dumps(resp), comp, session_id,
+                          reqid, target, instance, conh, uid)
+
+
+def _initial_zone_state(camp_id, champ_id, zone_id):
+    """Minimal client state for a new rules-driven row; campaign_runtime
+    projects the rest from the zone's rules on the first request."""
+    from campaign_runtime import catalog_data, locate
+    row_type = locate.ROW_TYPES[catalog_data.zone(zone_id)["kind"]]
+    return {
+        "CampID": camp_id, "ChampID": champ_id,
+        "TempType": row_type, "RulesZone": zone_id,
+        "PayGroups": [], "CSlide": None, "ALoc": None,
+        "VisLocs": [], "LocNodes": [], "Encounters": [],
+        "Champions": [], "CurState": "EXPLORE", "LastNode": "",
+        "PublicState": {"Data": {"CampaignGroup": row_type}},
+        "Started": None, "Finished": None, "FinishReason": None,
+        "Wins": 0, "Losses": 0, "Score": 0,
+        "HealthAdj": 0, "DungeonLifeAdj": 0, "Flags": {},
+    }
+
+
 def _handle_createcamp(handler, db, env_json, comp, session_id,
                         reqid, target, instance, conh, uid):
     """CreateCamp: create a new campaign instance."""
     champ_id = env_json.get("ChampID", 0)
-    template_name = env_json.get("Template", "Crayburn Castle")
-    # Determine campaign type from template name. The client's camp.dungeon
-    # console command sends whatever the user typed (typos like "cragburn" are
-    # common) — fuzzy-match against known dungeon names.
-    tname = (template_name or "").lower()
-    if _is_known_dungeon(tname):
+    requested_name = str(env_json.get("Template") or "Crayburn Castle").strip()
+    template_name = requested_name
+    from campaign_runtime import catalog_data, rules_loader
+
+    # camp.Dungeon passes its name through GetActiveStatus/CreateCamp. Resolve
+    # it against the authored zone catalogue so each named dungeon gets its own
+    # template and rules runtime instead of silently reusing Castle Crayburn.
+    dungeon_zone = catalog_data.resolve_zone_name(requested_name, kind="dungeon")
+    if dungeon_zone is None and _is_known_dungeon(requested_name):
+        # Keep the old forgiving spelling behaviour for Castle Crayburn.
+        dungeon_zone = catalog_data.resolve_zone_name(
+            "Castle Crayburn", kind="dungeon")
+    if dungeon_zone:
         campaign_type = "DUNGEON"
-        # Normalize typos to the canonical name so quest resolution etc. works.
-        template_name = "Crayburn Castle"
-    elif "panorama" in tname:
+        template_name = dungeon_zone.get("server_template") or dungeon_zone["title"]
+        try:
+            runtime_available = rules_loader.runtime_enabled(dungeon_zone["id"])
+        except Exception as exc:
+            runtime_available = False
+            print(f"[campaign] dungeon runtime unavailable for "
+                  f"{dungeon_zone['id']}: {exc}")
+        if not runtime_available:
+            resp = _build_input_response(0, None, success=False)
+            resp["Errors"] = [
+                f"Dungeon {dungeon_zone.get('title') or template_name!r} "
+                "does not have a server campaign runtime"
+            ]
+            return _send_response(handler, json.dumps(resp), comp, session_id,
+                                  reqid, target, instance, conh, uid)
+    elif "panorama" in requested_name.lower():
         campaign_type = "PANORAMA"
     else:
         campaign_type = "PANORAMA"
@@ -4492,116 +1493,121 @@ def _handle_createcamp(handler, db, env_json, comp, session_id,
         return _send_response(handler, json.dumps(resp), comp, session_id,
                               reqid, target, instance, conh, uid)
 
-    cid, inst_id, is_started, state = _find_campaign_for_champion(db, champ_id, campaign_type)
-    if campaign_type == "DUNGEON":
-        state = _prepare_dungeon_state(state, _race_name_for_campaign(db, cid))
+    if dungeon_zone:
+        # Dungeons are separate campaign templates. A type-only lookup here
+        # returned the champion's existing Crayburn row for every debug name.
+        from campaign_runtime import progress
+
+        with progress.champion_lock(champ_id):
+            row = pve_db.db_campaign_for_champion_template(
+                champ_id, template_name, conn=db)
+            if row:
+                cid, inst_id, is_started, state_json, stored_type = row
+                try:
+                    state = json.loads(state_json) if state_json else {}
+                except (TypeError, ValueError):
+                    state = {}
+                old_public = state.get("PublicState") if isinstance(state, dict) else None
+                old_data = (old_public.get("Data")
+                            if isinstance(old_public, dict) else None)
+                old_group = (old_data.get("CampaignGroup")
+                             if isinstance(old_data, dict) else None)
+                if (str(stored_type or "").upper() != "DUNGEON" or not state or
+                        not isinstance(state, dict) or
+                        str(state.get("TempType") or "").upper() not in
+                        ("", "DUNGEON") or
+                        old_group not in (None, "DUNGEON") or
+                        state.get("RulesZone") not in (None, dungeon_zone["id"])):
+                    state = _initial_zone_state(
+                        cid, champ_id, dungeon_zone["id"])
+                else:
+                    state["CampID"] = cid
+                    state["ChampID"] = champ_id
+                    state["TempType"] = "DUNGEON"
+                    state["RulesZone"] = dungeon_zone["id"]
+                    public = state.get("PublicState")
+                    if not isinstance(public, dict):
+                        public = {}
+                    data = public.get("Data")
+                    if not isinstance(data, dict):
+                        data = {}
+                    data.setdefault("CampaignGroup", "DUNGEON")
+                    public["Data"] = data
+                    state["PublicState"] = public
+                pve_db.db_campaign_set_zone(
+                    cid, "DUNGEON", template_name, json.dumps(state), conn=db,
+                    is_started=is_started)
+            else:
+                cid = _new_camp_id(db)
+                inst_id = _generate_inst_id()
+                state = _initial_zone_state(
+                    cid, champ_id, dungeon_zone["id"])
+                pve_db.db_create_campaign(
+                    cid, inst_id, champ_id, champ[1], champ[3], template_name,
+                    "DUNGEON", json.dumps(state), db)
+            pve_db.db_campaign_set_last_campaign(champ_id, cid, db)
+            if dungeon_zone["id"] == "crayburn":
+                # Preserve Crayburn's existing journal setup; other named
+                # dungeons are launched directly for debugging.
+                _ensure_quest_campaign(db, champ_id, "DUNGEON")
+            db.commit()
+    else:
+        cid, inst_id, is_started, state = _find_campaign_for_champion(
+            db, champ_id, campaign_type)
     resp = _build_input_response(cid, state, success=True)
     return _send_response(handler, json.dumps(resp), comp, session_id,
                           reqid, target, instance, conh, uid)
+
+
+def _rules_zone(db, camp_id):
+    """The rules-driven zone a campaign row shows (``campaign_runtime``
+    runs it), or None when the legacy code below still does."""
+    from campaign_runtime import runtime
+    try:
+        return runtime.owns(db, camp_id)
+    except Exception as exc:          # a broken rules file must not lock play
+        print(f"[campaign] rules runtime unavailable for camp {camp_id}: {exc}")
+        return None
 
 
 def _handle_getcampstate(handler, db, env_json, comp, session_id,
                           reqid, target, instance, conh, uid):
     """QueryCampState: return full GameplayState for a campaign."""
     camp_id = env_json.get("CampID", 0)
+    zone_id = _rules_zone(db, camp_id)
+    if zone_id:
+        from campaign_runtime import runtime
+        return runtime.handle_query(handler, db, zone_id, env_json, comp,
+                                    session_id, reqid, target, instance, conh, uid)
+    # A quest campaign is not a zone: its journal row is its state.
     row = pve_db.db_campaign_query_row(camp_id, conn=db)
-    if not row:
-        resp = _build_input_response(camp_id, None, success=False)
-        resp["Errors"] = ["Campaign not found"]
-        return _send_response(handler, json.dumps(resp), comp, session_id,
-                              reqid, target, instance, conh, uid)
-
-    champ_id, is_started, state_json, ctype, template_name = row
-    pending_quest_progress = None
-    if (ctype or "").upper() == "AREA":
-        pending_quest_progress = _consume_pending_quest_progress(db, champ_id)
-    if state_json:
-        state = json.loads(state_json)
-    else:
-        state = _build_initial_gameplay_state(camp_id, champ_id, ctype or "AREA")
-    if (ctype or "").upper() == "PANORAMA":
-        champ = _get_champion(db, champ_id)
-        cfg = _az0_config(champ[2]) if champ else None
-        if cfg and _normalize_starter_panorama_state(state, cfg):
-            _save_campaign_state(db, camp_id, state)
-            db.commit()
-        # Rebuild authored AZ1 panoramas from the source AREA state whenever
-        # they are queried. Older handoffs contain only one NPC, use the wrong
-        # campaign group, or leave ALoc pointing at an NPC; all three shapes
-        # prevent the client from showing the full quest/NPC panorama.
-        if state.get("PanoramaSceneGuid"):
-            area = _get_existing_campaign_for_champion(db, champ_id, "AREA")
-            if area and area[4]:
-                repaired = _build_az1_panorama_state(
-                    db, camp_id, champ_id, state.get("PanoramaSceneGuid"),
-                    state.get("PanoramaNode"), area[4])
-                state = repaired
-                _save_campaign_state(db, camp_id, state)
-                db.commit()
-    if ((ctype or "").upper() == "AREA" and
-            str(template_name or "").upper() == "AZ1"):
-        before = json.dumps(state, sort_keys=True)
-        _hydrate_az1_area_scene_metadata(
-            db, state.get("VisLocs", []), champ_id=champ_id, state=state)
-        _az1_reveal_neighbors(db, state,
-                               state.get("LastNode") or state.get("ALoc"))
-        if json.dumps(state, sort_keys=True) != before:
-            _save_campaign_state(db, camp_id, state)
-            db.commit()
-    if (ctype or "").upper() == "DUNGEON":
-        before = json.dumps(state, sort_keys=True)
-        state = _prepare_dungeon_state(state, _race_name_for_campaign(db, camp_id))
-        if json.dumps(state, sort_keys=True) != before:
-            _save_campaign_state(db, camp_id, state)
-            db.commit()
+    if not row or str(row[3] or "").upper() != "QUEST":
+        return _no_zone_reply(handler, camp_id, comp, session_id, reqid,
+                              target, instance, conh, uid)
+    state = json.loads(row[2] or "{}")
     resp = _build_input_response(camp_id, state, success=True)
-    ret = _send_response(handler, json.dumps(resp), comp, session_id,
-                         reqid, target, instance, conh, uid)
-    if pending_quest_progress:
-        push_campupdate(
-            handler, db, pending_quest_progress.get("CampID") or 0,
-            pending_quest_progress.get("ChampID") or champ_id,
-            "quest_progress", "QUEST", False, pending_quest_progress,
-            comp, session_id, target, instance, conh, uid)
-    return ret
+    return _send_response(handler, json.dumps(resp), comp, session_id,
+                          reqid, target, instance, conh, uid)
 
 
 def _handle_startcamp(handler, db, env_json, comp, session_id,
                        reqid, target, instance, conh, uid):
     """StartCamp: mark a campaign as started, return updated state."""
     camp_id = env_json.get("CampID", 0)
+    zone_id = _rules_zone(db, camp_id)
+    if zone_id:
+        from campaign_runtime import runtime
+        return runtime.handle_query(handler, db, zone_id, env_json, comp,
+                                    session_id, reqid, target, instance, conh,
+                                    uid, start=True)
     row = pve_db.db_campaign_protocol_row(camp_id, conn=db)
-    if not row:
-        resp = _build_input_response(camp_id, None, success=False)
-        resp["Errors"] = ["Campaign not found"]
-        return _send_response(handler, json.dumps(resp), comp, session_id,
-                              reqid, target, instance, conh, uid)
-
+    if not row or str(row[2] or "").upper() != "QUEST":
+        return _no_zone_reply(handler, camp_id, comp, session_id, reqid,
+                              target, instance, conh, uid)
     champ_id, state_json, ctype, template_name = row
-    if state_json:
-        state = json.loads(state_json)
-    else:
-        state = _build_initial_gameplay_state(camp_id, champ_id, ctype or "AREA")
-
-    # Mark as started
+    state = json.loads(state_json or "{}")
     state["Started"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     state["CurState"] = "EXPLORE"
-
-    if (ctype or "").upper() == "DUNGEON":
-        state = _prepare_dungeon_state(state, _race_name_for_campaign(db, camp_id))
-        # Advance the castle chain from the Entrance so the startcamp response
-        # itself carries ALoc pointing at the first conversation node.  That
-        # way the client auto-plays it once on zone load (no separate cmpupdate
-        # needed, which would re-trigger and loop).
-        _advance_crayburn(state, _race_name_for_campaign(db, camp_id),
-                          "Entrance", False)
-    elif ((ctype or "").upper() == "AREA" and
-          str(template_name or "").upper() == "AZ1"):
-        _hydrate_az1_area_scene_metadata(
-            db, state.get("VisLocs", []), champ_id=champ_id, state=state)
-        _az1_reveal_neighbors(db, state,
-                              state.get("LastNode") or state.get("ALoc"))
-
     pve_db.db_campaign_update_state(
         camp_id, json.dumps(state), conn=db, started=True)
     db.commit()
@@ -4621,20 +1627,9 @@ def _handle_getcampsum(handler, db, env_json, comp, session_id,
     for cid in camp_ids:
         row = pve_db.db_campaign_summary_row(cid, conn=db)
         if row:
-            panorama_scene = None
-            panorama_node = None
-            if (row[1] or "").upper() == "PANORAMA":
-                try:
-                    panorama_state = json.loads(row[4] or "{}") or {}
-                    panorama_scene = panorama_state.get("PanoramaSceneGuid")
-                    panorama_node = panorama_state.get("PanoramaNode")
-                except (TypeError, ValueError, json.JSONDecodeError):
-                    panorama_scene = None
-                    panorama_node = None
             summaries.append(_build_camp_summary(
                 cid, row[0], row[1] or "DUNGEON",
-                row[2] or "Crayburn Castle", row[3], panorama_scene,
-                panorama_node))
+                row[2] or "Crayburn Castle", row[3], state_json=row[4]))
 
     return _send_response(handler, json.dumps(summaries), comp, session_id,
                           reqid, target, instance, conh, uid)
@@ -4644,1086 +1639,20 @@ def _handle_sendevent(handler, db, env_json, comp, session_id,
                        reqid, target, instance, conh, uid):
     """SendEvent: handle events sent to the campaign logic engine."""
     camp_id = env_json.get("CampID", 0)
-    event_name = env_json.get("Event", "")
-    o_params = env_json.get("OParms", [])
-
-    log = getattr(handler, "_log_req", print)
-    log(f"    Campaign SendEvent: camp={camp_id} event={event_name} params={o_params}")
-
-    row = pve_db.db_campaign_protocol_row(camp_id, conn=db)
-    if not row:
-        resp = _build_input_response(camp_id, None, success=False)
-        resp["Errors"] = ["Campaign not found"]
-        return _send_response(handler, json.dumps(resp), comp, session_id,
-                              reqid, target, instance, conh, uid)
-
-    champ_id, state_json, ctype, template_name = row
-    if state_json:
-        state = json.loads(state_json)
-    else:
-        state = _build_initial_gameplay_state(camp_id, champ_id, ctype or "AREA")
-
-    # Determine the AZ0 race config from the champion's race so the
-    # conversation chain uses the correct NPC names/GUIDs.
-    cfg = None
-    champ = _get_champion(db, champ_id)
-    if champ:
-        cfg = _az0_config(champ[2])
-    if cfg is None:
-        cfg = _az0_config(1)  # fall back to Human layout
-    if cfg is None:
-        raise RuntimeError("AZ0 campaign configuration is unavailable")
-
-    intro_npc = cfg["intro_npc"]
-    trainer_npc = cfg["trainer_npc"]
-    quest_npc = cfg["quest_npc"]
-    training_node = cfg["training_node"]
-
-    def _append_location(loc):
-        node = loc.get("Data", {}).get("node")
-        if not any(l.get("Data", {}).get("node") == node
-                   for l in state.setdefault("VisLocs", [])):
-            state["VisLocs"].append(loc)
-
-    pending_dungeon = None
-    pending_area = None
-    pending_panorama = None
-    pending_quest_spawns = []
-    pending_quest_progress = []
-    conversation_applied = _empty_applied_updates()
-
-    # Conversation rewards are delivered in the same AppliedUpdates payload
-    # as battle/quest loot. Resolve the active map location before the normal
-    # conv_done state transition clears ALoc, and advance any matching journal
-    # objective while the conversation GUID is still available.
-    if (event_name == "conv_done" and
-            (ctype or "").upper() == "AREA"):
-        active_node = state.get("ALoc")
-        active_data = next(
-            ((loc.get("Data") or {}) for loc in state.get("VisLocs", [])
-             if active_node in ((loc.get("Data") or {}).get("node"),
-                                (loc.get("Data") or {}).get("name"),
-                                (loc.get("Data") or {}).get("title"))),
-            {},
-        )
-        active_conversation = active_data.get("conversationId")
-        conversation_applied = _apply_conversation_rewards(
-            handler, db, camp_id, state, active_conversation)
-        pending_quest_progress = _advance_quest_conversation_objectives(
-            db, champ_id, active_conversation)
-
-    if (event_name == "conv_done" and
-            (ctype or "").upper() == "PANORAMA" and
-            state.get("PanoramaSceneGuid")):
-        # Authored AREA panorama scenes use the same conversation protocol as
-        # the starter panorama, but do not belong to its tutorial chain.
-        current = state.get("ALoc")
-        current_data = next(
-            ((loc.get("Data") or {}) for loc in state.get("VisLocs", [])
-             if current in ((loc.get("Data") or {}).get("node"),
-                            (loc.get("Data") or {}).get("name"))),
-            {},
-        )
-        active_conversation = current_data.get("conversationId")
-        conversation_applied = _apply_conversation_rewards(
-            handler, db, camp_id, state, active_conversation)
-        pending_quest_progress = _advance_quest_conversation_objectives(
-            db, champ_id, active_conversation)
-        previous_flags = state.get("Flags")
-        if not isinstance(previous_flags, dict):
-            previous_flags = {}
-        pending_quest_spawns = []
-        if active_conversation:
-            spawned, _hooks = _grant_quests_for_conversation(
-                db, champ_id, str(template_name or "AZ1").upper(),
-                active_conversation)
-            pending_quest_spawns.extend(spawned)
-        if current:
-            if current_data.get("repeatable"):
-                # Panorama repeat/hint and active-quest conversations are
-                # reusable NPC interactions.  They must close without
-                # completing the scene location, otherwise the client hides
-                # the NPC on the next state refresh.
-                current_data["completed"] = False
-                current_data["autostart"] = False
-            else:
-                _mark_location_completed(state, current)
-        state["ALoc"] = None
-        state["CurState"] = "EXPLORE"
-        _sync_az1_quest_gates(db, champ_id, state)
-        # Quest acceptance can change the conversation variant immediately
-        # (for example Ennis start -> Sea Witch not-complete). Rebuild the
-        # panorama from the AREA source so the response keeps the right NPCs
-        # and no stale completed flags from the just-closed conversation.
-        area = _get_existing_campaign_for_champion(db, champ_id, "AREA")
-        if area and area[4]:
-            rebuilt = _build_az1_panorama_state(
-                db, camp_id, champ_id, state.get("PanoramaSceneGuid"),
-                state.get("PanoramaNode"), area[4])
-            rebuilt["Flags"] = previous_flags
-            state = rebuilt
-        _save_campaign_state(db, camp_id, state)
-        db.commit()
-        resp = _build_input_response(camp_id, state, success=True,
-                                     applied=conversation_applied)
-        ret = _send_response(handler, json.dumps(resp), comp, session_id,
-                             reqid, target, instance, conh, uid)
-        for quest_state in pending_quest_progress:
-            push_campupdate(
-                handler, db, quest_state.get("CampID") or 0,
-                quest_state.get("ChampID") or champ_id, "quest_progress",
-                "QUEST", False, quest_state, comp, session_id, target,
-                instance, conh, uid)
-        for quest_id, quest_script, quest_state in pending_quest_spawns:
-            push_campspawn(handler, quest_id, champ_id, quest_script,
-                           quest_state, camp_id, "AZ1", comp, session_id,
-                           target, instance, conh, uid)
-        return ret
-
-    if event_name == "choice_battle_yes":
-        state.setdefault("PublicState", {}).setdefault("Data", {})[
-            "RaceTutorialBattleUnlocked"
-        ] = True
-    elif event_name == "choice_battle_no":
-        state.setdefault("PublicState", {}).setdefault("Data", {})[
-            "RaceTutorialBattleUnlocked"
-        ] = False
-    elif event_name == "visit_path":
-        # The map client reports the authored path identifier separately from
-        # StartLoc. Persist it so travelled paths remain lit after refresh.
-        if (ctype or "").upper() == "DUNGEON":
-            state = _prepare_dungeon_state(
-                state, _race_name_for_campaign(db, camp_id))
-        pdata = state.setdefault("PublicState", {}).setdefault("Data", {})
-        paths = pdata.setdefault("visited_paths", [])
-        values = (o_params[0] if o_params and
-                  isinstance(o_params[0], list) else o_params)
-        if not isinstance(values, (list, tuple)):
-            values = [values]
-        new_values = []
-        for path in values:
-            path = str(path)
-            if path and path not in paths:
-                paths.append(path)
-                new_values.append(path)
-        if ((ctype or "").upper() == "AREA" and
-                str(template_name or "").upper() == "AZ1"):
-            recovery_node = _resolve_node(
-                state, state.get("ALoc") or state.get("LastNode") or "")
-            # The client can retry the same travel animation after a
-            # reconnect.  In that case the path is already in
-            # ``visited_paths`` and ``new_values`` is empty, but the retry is
-            # still the signal that the player has reached the destination.
-            # Resolve the complete ordered path list so an already-persisted
-            # path can still finish an AREA -> PANORAMA handoff.
-            arrived_node = _az1_activate_direct_path_destination(
-                db, state, values, champ_id)
-            # If the area save already advanced to a completed panorama node
-            # before the cmpupdate was delivered, the client may only resend
-            # the edge containing that node.  Recover the pending handoff
-            # instead of leaving the player in the map.  A healthy handoff
-            # would already have switched the campaign out of AREA mode, so a
-            # completed authored panorama node is an unambiguous recovery
-            # marker here even when the path resolver sees the opposite edge
-            # direction.
-            current_node = recovery_node
-            current_data = next(
-                ((loc.get("Data") or {}) for loc in state.get("VisLocs", [])
-                 if (loc.get("Data") or {}).get("node") == current_node),
-                {},
-            )
-            path_mentions_current = False
-            for path in values:
-                match = re.fullmatch(
-                    r"Path_([^_]+)_([^_]+)", str(path or ""))
-                if match and current_node in {
-                    _resolve_node(state, part) for part in match.groups()
-                }:
-                    path_mentions_current = True
-                    break
-            current_scene = _az1_scene_for_node(db, current_node)
-            if (arrived_node is None and current_data.get("completed") and
-                    path_mentions_current and
-                    current_scene and
-                    "PANORAMA" in str(current_scene[1] or "").upper()):
-                arrived_node = current_node
-            if arrived_node:
-                log(f"    Campaign direct path arrival: {arrived_node}")
-                location_data = next(
-                    ((loc.get("Data") or {}) for loc in state.get("VisLocs", [])
-                     if (loc.get("Data") or {}).get("node") == arrived_node),
-                    {},
-                )
-                scene = _az1_scene_for_node(db, arrived_node)
-                if (scene and
-                        "PANORAMA" in str(scene[1] or "").upper()):
-                    log(f"    Campaign panorama transition: node={arrived_node} "
-                        f"scene={scene[0]} name={scene[1]}")
-                    pending_panorama = _activate_az1_panorama(
-                        db, champ_id, scene[0], arrived_node, state)
-                    state["ALoc"] = None
-                    state["CurState"] = "EXPLORE"
-    elif event_name == "visit_node":
-        # UIDungeonZoneViewModel reports the node when the token reaches its
-        # destination, immediately before issuing StartLoc.  Synchronize the
-        # server-side position here so an older save cannot reject a valid
-        # authored move (for example Node003 -> Node007 while LastNode still
-        # points at a completed Node004 side location).
-        if ((ctype or "").upper() == "AREA" and
-                str(template_name or "").upper() == "AZ1"):
-            requested_node = _resolve_node(
-                state, str(o_params[0]) if o_params else "")
-            location_data = next(
-                ((loc.get("Data") or {}) for loc in state.get("VisLocs", [])
-                 if (loc.get("Data") or {}).get("node") == requested_node),
-                None,
-            )
-            pdata = state.setdefault("PublicState", {}).setdefault("Data", {})
-            visited_nodes = {
-                _resolve_node(state, str(value))
-                for value in (pdata.get("visited_nodes") or []) if value
-            }
-            blocked_nodes = {
-                _resolve_node(state, str(value))
-                for value in (pdata.get("blocked_nodes") or []) if value
-            }
-            # The client only emits visit_node for a rendered map node. Do
-            # not let a direct event reveal a hidden quest-gated location;
-            # already visited nodes remain valid for repeatable locations.
-            if (location_data and
-                    (location_data.get("visible", True) or
-                     requested_node in visited_nodes) and
-                    requested_node not in blocked_nodes and
-                    requested_node not in _az1_path_fork_ids(db)):
-                state["LastNode"] = requested_node
-                _note_visited(state, requested_node)
-                _az1_reveal_neighbors(db, state, requested_node)
-                # A completed panorama node has no StartLoc follow-up: the
-                # client shows the Travel button, moves the token, reports
-                # visit_node, and considers the node finished. Transition at
-                # arrival so the button loads the authored panorama level.
-                scene = _az1_scene_for_node(db, requested_node)
-                if (scene and
-                        "PANORAMA" in str(scene[1] or "").upper()):
-                    log(f"    Campaign panorama transition: node={requested_node} "
-                        f"scene={scene[0]} name={scene[1]}")
-                    pending_panorama = _activate_az1_panorama(
-                        db, champ_id, scene[0], requested_node, state)
-                    state["ALoc"] = None
-                    state["CurState"] = "EXPLORE"
-    elif event_name in ("choice_go", "choice_stay"):
-        # The authored AZ0 transition conversation is already hosted by the
-        # AZ1 panorama.  The choice is recorded for the client conversation
-        # flow; selecting either answer returns to the map without relaunching
-        # the starter tutorial.
-        if state.get("PostCrayburnReport"):
-            state["ALoc"] = None
-            state["CurState"] = "EXPLORE"
-            if event_name == "choice_go":
-                pending_area = _activate_az1_area(db, champ_id)
-    elif event_name == "return_parent":
-        # UIPanoramaZoneViewModel sends this after the player confirms the
-        # leave prompt. Authored AZ1 panoramas return to the existing AREA
-        # campaign and must push a transition back to the map.
-        if ((ctype or "").upper() == "PANORAMA" and
-                state.get("PanoramaSceneGuid")):
-            pending_area = _activate_az1_area(db, champ_id)
-            state["ALoc"] = None
-            state["CurState"] = "EXPLORE"
-    elif event_name == "gaal_camp_accept":
-        # Authored Milosh conversations emit this server-script event after
-        # the player pays for a reading.  Persist the state marker used by the
-        # node conversation selector so the next visit can use the
-        # "already has fortune" variant instead of charging again.  The
-        # display is deferred until conv_done, after the conversation window
-        # has closed, so the two client panels do not overlap.
-        data = state.setdefault("PublicState", {}).setdefault("Data", {})
-        data["gaal_fortune"] = True
-        fortune_guids = _fortune_card_guids(db)
-        if fortune_guids:
-            data["gaal_fortune_guid"] = random.choice(fortune_guids)
-            data["gaal_fortune_display_pending"] = True
-    elif event_name == "display_done":
-        # UICampaignGaalCamp sends this after the player closes the Fortune
-        # card.  Keep the reading active for the next campaign battle, but
-        # restore Node007 to its repeatable Milosh conversation.
-        if ((ctype or "").upper() == "AREA" and
-                str(template_name or "").upper() in {"AZ1", "AZ2"}):
-            _finish_gaal_fortune_display(
-                db, state, str(template_name or "").upper(),
-                node=state.get("LastNode") or state.get("ALoc"))
-            data = state.setdefault("PublicState", {}).setdefault("Data", {})
-            data.pop("gaal_fortune_display_pending", None)
-    elif (event_name == "conv_done" and
-          (ctype or "").upper() == "DUNGEON"):
-        # Server-driven Crayburn dungeon: ordinary conversations and authored
-        # victory conversations advance the chain.  A defeat conversation is
-        # different: it is the result of a lost encounter and must restore the
-        # same encounter as retryable.  Do not infer victory merely because a
-        # conversation closed.
-        current = _resolve_node(
-            state, state.get("ALoc") or state.get("LastNode") or "Entrance")
-        current_data = next(
-            ((loc.get("Data") or {}) for loc in state.get("VisLocs", [])
-             if current in ((loc.get("Data") or {}).get("node"),
-                            (loc.get("Data") or {}).get("name"))),
-            {},
-        )
-        node_data = _crayburn_node_data(
-            _race_name_for_campaign(db, camp_id), current)
-        active_conversation = current_data.get("conversationId")
-        defeat_conversation = node_data.get("fail")
-        pending_success = (
-            state.get("_pending_encounter_success") == current)
-        active_conversation_node = (
-            current_data.get("type") == "Convo" and
-            bool(active_conversation))
-
-        if active_conversation_node and active_conversation == defeat_conversation:
-            # The defeat dialogue is acknowledgement of a loss, not a node
-            # completion.  Restore the authored encounter so a later StartLoc
-            # can retry it, and clear ALoc so the client returns to the map
-            # instead of immediately reopening either conversation or battle.
-            return_node = _crayburn_return_node(state, current)
-            current_data.update({
-                "type": "Encounter",
-                "conversationId": None,
-                "encounter": _crayburn_scene_for_node(
-                    _race_name_for_campaign(db, camp_id), current),
-                "completed": False,
-                "enabled": True,
-                "visible": True,
-                "autostart": False,
-            })
-            state.pop("_pending_encounter_success", None)
-            state["ALoc"] = ""
-            state["LastNode"] = return_node
-            state["CurState"] = "EXPLORE"
-            _reveal_crayburn_node(state, return_node)
-            _save_campaign_state(db, camp_id, state)
-            db.commit()
-        elif active_conversation_node or pending_success:
-            # Ordinary dungeon conversations and the explicitly pending
-            # victory conversation are the only conversation completions that
-            # advance the Crayburn chain.
-            advance_crayburn_step(handler, db, camp_id, True, comp, session_id,
-                                  target, instance, conh, uid,
-                                  auto_activate=False)
-        else:
-            # Ignore a stale/duplicate conv_done after a defeat conversation
-            # has already restored the encounter.  In particular, do not use
-            # LastNode as evidence that an encounter was won.
-            state["CurState"] = "EXPLORE"
-            _save_campaign_state(db, camp_id, state)
-            db.commit()
-        # advance_crayburn_step already persisted the updated state; reload
-        # it so we return the post-advance state, not the stale pre-advance
-        # copy that would otherwise be saved back and undo the advance.
-        saved_state = pve_db.db_campaign_state(camp_id, conn=db)
-        state = json.loads(saved_state) if saved_state else state
-        resp = _build_input_response(camp_id, state, success=True)
-        return _send_response(handler, json.dumps(resp), comp, session_id,
-                              reqid, target, instance, conh, uid)
-    elif event_name == "shroom_choice":
-        if (ctype or "").upper() == "AREA":
-            choice = str(o_params[0]) if o_params else ""
-            current = state.get("ALoc")
-            current_data = next(
-                ((loc.get("Data") or {}) for loc in state.get("VisLocs", [])
-                 if current in (loc.get("Data", {}).get("node"),
-                                loc.get("Data", {}).get("name"),
-                                loc.get("Data", {}).get("title"))),
-                {})
-            scene_guid = _area_scene_guid(db, state)
-            # Older AZ1 states were created before the authored NODE 04
-            # encounter scene was seeded, so they have no Data.encounter even
-            # though the map location already carries its metadata choices.
-            # Prefer the encounter_scenes reward list, but accept that
-            # persisted scene-derived list as a migration-safe fallback.
-            choices = _scene_card_choices(db, scene_guid)
-            if not choices:
-                choices = [str(value) for value in
-                           (current_data.get("choices") or []) if value]
-            # A completed Haus is one-time; do not award a second copy if a
-            # client retries the selection or manually reopens the location.
-            if choice in choices and not current_data.get("completed"):
-                user_id = pve_db.db_campaign_user_id(champ_id, conn=db)
-                granted = _grant_card_reward(
-                    handler, db, user_id, choice)
-                if not granted:
-                    log(f"    Shroom Haus reward card not found: {choice}")
-                if current and granted:
-                    _mark_location_completed(state, current)
-                    _note_visited(state, current)
-                    state["ALoc"] = None
-                    state["CurState"] = "EXPLORE"
-            else:
-                log(f"    Shroom Haus choice rejected: choice={choice} "
-                    f"scene={scene_guid} choices={choices} active={current}")
-    elif event_name in ("empty_done", "conv_done"):
-        # Empty AREA nodes (such as AZ1's Shroom House) still require an
-        # explicit completion event from the client after Explore.  Clear the
-        # active location so the map can select the next revealed node.
-        if (ctype or "").upper() == "AREA" and event_name == "empty_done":
-            current = state.get("ALoc")
-            if current:
-                _mark_location_completed(state, current)
-                _note_visited(state, current)
-            state["ALoc"] = None
-            state["CurState"] = "EXPLORE"
-        if (ctype or "").upper() == "QUEST":
-            # The journal quest's final report conversation is the terminal
-            # objective. Persist completion so reconnect/current-campaign
-            # queries fall through to the champion's panorama instead of
-            # returning an empty Step2 quest map.
-            current = state.get("ALoc")
-            if current:
-                _mark_location_completed(state, current)
-            all_done = all(
-                (loc.get("Data", {}) or {}).get("completed")
-                for loc in state.get("VisLocs", []))
-            if all_done or current == "Step2":
-                state["Finished"] = _now_utc()
-                state["FinishReason"] = "Complete"
-                state["ALoc"] = None
-                state["CurState"] = "EXPLORE"
-                _save_campaign_state(db, camp_id, state)
-                db.commit()
-            resp = _build_input_response(camp_id, state, success=True)
-            return _send_response(handler, json.dumps(resp), comp, session_id,
-                                  reqid, target, instance, conh, uid)
-        if (ctype or "").upper() == "AREA":
-            # Conversation nodes complete when their authored conversation
-            # closes. Repeatable authored conversations remain actionable so
-            # returning to the node selects their repeat/state variant.
-            current = state.get("ALoc")
-            if current:
-                current_data = next(
-                    ((loc.get("Data") or {}) for loc in state.get("VisLocs", [])
-                     if current in ((loc.get("Data") or {}).get("node"),
-                                    (loc.get("Data") or {}).get("name"))),
-                    {})
-                current_template = str(template_name or "").upper()
-                quest_variant_terminal = bool(
-                    current_data.get("quest_variant_terminal"))
-                repeatable_convo = (
-                    current_template in {"AZ1", "AZ2"} and
-                    current_data.get("type") == "Convo" and
-                    bool(current_data.get("repeatable")) and
-                    not quest_variant_terminal)
-                outcome_convo = bool(current_data.get("outcome_conversation"))
-                pre_encounter_convo = bool(current_data.get("pre_encounter"))
-                quest_turnin_convo = bool(current_data.get("turninquest"))
-                blockade_convo = (
-                    current_template == "AZ1" and
-                    current_data.get("node") == "Node019" and
-                    current_data.get("type") == "Convo" and
-                    not outcome_convo and not pre_encounter_convo)
-                if outcome_convo:
-                    # A one-shot result dialogue follows a completed battle;
-                    # closing it completes the map node even though the
-                    # underlying location retains its pre-encounter marker.
-                    _mark_location_completed(state, current)
-                    current_data["autostart"] = False
-                elif blockade_convo:
-                    # The first Brink Ridge conversation only explains the
-                    # blockade. It must not complete the node or reveal its
-                    # northern neighbours; the successful encounter sets
-                    # blockade_cleared through the battle result path.
-                    current_data["completed"] = False
-                    current_data["autostart"] = False
-                elif quest_turnin_convo:
-                    # A quest-start conversation keeps its map node open so
-                    # accepting the quest does not lower a bridge. The
-                    # authored turn-in conversation is the point at which
-                    # this node is completed.
-                    _mark_location_completed(state, current)
-                    current_data.pop("quest_start_open", None)
-                    current_data["repeatable"] = False
-                    current_data["autostart"] = False
-                elif not repeatable_convo and not pre_encounter_convo:
-                    _mark_location_completed(state, current)
-                    if quest_variant_terminal:
-                        current_data["quest_variant_completed"] = True
-                    current_data.pop("quest_variant_terminal", None)
-                else:
-                    # A repeatable node must not auto-trigger again while the
-                    # client is still parked on it after the conversation
-                    # closes. StartLoc sets this back to true on re-entry.
-                    current_data["autostart"] = False
-                _note_visited(state, current)
-                if (current_template in {"AZ1", "AZ2"} and
-                        current_data.get("type") == "Convo"):
-                    pdata = state.setdefault("PublicState", {}).setdefault("Data", {})
-                    visits = pdata.setdefault("conversation_visits", {})
-                    node_key = str(current_data.get("node") or current)
-                    try:
-                        visits[node_key] = int(visits.get(node_key, 0) or 0) + 1
-                    except (TypeError, ValueError):
-                        visits[node_key] = 1
-                # Completing the Savage Lord result conversation unlocks the
-                # west half of the Zila bridge. Until this point Node015 stays
-                # hidden/blocked even though the authored map graph contains
-                # a static Node012 <-> Node015 edge.
-                if (current_template == "AZ1" and
-                        current_data.get("node") == "Node014" and
-                        str(current_data.get("conversationId") or "") ==
-                        "0211e909-2945-4f84-b8c6-1e5d33169d6e"):
-                    _az1_unlock_west_bridge(state)
-                outcome_conversation_guid = None
-                if (current_template == "AZ1" and
-                        current_data.get("shroomhaus_convo")):
-                    current_data.update({
-                        "type": "ShroomHaus", "conversationId": None,
-                        "autostart": True, "completed": False,
-                        "shroomhaus_ready": True,
-                    })
-                    current_data.pop("shroomhaus_convo", None)
-                if current_data.get("outcome_conversation"):
-                    outcome_conversation_guid = current_data.get(
-                        "conversationId")
-                    # The result dialogue has now been acknowledged. Restore
-                    # the underlying encounter on the next hydration without
-                    # reopening the result conversation.
-                    current_data.update({
-                        "outcome_conversation": False,
-                        "conversationId": None,
-                        "autostart": False,
-                    })
-                # Quest assignment is driven by the extracted conversation
-                # catalog.  One conversation may grant several quests (for
-                # example Tamed plus the faction Find quest).
-                if str(template_name or "").upper() in {"AZ1", "AZ2"}:
-                    spawned, _hooks = _grant_quests_for_conversation(
-                        db, champ_id, str(template_name).upper(),
-                        (outcome_conversation_guid if outcome_convo else
-                         current_data.get("conversationId")))
-                    for quest_id, quest_script, quest_state in spawned:
-                        pending_quest_spawns.append(
-                            (quest_id, quest_script, quest_state))
-                    # A newly spawned quest is authoritative evidence that
-                    # this conversation was a quest start. Keep its map node
-                    # incomplete and repeatable until the quest's authored
-                    # turn-in row is selected by _apply_az1_quest_markers.
-                    if spawned and not quest_turnin_convo:
-                        current_data["completed"] = False
-                        current_data["repeatable"] = True
-                        current_data["autostart"] = False
-                        current_data["quest_start_open"] = True
-                    _sync_az1_quest_gates(db, champ_id, state)
-                    _apply_az1_quest_markers(db, champ_id, state)
-                data = state.setdefault("PublicState", {}).setdefault("Data", {})
-                if (current_template in {"AZ1", "AZ2"} and
-                        current_data.get("node") in
-                        _gaal_camp_nodes(db, current_template) and
-                        data.get("gaal_fortune_display_pending") and
-                        data.get("gaal_fortune_guid")):
-                    # The client has just closed Milosh's conversation.  Turn
-                    # the same active location into ModDisplay so its
-                    # UICampaignGaalCamp panel shows the selected Fortune.
-                    _show_gaal_fortune(
-                        db, state, current_template,
-                        node=current_data.get("node"))
-                    # Keep this marker until display_done so a disconnect or
-                    # reconnect before the acknowledgement can recover the
-                    # already-paid Fortune display.
-                    current_data["autostart"] = False
-                    state["ALoc"] = current_data.get("name") or current_data.get("node")
-                    state["CurState"] = "EXPLORE"
-                    _save_campaign_state(db, camp_id, state)
-                    db.commit()
-                    resp = _build_input_response(camp_id, state, success=True)
-                    return _send_response(handler, json.dumps(resp), comp,
-                                          session_id, reqid, target, instance,
-                                          conh, uid)
-                # A pre-encounter conversation promotes its location back to
-                # the authored battle scene. A result conversation does the
-                # same promotion, but leaves the already-won node complete
-                # and clears ALoc so travel can continue.
-                if current_data.get("pre_encounter") and not outcome_convo:
-                    current_data.update({
-                        "type": "Encounter",
-                        "conversationId": None,
-                        "completed": False,
-                        "pre_encounter_completed": True,
-                        # Keep the player parked on the encounter.  The
-                        # client uses ALoc/AutoStart to make the location
-                        # active and prevent travel until the battle starts.
-                        "autostart": True,
-                    })
-                    state["ALoc"] = (current_data.get("name") or
-                                      current_data.get("node") or current)
-                elif current_data.get("pre_encounter") and outcome_convo:
-                    scene = _az1_scene_for_node(db, current_data.get("node"))
-                    current_data.update({
-                        "type": "Encounter",
-                        "conversationId": None,
-                        "completed": True,
-                        "pre_encounter_completed": True,
-                        "autostart": False,
-                    })
-                    if scene:
-                        current_data["encounter"] = scene[0]
-                    state["ALoc"] = None
-                elif not current_data.get("shroomhaus_ready"):
-                    state["ALoc"] = None
-                # Conversation completion can change a repeatable node from
-                # an active prelude into its retryable map state. Recompute
-                # both node and edge visibility now; otherwise the newly
-                # visible destinations can retain stale locked_paths from
-                # before this node was completed/re-enterable.
-                if (current_template == "AZ1" and
-                        current_data.get("node")):
-                    _az1_reveal_neighbors(
-                        db, state, current_data.get("node"))
-            state["CurState"] = "EXPLORE"
-            _save_campaign_state(db, camp_id, state)
-            db.commit()
-            resp = _build_input_response(camp_id, state, success=True,
-                                         applied=conversation_applied)
-            ret = _send_response(handler, json.dumps(resp), comp, session_id,
-                                 reqid, target, instance, conh, uid)
-            for quest_state in pending_quest_progress:
-                push_campupdate(
-                    handler, db, quest_state.get("CampID") or 0,
-                    quest_state.get("ChampID") or champ_id, "quest_progress",
-                    "QUEST", False, quest_state, comp, session_id, target,
-                    instance, conh, uid)
-            for quest_id, quest_script, quest_state in pending_quest_spawns:
-                push_campspawn(handler, quest_id, champ_id, quest_script,
-                               quest_state, camp_id, "AZ1", comp, session_id,
-                               target, instance, conh, uid)
-            return ret
-        current = state.get("ALoc")
-        # After Crayburn completion the report conversation is shown in the
-        # race panorama.  Its completion must not restart the castle; instead
-        # expose the original race NPC with the authored Feralroot travel
-        # conversation and finish the linked journal objective.
-        if ((ctype or "").upper() == "PANORAMA" and
-                current == quest_npc and state.get("PostCrayburnReport")):
-            report_conv = next(
-                ((loc.get("Data") or {}).get("conversationId")
-                 for loc in state.get("VisLocs", [])
-                 if (loc.get("Data") or {}).get("node") == current),
-                None,
-            )
-            report_applied = _apply_conversation_rewards(
-                handler, db, camp_id, state, report_conv)
-            _mark_location_completed(state, current)
-            transition = _activate_az1_transition(db, champ_id, cfg)
-            if transition:
-                _pano_id, state = transition
-            qrow = pve_db.db_latest_quest_state(champ_id, conn=db)
-            if qrow and qrow[1]:
-                qstate = json.loads(qrow[1])
-                qcurrent = qstate.get("ALoc")
-                if qcurrent:
-                    _mark_location_completed(qstate, qcurrent)
-                qstate["Finished"] = _now_utc()
-                qstate["FinishReason"] = "Complete"
-                qstate["ALoc"] = None
-                qstate["CurState"] = "EXPLORE"
-                _save_campaign_state(db, qrow[0], qstate)
-                db.commit()
-            resp = _build_input_response(camp_id, state, success=True,
-                                         applied=report_applied)
-            return _send_response(handler, json.dumps(resp), comp, session_id,
-                                  reqid, target, instance, conh, uid)
-        if (current == intro_npc and state.get("PostCrayburnReport")):
-            _mark_location_completed(state, current)
-            state["ALoc"] = None
-        elif current == intro_npc:
-            _mark_location_completed(state, current)
-            _append_location(_convo_location(
-                trainer_npc, cfg["battle_conv"], givequest=True))
-            # The player must find the trainer on the panorama; do NOT
-            # auto-launch their conversation. Clear ALoc so ProcessStateChange
-            # returns to explore mode and the panorama hint guides the player.
-            state["ALoc"] = None
-        elif current == trainer_npc:
-            if state.pop("TrainingVictoryPending", False):
-                _mark_location_completed(state, current)
-                for loc in state.get("VisLocs", []):
-                    data = loc.get("Data", {})
-                    if data.get("node") == trainer_npc or data.get("name") == trainer_npc:
-                        data.update({"visible": False, "completed": True,
-                                     "enabled": False})
-                _append_location(_convo_location(
-                    quest_npc, cfg["quest_conv"], givequest=True))
-                state["ALoc"] = None
-            elif state.get("PublicState", {}).get("Data", {}).get("RaceTutorialBattleUnlocked"):
-                # Convert the trainer's own location into the training
-                # encounter. The client's ProcessStateChange only finds a
-                # location to auto-trigger when it is bound to an NPC
-                # GameObject (ALoc must equal the NPC's location Name), so we
-                # must keep this on the trainer NPC node rather than creating a
-                # separate unbound node.
-                for loc in state.get("VisLocs", []):
-                    data = loc.get("Data", {})
-                    if data.get("node") == trainer_npc or data.get("name") == trainer_npc:
-                        data["type"] = "Encounter"
-                        data["encounter"] = cfg["training_encounter"]
-                        data["conversationId"] = None
-                        data["completed"] = False
-                        break
-                state["ALoc"] = trainer_npc
-            else:
-                # Declined the spar. Return to the panorama with the trainer
-                # still visible/talkable. Clear ALoc so the client doesn't
-                # auto-relaunch the conversation (ProcessStateChange relaunches
-                # when ALoc matches a Convo location's Name).
-                state["ALoc"] = None
-        elif current == quest_npc:
-            # Quest conversation finished. The quest-giver (e.g. Colonel
-            # Sterling / Margugram) handed off the Crayburn Castle quest;
-            # transition the campaign to the castle. We reuse this same
-            # campaign row by switching its type and rebuilding the
-            # GameplayState (currently a PANORAMA so the client uses its
-            # working panorama renderer — the DUNGEON map renderer hits a
-            # missing 'DungeonMapNode' script).
-            _mark_location_completed(state, current)
-            state["ALoc"] = None
-            dungeon_id, _dungeon_uid, _dungeon_started, dungeon_state = \
-                _find_campaign_for_champion(db, champ_id, "DUNGEON")
-            if not dungeon_state or dungeon_state.get("TempType") != "DUNGEON":
-                dungeon_state = _build_initial_gameplay_state(
-                    dungeon_id, champ_id, "DUNGEON", _race_for_cfg(cfg))
-            dungeon_state["CampID"] = dungeon_id
-            dungeon_state["ChampID"] = champ_id
-            dungeon_state["Started"] = dungeon_state.get("Started") or _now_utc()
-            dungeon_state["CurState"] = "EXPLORE"
-            pve_db.db_promote_campaign_to_dungeon(
-                dungeon_id, json.dumps(dungeon_state), conn=db)
-            # Ensure the dungeon's journal quest campaign exists (the client's
-            # QuestMgr queries getactive with CampType=QUEST and resolves the
-            # quest template by this campaign's TemplateName = script name).
-            _ensure_quest_campaign(db, champ_id, "DUNGEON")
-            # Send the transition only after the panorama response has been
-            # delivered, and use the distinct child campaign ID so the
-            # client's OnTransitionRequested actually loads the dungeon.
-            pending_dungeon = (dungeon_id, dungeon_state)
-    elif event_name == "enc_cancel":
-        # The player clicked "Cancel" on the training battle panel.  Return to
-        # the panorama with the trainer still available as an Encounter node.
-        # Clear ALoc so ProcessStateChange doesn't auto-relaunch anything and
-        # the panorama redisplays.
-        state["ALoc"] = None
-        state["CurState"] = "EXPLORE"
-        for loc in state.get("VisLocs", []):
-            data = loc.get("Data", {})
-            if data.get("node") == trainer_npc or data.get("name") == trainer_npc:
-                data["type"] = "Encounter"
-                data["encounter"] = cfg["training_encounter"]
-                data["conversationId"] = None
-                data["completed"] = False
-                data["enabled"] = True
-                break
-    elif event_name == "start":
-        # The player pressed "Let's start" on the training encounter (or a
-        # dungeon). Launch the battle by pushing a 'gamestarted' notification
-        # with a SessionState pointing at the encounter scene.  The client's
-        # handleNofityGameStarted transitions to EGameState.Battle and then
-        # drives the LoadBalancer session flow (FindSession -> StartEncounter
-        # -> Join -> battle events).
-        _handle_campaign_start(handler, db, env_json, champ_id, cfg,
-                               comp, session_id, target, instance, conh, uid)
-        # _handle_campaign_start persists ActiveEncounterGuid so the later
-        # battle result can resolve the authored scene rewards.  Reload the
-        # state before the common response write below; otherwise this handler
-        # would overwrite that field with its stale pre-launch snapshot.
-        saved_state = pve_db.db_campaign_state(camp_id, conn=db)
-        if saved_state:
-            try:
-                state = json.loads(saved_state)
-            except (TypeError, ValueError, json.JSONDecodeError):
-                pass
-
-    resp = _build_input_response(camp_id, state, success=True,
-                                 applied=conversation_applied)
-    _save_campaign_state(db, camp_id, state)
-    db.commit()
-    ret = _send_response(handler, json.dumps(resp), comp, session_id,
-                         reqid, target, instance, conh, uid)
-    for quest_state in pending_quest_progress:
-        push_campupdate(
-            handler, db, quest_state.get("CampID") or 0,
-            quest_state.get("ChampID") or champ_id, "quest_progress", "QUEST",
-            False, quest_state, comp, session_id, target, instance, conh, uid)
-    # Server-driven dungeon: after the quest-giver's conv_done response has
-    # been delivered, start the castle chain by advancing one step from the
-    # Entrance — which shows the first node's conversation (Watchtower). The
-    # client processes the response then the cmpupdate/gamestarted in order,
-    # so no pacing delay is needed.
-    if pending_dungeon:
-        dungeon_id, dungeon_state = pending_dungeon
-        push_campupdate(handler, db, dungeon_id, champ_id, "quest_complete",
-                        "DUNGEON", True, dungeon_state, comp, session_id,
-                        target, instance, conh, uid)
-        advance_crayburn_step(handler, db, dungeon_id, False, comp, session_id,
-                              target, instance, conh, uid)
-    if pending_area:
-        area_id, area_state = pending_area
-        push_campupdate(handler, db, area_id, champ_id, "feralroot_travel",
-                        "AREA", True, area_state, comp, session_id, target,
-                        instance, conh, uid)
-    if pending_panorama:
-        panorama_id, panorama_state = pending_panorama
-        push_campupdate(handler, db, panorama_id, champ_id, "area_panorama",
-                        "PANORAMA", True, panorama_state, comp, session_id,
-                        target, instance, conh, uid)
-    return ret
+    if str(env_json.get("Event", "") or "") == "start":
+        _remember_mercenary_choice(handler, db, camp_id, env_json.get("OParms"))
+    zone_id = _rules_zone(db, camp_id)
+    if zone_id:
+        from campaign_runtime import runtime
+        return runtime.handle_sendevent(handler, db, zone_id, env_json, comp,
+                                        session_id, reqid, target, instance,
+                                        conh, uid)
+    return _no_zone_reply(handler, camp_id, comp, session_id, reqid,
+                          target, instance, conh, uid)
 
 
-def _mark_quest_objective_retryable(db, champion_id, scene_guid):
-    """Keep a quest encounter available when its optional condition failed."""
-    if not champion_id or not scene_guid:
-        return
-    rows = pve_db.db_campaign_state_rows(
-        champion_id, "QUEST", conn=db, template_name="az01_tamed")
-    for quest_id, raw in rows:
-        try:
-            state = json.loads(raw or "{}")
-        except (TypeError, ValueError, json.JSONDecodeError):
-            continue
-        changed = False
-        for loc in state.get("VisLocs", []):
-            data = loc.get("Data") or {}
-            if str(data.get("encounter") or "") == str(scene_guid):
-                data["completed"] = False
-                data["repeatable"] = True
-                data["enabled"] = True
-                data["visible"] = True
-                changed = True
-        if changed:
-            _save_campaign_state(db, quest_id, state)
-    db.commit()
 
 
-def _apply_gameend(db, camp_id, won):
-    """Apply a campaign game-end result to the DB, return (camp_id, state).
-
-    On a win of the training encounter, reveals the quest-giver NPC on the
-    panorama. Returns (camp_id, GameplayState) or (None, None) if not found.
-    """
-    row = pve_db.db_campaign_protocol_row(camp_id, conn=db)
-    if not row:
-        return None, None
-
-    champ_id, state_json, ctype, template_name = row
-    if state_json:
-        state = json.loads(state_json)
-    else:
-        state = _build_initial_gameplay_state(camp_id, champ_id, ctype or "AREA")
-
-    cfg = None
-    champ = _get_champion(db, champ_id)
-    if champ:
-        cfg = _az0_config(champ[2])
-    if cfg is None:
-        cfg = _az0_config(1)
-    if cfg is None:
-        raise RuntimeError("AZ0 campaign configuration is unavailable")
-
-    is_dungeon = (ctype or "").upper() == "DUNGEON"
-
-    if won:
-        quest_npc = cfg["quest_npc"]
-        trainer_npc = cfg["trainer_npc"]
-        success_conv = cfg.get("training_success_conv")
-        # Queue the authored post-training victory conversation first.  The
-        # conversation-complete handler performs the normal trainer hide and
-        # quest-giver reveal after the player advances through it.
-        if success_conv and trainer_npc and not is_dungeon:
-            trainer_loc = None
-            for loc in state.setdefault("VisLocs", []):
-                data = loc.get("Data", {})
-                if data.get("node") == trainer_npc or data.get("name") == trainer_npc:
-                    trainer_loc = data
-                    break
-            if trainer_loc is None:
-                state["VisLocs"].append(
-                    _convo_location(trainer_npc, success_conv))
-            else:
-                trainer_loc.update({
-                    "type": "Convo", "conversationId": success_conv,
-                    "encounter": None, "completed": False,
-                    "enabled": True, "visible": True,
-                })
-            state["TrainingVictoryPending"] = True
-            state["ALoc"] = trainer_npc
-        # Hide the trainer node (Iddi) — the training battle is done.
-        if not state.get("TrainingVictoryPending"):
-            for loc in state.get("VisLocs", []):
-                data = loc.get("Data", {})
-                if data.get("node") == trainer_npc or data.get("name") == trainer_npc:
-                    data["visible"] = False
-                    data["completed"] = True
-        if not is_dungeon:
-            # Only the panorama reveals the quest-giver; the dungeon has its
-            # own node list and must not gain a stray panorama NPC location.
-            if not any(l.get("Data", {}).get("node") == quest_npc
-                       for l in state.setdefault("VisLocs", [])):
-                state["VisLocs"].append(_convo_location(
-                    quest_npc, cfg["quest_conv"], givequest=True))
-        state["Wins"] = state.get("Wins", 0) + 1
-        if is_dungeon:
-            # Consecutive dungeon wins.  The "if you won the last encounter in
-            # this dungeon" PreGame talents read this streak rather than the
-            # cumulative ``Wins`` counter, which also counts non-dungeon
-            # battles and therefore fired on the first dungeon encounter.
-            state["dungeon_win_count"] = int(
-                state.get("dungeon_win_count", 0) or 0) + 1
-        # The training battle has been won: stop treating the campaign as the
-        # tutorial so later battles randomize the turn player instead of always
-        # giving the player first turn.
-        state["TutorialDone"] = True
-    else:
-        state["Losses"] = state.get("Losses", 0) + 1
-        if is_dungeon:
-            # A loss breaks the dungeon streak; the next encounter must not
-            # grant the previous-win PreGame bonuses.
-            state["dungeon_win_count"] = 0
-        # Training encounters have an authored defeat conversation.  Return
-        # to the trainer's panorama node with that conversation queued so the
-        # client can play it immediately; the encounter remains retryable.
-        fail_conv = cfg.get("training_fail_conv")
-        trainer_npc = cfg.get("trainer_npc")
-        if fail_conv and trainer_npc and not is_dungeon:
-            trainer_loc = None
-            for loc in state.setdefault("VisLocs", []):
-                data = loc.get("Data", {})
-                if data.get("node") == trainer_npc or data.get("name") == trainer_npc:
-                    trainer_loc = data
-                    break
-            if trainer_loc is None:
-                state["VisLocs"].append(
-                    _convo_location(trainer_npc, fail_conv))
-            else:
-                trainer_loc.update({
-                    "type": "Convo", "conversationId": fail_conv,
-                    "encounter": None, "completed": False,
-                    "enabled": True, "visible": True,
-                })
-            state["ALoc"] = trainer_npc
-
-    # AREA encounters are attached directly to map locations. Conditional
-    # quest encounters remain retryable until their condition succeeds; a
-    # normal victory completes the location and reveals the next map node.
-    outcome_pending = False
-    if (ctype or "").upper() == "AREA":
-        active_scene = str(state.get("ActiveEncounterGuid") or "")
-        active_node = state.get("ALoc")
-        condition_met = bool(state.pop("_last_encounter_condition_met", False))
-        quest_pending = _quest_encounter_is_pending(db, champ_id, active_scene)
-        # Tamed encounters remain available after an uncaptured win even if
-        # the journal has not reached (or has not yet recorded) that specific
-        # objective. The authored condition identifies these scenes without
-        # naming individual creatures; a captured win closes the node and
-        # advances the matching quest objective when one is active.
-        tamed_scene = any(
-            str((record.get("end_of_game_condition") or {}).get("type") or "")
-                .strip().lower() == "void_tamed_troop"
-            for record in _scene_reward_records(db, active_scene)
-        )
-        # An authored conditional encounter remains retryable only after a
-        # win that did not satisfy its condition.  A loss or concede leaves
-        # the encounter incomplete, so it cannot use the retryable map state
-        # that exposes outgoing paths.
-        retryable = bool(won and (quest_pending or tamed_scene) and
-                         not condition_met)
-        matched_index = None
-        result_node = None
-        for idx, loc in enumerate(state.get("VisLocs", [])):
-            data = loc.get("Data") or {}
-            if ((active_scene and str(data.get("encounter") or "") == active_scene)
-                    or (active_node and active_node in (
-                        data.get("node"), data.get("name"), data.get("title")))):
-                data["completed"] = bool(won and not retryable)
-                data["repeatable"] = bool(retryable)
-                data["enabled"] = True
-                data["visible"] = True
-                # A result has been handled.  Even a retryable defeat must
-                # return to the map without immediately launching the same
-                # encounter again; deliberate re-entry can set this again.
-                data["autostart"] = False
-                matched_index = idx
-                node_name = data.get("node") or data.get("name")
-                if node_name:
-                    result_node = node_name
-                    state["LastNode"] = node_name
-                    visited = state.setdefault("PublicState", {}).setdefault(
-                        "Data", {}).setdefault("visited_nodes", [])
-                    if node_name not in visited:
-                        visited.append(node_name)
-                    pdata = state.setdefault("PublicState", {}).setdefault(
-                        "Data", {})
-                    failed_nodes = [str(value) for value in
-                                    (pdata.get("failed_nodes") or []) if value]
-                    if not won and node_name not in failed_nodes:
-                        failed_nodes.append(node_name)
-                    elif won:
-                        failed_nodes = [value for value in failed_nodes
-                                        if value != str(node_name)]
-                    pdata["failed_nodes"] = failed_nodes
-                break
-        if retryable:
-            _mark_quest_objective_retryable(db, champ_id, active_scene)
-        # A successful completion can expose the next authored location. A
-        # loss leaves the player at the failed node; its unvisited neighbours
-        # stay hidden until a retry succeeds.
-        if won and matched_index is not None:
-            for loc in state.get("VisLocs", [])[matched_index + 1:]:
-                data = loc.get("Data") or {}
-                if not data.get("completed"):
-                    data["visible"] = True
-                    data["enabled"] = True
-                    break
-        if (str(template_name or "").upper() == "AZ1" and
-                result_node):
-            _az1_reveal_neighbors(db, state, result_node)
-            # Authored result conversations are part of the encounter flow,
-            # not ordinary map chatter. Queue success on a completed win and
-            # failure on any loss (including a player withdrawal) so the
-            # client can play the authored result immediately. Retryable/
-            # taming wins do not queue a result until their capture condition
-            # is met.
-            outcome_conv = None
-            if not won or not retryable:
-                outcome_conv = _az1_outcome_conversation(
-                    db, result_node, bool(won), champ_id=champ_id)
-            if outcome_conv and matched_index is not None:
-                result_data = state.get("VisLocs", [])[matched_index].get(
-                    "Data", {})
-                result_data.update({
-                    "type": "Convo",
-                    "conversationId": outcome_conv,
-                    "encounter": None,
-                    "completed": False,
-                    "repeatable": False,
-                    "outcome_conversation": True,
-                    "autostart": True,
-                    "enabled": True,
-                    "visible": True,
-                })
-                state["ALoc"] = (result_data.get("name") or
-                                  result_data.get("node") or result_node)
-                outcome_pending = True
-            if (result_node == "Node019" and won and not retryable):
-                state.setdefault("PublicState", {}).setdefault("Data", {})[
-                    "blockade_cleared"
-                ] = True
-        state.pop("ActiveEncounterGuid", None)
-
-    # Clear ALoc so the panorama doesn't auto-pop the encounter dialog when
-    # the client returns from the battle. Use an empty string (not None) — the
-    # client's ProcessStateChange won't match it to any node GameObject, and
-    # portrait rendering resolves correctly because it's not a null ALoc.
-    if not is_dungeon and not outcome_pending:
-        state["ALoc"] = ""
-
-    _save_campaign_state(db, camp_id, state)
-    db.commit()
-    return camp_id, state
 
 
 def push_campupdate(handler, db, camp_id, champ_id, reason, temptype, transition,
@@ -5787,12 +1716,12 @@ def push_gameendnotify(handler, db, camp_id, won, comp, session_id,
     Used by the !game_end debug command and by the real gameend flow to
     deliver the updated GameplayState after a campaign battle.
     """
-    cid, state = _apply_gameend(db, camp_id, won)
-    if state is None:
+    row = pve_db.db_campaign_protocol_row(camp_id, conn=db)
+    if not row:
         return "    Campaign not found for gameend"
+    state = json.loads(row[1] or "{}")
 
     champ_id = state.get("ChampID", 0)
-    champ = _get_champion(db, champ_id)
     env_json = {
         "ReckID": 0,
         "CampID": camp_id,
@@ -5838,18 +1767,6 @@ def _scene_reward_records(db, scene_guid):
     return [record for record in (records or []) if isinstance(record, dict)]
 
 
-def _scene_reward_metadata(db, scene_guid):
-    """Return the complete authored rewards_json object for a scene."""
-    if not scene_guid:
-        return {}
-    rewards_json = pve_db.db_encounter_scene_rewards(scene_guid, db)
-    if not rewards_json:
-        return {}
-    try:
-        value = json.loads(rewards_json)
-    except (TypeError, ValueError, json.JSONDecodeError):
-        return {}
-    return value if isinstance(value, dict) else {}
 
 
 def _evaluate_encounter_condition(db, session_id, player_user_id, condition):
@@ -5890,6 +1807,24 @@ def _resolve_reward_template(template, condition_context):
         return template
     key = template[len("$condition."):]
     return (condition_context or {}).get(key)
+
+
+def _grant_reward_deck(handler, db, user_id, deck_guid):
+    """Give the player a copy of a DeckTemplate: its cards join the collection
+    and a saved deck is created from them.  Returns True when a deck was made.
+
+    Used for reward ``deck_guid`` (e.g. a mercenary's authored deck).  The
+    cards and deck persist in the caller's transaction.
+    """
+    from services.store import deck_template_definition, _grant_deck_to_player
+    definition = deck_template_definition(deck_guid)
+    if definition is None:
+        return False
+    _grant_deck_to_player(user_id, definition["cards"],
+                          definition["name"] or "Reward Deck", conn=db)
+    if hasattr(handler, "push_cards_to_client"):
+        handler.push_cards_to_client()
+    return True
 
 
 def _grant_card_reward(handler, db, user_id, template_guid, quantity=1,
@@ -5945,19 +1880,259 @@ def _apply_conversation_rewards(handler, db, camp_id, state,
     campaign state so reconnects or a repeated ``conv_done`` cannot duplicate
     a one-time reward.
     """
-    applied = _empty_applied_updates()
     if not conversation_guid:
-        return applied
+        return _empty_applied_updates()
     row = pve_db.db_conversation_reward(conversation_guid, conn=db)
     if not row or not row[2]:
-        return applied
+        return _empty_applied_updates()
     reward_raw, one_time, _enabled = row
     try:
         reward = json.loads(reward_raw or "{}")
     except (TypeError, ValueError, json.JSONDecodeError):
         reward = {}
-    if not isinstance(reward, dict):
+    return _apply_reward_dict(
+        handler, db, camp_id, state, reward if isinstance(reward, dict) else {},
+        bool(one_time), str(conversation_guid),
+        f"conversation={conversation_guid}")
+
+
+def _apply_quest_rewards(handler, db, camp_id, state, quest_script):
+    """Grant a quest's authored completion reward (``quest_templates.rewards_json``).
+
+    Called where a quest is marked finished; one-time per champion, keyed
+    ``quest:<script>`` in the same claim table conversations use.
+    """
+    row = pve_db.db_quest_template_reward(quest_script, conn=db)
+    if not row or not row[1]:
+        return _empty_applied_updates()
+    try:
+        reward = json.loads(row[0] or "{}")
+    except (TypeError, ValueError, json.JSONDecodeError):
         reward = {}
+    return _apply_reward_dict(
+        handler, db, camp_id, state, reward if isinstance(reward, dict) else {},
+        True, f"quest:{quest_script}", f"quest={quest_script}")
+
+
+def _merge_applied(base, extra):
+    """Append ``extra``'s AppliedUpdates lists onto ``base`` (in place)."""
+    for key, values in (extra or {}).items():
+        if isinstance(values, list):
+            base.setdefault(key, []).extend(values)
+    return base
+
+
+def _inventory_reward_specs(reward):
+    """Inventory specs for a reward's ``mercenaries`` and ``sleeves`` entries.
+
+    The editor's Rewards tab saves ``mercenaries`` (InventoryMercenaryData
+    GUIDs) and ``sleeves`` (DeckSleeve InventoryItemData GUIDs), each as
+    ``[{"guid", "quantity"}]``.  Both are account inventory items, so they are
+    granted through the same ``player_inventory`` path as equipment.
+    """
+    specs = []
+    for key in ("mercenaries", "sleeves"):
+        for entry in (reward or {}).get(key) or ():
+            if isinstance(entry, str):
+                entry = {"guid": entry}
+            if not isinstance(entry, dict) or not entry.get("guid"):
+                continue
+            # One copy each: mercenaries and sleeves are never stacked.
+            specs.append({"guid": str(entry["guid"]).lower(), "quantity": 1,
+                          "_campaign_mercenary": key == "mercenaries"})
+    return specs
+
+
+def _unlock_party_slot_for_mercenary(db, user_id, applied):
+    """Raise CAMP_PARTYCAP to one and publish the account-flag update once."""
+    from services import mercenaries
+    flag = mercenaries.unlock_first_party_slot(db, user_id)
+    if flag:
+        applied.setdefault("AccountFlags", []).append({"Info": {
+            "Name": flag["name"], "Progress": flag["progress"],
+            "Maximum": flag["maximum"], "Completed": flag["completed"],
+        }})
+
+
+def _stardust_item_specs(reward):
+    """Item specs for a reward's ``stardust`` entries (rarity/amount/probability).
+
+    Each entry ``{"rarity": "common", "amount": 25, "probability": 50}`` is
+    rolled independently; ``probability`` is a percentage (default 100).  The
+    returned specs carry ``stardust`` so the grant also updates the ledger.
+    """
+    from db import STARDUST_TEMPLATES
+    specs = []
+    for entry in (reward or {}).get("stardust") or ():
+        if not isinstance(entry, dict):
+            continue
+        guid = STARDUST_TEMPLATES.get(str(entry.get("rarity") or "").lower())
+        try:
+            amount = int(entry.get("amount", 0) or 0)
+            probability = float(entry.get("probability", 100))
+        except (TypeError, ValueError):
+            continue
+        if guid and amount > 0 and random.random() * 100 < probability:
+            specs.append({"guid": guid, "quantity": amount,
+                          "stardust": str(entry["rarity"]).lower()})
+    return specs
+
+
+# Champion XP needed to reach each level (level = index + 1); the last entry
+# is the level cap.
+CHAMPION_XP_THRESHOLDS = (0, 1000, 2800, 5000, 8000, 12000, 17500,
+                          25000, 40000, 50000, 60000, 70000, 80000,
+                          92000, 110000)
+
+
+def _champion_level_for_xp(xp):
+    return max(1, min(len(CHAMPION_XP_THRESHOLDS),
+                      1 + sum(xp >= n for n in CHAMPION_XP_THRESHOLDS[1:])))
+
+
+def _champion_reward_talents(db, champion_id, mercenary=False):
+    """GUIDs of the champion talents whose reward effects apply.
+
+    A mercenary fights without champion talents, so none apply to its battle.
+    """
+    if mercenary:
+        return []
+    row = pve_db.db_champion_battle_profile(champion_id, conn=db)
+    try:
+        guids = json.loads((row[5] if row else None) or "[]")
+    except (TypeError, ValueError):
+        return []
+    if not isinstance(guids, list):
+        return []
+    return [str(guid).lower() for guid in guids if guid]
+
+
+def _talent_on_event(talent_guid):
+    """A talent's ``on_event`` table, decoded from ``ChampionTalentData.m_Eval``.
+
+    The script is base64 of a JSON-like table.  Numbers may omit the leading
+    zero (``.05``), which strict JSON rejects, so those are normalised first.
+    """
+    from gamedata import DEFAULT_RECORD_STORE
+    record = DEFAULT_RECORD_STORE.get(
+        "ChampionTalentData", str(talent_guid).lower())
+    raw = record.field("m_Eval") if record else ""
+    if not raw:
+        return {}
+    try:
+        text = base64.b64decode(raw).decode("utf-8")
+        script = json.loads(re.sub(r"(?<=[\s\[,:])\.(\d)", r"0.\1", text))
+    except (TypeError, ValueError):
+        return {}
+    events = script.get("on_event") if isinstance(script, dict) else None
+    return events if isinstance(events, dict) else {}
+
+
+def _event_amount(entries, key):
+    """Sum of the amounts of the ``[key, amount]`` entries of an event list."""
+    total = 0.0
+    for entry in entries or ():
+        if isinstance(entry, list) and len(entry) >= 2 and entry[0] == key:
+            total += float(entry[1])
+    return total
+
+
+def _talent_reward_multipliers(talent_guids, level):
+    """``(xp, gold)`` multipliers from the talents' ``bonusxp`` and
+    ``bonusgold`` entries.  Gold bonuses count only at the level cap."""
+    xp_bonus = gold_bonus = 0.0
+    at_cap = level >= len(CHAMPION_XP_THRESHOLDS)
+    for guid in talent_guids:
+        events = _talent_on_event(guid)
+        xp_bonus += _event_amount(events.get("on_xp"), "bonusxp")
+        if at_cap:
+            gold_bonus += _event_amount(
+                events.get("on_gold_at_max_level"), "bonusgold")
+    return 1 + xp_bonus, 1 + gold_bonus
+
+
+def _scale_reward(amount, multiplier):
+    """A reward after a talent bonus, rounded down to whole units."""
+    return int(round(amount * multiplier, 6))
+
+
+def _talent_dungeon_reward_specs(talent_guids):
+    """Item specs from talents' ``dungeon_complete`` weighted picks (Artistic).
+
+    Each pick is rolled once per dungeon win.  Stardust picks carry their
+    rarity so the grant also updates the stardust ledger.
+    """
+    from db import STARDUST_TEMPLATES
+    rarity_by_guid = {guid: rarity for rarity, guid in STARDUST_TEMPLATES.items()}
+    specs = []
+    for guid in talent_guids:
+        for step in _talent_on_event(guid).get("dungeon_complete") or ():
+            if not (isinstance(step, list) and len(step) == 2 and
+                    step[0] == "weightpick"):
+                continue
+            outcomes = [o for o in step[1]
+                        if isinstance(o, list) and len(o) == 3]
+            weights = [float(o[0]) for o in outcomes]
+            if not outcomes or sum(weights) <= 0:
+                continue
+            _weight, items, _label = random.choices(
+                outcomes, weights=weights)[0]
+            for item in items:
+                if not (isinstance(item, list) and len(item) == 3 and
+                        item[0] == "item"):
+                    continue
+                key = str(item[1]).lower()
+                spec = {"guid": key, "quantity": max(1, int(item[2]))}
+                if key in rarity_by_guid:
+                    spec["stardust"] = rarity_by_guid[key]
+                specs.append(spec)
+    return specs
+
+
+def _battle_uses_mercenary(db, camp_id, user_id):
+    """True when this campaign battle is fought as its chosen mercenary."""
+    from services.mercenaries import battle_mercenary
+    with _active_mercenary_lock:
+        chosen = _active_mercenary.get(camp_id)
+    if not chosen or user_id is None:
+        return False
+    return battle_mercenary(db, user_id, chosen[0], chosen[1]) is not None
+
+
+def _zone_is_dungeon(zone_id):
+    from campaign_runtime import catalog_data
+    entry = catalog_data.zone(zone_id)
+    return bool(entry and entry.get("kind") == "dungeon")
+
+
+def _champion_claimed_elsewhere(db, champion_id, keys):
+    """True when any campaign of this champion already recorded one of ``keys``.
+
+    A one-time reward belongs to the champion. Each campaign keeps its own
+    claim table, so starting the same dungeon again must not grant it twice.
+    """
+    rows = db.execute("SELECT state_json FROM campaigns WHERE champion_id=?",
+                      (int(champion_id or 0),)).fetchall()
+    for (raw,) in rows:
+        try:
+            state = json.loads(raw or "{}")
+        except (TypeError, ValueError, json.JSONDecodeError):
+            continue
+        if not isinstance(state, dict):
+            continue
+        for field in ("_encounter_reward_claims", "_conversation_reward_claims"):
+            claims = state.get(field)
+            if isinstance(claims, dict) and any(claims.get(key) for key in keys):
+                return True
+    return False
+
+
+def _apply_reward_dict(handler, db, camp_id, state, reward, one_time,
+                       claim_name, label):
+    """Grant ``reward`` (gold/xp/cards/items/chest) to the campaign's champion."""
+    applied = _empty_applied_updates()
+    if not reward:
+        return applied
     claims = state.setdefault("_conversation_reward_claims", {})
     if not isinstance(claims, dict):
         claims = {}
@@ -5972,8 +2147,10 @@ def _apply_conversation_rewards(handler, db, camp_id, state,
     # conversation rewards therefore belong to the champion, not the shared
     # conversation/campaign template.  Accept the legacy unscoped key so a
     # reward already claimed by an older server build is not duplicated.
-    claim_key = f"{champ_id}:{conversation_guid}"
-    if bool(one_time) and (claims.get(claim_key) or claims.get(str(conversation_guid))):
+    claim_key = f"{champ_id}:{claim_name}"
+    if bool(one_time) and (claims.get(claim_key) or claims.get(str(claim_name)) or
+                           _champion_claimed_elsewhere(
+                               db, champ_id, (claim_key, str(claim_name)))):
         return applied
     try:
         gold = max(0, int(reward.get("gold", 0) or 0))
@@ -5983,6 +2160,10 @@ def _apply_conversation_rewards(handler, db, camp_id, state,
         xp = max(0, int(reward.get("xp", 0) or 0))
     except (TypeError, ValueError):
         xp = 0
+    talents = _champion_reward_talents(db, champ_id)
+    xp_mult, gold_mult = _talent_reward_multipliers(talents, int(champ[4] or 0))
+    gold = _scale_reward(gold, gold_mult)
+    xp = _scale_reward(xp, xp_mult)
 
     if gold:
         new_gold, platinum = db_adjust_user_currency(
@@ -5999,11 +2180,7 @@ def _apply_conversation_rewards(handler, db, camp_id, state,
         crow = db_champion_reward_profile(champ_id, conn=db)
         if crow:
             new_xp = int(crow[3] or 0) + xp
-            thresholds = (0, 1000, 2800, 5000, 8000, 12000, 17500,
-                          25000, 40000, 50000, 60000, 70000, 80000,
-                          92000, 110000)
-            new_level = max(1, min(len(thresholds),
-                                   1 + sum(new_xp >= n for n in thresholds[1:])))
+            new_level = _champion_level_for_xp(new_xp)
             db_update_champion_xp(champ_id, new_xp, new_level, conn=db)
             applied["Champions"].append({"Champ": {
                 "Id": int(crow[0]), "Name": crow[1] or "",
@@ -6051,7 +2228,7 @@ def _apply_conversation_rewards(handler, db, camp_id, state,
             applied["Cards"].append({"Card": {
                 "Id": int(card["instance_id"]), "TemplateID": card["guid"],
                 "CardStats": {}, "IsFoil": False, "IsExtended": False,
-                "SocketedGems": 0, "IsNotTradeable": False,
+                "SocketedGems": EGemTypesNew.Unknown, "IsNotTradeable": False,
                 "EscrowStatus": "Clean",
             }})
             applied["Completed"].append({
@@ -6078,6 +2255,8 @@ def _apply_conversation_rewards(handler, db, camp_id, state,
         }]
     if isinstance(item_specs, dict):
         item_specs = [item_specs]
+    item_specs = (list(item_specs) + _stardust_item_specs(reward) +
+                  _inventory_reward_specs(reward))
     for spec in item_specs:
         if isinstance(spec, str):
             spec = {"guid": spec}
@@ -6091,6 +2270,8 @@ def _apply_conversation_rewards(handler, db, camp_id, state,
             quantity = max(1, int(spec.get("quantity", 1) or 1))
         except (TypeError, ValueError):
             quantity = 1
+        if spec.get("stardust"):
+            db_add_stardust(user_id, spec["stardust"], quantity, conn=db)
         existing = db_inventory_item(user_id, str(template_guid), conn=db)
         if existing:
             item_row_id, old_quantity, item_uid = existing
@@ -6119,13 +2300,16 @@ def _apply_conversation_rewards(handler, db, camp_id, state,
             "ItemAction": "GRANT", "ItemTemplate": str(template_guid),
             "RCode": "ITEM",
         })
+        if spec.get("_campaign_mercenary"):
+            _unlock_party_slot_for_mercenary(db, user_id, applied)
 
     # Promotional Crayburn rewards are real treasure chests, not merely a
     # display-only loot entry.  Persist the chest so it survives reconnects,
     # and return inventory_bits in Applied.Items so the campaign client adds
     # it immediately to InventoryChests and the pack-opening screen.
     chest_guid = (reward.get("chest_guid") or reward.get("chest_template")
-                  or reward.get("pack_guid"))
+                  or reward.get("pack_guid")
+                  or (reward.get("chest_guid_by_race") or {}).get(race_name))
     if chest_guid:
         chest_guid = str(chest_guid)
         chest_id = db_create_treasure_chest(
@@ -6154,151 +2338,56 @@ def _apply_conversation_rewards(handler, db, camp_id, state,
     _save_campaign_state(db, camp_id, state)
     db.commit()
     getattr(handler, "_log_req", print)(
-        f"    Conversation reward: conversation={conversation_guid} "
+        f"    Reward: {label} "
         f"gold={gold} xp={xp} cards={len(applied['Cards'])} "
         f"items={len(applied['Items'])}")
     return applied
 
 
-def _scene_card_choices(db, scene_guid):
-    """Return card GUIDs offered by a scene's authored card_choice reward."""
-    if not scene_guid:
-        return []
-    rewards_json = pve_db.db_encounter_scene_rewards(scene_guid, db)
-    if not rewards_json:
-        return []
-    try:
-        rewards = json.loads(rewards_json)
-    except (TypeError, ValueError, json.JSONDecodeError):
-        return []
-    if not isinstance(rewards, dict):
-        return []
-    choices = rewards.get("card_choice") or []
-    return [str(item["guid"]) for item in choices
-            if isinstance(item, dict) and item.get("guid")]
+_SCENE_ACTION = re.compile(r"^\s*(set_flag|clear_flag)\s*\(\s*([^()\s][^()]*?)\s*\)\s*$")
+_SCENE_CHECK_TAMED = re.compile(r"^\s*check_?tamed\s*\(\s*\)\s*$", re.I)
 
 
-def _area_scene_guid(db, state):
-    """Resolve the encounter scene attached to the active AREA location."""
-    current = state.get("ALoc")
-    if not current:
-        return None
-    for loc in state.get("VisLocs", []):
-        data = loc.get("Data") or {}
-        if current in (data.get("node"), data.get("name"), data.get("title")):
-            if data.get("encounter"):
-                return str(data["encounter"])
-            node = data.get("node") or current
-            match = re.search(r"NODE[_ ]?0*(\d+)", str(node), re.I)
-            if match:
-                rows = [(row[0], row[1])
-                        for row in pve_db.db_az1_scene_rows(conn=db)]
-                for guid, name in rows:
-                    if re.search(r"NODE[_ ]?0*%s\b" % int(match.group(1)),
-                                 name or "", re.I):
-                        return str(guid)
-            break
-    return None
 
 
-def _apply_encounter_end_rewards_legacy(handler, db, session, camp_id, won):
-    """Apply authored conditional encounter rewards before session cleanup.
+# PublicState path the ModChoiceEncounter location's ``modlistId`` names:
+# the client's card-selector panel lists these card GUIDs.
+_MOD_CHOICE_LIST = "mod_choice_list"
 
-    One-time records are claimed once per campaign/scene; repeatable records
-    are keyed by battle session so later runs can award a new capture while
-    duplicate end-game notifications cannot grant the same capture twice.
-    """
-    if not won:
-        return []
-    row = pve_db.db_campaign_identity_state(camp_id, db)
-    if not row:
-        return []
-    champion_id, state_json = row
-    try:
-        state = json.loads(state_json or "{}")
-    except (TypeError, ValueError, json.JSONDecodeError):
-        state = {}
-    scene_guid = state.get("ActiveEncounterGuid")
-    if not scene_guid:
-        scene_guid = _last_encounter_scene.get(session.session_name or "")
-    records = _scene_reward_records(db, scene_guid)
-    if not records:
-        return []
-    champ = _get_champion(db, champion_id)
-    player_user_id = champ[1] if champ else None
-    if player_user_id is None:
-        return []
 
-    claims = state.setdefault("_encounter_reward_claims", {})
-    if not isinstance(claims, dict):
-        claims = {}
-        state["_encounter_reward_claims"] = claims
-    granted = []
-    for record_index, record in enumerate(records):
-        reward_obj = record.get("reward")
-        one_time = record.get("one_time")
-        if one_time is None and isinstance(reward_obj, dict):
-            one_time = reward_obj.get("one_time")
-        one_time = True if one_time is None else bool(one_time)
-        # One-time rewards are claimed once per campaign/scene.  Repeatable
-        # rewards are still deduplicated for a single battle session, while a
-        # later repeatable encounter receives its own session-scoped claim.
-        claim_key = (f"{scene_guid}:{record_index}" if one_time else
-                     f"{scene_guid}:{record_index}:{session.session_id}")
-        if claims.get(claim_key):
-            continue
-        condition_context = _evaluate_encounter_condition(
+
+
+
+
+# Battle events that depend on a card being in the opponent's warzone at the
+# end of the battle: event name -> card template GUID (Node 006's Princess Daphne).
+WARZONE_CARD_EVENTS = {"saved_daphne": "686ab5d7-3635-4cb2-91b5-2f933ccc7cb2"}
+
+
+def _battle_events(db, session, player_user_id):
+    """Named events a finished battle produced (``tamed_troop`` ...)."""
+    events = []
+    if _evaluate_encounter_condition(
             db, session.session_id, player_user_id,
-            record.get("end_of_game_condition"))
-        if not condition_context:
-            continue
-        reward_type = str(record.get("reward_type") or
-                          (reward_obj.get("type") if isinstance(reward_obj, dict) else None) or
-                          "CARD").upper()
-        if reward_type != "CARD":
-            # Keep this evaluator extensible without silently treating an
-            # unknown reward as a card.  Gold/plat can be added as additional
-            # RewardResult types without changing condition handling.
-            continue
-        reward_obj = reward_obj if isinstance(reward_obj, dict) else record
-        template_guid = _resolve_reward_template(
-            reward_obj.get("card_guid") or reward_obj.get("template"),
-            condition_context)
-        if not template_guid:
-            continue
-        try:
-            quantity = max(1, int(reward_obj.get("quantity", 1) or 1))
-        except (TypeError, ValueError):
-            quantity = 1
-        new_cards = _grant_card_reward(
-            handler, db, player_user_id, template_guid, quantity, emit=False)
-        if new_cards:
-            granted.extend(new_cards)
-            claims[claim_key] = True
-    if not granted:
-        return []
-    _save_campaign_state(db, camp_id, state)
-    db.commit()
-    cards = [(x["guid"], x["name"], x["cost"], x["attack"], x["defense"],
-              x["instance_id"], 0) for x in granted]
-    if hasattr(handler, "push_opened_cards_via_generic"):
-        handler.push_opened_cards_via_generic(cards)
-    if hasattr(handler, "push_display_rewards"):
-        handler.push_display_rewards([
-            {"id": str(x["instance_id"]), "template": x["guid"],
-             "quantity": 1, "type": "CARD", "ledger_id": 0, "boa": False}
-            for x in granted])
-    getattr(handler, "_log_req", print)(
-        f"    Encounter reward: granted {len(granted)} captured card(s) "
-        f"from scene {scene_guid}")
-    return granted
+            {"type": "void_tamed_troop", "owner": "opponent"}):
+        events.append("tamed_troop")
+    for event, template_guid in WARZONE_CARD_EVENTS.items():
+        if pve_db.db_card_in_warzone(session.session_id, player_user_id,
+                                     template_guid, "opponent", db):
+            events.append(event)
+    return events
 
 
-def _apply_encounter_end_rewards(handler, db, session, camp_id, won):
+
+
+def _apply_encounter_end_rewards(handler, db, session, camp_id, won,
+                                 in_dungeon=False):
     """Apply authored encounter rewards and return campaign AppliedUpdates.
 
     Campaign clients build their loot window from ``gameendnotify.Applied``;
-    generic profile reward events are not sufficient here.
+    generic profile reward events are not sufficient here. The engine has
+    already run the scene's flag actions; its flags are mirrored into the
+    state the ``when`` tags read.
     """
     result = {"applied": _empty_applied_updates(), "cards": [],
               "items": [], "chests": [], "gold": 0, "xp": 0,
@@ -6315,12 +2404,22 @@ def _apply_encounter_end_rewards(handler, db, session, camp_id, won):
         state = {}
     scene_guid = state.get("ActiveEncounterGuid") or _last_encounter_scene.get(
         session.session_name or "")
-    records = _scene_reward_records(db, scene_guid)
+    champ = _get_champion(db, champion_id)
+    player_user_id = champ[1] if champ else None
+    records = list(_scene_reward_records(db, scene_guid) or ())
+    talents = []
+    if player_user_id is not None:
+        talents = _champion_reward_talents(
+            db, champion_id,
+            mercenary=_battle_uses_mercenary(db, camp_id, player_user_id))
+        if in_dungeon:
+            talent_items = _talent_dungeon_reward_specs(talents)
+            if talent_items:
+                records.append({"reward": {"items": talent_items},
+                                "one_time": False})
     if not records:
         return result
     result["scene_guid"] = str(scene_guid) if scene_guid else None
-    champ = _get_champion(db, champion_id)
-    player_user_id = champ[1] if champ else None
     if player_user_id is None:
         return result
     claims = state.setdefault("_encounter_reward_claims", {})
@@ -6344,6 +2443,8 @@ def _apply_encounter_end_rewards(handler, db, session, camp_id, won):
     quest_pending = _quest_encounter_is_pending(
         db, champion_id, str(scene_guid) if scene_guid else None)
     retry_without_currency = bool(quest_pending and prior_successes)
+    champ_level = int(champ[4] or 0) if champ else 0
+    xp_mult, gold_mult = _talent_reward_multipliers(talents, champ_level)
     granted, total_gold, total_xp = [], 0, 0
     for record_index, record in enumerate(records):
         reward_obj = record.get("reward")
@@ -6354,8 +2455,16 @@ def _apply_encounter_end_rewards(handler, db, session, camp_id, won):
         one_time = bool(one_time)
         claim_key = (f"{scene_guid}:{record_index}" if one_time else
                      f"{scene_guid}:{record_index}:{session.session_id}")
-        if claims.get(claim_key):
+        if claims.get(claim_key) or (one_time and _champion_claimed_elsewhere(
+                db, champion_id, (claim_key,))):
             continue
+        # ``when``: flag tags that must hold (set by the battle's events via
+        # the rules hooks, see _record_battle_flags).
+        when = record.get("when")
+        if when:
+            if not _conversation_tags_hold(db, champion_id, state, "", when):
+                continue
+            result["condition_met"] = True
         condition = record.get("end_of_game_condition")
         context = ({"owner": "player"} if not condition else
                    _evaluate_encounter_condition(
@@ -6373,6 +2482,8 @@ def _apply_encounter_end_rewards(handler, db, session, camp_id, won):
         if retry_without_currency:
             gold = 0
             xp = 0
+        gold = _scale_reward(gold, gold_mult)
+        xp = _scale_reward(xp, xp_mult)
         # Tamed scenes have unconditional completion currency alongside a
         # conditional capture card. Only the card template is gated by
         # end_of_game_condition, so an uncaptured win can be retried without
@@ -6418,6 +2529,8 @@ def _apply_encounter_end_rewards(handler, db, session, camp_id, won):
         if isinstance(item_specs, dict):
             item_specs = [item_specs]
         if not condition or context:
+            item_specs = (list(item_specs) + _stardust_item_specs(reward_obj) +
+                          _inventory_reward_specs(reward_obj))
             for spec in item_specs:
                 if isinstance(spec, str):
                     spec = {"guid": spec}
@@ -6431,6 +2544,9 @@ def _apply_encounter_end_rewards(handler, db, session, camp_id, won):
                     quantity = max(1, int(spec.get("quantity", 1) or 1))
                 except (TypeError, ValueError):
                     quantity = 1
+                if spec.get("stardust"):
+                    db_add_stardust(player_user_id, spec["stardust"], quantity,
+                                    conn=db)
                 existing = db_inventory_item(
                     player_user_id, str(template_guid), conn=db)
                 if existing:
@@ -6451,7 +2567,16 @@ def _apply_encounter_end_rewards(handler, db, session, camp_id, won):
                         client_item_uid=item_uid, conn=db)
                 items.append({"id": item_uid, "template": str(template_guid),
                               "quantity": new_quantity, "granted": quantity})
-        if not cards and not gold and not xp and not chest and not items:
+                if spec.get("_campaign_mercenary"):
+                    _unlock_party_slot_for_mercenary(
+                        db, player_user_id, result["applied"])
+        deck_granted = False
+        deck_guid = reward_obj.get("deck_guid")
+        if deck_guid and (not condition or context):
+            deck_granted = _grant_reward_deck(
+                handler, db, player_user_id, str(deck_guid).lower())
+        if (not cards and not gold and not xp and not chest and not items and
+                not deck_granted):
             continue
         granted.extend(cards)
         total_gold += gold
@@ -6474,11 +2599,7 @@ def _apply_encounter_end_rewards(handler, db, session, camp_id, won):
         crow = db_champion_reward_profile(champion_id, conn=db)
         if crow:
             new_xp = int(crow[3] or 0) + total_xp
-            thresholds = (0, 1000, 2800, 5000, 8000, 12000, 17500,
-                          25000, 40000, 50000, 60000, 70000, 80000,
-                          92000, 110000)
-            new_level = max(1, min(len(thresholds),
-                                   1 + sum(new_xp >= n for n in thresholds[1:])))
+            new_level = _champion_level_for_xp(new_xp)
             db_update_champion_xp(champion_id, new_xp, new_level, conn=db)
             champion_bits = {
                 "Id": int(crow[0]), "Name": crow[1] or "",
@@ -6508,7 +2629,7 @@ def _apply_encounter_end_rewards(handler, db, session, camp_id, won):
         applied["Cards"].append({"Card": {
             "Id": int(card["instance_id"]), "TemplateID": card["guid"],
             "CardStats": {}, "IsFoil": False, "IsExtended": False,
-            "SocketedGems": 0, "IsNotTradeable": False,
+            "SocketedGems": EGemTypesNew.Unknown, "IsNotTradeable": False,
             "EscrowStatus": "Clean",
         }})
         applied["Completed"].append({
@@ -6558,6 +2679,126 @@ def _apply_encounter_end_rewards(handler, db, session, camp_id, won):
         f"    Encounter reward: scene={scene_guid} cards={len(granted)} "
         f"chests={len(result['chests'])} gold={total_gold} xp={total_xp}")
     return result
+
+
+def _playtest_tag_view(db, session, scene_guid, user_id, request, race_name):
+    """The rules state an editor Play battle's reward ``when`` tags read: the
+    editor's simulated state with this victory applied by the rules engine
+    (in memory only), else an empty state for the champion's race."""
+    state = request.get("sim_state")
+    if not isinstance(state, dict) or not isinstance(state.get("flags"), list):
+        return {"flags": [], "quests": {}, "nodes": {}, "counters": {},
+                "keywords": [], "race": race_name,
+                "faction": next((f for r, f in _RACE_FACTIONS.items()
+                                 if _RACE_NAMES.get(r) == race_name), ""),
+                "current": ""}
+    zone_id, node = request.get("zone"), request.get("node")
+    if zone_id and node:
+        try:
+            from campaign_runtime import rules_loader
+            loaded, _problems = rules_loader.rules(db, str(zone_id))
+            if loaded:
+                state, _log = campaign_rules.apply(loaded, state, {
+                    "type": "encounter_result", "node": str(node),
+                    "scene": scene_guid, "victory": True,
+                    "events": _battle_events(db, session, user_id)})
+        except Exception as exc:     # not offered there: read the state as is
+            print(f"[campaign] playtest reward view: {exc}")
+    return state
+
+
+def preview_encounter_rewards(db, session, scene_guid, user_id, request):
+    """What ``_apply_encounter_end_rewards`` pays for a first win of
+    ``scene_guid``, without granting anything (an editor Play battle).
+
+    Returns ``{"display": [...], "lines": [...]}``: ``display`` entries feed
+    the display-only ``push_display_rewards`` popup (gold, cards, items,
+    chests; the popup has no XP entry), ``lines`` describe every reward for
+    the editor. ``when`` tags read the editor's simulated state
+    (``_playtest_tag_view``); one-time claims and the quest-retry currency
+    rule are not applied because the playtest has no campaign state."""
+    out = {"display": [], "lines": []}
+    records = _scene_reward_records(db, scene_guid)
+    if not records:
+        return out
+    battle = request.get("battle") or {}
+    champ = (_get_champion(db, battle["champion_id"])
+             if battle.get("champion_id") else None)
+    race_name = _RACE_NAMES.get(champ[2], "") if champ else ""
+    view = _playtest_tag_view(db, session, scene_guid, user_id, request, race_name)
+
+    def show(kind, template, quantity, label):
+        out["display"].append({"id": "playtest", "template": str(template or ""),
+                               "quantity": int(quantity), "type": kind,
+                               "ledger_id": 0, "boa": True})
+        out["lines"].append(f"{label} x{int(quantity)}")
+
+    for record in records:
+        reward_obj = record.get("reward")
+        reward_obj = reward_obj if isinstance(reward_obj, dict) else record
+        when = record.get("when")
+        if when:
+            try:
+                if not campaign_rules.evaluate(when, view, ""):
+                    continue
+            except campaign_rules.RulesError:
+                continue
+        condition = record.get("end_of_game_condition")
+        context = ({"owner": "player"} if not condition else
+                   _evaluate_encounter_condition(
+                       db, session.session_id, user_id, condition))
+        met = not condition or bool(context)
+        try:
+            gold = max(0, int(reward_obj.get("gold", 0) or 0))
+            xp = max(0, int(reward_obj.get("xp", 0) or 0))
+            quantity = max(1, int(reward_obj.get("quantity", 1) or 1))
+        except (TypeError, ValueError):
+            gold, xp, quantity = 0, 0, 1
+        if gold:
+            show("GOLD", "", gold, "gold")
+        if xp:
+            out["lines"].append(f"xp x{xp}")
+        template = reward_obj.get("card_guid") or reward_obj.get("template")
+        card_guid = _resolve_reward_template(template, context) if met else None
+        if card_guid:
+            card = db_reward_card_template(str(card_guid), conn=db)
+            show("CARD", card_guid, quantity, f"card {card[0] if card else card_guid}")
+        chest_guid = (reward_obj.get("chest_guid") or
+                      reward_obj.get("chest_template") or reward_obj.get("pack_guid"))
+        if chest_guid and met:
+            show("CHEST", chest_guid, 1, f"chest {chest_guid}")
+        if not met:
+            continue
+        item_specs = reward_obj.get("items") or []
+        if isinstance(item_specs, dict):
+            item_specs = [item_specs]
+        item_specs = list(item_specs)
+        race_item = (reward_obj.get("item_guid_by_race") or {}).get(race_name)
+        if race_item:
+            item_specs.append({"guid": race_item, "quantity": quantity})
+        if reward_obj.get("item_guid"):
+            item_specs.append({"guid": reward_obj["item_guid"], "quantity": quantity})
+        for spec in (item_specs + _stardust_item_specs(reward_obj) +
+                     _inventory_reward_specs(reward_obj)):
+            spec = {"guid": spec} if isinstance(spec, str) else spec
+            if not isinstance(spec, dict):
+                continue
+            guid = spec.get("guid") or spec.get("template") or spec.get("item_guid")
+            if not guid:
+                continue
+            try:
+                count = max(1, int(spec.get("quantity", 1) or 1))
+            except (TypeError, ValueError):
+                count = 1
+            label = (f"stardust {spec['stardust']}" if spec.get("stardust")
+                     else f"item {guid}")
+            show("INVENTORY", guid, count, label)
+        if reward_obj.get("deck_guid"):
+            from services.store import deck_template_definition
+            deck = deck_template_definition(str(reward_obj["deck_guid"]).lower())
+            out["lines"].append(
+                f"deck {deck['name'] if deck else reward_obj['deck_guid']}")
+    return out
 
 
 def prepare_fra_battle_gameend(handler, db, session, won):
@@ -6615,6 +2856,31 @@ def publish_fra_battle_gameend(handler, prepared, service_mail_uid):
     return True
 
 
+def _rules_battle_gameend(handler, db, session, camp_id, won, zone_id,
+                          service_mail_uid, service_campaign_uid_type):
+    """``handle_battle_gameend`` for a rules-driven zone: the engine applies
+    the result (scene / card-choice flag actions, quest steps, result
+    conversation), then the scene's rewards are paid against its flags."""
+    from campaign_runtime import runtime
+    from pvp_db import db_delete_game_session
+    zone = runtime.handle_battle_end(handler, db, zone_id, session, camp_id, won)
+    reward_result = _apply_encounter_end_rewards(
+        handler, db, session, camp_id, won,
+        in_dungeon=_zone_is_dungeon(zone_id))
+    applied = _merge_applied(reward_result.get("applied") or
+                             _empty_applied_updates(), zone.applied)
+    service = ("00000000-0000-0000-0000-000000000000", "ServiceCampaign",
+               str(service_campaign_uid_type), 0, service_mail_uid)
+    push_gameendnotify(handler, db, camp_id, won, 0, *service, applied=applied)
+    net = {"handler": handler, "args": (0,) + service}
+    for push in zone.after:
+        push(net)
+    db_delete_game_session(session.session_id)
+    getattr(handler, "_log_req", print)(
+        f"    Campaign {camp_id} [{zone_id}]: rules result applied (won={won})")
+    return True
+
+
 def handle_battle_gameend(handler, db, session, won, service_mail_uid,
                           service_campaign_uid_type=253):
     """Apply a finished PvE/FRA battle and clean up its game session.
@@ -6624,6 +2890,7 @@ def handle_battle_gameend(handler, db, session, won, service_mail_uid,
     session lifecycle are service concerns.  FRA persistence remains here as
     the same result path is shared by practice and campaign battles.
     """
+    from pvp_db import db_delete_game_session
     try:
         session_name = session.session_name or ""
         if not session_name.startswith("camp_"):
@@ -6636,48 +2903,20 @@ def handle_battle_gameend(handler, db, session, won, service_mail_uid,
                 return bool(prepared.get("handled"))
             return False
         camp_id = int(session_name[5:])
-        reward_result = _apply_encounter_end_rewards(
-            handler, db, session, camp_id, won)
-        advanced_quest_states = []
-        camp_row = pve_db.db_campaign_identity_state(camp_id, conn=db)
-        if reward_result.get("condition_met"):
-            # Taming objectives are separate QUEST campaign entries linked by
-            # encounter GUID. Advance that objective only after the finished
-            # battle actually contains a captured troop.
-            if camp_row:
-                _advance_quest_campaign(
-                    db, camp_row[0], "az01_tamed", reward_result.get("scene_guid"))
-        if won:
-            advanced_quest_states = _advance_quest_encounter_objectives(
-                db, camp_row[0] if camp_row else 0,
-                reward_result.get("scene_guid"))
-        push_gameendnotify(
-            handler, db, camp_id, won, 0,
-            "00000000-0000-0000-0000-000000000000",
-            "ServiceCampaign", str(service_campaign_uid_type), 0,
-            service_mail_uid, applied=reward_result.get("applied"))
-        for quest_state in advanced_quest_states:
-            push_campupdate(
-                handler, db, quest_state.get("CampID") or 0,
-                quest_state.get("ChampID") or (camp_row[0] if camp_row else 0),
-                "quest_progress", "QUEST", False, quest_state, 0,
-                "00000000-0000-0000-0000-000000000000", "ServiceCampaign",
-                str(service_campaign_uid_type), 0, service_mail_uid)
-        getattr(handler, "_log_req", print)(
-            f"    Campaign {camp_id}: gameendnotify pushed (won={won})")
-        try:
-            advance_crayburn_step(
-                handler, db, camp_id, won, 0,
-                "00000000-0000-0000-0000-000000000000",
-                "ServiceCampaign", str(service_campaign_uid_type), 0,
-                service_mail_uid, auto_activate=False)
-        except Exception as exc:
-            getattr(handler, "_log_req", print)(
-                f"    Crayburn advance failed: {exc}")
+        import campaign_playtest
+        if campaign_playtest.is_playtest_campaign(camp_id):
+            # An editor Play battle: show its rewards, change no campaign.
+            return campaign_playtest.finish_battle(
+                handler, db, session, camp_id, won)
+        zone_id = _rules_zone(db, camp_id)
+        if zone_id:
+            return _rules_battle_gameend(handler, db, session, camp_id, won,
+                                         zone_id, service_mail_uid,
+                                         service_campaign_uid_type)
         db_delete_game_session(session.session_id)
         getattr(handler, "_log_req", print)(
-            "    PvE game session and game cards cleaned")
-        return True
+            f"    Campaign {camp_id}: no rules zone; session cleaned")
+        return False
     except Exception as exc:
         getattr(handler, "_log_req", print)(
             f"    gameendnotify failed: {exc}")
@@ -6685,7 +2924,8 @@ def handle_battle_gameend(handler, db, session, won, service_mail_uid,
 
 
 def _launch_encounter(handler, db, camp_id, champ_id, encounter_guid,
-                      deck_uid64, comp, session_id, target, instance, conh, uid):
+                      deck_uid64, comp, session_id, target, instance, conh, uid,
+                      encounter_mod_conversation_guid=None, mod_choice=None):
     """Push a 'gamestarted' notification launching an encounter battle.
 
     Shared by the campaign 'start' SendEvent and the 'camp.encounter' cheat.
@@ -6694,11 +2934,40 @@ def _launch_encounter(handler, db, camp_id, champ_id, encounter_guid,
     drives the LoadBalancer session flow (FindSession -> StartEncounter ->
     Join -> battle events).
 
+    ``encounter_guid`` may also be the rules engine's encounter descriptor:
+    ``{"scene": ..., "conversation_id": ...}``. In that form, the optional
+    conversation is queued as an encounter mod when battle setup begins.
+
+    ``mod_choice`` is the card picked on a ModChoiceEncounter's selector
+    panel; battle setup applies it in place of the scene's choice mod, and
+    its option's flag actions run with the scene's.
+
     The battle session itself is NOT created here — StartEncounter (22017)
     allocates the authoritative DB-backed session. The scene GUID is also
      recorded so resolve_encounter can resolve the correct AI deck/name
     when the battle session is later set up.
     """
+    from campaign_playtest import is_playtest_campaign
+    if champ_id and not is_playtest_campaign(camp_id):
+        # The editor Play resolves its default champion from the last one
+        # played, so every real launch that names a champion records it.  A
+        # playtest saves nothing, so it does not stamp the champion either.
+        from profile_db import db_mark_champion_played
+        db_mark_champion_played(champ_id, conn=db)
+    if isinstance(encounter_guid, dict):
+        encounter_action = encounter_guid
+        encounter_guid = encounter_action.get("scene")
+        if encounter_mod_conversation_guid is None:
+            encounter_mod_conversation_guid = encounter_action.get(
+                "conversation_id")
+    if not encounter_guid:
+        raise ValueError("encounter action needs a scene")
+    if encounter_mod_conversation_guid:
+        encounter_mod_conversation_guid = str(
+            encounter_mod_conversation_guid).strip().lower()
+    else:
+        encounter_mod_conversation_guid = None
+
     from encoder import encode_campaign_session_state
     import base64
 
@@ -6723,6 +2992,15 @@ def _launch_encounter(handler, db, camp_id, champ_id, encounter_guid,
         except (TypeError, ValueError, json.JSONDecodeError):
             camp_state = {}
         camp_state["ActiveEncounterGuid"] = encounter_guid
+        if encounter_mod_conversation_guid:
+            camp_state["ActiveEncounterConversationGuid"] = (
+                encounter_mod_conversation_guid)
+        else:
+            camp_state.pop("ActiveEncounterConversationGuid", None)
+        if mod_choice:
+            camp_state["ActiveEncounterModChoice"] = str(mod_choice).lower()
+        else:
+            camp_state.pop("ActiveEncounterModChoice", None)
         _save_campaign_state(db, camp_id, camp_state)
         db.commit()
     gs_bytes = encode_campaign_session_state(
@@ -6811,9 +3089,33 @@ def resolve_battle_config(handler, db, camp_id, session_name):
     of campaign tables while allowing the campaign service to own this logic.
     """
     scene_override = _last_encounter_scene.pop(session_name, None)
+    # An editor Play battle: no campaign row; its claimed request names the
+    # scene, the account's champion and deck (campaign_playtest).
+    import campaign_playtest
+    playtest = campaign_playtest.active(camp_id)
+    playtest_battle = (playtest or {}).get("battle") or {}
+    playtest_profile = None
+    if playtest is not None:
+        scene_override = playtest_battle.get("scene") or scene_override
+        if playtest_battle.get("champion_id"):
+            playtest_profile = pve_db.db_champion_battle_profile(
+                playtest_battle["champion_id"], conn=db)
     scene_guid, ai_deck_guid, ai_champ_guid, ai_name, ai_charge_power, \
         ai_personality, ai_deck_personality = resolve_encounter(
-            db, camp_id, scene_override)
+            db, camp_id, scene_override,
+            race=(int(playtest_profile[2] or 0) if playtest_profile else 0)
+            if playtest is not None else None)
+    # A scene may fix the player's champion and deck (blank: the player's own).
+    player_champ_override, player_deck_override = (
+        pve_db.db_encounter_scene_player_override(scene_guid, conn=db)
+        if scene_guid else (None, None))
+    player_deck_cards_json = None
+    if player_deck_override:
+        player_deck_cards_json = json.dumps([
+            str(card_guid).lower()
+            for card_guid, quantity, _gems in pvp_db.db_encounter_deck_cards(
+                player_deck_override, conn=db)
+            for _copy in range(int(quantity or 0))])
 
     deck_db_id = None
     player_champ_name = None
@@ -6824,7 +3126,17 @@ def resolve_battle_config(handler, db, camp_id, session_name):
     fortune_guid = None
     fortune_ability_guid = None
     fortune_starting_hand_bonus = 0
-    if camp_id:
+    encounter_mod_conversation_guid = None
+    encounter_mod_choice_guid = None
+    if playtest is not None:
+        # No campaign state: not a tutorial, no fortune, no opening mod.
+        if playtest_profile:
+            player_champ_name, deck_db_id = playtest_profile[0], playtest_profile[1]
+            race_num, cls_num, gnd_num = (playtest_profile[2], playtest_profile[3],
+                                          playtest_profile[4])
+            player_talents_json = playtest_profile[5] or "[]"
+        deck_db_id = playtest_battle.get("deck_id") or deck_db_id
+    elif camp_id:
         row = pve_db.db_campaign_battle_profile(camp_id, conn=db)
         if row:
             player_champ_name, deck_db_id = row[0], row[1]
@@ -6834,6 +3146,12 @@ def resolve_battle_config(handler, db, camp_id, session_name):
                 campaign_state = json.loads(row[5] or "{}")
                 is_tutorial = not bool(campaign_state.get(
                     "TutorialDone", False))
+                encounter_mod_conversation_guid = str(
+                    campaign_state.get("ActiveEncounterConversationGuid") or ""
+                ).strip().lower() or None
+                encounter_mod_choice_guid = str(
+                    campaign_state.get("ActiveEncounterModChoice") or ""
+                ).strip().lower() or None
                 data = ((campaign_state.get("PublicState") or {}).get(
                     "Data") or {})
                 fortune_guid = str(data.get("gaal_fortune_guid") or "").lower()
@@ -6884,6 +3202,24 @@ def resolve_battle_config(handler, db, camp_id, session_name):
             db, talent_guids)
     except (TypeError, ValueError, json.JSONDecodeError):
         pass
+    # A mercenary chosen for this encounter replaces the champion: its own
+    # template, health and saved party deck, and no champion talents.  A
+    # scene that fixes the player's champion and deck takes precedence.
+    mercenary = None
+    with _active_mercenary_lock:
+        chosen = _active_mercenary.get(camp_id)
+    if (chosen and profile and playtest is None
+            and not (player_champ_override or player_deck_override)):
+        from services.mercenaries import battle_mercenary
+        merc_champ_id, merc_guid = chosen
+        mercenary = battle_mercenary(db, profile.get("id"), merc_champ_id,
+                                     merc_guid)
+    if mercenary:
+        player_champ_guid = mercenary["champion_guid"]
+        player_champ_name = mercenary["name"] or player_champ_name
+        player_starting_health = mercenary["starting_health"]
+        player_talents_json = "[]"
+    # The scene's AI personality comes from shared authored campaign data.
     return {
         "scene_guid": scene_guid,
         "ai_deck_guid": ai_deck_guid,
@@ -6901,13 +3237,18 @@ def resolve_battle_config(handler, db, camp_id, session_name):
         "race_name": race_name,
         "cls_name": cls_name,
         "gnd_name": gnd_name,
-        "player_champ_guid": player_champ_guid,
+        "player_champ_guid": player_champ_override or player_champ_guid,
+        "player_deck_cards_json": player_deck_cards_json,
         "player_talents_json": player_talents_json,
         "player_starting_health": player_starting_health,
         "is_tutorial": is_tutorial,
         "fortune_guid": fortune_guid,
         "fortune_ability_guid": fortune_ability_guid,
         "fortune_starting_hand_bonus": fortune_starting_hand_bonus,
+        "encounter_mod_conversation_guid": encounter_mod_conversation_guid,
+        # The card picked on a ModChoiceEncounter's selector panel.
+        "encounter_mod_choice_guid": encounter_mod_choice_guid,
+        "mercenary_deck_cards": mercenary["deck_cards"] if mercenary else None,
     }
 
 
@@ -7027,166 +3368,30 @@ def apply_starting_hand_talents(handler, db, session, game, pl_t, effects):
     return changed
 
 
-def _handle_campaign_start(handler, db, env_json, champ_id, cfg,
-                           comp, session_id, target, instance, conh, uid):
-    """Handle the campaign 'start' SendEvent and launch its active encounter.
-
-    The client sends the same event for the AZ0 training encounter and for a
-    dungeon encounter.  A dungeon must use the encounter attached to its
-    active node; falling back to the race training scene here launches the
-    player against the trainer again even though the client is showing a
-    Crayburn Castle opponent.
-    """
-    log = getattr(handler, "_log_req", print)
-    camp_id = env_json.get("CampID", 0)
-
-    # Player's deck for this champion (the auto-created race starter deck).
-    deck_db_id = pve_db.db_champion_last_deck_id(champ_id, conn=db)
-    deck_uid64 = (deck_db_id << 8) | 17 if deck_db_id else 0
-
-    campaign_row = pve_db.db_campaign_runtime_row(camp_id, conn=db)
-    row = campaign_row
-    campaign_type = (row[1] or "").upper() if row else ""
-    encounter_guid = None
-
-    if campaign_type in ("DUNGEON", "AREA"):
-        state = json.loads(row[0]) if row and row[0] else {}
-        race_name = _race_name_for_campaign(db, camp_id)
-        active_node = _resolve_node(
-            state, state.get("ALoc") or state.get("LastNode") or "")
-        if campaign_type == "DUNGEON" and _normalize_crayburn_encounters(state, race_name):
-            _save_campaign_state(db, camp_id, state)
-            db.commit()
-        for loc in state.get("VisLocs", []):
-            data = loc.get("Data", {}) or {}
-            if data.get("node") == active_node or data.get("name") == active_node:
-                if (campaign_type == "AREA" and data.get("completed")
-                        and not data.get("repeatable")):
-                    log(f"    Campaign start ignored: completed AREA node "
-                        f"(camp={camp_id}, node={active_node})")
-                    return None
-                encounter_guid = data.get("encounter")
-                break
-
-        # Recover older states whose VisLoc did not retain the encounter GUID.
-        if not encounter_guid:
-            if _crayburn_node_is_encounter(race_name, active_node):
-                try:
-                    encounter_guid = _crayburn_scene_for_node(
-                        race_name, active_node)
-                except (KeyError, ValueError, IndexError):
-                    encounter_guid = None
-
-        if not encounter_guid:
-            log(f"    Campaign start ignored: no active dungeon encounter "
-                f"(camp={camp_id}, node={active_node})")
-            return None
-        log(f"    {campaign_type.title()} start: camp={camp_id} node={active_node} "
-            f"encounter={encounter_guid}")
-    else:
-        # The training encounter scene for this race.
-        encounter_guid = cfg.get("training_encounter")
-
-    return _launch_encounter(handler, db, camp_id, champ_id, encounter_guid,
-                             deck_uid64, comp, session_id, target, instance,
-                             conh, uid)
-
-
-def resolve_encounter(db, camp_id, scene_guid=None):
+def resolve_encounter(db, camp_id, scene_guid=None, race=None):
     """Resolve a campaign's encounter data.
 
-    If scene_guid is a Crayburn Castle encounter, the AI deck + champion
-    are resolved from the per-race ``_CRAYBURN_CASTLE`` seed; otherwise
-    ``encounter_scenes`` + ``_az0_config`` is used. Returns (scene_guid,
+    The AI deck, champion and personality come from the scene's
+    ``encounter_scenes`` row; ``_az0_config`` supplies the tutorial's. Returns (scene_guid,
     ai_deck_guid, ai_champ_guid, ai_name, ai_charge_power, ai_personality,
     ai_deck_personality) or (None,)*7 if unresolved.
+
+    ``race`` (an editor Play battle, which has no campaign row) supplies the
+    champion race instead of reading it from the campaign.
     """
-    champion_id = pve_db.db_campaign_identity_state(camp_id, conn=db)
-    if not champion_id:
-        return None, None, None, None, None, None, None
-    race = pve_db.db_campaign_champion_race(camp_id, conn=db)
     if race is None:
-        return None, None, None, None, None, None, None
-    cfg = _az0_config(race)
-    if not cfg:
-        return None, None, None, None, None, None, None
+        champion_id = pve_db.db_campaign_identity_state(camp_id, conn=db)
+        if not champion_id:
+            return None, None, None, None, None, None, None
+        race = pve_db.db_campaign_champion_race(camp_id, conn=db)
+        if race is None:
+            return None, None, None, None, None, None, None
+        cfg = _az0_config(race)
+        if not cfg:
+            return None, None, None, None, None, None, None
+    else:
+        cfg = _az0_config(race) or {}
     if scene_guid:
-        race_name = _RACE_NAMES.get(race, "Necrotic")
-        race_data = _CRAYBURN_CASTLE.get("races", {}).get(race_name, {})
-        ai_decks = race_data.get("ai_decks", {})
-        enc_node_names = ["Castle Gatehouse", "Tower Gatehouse",
-                          "Tower of Penworth"]
-
-        def _route_ai_deck_guid(node_name, fallback):
-            """Return the EncounterDeck GUID for a Crayburn route node.
-
-            The campaign mapping stores the node's DeckTemplate GUID because
-            that is what identifies the opponent deck/champion.  The battle
-            card seed is keyed by the separate EncounterDeck GUID carried by
-            SceneData, however.  Resolve that indirection from the client
-            data so setup receives real cards instead of the placeholder
-            fallback deck.
-            """
-            try:
-                route_nodes = {
-                    "Castle Gatehouse": "CastleGate",
-                    "Tower Gatehouse": "TowerGate",
-                    "Tower of Penworth": "PenworthTower",
-                }
-                route_scene = _crayburn_scene_for_node(
-                    race_name, route_nodes.get(node_name, node_name))
-                row = pve_db.db_encounter_scene_runtime(route_scene, conn=db)
-                if row and row[4]:
-                    return row[4]
-            except (KeyError, TypeError, ValueError):
-                pass
-            return fallback
-
-        def _scene_deck_personality(scene_id):
-            try:
-                row = pve_db.db_encounter_scene_runtime(scene_id, conn=db)
-                return row[6] if row else None
-            except Exception:
-                return None
-
-        # New campaign state uses the race-specific scene that the client
-        # already knows. This keeps the pre-battle preview and actual battle
-        # on the same opponent/deck.
-        race_scene_guids = _crayburn_scene_guids(race_name)
-        if scene_guid in race_scene_guids:
-            node_name = enc_node_names[race_scene_guids.index(scene_guid)]
-            deck_data = ai_decks.get(node_name, {})
-            return (scene_guid, _route_ai_deck_guid(
-                node_name, deck_data.get("deck_guid")),
-                deck_data.get("champion_guid"),
-                deck_data.get("champion_name", cfg.get("trainer_npc")),
-                cfg.get("ai_charge_power"), cfg.get("ai_personality"),
-                deck_data.get("ai_deck_personality") or
-                _scene_deck_personality(scene_guid))
-
-        # Legacy shared Crayburn scenes can still arrive from a battle that
-        # was started before its saved dungeon state was normalized.
-        castle_encs = _CRAYBURN_CASTLE.get("encounters", [])
-        if scene_guid in castle_encs:
-            # Map encounter GUID index to encounter node name.
-            enc_idx = castle_encs.index(scene_guid)
-            race_enc_guids = [
-                castle_encs[2],   # Castle Gatehouse (index 2)
-                castle_encs[4],   # Tower Gatehouse (index 4)
-                castle_encs[5],   # Tower of Penworth (index 5)
-            ]
-            node_name = None
-            if enc_idx in (2, 4, 5):
-                node_name = enc_node_names[race_enc_guids.index(scene_guid)]
-            deck_data = ai_decks.get(node_name, {}) if node_name else {}
-            return (scene_guid, _route_ai_deck_guid(
-                node_name, deck_data.get("deck_guid")) if node_name else None,
-                deck_data.get("champion_guid"),
-                deck_data.get("champion_name", cfg.get("trainer_npc")),
-                cfg.get("ai_charge_power"), cfg.get("ai_personality"),
-                deck_data.get("ai_deck_personality") or
-                _scene_deck_personality(scene_guid))
-        # Fallback: encounter_scenes lookup.
         scene = pve_db.db_encounter_scene_runtime(scene_guid, conn=db)
         ai_deck_guid = scene[4] if scene else None
         # The training scene's internal name is AZ0_Orc, but the campaign
@@ -7205,6 +3410,11 @@ def resolve_encounter(db, camp_id, scene_guid=None):
             if ai_champion_guid:
                 template_name = pvp_db.db_template_name(
                     ai_champion_guid, conn=db)
+                if not template_name:
+                    champ_row = db.execute(
+                        "SELECT name FROM champion_templates_extended WHERE guid=?",
+                        (ai_champion_guid,)).fetchone()
+                    template_name = champ_row[0] if champ_row else None
                 if template_name:
                     ai_name = template_name
         return scene_guid, ai_deck_guid, ai_champion_guid, \
@@ -7229,331 +3439,40 @@ def _handle_gameend(handler, db, env_json, comp, session_id,
     the quest-giver NPC so the player can take the Crayburn Castle quest.
     """
     camp_id = env_json.get("CampID", 0)
-    session = env_json.get("Session", "")
-    winners = env_json.get("Winners", [])
-    losers = env_json.get("Losers", [])
-
-    log = getattr(handler, "_log_req", print)
-    log(f"    Campaign GameEnd: camp={camp_id} session={session} winners={winners} losers={losers}")
-
-    cid, state = _apply_gameend(db, camp_id, bool(winners))
-    if state is None:
-        resp = _build_input_response(camp_id, None, success=False)
-        resp["Errors"] = ["Campaign not found"]
-        return _send_response(handler, json.dumps(resp), comp, session_id,
-                              reqid, target, instance, conh, uid)
-
-    resp = _build_input_response(camp_id, state, success=True)
-    return _send_response(handler, json.dumps(resp), comp, session_id,
-                          reqid, target, instance, conh, uid)
+    zone_id = _rules_zone(db, camp_id)
+    if zone_id:
+        from campaign_runtime import runtime
+        return runtime.handle_gameend(handler, db, zone_id, env_json, comp,
+                                      session_id, reqid, target, instance,
+                                      conh, uid)
+    return _no_zone_reply(handler, camp_id, comp, session_id, reqid,
+                          target, instance, conh, uid)
 
 
 def _handle_locaction(handler, db, env_json, comp, session_id,
                        reqid, target, instance, conh, uid):
     """StartLoc / FinishLoc: start or finish a location."""
     camp_id = env_json.get("CampID", 0)
-    ract = env_json.get("RAct", 0)  # 0=Start, 1=FinishLoc
-    location_name = env_json.get("Loc", "")
-    params = env_json.get("Params", [])
-    pending_panorama = None
-
-    log = getattr(handler, "_log_req", print)
-    action = "StartLoc" if ract == 0 else "FinishLoc"
-    log(f"    Campaign {action}: camp={camp_id} loc={location_name}")
-
-    row = pve_db.db_campaign_protocol_row(camp_id, conn=db)
-    if not row:
-        resp = _build_input_response(camp_id, None, success=False)
-        resp["Errors"] = ["Campaign not found"]
-        return _send_response(handler, json.dumps(resp), comp, session_id,
-                              reqid, target, instance, conh, uid)
-
-    champ_id, state_json, ctype, template_name = row
-    if state_json:
-        state = json.loads(state_json)
-    else:
-        state = _build_initial_gameplay_state(camp_id, champ_id, ctype or "AREA")
-
-    if ract == 0:
-        if (ctype or "").upper() == "DUNGEON":
-            state = _prepare_dungeon_state(
-                state, _race_name_for_campaign(db, camp_id))
-            requested_node = _resolve_node(state, location_name)
-            expected_node = _crayburn_first_incomplete(state)
-            requested_idx = (_CASTLE_CHAIN.index(requested_node)
-                             if requested_node in _CASTLE_CHAIN else None)
-            expected_idx = (_CASTLE_CHAIN.index(expected_node)
-                            if expected_node else None)
-            movement_rejected = bool(
-                requested_idx is None or
-                (expected_idx is not None and requested_idx > expected_idx))
-            if movement_rejected:
-                # Do not silently turn a click on a future marker into
-                # StartLoc for the current encounter.  That made Tower of
-                # Penworth appear reachable while Tower Gatehouse was still
-                # unfinished, and could launch the wrong battle on `start`.
-                node = _crayburn_return_node(
-                    state, expected_node or requested_node or "Entrance")
-                log(f"    Campaign movement rejected: {requested_node} is "
-                    f"locked; expected {expected_node}")
-                state["ALoc"] = ""
-                state["LastNode"] = node
-                state["CurState"] = "EXPLORE"
-                _reveal_crayburn_node(state, node)
-            else:
-                node = requested_node
-                state.pop("_pending_travel", None)
-                state["ALoc"] = node
-                state["LastNode"] = node
-                state["CurState"] = "EXPLORE"
-                _reveal_crayburn_node(state, node)
-                _set_crayburn_autostart(state, node)
-        else:
-            requested = next((loc.get("Data", {}) for loc in state.get("VisLocs", [])
-                              if loc.get("Data", {}).get("node") == location_name or
-                              loc.get("Data", {}).get("name") == location_name), {})
-            node = requested.get("node") or location_name
-            # AREA maps use the authored linear scene order. Keep the current
-            # node visited/completed and reveal only the next adjacent node;
-            # the client uses these flags to render fog of war and Completed.
-            previous = state.get("ALoc") or state.get("LastNode")
-            previous_node = _resolve_node(state, previous) if previous else None
-            requested_node = _resolve_node(state, node) if node else None
-            # A completed battle node is no longer startable, even if a stale
-            # client sends StartLoc for it after reconnecting.
-            blocked_encounter = bool(
-                requested.get("type") == "Encounter"
-                and requested.get("completed")
-                and not requested.get("repeatable"))
-            movement_rejected = False
-            previous_data = {}
-            path_forks = (_az1_path_fork_ids(db)
-                          if ((ctype or "").upper() == "AREA" and
-                              str(template_name or "").upper() == "AZ1")
-                          else set())
-            if requested_node in path_forks:
-                # Fork nodes are present for client path geometry only; a
-                # stale or modified client must not turn one into ALoc.
-                log(f"    Campaign movement rejected: {requested_node} is "
-                    "a non-visitable path fork")
-                movement_rejected = True
-                node = previous_node or previous or state.get("LastNode") or ""
-                if node and node != requested_node:
-                    requested = next(
-                        ((l.get("Data") or {}) for l in state.get("VisLocs", [])
-                         if (l.get("Data") or {}).get("node") == node),
-                        requested)
-            if not blocked_encounter and previous and previous != node:
-                previous_data = next(
-                    ((l.get("Data") or {}) for l in state.get("VisLocs", [])
-                     if ((l.get("Data") or {}).get("node") in
-                         {previous, previous_node} or
-                         (l.get("Data") or {}).get("name") == previous)), {})
-                # Do not silently complete an encounter merely because the
-                # client attempted to travel away from it. Battles complete
-                # only through the game-end flow.
-                # Repeatable locations (for example Winston at the east
-                # bridge, or a Tamed encounter won without capture) deliberately
-                # remain incomplete so they can be entered again. They must
-                # not behave like unfinished one-time content and trap the
-                # player on the node when another adjacent location is chosen.
-                # Non-repeatable conversations and encounters still block
-                # movement until their event resolves.
-                previous_type = str(previous_data.get("type") or "").lower()
-                previous_repeatable = bool(previous_data.get("repeatable"))
-                failed_nodes = _az1_failed_nodes(state)
-                visited_nodes = {
-                    _resolve_node(state, str(value))
-                    for value in (state.setdefault("PublicState", {})
-                                  .setdefault("Data", {})
-                                  .get("visited_nodes") or [])
-                    if value
-                }
-                if (previous_node in failed_nodes and
-                        requested_node not in visited_nodes and
-                        not _az1_has_safe_visited_route(
-                            db, state, requested_node,
-                            visited=visited_nodes)):
-                    log(f"    Campaign movement rejected: {previous_node} "
-                        f"failed; {requested_node} has no safe visited route")
-                    node = previous_node or previous
-                    requested = previous_data
-                    movement_rejected = True
-                elif (previous_type not in ("", "empty") and
-                        previous_node not in failed_nodes and
-                        not previous_data.get("completed") and
-                        not previous_repeatable):
-                    node = previous_node or previous
-                    requested = previous_data
-                    blocked_encounter = True
-                elif ((ctype or "").upper() == "AREA" and
-                      str(template_name or "").upper() == "AZ1" and
-                      previous_node and requested_node and
-                      not _az1_is_adjacent(db, previous_node, requested_node)
-                      and requested_node not in visited_nodes):
-                    # The client reports the destination after walking a
-                    # multi-edge return route, so a previously visited node
-                    # is a safe backtracking destination even when it is not
-                    # directly adjacent to the persisted current node. Keep
-                    # rejecting arbitrary jumps to new locations.
-                    log(f"    Campaign movement rejected: {previous_node} -> "
-                        f"{requested_node} is not adjacent")
-                    node = previous_node or previous
-                    requested = previous_data
-                    movement_rejected = True
-            if (not blocked_encounter and not movement_rejected and
-                    (ctype or "").upper() == "AREA" and
-                    str(template_name or "").upper() == "AZ1" and
-                    requested_node and requested_node != previous_node):
-                pdata = state.setdefault("PublicState", {}).setdefault("Data", {})
-                visited_nodes = {
-                    _resolve_node(state, str(value))
-                    for value in (pdata.get("visited_nodes") or []) if value
-                }
-                blocked_nodes = {
-                    _resolve_node(state, str(value))
-                    for value in (pdata.get("blocked_nodes") or []) if value
-                }
-                requested_visible = bool(requested.get("visible", True))
-                if (requested_node in blocked_nodes and
-                        requested_node not in visited_nodes) or not requested_visible:
-                    log(f"    Campaign movement rejected: {previous_node} -> "
-                        f"{requested_node} is hidden or quest-gated")
-                    node = previous_node or previous
-                    requested = previous_data
-                    movement_rejected = True
-            _note_visited(state, node)
-            # The client identifies an active AREA Location by its authored
-            # Name, not its internal map-node ID.
-            state["ALoc"] = (None if (blocked_encounter or movement_rejected)
-                              else (requested.get("name") or node))
-            state["LastNode"] = node
-            for idx, loc in enumerate(state.get("VisLocs", [])):
-                data = loc.get("Data", {})
-                if data.get("node") == node:
-                    data["visible"] = True
-                    data["enabled"] = True
-                    if (str(template_name or "").upper() != "AZ1" and
-                            idx + 1 < len(state["VisLocs"])):
-                        nxt = state["VisLocs"][idx + 1].get("Data", {})
-                        nxt["visible"] = True
-                        nxt["enabled"] = True
-                    if data.get("type") == "Convo":
-                        data["autostart"] = True
-                    break
-            if ((ctype or "").upper() == "AREA" and
-                    str(template_name or "").upper() == "AZ1"):
-                _hydrate_az1_area_scene_metadata(
-                    db, state.get("VisLocs", []), champ_id=champ_id, state=state)
-                # Select the authored first/repeat/state conversation at the
-                # moment the node is entered.  Hydration provides a safe
-                # default for old saves; this pass uses the persisted visit
-                # count so repeatable nodes (such as Milosh's camp) receive
-                # their repeat conversation on subsequent visits.
-                for loc in state.get("VisLocs", []):
-                    data = loc.get("Data", {}) or {}
-                    if data.get("node") == node and data.get("type") == "Convo":
-                        if (data.get("pre_encounter") and
-                                not data.get("pre_encounter_completed") and
-                                not data.get("completed")):
-                            # Outcome conversations (Success/Fail) are in the
-                            # same catalog as the opening narration.  While
-                            # entering the encounter for the first time, use
-                            # the prelude selector so a success row cannot be
-                            # chosen merely because it sorts first by GUID.
-                            data["conversationId"] = (
-                                _az1_pre_encounter_conversation(
-                                    db, node, champ_id))
-                        else:
-                            data["conversationId"] = _az1_node_conversation(
-                                db, node, state, champ_id=champ_id)
-                        masked_army_variant = (
-                            _az1_masked_army_variant(
-                                db, champ_id, node=str(node or ""))
-                            if str(node).lower() in {"noder", "node00r"}
-                            else None
-                        )
-                        if (masked_army_variant and
-                                not data.get("quest_variant_completed")):
-                            data["completed"] = False
-                            data["quest_variant_terminal"] = bool(
-                                masked_army_variant[2])
-                        conversation_visits = (
-                            (((state.get("PublicState") or {}).get("Data") or {})
-                             .get("conversation_visits") or {})
-                        )
-                        try:
-                            prior_visit_count = int(
-                                conversation_visits.get(str(node), 0) or 0)
-                        except (TypeError, ValueError):
-                            prior_visit_count = 0
-                        data["repeatable"] = (
-                            True if ((masked_army_variant and
-                                     prior_visit_count > 0 and
-                                     not data.get("quest_variant_completed")) or
-                                     (data.get("quest_start_open") and
-                                      not data.get("completed"))) else
-                            (prior_visit_count > 0 and
-                             _az1_node_is_repeatable(db, node)))
-                        data["autostart"] = True
-                        break
-                # The generic first/repeat selector above is needed for an
-                # ordinary return to a conversation node, but an active quest
-                # objective is authoritative.  Reapply its marker after that
-                # selector so a newly unlocked turn-in (such as Weston) keeps
-                # its authored quest conversation on the first visit.
-                _apply_az1_quest_markers(db, champ_id, state)
-                _az1_reveal_neighbors(db, state, node)
-                # A PANORAMA scene is a campaign handoff, not a battle.  Use
-                # the authored AZ1 node scene as the source of truth rather
-                # than the transient location ``encounter`` field: older
-                # saves and conversation-backed nodes can omit that field.
-                # This also runs when StartLoc is retried on the already
-                # arrived node (LastNode == requested node), which is how the
-                # client resumes an area-to-panorama handoff after reconnect.
-                scene = _az1_scene_for_node(db, node)
-                if (not blocked_encounter and not movement_rejected and
-                        scene and "PANORAMA" in str(scene[1] or "").upper()):
-                    log(f"    Campaign panorama transition: node={node} "
-                        f"scene={scene[0]} name={scene[1]}")
-                    pending_panorama = _activate_az1_panorama(
-                        db, champ_id, scene[0], node, state)
-                    state["ALoc"] = None
-                    state["CurState"] = "EXPLORE"
-        state["CurState"] = "EXPLORE"
-    else:
-        state["CurState"] = "EXPLORE"
-        for loc in state.get("VisLocs", []):
-            ld = loc.get("Data", {})
-            if ((ctype or "").upper() == "AREA" and
-                    str(template_name or "").upper() == "AZ1" and
-                    (ld.get("node") or ld.get("name")) in
-                    _az1_path_fork_ids(db)):
-                continue
-            if ld.get("node") == location_name or ld.get("name") == location_name:
-                ld["completed"] = True
-                _note_visited(state, ld.get("node") or location_name)
-                break
-
-    _save_campaign_state(db, camp_id, state)
-    db.commit()
-
-    resp = _build_input_response(camp_id, state, success=True)
-    ret = _send_response(handler, json.dumps(resp), comp, session_id,
-                         reqid, target, instance, conh, uid)
-    if pending_panorama:
-        panorama_id, panorama_state = pending_panorama
-        push_campupdate(
-            handler, db, panorama_id, champ_id, "area_panorama",
-            "PANORAMA", True, panorama_state, comp, session_id,
-            target, instance, conh, uid)
-    return ret
+    zone_id = _rules_zone(db, camp_id)
+    if zone_id:
+        from campaign_runtime import runtime
+        return runtime.handle_locaction(handler, db, zone_id, env_json, comp,
+                                        session_id, reqid, target, instance,
+                                        conh, uid)
+    return _no_zone_reply(handler, camp_id, comp, session_id, reqid,
+                          target, instance, conh, uid)
 
 
 def _handle_forfeit(handler, db, env_json, comp, session_id,
                      reqid, target, instance, conh, uid):
     """Forfeit: forfeit a campaign."""
     camp_id = env_json.get("CampID", 0)
+    zone_id = _rules_zone(db, camp_id)
+    if zone_id:
+        from campaign_runtime import runtime
+        return runtime.handle_forfeit(handler, db, zone_id, env_json, comp,
+                                      session_id, reqid, target, instance,
+                                      conh, uid)
     row = pve_db.db_campaign_forfeit_row(camp_id, conn=db)
     if not row:
         resp = _build_input_response(camp_id, None, success=False)
@@ -7562,10 +3481,7 @@ def _handle_forfeit(handler, db, env_json, comp, session_id,
                               reqid, target, instance, conh, uid)
 
     champ_id, state_json, ctype = row
-    if state_json:
-        state = json.loads(state_json)
-    else:
-        state = _build_initial_gameplay_state(camp_id, champ_id, ctype or "AREA")
+    state = json.loads(state_json or "{}")
 
     state["Finished"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     state["FinishReason"] = "Forfeit"
@@ -7611,886 +3527,9 @@ def _handle_cheat(handler, db, env_json, comp, session_id,
         except Exception as e:
             results.append({"Cheat": "encounter", "Success": False,
                             "Summary": str(e)})
-    elif len(namevals) >= 1 and namevals[0].lower() == "dungeon":
-        # 'camp.dungeon <name>' — enter a dungeon as if the quest-giver's
-        # conversation had just finished: switch the campaign row to DUNGEON,
-        # transition to the scene, then advance the castle chain one step from
-        # the Entrance (which shows the first node's conversation).
-        try:
-            row = pve_db.db_latest_campaign_any(champ_id, conn=db)
-            if not row:
-                if not pve_db.db_campaign_champion(champ_id, conn=db):
-                    raise ValueError("no champion for dungeon cheat")
-                camp_id, _inst, _started, _st = _find_campaign_for_champion(
-                    db, champ_id, "DUNGEON")
-                camp_champ_id = champ_id
-            else:
-                camp_id, camp_champ_id, _ = row
-            # Always rebuild a fresh dungeon state — stale _pending_travel /
-            # completed-node data from a previous run skips conversations.
-            pve_db.db_campaign_clear_state(camp_id, db)
-            db.commit()
-            champ = _get_champion(db, camp_champ_id)
-            cfg = _az0_config(champ[2]) if champ else _az0_config(1)
-            if cfg is None:
-                cfg = _az0_config(1)
-            if cfg is None:
-                raise RuntimeError("AZ0 campaign configuration is unavailable")
-            state = _build_initial_gameplay_state(camp_id, camp_champ_id,
-                                                  "DUNGEON", _race_for_cfg(cfg))
-            _transition_to_dungeon(state, cfg)
-            pve_db.db_promote_campaign_to_dungeon(
-                camp_id, json.dumps(state), conn=db)
-            db.commit()
-            # Ensure the dungeon's journal quest campaign exists.
-            _ensure_quest_campaign(db, camp_champ_id, "DUNGEON")
-            # Transition to the dungeon scene...
-            push_campupdate(handler, db, camp_id, state.get("ChampID") or camp_champ_id,
-                            "dungeon_enter", "DUNGEON", True, state, comp,
-                            session_id, target, instance, conh, uid)
-            # ...then start the chain at the first conversation.
-            advance_crayburn_step(handler, db, camp_id, False, comp, session_id,
-                                  target, instance, conh, uid)
-            results.append({"Cheat": "dungeon", "Success": True,
-                            "Summary": f"Entered Crayburn Castle (camp={camp_id})"})
-        except Exception as e:
-            results.append({"Cheat": "dungeon", "Success": False,
-                            "Summary": str(e)})
     else:
         results.append({"Cheat": "unknown", "Success": False,
                         "Summary": "Unsupported cheat"})
 
     return _send_response(handler, json.dumps(results), comp, session_id,
                           reqid, target, instance, conh, uid)
-
-
-### BEGIN CRAYBURN CASTLE SEED
-_CRAYBURN_CASTLE = {
- "encounters": [
-  "1e65d03d-f3d8-41e9-b3a1-3600e1756378",
-  "cae9b735-ca90-400f-81bf-a0a763fa3dc3",
-  "f3c0ac5b-ff09-488c-ad63-f11ff15acdcd",
-  "df073679-4fd2-4434-8aff-6c044d759f91",
-  "2ba61b7b-6864-4582-a634-f9124fb2fdee",
-  "5f222319-7b4e-4ba4-b0dc-f9678c000d8b"
- ],
- "races": {
-  "Coyotle": {
-   "ai_decks": {
-    "Castle Gatehouse": {
-     "champion_guid": "891cf0c5-3581-4d4e-910f-6cef50840d0e",
-     "champion_name": "Snarling Ambusher",
-     "champion_race": "Coyotle",
-     "deck_guid": "48e8d6a4-7b58-474e-b3d3-540597916e6d"
-    },
-    "Tower Gatehouse": {
-     "champion_guid": "aa99a0b5-b2b8-40ef-b180-0c0fb5ae4ca6",
-     "champion_name": "Wind Whisperer",
-     "champion_race": "Coyotle",
-     "deck_guid": "49e9ab78-7e97-40e4-881e-c5194be4ce61"
-    },
-    "Tower of Penworth": {
-     "champion_guid": "f1f76801-83be-452b-90e0-85731decd72e",
-     "champion_name": "Whispering Breeze",
-     "champion_race": "Coyotle",
-     "deck_guid": "6e6d3a29-64fe-47fc-a7e8-a7a6e1aecf49"
-    }
-   },
-   "nodes": {
-    "Castle Gatehouse": {
-     "conv": "4084b46c-3d26-4159-8e01-ec86c1d0e7b6",
-     "fail": "50bd1063-7597-424c-9885-1e3adc36dea4",
-     "success": "8a39b557-c62d-4f44-bfd4-87e0579cccbe"
-    },
-    "Inner Bailey": {
-     "conv": "c3146d14-b7d1-4737-8c14-d1c4cac4be9f"
-    },
-    "The Drawbridge": {
-     "conv": "1de6dac7-b539-4603-95fb-18b16e6a95e9"
-    },
-    "The Watchtower": {
-     "conv": "a74f5fbb-fc87-488d-921e-cd1cc7a856d8"
-    },
-    "Tower Gatehouse": {
-     "conv": "e1a7a3cc-2ad9-44fc-bde1-16db12eeb014",
-     "fail": "b22b0125-6f0a-4d4b-8e5d-c23369ddd9c4",
-     "success": "ae96f501-9acf-4c72-a72d-c71a3b96142a"
-    },
-    "Tower of Penworth": {
-     "conv": "e6c52582-14b5-439a-949d-f2911ff03ac7",
-     "fail": "d842028a-75da-422c-9f0f-41c33c1d71b0",
-     "success": "d68f7078-8ea3-41b1-85a1-01af5ee0cfc8"
-    }
-   },
-   "quest_end": "9c139a1c-40a4-4ed7-b6ff-378c6f6bc1ea",
-   "quest_start": "0934ceae-03be-436e-b8e5-4f8922e02a0b"
-  },
-  "Dwarf": {
-   "ai_decks": {
-    "Castle Gatehouse": {
-     "champion_guid": "14241860-ad15-41bd-a63b-27477044d5b0",
-     "champion_name": "Scrap Welder",
-     "champion_race": "Dwarf",
-     "deck_guid": "7062ed10-73f6-449a-8b11-3faee5442355"
-    },
-    "Tower Gatehouse": {
-     "champion_guid": "519737b5-6ec0-4355-9e40-7a0ef0fbb40b",
-     "champion_name": "Elite Battle Tech",
-     "champion_race": "Dwarf",
-     "deck_guid": "7b600dfb-9f2a-4122-8157-ae8bd484ee11"
-    },
-    "Tower of Penworth": {
-     "champion_guid": "259f0138-5a98-424c-ac83-da081d702ec4",
-     "champion_name": "Glendower",
-     "champion_race": "Dwarf",
-     "deck_guid": "6042bf6c-e0a3-401f-8156-144d2b4d9c5d"
-    }
-   },
-   "nodes": {
-    "Castle Gatehouse": {
-     "conv": "d6afd6b2-2d82-4e08-b099-281037116261",
-     "fail": "bc8ee2ca-0453-4274-a56f-1dee95d24944",
-     "success": "1a251fae-0933-4560-bfd5-a9b2181031c5"
-    },
-    "Inner Bailey": {
-     "conv": "a9c78e63-478e-48a0-9223-56d5aff54882"
-    },
-    "The Drawbridge": {
-     "conv": "10238e3b-6a07-4fab-a632-64ecaaf13671"
-    },
-    "The Watchtower": {
-     "conv": "fea06901-f852-4221-a740-d801087e7846"
-    },
-    "Tower Gatehouse": {
-     "conv": "155a5947-2cdf-4cda-b396-3e6ffaf9f362",
-     "fail": "76031387-ccb3-4fc1-993e-283395b5fe2b",
-     "success": "e35a165c-a306-466f-8e02-bb298d3b6197"
-    },
-    "Tower of Penworth": {
-     "conv": "76b62ae6-ebc3-4801-82f2-83290957446a",
-     "fail": "ce4d8cba-ac4f-4dcf-8276-48a4bf55984d",
-     "success": "e2c269f1-7d82-4e48-a029-ab65d8e122cd"
-    }
-   },
-   "quest_end": "21c62741-49c8-4da5-8b8d-440247911027",
-   "quest_start": "88fe73d5-a42a-408d-97c2-ca5651affc1b"
-  },
-  "Elf": {
-   "ai_decks": {
-    "Castle Gatehouse": {
-     "champion_guid": "9efbd1c3-1724-4e74-8cc3-06f2c1fc5f22",
-     "champion_name": "Wild Child",
-     "champion_race": "Elf",
-     "deck_guid": "10069a59-a090-4850-98a7-8734d532d150"
-    },
-    "Tower Gatehouse": {
-     "champion_guid": "b90abda1-dc37-48b6-8ed2-a9c86b5bfa2d",
-     "champion_name": "Ashwood Blademaster",
-     "champion_race": "Elf",
-     "deck_guid": "35d90990-3a6a-495c-9092-8e07ff595a30"
-    },
-    "Tower of Penworth": {
-     "champion_guid": "ce9e4694-0a43-44ba-9e33-3b035aea86c6",
-     "champion_name": "Nerissa",
-     "champion_race": "Elf",
-     "deck_guid": "59487597-64ab-4755-8884-d936653353d2"
-    }
-   },
-   "nodes": {
-    "Castle Gatehouse": {
-     "conv": "260f9a04-28f9-443a-8741-67e6264e090d",
-     "fail": "36725ee7-4476-4650-ad02-43c4b7f9a6ee",
-     "success": "4fe768f9-4f82-445c-a178-db3730035dfd"
-    },
-    "Inner Bailey": {
-     "conv": "43f26b07-6693-439a-847c-893b9c6b884d"
-    },
-    "The Drawbridge": {
-     "conv": "bfc57f7f-7832-480c-b0cd-2713562aff9a"
-    },
-    "The Watchtower": {
-     "conv": "7f3d1858-a4ca-4166-b6c6-a911b9b60a01"
-    },
-    "Tower Gatehouse": {
-     "conv": "28a7724d-264c-41b2-86a4-5cdc1a16afb2",
-     "fail": "f86bb43a-de74-4ac0-a730-cdd1479a90e2",
-     "success": "9790dab2-2198-4d29-8544-79c8515fa0d3"
-    },
-    "Tower of Penworth": {
-     "conv": "4ab9607d-b45b-4638-ad4b-f2331c38cde3",
-     "fail": "5719984b-06c2-41f0-8304-87dd9817aa37",
-     "success": "f6ffc170-f15d-4c34-90db-07e321fd3067"
-    }
-   },
-   "quest_end": "bbc4460d-8452-4d49-a6e9-c64216f483b3",
-   "quest_start": "18b84529-d187-46ad-bb98-9a591d5287ea"
-  },
-  "Human": {
-   "ai_decks": {
-    "Castle Gatehouse": {
-     "champion_guid": "9b3ecd51-da74-41a4-adc9-f44b4bfb412b",
-     "champion_name": "Chimera Guard Outrider",
-     "champion_race": "Human",
-     "deck_guid": "582f1eff-360a-4129-9288-ad938999f6cc"
-    },
-    "Tower Gatehouse": {
-     "champion_guid": "50ab780f-e546-468f-ba79-06a49fb68469",
-     "champion_name": "Buccaneer",
-     "champion_race": "Human",
-     "deck_guid": "146ff24f-f208-494a-b77e-894a3448a665"
-    },
-    "Tower of Penworth": {
-     "champion_guid": "a0a5ef26-6676-4602-9fa2-e1608120d210",
-     "champion_name": "Gareth Kay",
-     "champion_race": "Human",
-     "deck_guid": "326dd554-808b-4d1b-aacd-49fdf717a941"
-    }
-   },
-   "nodes": {
-    "Castle Gatehouse": {
-     "conv": "60a7d90d-c16f-4922-9c43-8e59bbc416e3",
-     "fail": "3c635381-acb3-4912-a3ce-501c53dbb691",
-     "success": "e83ffcda-1d7f-4ccf-8dd2-2e5cbdc0dc1d"
-    },
-    "Inner Bailey": {
-     "conv": "52cdef5d-fa56-45f9-8699-16b835bc129c"
-    },
-    "The Drawbridge": {
-     "conv": "29ad6621-9b02-4380-b4ff-3dfe6d8a4b81"
-    },
-    "The Watchtower": {
-     "conv": "ba9fb1a9-406b-49b0-aa46-18044a9ac296"
-    },
-    "Tower Gatehouse": {
-     "conv": "1f9acf0f-970c-4e68-a6ac-558550482550",
-     "fail": "cb4b5e85-dfda-45e8-9b96-92973d6eadf5",
-     "success": "cc4080df-4ec8-46d9-aaf8-0d67537bfe86"
-    },
-    "Tower of Penworth": {
-     "conv": "94076e42-9435-490d-82a4-a32a592cf3fa",
-     "fail": "7c4e314c-4d6c-432c-a097-8d702a44cdc2",
-     "success": "10b3d849-3cda-41a8-bbaf-0d43819a0b5a"
-    }
-   },
-   "quest_end": "0427b61f-251c-47b5-b89d-a0f2e2f42b1a",
-   "quest_start": "abdcca36-20fa-4af7-8c24-8b5e0fcb61d3"
-  },
-  "Necrotic": {
-   "ai_decks": {
-    "Castle Gatehouse": {
-     "champion_guid": "05499eb5-f6cc-4d82-96ad-54a9071c055e",
-     "champion_name": "Duskwing Outrider",
-     "champion_race": "Necrotic",
-     "deck_guid": "398df9c8-69fa-43b0-aa8c-44fed10f2e09"
-    },
-    "Tower Gatehouse": {
-     "champion_guid": "c0c7e1b1-1163-4cc9-96d2-4b15570197c8",
-     "champion_name": "Warlock of Aettir",
-     "champion_race": "Necrotic",
-     "deck_guid": "71a650cc-ef4a-4d99-8e23-a7e0d4da883d"
-    },
-    "Tower of Penworth": {
-     "champion_guid": "3658be25-2160-4a23-a609-e40d531832d0",
-     "champion_name": "Iddi",
-     "champion_race": "Necrotic",
-     "deck_guid": "b4b67816-2cc4-4f9e-9788-be0326e139d9"
-    }
-   },
-   "nodes": {
-    "Castle Gatehouse": {
-     "conv": "83ffe2e5-bd78-47c1-8b85-849ef5e184bf",
-     "fail": "df455c81-06e7-4634-9165-9f2b039d14b2",
-     "success": "e7d6489d-dff8-446c-8a10-87136d598b15"
-    },
-    "Inner Bailey": {
-     "conv": "2ba5b572-a454-4af2-b1d7-0d96f08d6729"
-    },
-    "The Drawbridge": {
-     "conv": "49da653a-012f-42c4-843d-5eaf14b6731e"
-    },
-    "The Watchtower": {
-     "conv": "8bdde70c-06bf-460d-bd37-ce9029cc01c0"
-    },
-    "Tower Gatehouse": {
-     "conv": "40a89f9a-a41c-465c-a3ef-6c9ab5a07c8d",
-     "fail": "a43f9a3a-19cf-4c95-8124-1122fbcae655",
-     "success": "1fd4765f-78c5-4514-a7bf-074ca9b75a85"
-    },
-    "Tower of Penworth": {
-     "conv": "e0674a7b-81a0-480a-9c55-e18409378690",
-     "fail": "23f92d62-c827-44e8-aa9f-f1c4d98fab47",
-     "success": "34d48257-b16e-443c-940c-d322b47d00b9"
-    }
-   },
-   "quest_end": "922aa66e-e41c-41ad-94a2-adb84f356430",
-   "quest_start": "4cf66046-086b-40f8-8237-4e4d13e64a42"
-  },
-  "Orc": {
-   "ai_decks": {
-    "Castle Gatehouse": {
-     "champion_guid": "5e3982aa-9f7e-45f5-8d8f-ef611365053f",
-     "champion_name": "Ridge Raider",
-     "champion_race": "Orc",
-     "deck_guid": "4b78d914-c7a8-4b10-b787-5844ebb5d7c0"
-    },
-    "Tower Gatehouse": {
-     "champion_guid": "ef67a187-286d-4e4d-94c9-e92159617f3a",
-     "champion_name": "Bloodsoaked Brawler",
-     "champion_race": "Orc",
-     "deck_guid": "65407eee-6308-4958-a80f-6d9dc7bff23a"
-    },
-    "Tower of Penworth": {
-     "champion_guid": "0520c385-7e2d-4dc5-9fd0-61c85df69250",
-     "champion_name": "Moqui",
-     "champion_race": "Orc",
-     "deck_guid": "93acc9f3-2fe9-459f-a653-f0ffd2a48db2"
-    }
-   },
-   "nodes": {
-    "Castle Gatehouse": {
-     "conv": "51bba89c-d583-4d34-a47f-a58bc84ccab8",
-     "fail": "9087e9ec-e219-4cec-b181-439d95374f0e",
-     "success": "8ae2c43e-e695-44df-adf8-f61d34d2c74b"
-    },
-    "Inner Bailey": {
-     "conv": "fe7818f3-df41-466f-8a1a-162ef7267493"
-    },
-    "The Drawbridge": {
-     "conv": "fd9b329c-2341-43b3-932e-6bea48ed4faf"
-    },
-    "The Watchtower": {
-     "conv": "3c0ee3b4-0453-43c4-bce9-d7882c9ea4e9"
-    },
-    "Tower Gatehouse": {
-     "conv": "7a31ca71-cc29-45c8-a698-fc5f9c65529b",
-     "fail": "c16ba7a4-9d23-4de9-ae84-b6074d3fc36e",
-     "success": "aa2da90c-9325-44fc-ad8b-abae6f6dba6d"
-    },
-    "Tower of Penworth": {
-     "conv": "a6a20599-fc46-48f4-8a29-134c34548936",
-     "fail": "1317c9bb-e1bc-4294-9806-52bf4f8fe953",
-     "success": "7b4fb960-9150-4175-8fee-444a29266c03"
-    }
-   },
-   "quest_end": "463a5ea3-847f-4102-83e4-512eb0ca97ab",
-   "quest_start": "578dd9ea-c5ab-49a0-93c5-44ad235cf0a9"
-  },
-  "Shin'hare": {
-   "ai_decks": {
-    "Castle Gatehouse": {
-     "champion_guid": "ddada3b2-7a69-4040-b1f5-fd5ca2ca4bd6",
-     "champion_name": "Rune Ear Elite",
-     "champion_race": "ShinHare",
-     "deck_guid": "c2c0c313-ae14-407a-a7db-b889ee292db0"
-    },
-    "Tower Gatehouse": {
-     "champion_guid": "9d0cdd24-3672-414e-8c49-07da6f97e784",
-     "champion_name": "Blood Cauldron Ritualist",
-     "champion_race": "ShinHare",
-     "deck_guid": "52adf921-5244-41eb-987a-7d78dd7b2943"
-    },
-    "Tower of Penworth": {
-     "champion_guid": "1d756624-3c6a-445e-8fd1-acba6c9e4ce1",
-     "champion_name": "Sora",
-     "champion_race": "ShinHare",
-     "deck_guid": "8400016d-9eb9-4565-b05f-28b5e41d51e3"
-    }
-   },
-   "nodes": {
-    "Castle Gatehouse": {
-     "conv": "78c4a18a-c212-4005-9619-aa08aa453a85",
-     "fail": "3afa146d-1c07-4abb-a0b2-f17889bda00f",
-     "success": "97acd02e-1821-4730-a8e2-2b8dd5e5091d"
-    },
-    "Inner Bailey": {
-     "conv": "5c735a25-ab19-46db-a281-3d895680f940"
-    },
-    "The Drawbridge": {
-     "conv": "c437e9e4-946f-4738-92a2-cb0ad621b349"
-    },
-    "The Watchtower": {
-     "conv": "f2e95564-a78e-4ae2-8ba9-be8b72b260f6"
-    },
-    "Tower Gatehouse": {
-     "conv": "263472e5-e4fa-43e2-b58b-0a30424320c4",
-     "fail": "8a3aac87-6501-41b8-9054-7abb69e07e05",
-     "success": "84cf84b9-ac29-4296-b9b9-96baaa48fc97"
-    },
-    "Tower of Penworth": {
-     "conv": "37191606-9653-48f8-8cb7-b72e54badc7b",
-     "fail": "97c516e9-8622-4b8d-849f-afc9164977ec",
-     "success": "b15bb1da-cffa-4f8e-9287-15bcee3706aa"
-    }
-   },
-   "quest_end": "5f119ac9-1018-4161-9b87-2cc23dba9c71",
-   "quest_start": "d89040c9-75c1-4f10-a647-f35679bcff72"
-  },
-  "Vennen": {
-   "ai_decks": {
-    "Castle Gatehouse": {
-     "champion_guid": "9a62d370-5029-4356-ad3f-7873792984c6",
-     "champion_name": "Vilefang Eremite",
-     "champion_race": "Vennen",
-     "deck_guid": "6d5144a4-3cf5-4c1c-8c50-2cd17a87ebc1"
-    },
-    "Tower Gatehouse": {
-     "champion_guid": "b6fe99d4-be07-4741-b072-eae38b6b7247",
-     "champion_name": "Nazhk Webguard",
-     "champion_race": "Vennen",
-     "deck_guid": "1aacb82b-fea5-4653-b190-41eae593233c"
-    },
-    "Tower of Penworth": {
-     "champion_guid": "22e3a199-4028-43b5-9290-7c646535360c",
-     "champion_name": "Zilth",
-     "champion_race": "Vennen",
-     "deck_guid": "306b9a87-29cc-4393-a547-5d090b3e1855"
-    }
-   },
-   "nodes": {
-    "Castle Gatehouse": {
-     "conv": "4c4e84a4-dbdd-481d-a8f6-efd3362c1416",
-     "fail": "02d251fd-0f9a-435d-8586-2197aeb97ea2",
-     "success": "c16d9605-b12f-41ff-baf2-4d48f439f3f2"
-    },
-    "Inner Bailey": {
-     "conv": "6c08b7be-cd2e-40bc-9942-6d7328daad0f"
-    },
-    "The Drawbridge": {
-     "conv": "509c4971-4d29-450d-acd5-88050919df49"
-    },
-    "The Watchtower": {
-     "conv": "25bc2cf2-3ab5-418e-8301-ef34a74bd60e"
-    },
-    "Tower Gatehouse": {
-     "conv": "26c93c43-b10d-4387-b394-a373fc46bdc6",
-     "fail": "8e537c2d-edab-4b21-9ab8-09ef54f1ecb8",
-     "success": "5121dde6-9b5f-4895-b0bd-24675a2e3afa"
-    },
-    "Tower of Penworth": {
-     "conv": "9f7aa210-a89f-4b49-942e-44e0a9ea6eb1",
-     "fail": "087bb91d-add5-4ed1-a17e-31c6d10c843d",
-     "success": "9c20be5e-3e19-4a33-9fd5-30c3e74a9eae"
-    }
-   },
-   "quest_end": "49eaafb9-6645-4c04-9966-5190c4e8ca3d",
-   "quest_start": "782369c4-61c2-4a3e-97ce-660f2d062be7"
-  }
- }
-}
-
-
-
-### BEGIN CRAYBURN CASTLE SEED
-_CRAYBURN_CASTLE = {
- "encounters": [
-  "1e65d03d-f3d8-41e9-b3a1-3600e1756378",
-  "cae9b735-ca90-400f-81bf-a0a763fa3dc3",
-  "f3c0ac5b-ff09-488c-ad63-f11ff15acdcd",
-  "df073679-4fd2-4434-8aff-6c044d759f91",
-  "2ba61b7b-6864-4582-a634-f9124fb2fdee",
-  "5f222319-7b4e-4ba4-b0dc-f9678c000d8b"
- ],
- "races": {
-  "Coyotle": {
-   "ai_decks": {
-    "Castle Gatehouse": {
-     "champion_guid": "ddada3b2-7a69-4040-b1f5-fd5ca2ca4bd6",
-     "champion_name": "Rune Ear Elite",
-     "champion_race": "ShinHare",
-     "deck_guid": "c2c0c313-ae14-407a-a7db-b889ee292db0"
-    },
-    "Tower Gatehouse": {
-     "champion_guid": "9d0cdd24-3672-414e-8c49-07da6f97e784",
-     "champion_name": "Blood Cauldron Ritualist",
-     "champion_race": "ShinHare",
-     "deck_guid": "52adf921-5244-41eb-987a-7d78dd7b2943"
-    },
-    "Tower of Penworth": {
-     "champion_guid": "1d756624-3c6a-445e-8fd1-acba6c9e4ce1",
-     "champion_name": "Sora",
-     "champion_race": "ShinHare",
-     "deck_guid": "8400016d-9eb9-4565-b05f-28b5e41d51e3"
-    }
-   },
-   "nodes": {
-    "Castle Gatehouse": {
-     "conv": "4084b46c-3d26-4159-8e01-ec86c1d0e7b6",
-     "fail": "50bd1063-7597-424c-9885-1e3adc36dea4",
-     "success": "8a39b557-c62d-4f44-bfd4-87e0579cccbe"
-    },
-    "Inner Bailey": {
-     "conv": "c3146d14-b7d1-4737-8c14-d1c4cac4be9f"
-    },
-    "The Drawbridge": {
-     "conv": "1de6dac7-b539-4603-95fb-18b16e6a95e9"
-    },
-    "The Watchtower": {
-     "conv": "a74f5fbb-fc87-488d-921e-cd1cc7a856d8"
-    },
-    "Tower Gatehouse": {
-     "conv": "e1a7a3cc-2ad9-44fc-bde1-16db12eeb014",
-     "fail": "b22b0125-6f0a-4d4b-8e5d-c23369ddd9c4",
-     "success": "ae96f501-9acf-4c72-a72d-c71a3b96142a"
-    },
-    "Tower of Penworth": {
-     "conv": "e6c52582-14b5-439a-949d-f2911ff03ac7",
-     "fail": "d842028a-75da-422c-9f0f-41c33c1d71b0",
-     "success": "d68f7078-8ea3-41b1-85a1-01af5ee0cfc8"
-    }
-   },
-   "quest_end": "9c139a1c-40a4-4ed7-b6ff-378c6f6bc1ea",
-   "quest_start": "0934ceae-03be-436e-b8e5-4f8922e02a0b"
-  },
-  "Dwarf": {
-   "ai_decks": {
-    "Castle Gatehouse": {
-     "champion_guid": "9efbd1c3-1724-4e74-8cc3-06f2c1fc5f22",
-     "champion_name": "Wild Child",
-     "champion_race": "Elf",
-     "deck_guid": "10069a59-a090-4850-98a7-8734d532d150"
-    },
-    "Tower Gatehouse": {
-     "champion_guid": "b90abda1-dc37-48b6-8ed2-a9c86b5bfa2d",
-     "champion_name": "Ashwood Blademaster",
-     "champion_race": "Elf",
-     "deck_guid": "35d90990-3a6a-495c-9092-8e07ff595a30"
-    },
-    "Tower of Penworth": {
-     "champion_guid": "ce9e4694-0a43-44ba-9e33-3b035aea86c6",
-     "champion_name": "Nerissa",
-     "champion_race": "Elf",
-     "deck_guid": "59487597-64ab-4755-8884-d936653353d2"
-    }
-   },
-   "nodes": {
-    "Castle Gatehouse": {
-     "conv": "d6afd6b2-2d82-4e08-b099-281037116261",
-     "fail": "bc8ee2ca-0453-4274-a56f-1dee95d24944",
-     "success": "1a251fae-0933-4560-bfd5-a9b2181031c5"
-    },
-    "Inner Bailey": {
-     "conv": "a9c78e63-478e-48a0-9223-56d5aff54882"
-    },
-    "The Drawbridge": {
-     "conv": "10238e3b-6a07-4fab-a632-64ecaaf13671"
-    },
-    "The Watchtower": {
-     "conv": "fea06901-f852-4221-a740-d801087e7846"
-    },
-    "Tower Gatehouse": {
-     "conv": "155a5947-2cdf-4cda-b396-3e6ffaf9f362",
-     "fail": "76031387-ccb3-4fc1-993e-283395b5fe2b",
-     "success": "e35a165c-a306-466f-8e02-bb298d3b6197"
-    },
-    "Tower of Penworth": {
-     "conv": "76b62ae6-ebc3-4801-82f2-83290957446a",
-     "fail": "ce4d8cba-ac4f-4dcf-8276-48a4bf55984d",
-     "success": "e2c269f1-7d82-4e48-a029-ab65d8e122cd"
-    }
-   },
-   "quest_end": "21c62741-49c8-4da5-8b8d-440247911027",
-   "quest_start": "88fe73d5-a42a-408d-97c2-ca5651affc1b"
-  },
-  "Elf": {
-   "ai_decks": {
-    "Castle Gatehouse": {
-     "champion_guid": "14241860-ad15-41bd-a63b-27477044d5b0",
-     "champion_name": "Scrap Welder",
-     "champion_race": "Dwarf",
-     "deck_guid": "7062ed10-73f6-449a-8b11-3faee5442355"
-    },
-    "Tower Gatehouse": {
-     "champion_guid": "519737b5-6ec0-4355-9e40-7a0ef0fbb40b",
-     "champion_name": "Elite Battle Tech",
-     "champion_race": "Dwarf",
-     "deck_guid": "7b600dfb-9f2a-4122-8157-ae8bd484ee11"
-    },
-    "Tower of Penworth": {
-     "champion_guid": "259f0138-5a98-424c-ac83-da081d702ec4",
-     "champion_name": "Glendower",
-     "champion_race": "Dwarf",
-     "deck_guid": "6042bf6c-e0a3-401f-8156-144d2b4d9c5d"
-    }
-   },
-   "nodes": {
-    "Castle Gatehouse": {
-     "conv": "260f9a04-28f9-443a-8741-67e6264e090d",
-     "fail": "36725ee7-4476-4650-ad02-43c4b7f9a6ee",
-     "success": "4fe768f9-4f82-445c-a178-db3730035dfd"
-    },
-    "Inner Bailey": {
-     "conv": "43f26b07-6693-439a-847c-893b9c6b884d"
-    },
-    "The Drawbridge": {
-     "conv": "bfc57f7f-7832-480c-b0cd-2713562aff9a"
-    },
-    "The Watchtower": {
-     "conv": "7f3d1858-a4ca-4166-b6c6-a911b9b60a01"
-    },
-    "Tower Gatehouse": {
-     "conv": "28a7724d-264c-41b2-86a4-5cdc1a16afb2",
-     "fail": "f86bb43a-de74-4ac0-a730-cdd1479a90e2",
-     "success": "9790dab2-2198-4d29-8544-79c8515fa0d3"
-    },
-    "Tower of Penworth": {
-     "conv": "4ab9607d-b45b-4638-ad4b-f2331c38cde3",
-     "fail": "5719984b-06c2-41f0-8304-87dd9817aa37",
-     "success": "f6ffc170-f15d-4c34-90db-07e321fd3067"
-    }
-   },
-   "quest_end": "bbc4460d-8452-4d49-a6e9-c64216f483b3",
-   "quest_start": "18b84529-d187-46ad-bb98-9a591d5287ea"
-  },
-  "Human": {
-   "ai_decks": {
-    "Castle Gatehouse": {
-     "champion_guid": "05499eb5-f6cc-4d82-96ad-54a9071c055e",
-     "champion_name": "Duskwing Outrider",
-     "champion_race": "Necrotic",
-     "deck_guid": "398df9c8-69fa-43b0-aa8c-44fed10f2e09"
-    },
-    "Tower Gatehouse": {
-     "champion_guid": "c0c7e1b1-1163-4cc9-96d2-4b15570197c8",
-     "champion_name": "Warlock of Aettir",
-     "champion_race": "Necrotic",
-     "deck_guid": "71a650cc-ef4a-4d99-8e23-a7e0d4da883d"
-    },
-    "Tower of Penworth": {
-     "champion_guid": "3658be25-2160-4a23-a609-e40d531832d0",
-     "champion_name": "Iddi",
-     "champion_race": "Necrotic",
-     "deck_guid": "b4b67816-2cc4-4f9e-9788-be0326e139d9"
-    }
-   },
-   "nodes": {
-    "Castle Gatehouse": {
-     "conv": "60a7d90d-c16f-4922-9c43-8e59bbc416e3",
-     "fail": "3c635381-acb3-4912-a3ce-501c53dbb691",
-     "success": "e83ffcda-1d7f-4ccf-8dd2-2e5cbdc0dc1d"
-    },
-    "Inner Bailey": {
-     "conv": "52cdef5d-fa56-45f9-8699-16b835bc129c"
-    },
-    "The Drawbridge": {
-     "conv": "29ad6621-9b02-4380-b4ff-3dfe6d8a4b81"
-    },
-    "The Watchtower": {
-     "conv": "ba9fb1a9-406b-49b0-aa46-18044a9ac296"
-    },
-    "Tower Gatehouse": {
-     "conv": "1f9acf0f-970c-4e68-a6ac-558550482550",
-     "fail": "cb4b5e85-dfda-45e8-9b96-92973d6eadf5",
-     "success": "cc4080df-4ec8-46d9-aaf8-0d67537bfe86"
-    },
-    "Tower of Penworth": {
-     "conv": "94076e42-9435-490d-82a4-a32a592cf3fa",
-     "fail": "7c4e314c-4d6c-432c-a097-8d702a44cdc2",
-     "success": "10b3d849-3cda-41a8-bbaf-0d43819a0b5a"
-    }
-   },
-   "quest_end": "0427b61f-251c-47b5-b89d-a0f2e2f42b1a",
-   "quest_start": "abdcca36-20fa-4af7-8c24-8b5e0fcb61d3"
-  },
-  "Necrotic": {
-   "ai_decks": {
-    "Castle Gatehouse": {
-     "champion_guid": "9b3ecd51-da74-41a4-adc9-f44b4bfb412b",
-     "champion_name": "Chimera Guard Outrider",
-     "champion_race": "Human",
-     "deck_guid": "582f1eff-360a-4129-9288-ad938999f6cc"
-    },
-    "Tower Gatehouse": {
-     "champion_guid": "50ab780f-e546-468f-ba79-06a49fb68469",
-     "champion_name": "Buccaneer",
-     "champion_race": "Human",
-     "deck_guid": "146ff24f-f208-494a-b77e-894a3448a665"
-    },
-    "Tower of Penworth": {
-     "champion_guid": "a0a5ef26-6676-4602-9fa2-e1608120d210",
-     "champion_name": "Gareth Kay",
-     "champion_race": "Human",
-     "deck_guid": "326dd554-808b-4d1b-aacd-49fdf717a941"
-    }
-   },
-   "nodes": {
-    "Castle Gatehouse": {
-     "conv": "83ffe2e5-bd78-47c1-8b85-849ef5e184bf",
-     "fail": "df455c81-06e7-4634-9165-9f2b039d14b2",
-     "success": "e7d6489d-dff8-446c-8a10-87136d598b15"
-    },
-    "Inner Bailey": {
-     "conv": "2ba5b572-a454-4af2-b1d7-0d96f08d6729"
-    },
-    "The Drawbridge": {
-     "conv": "49da653a-012f-42c4-843d-5eaf14b6731e"
-    },
-    "The Watchtower": {
-     "conv": "8bdde70c-06bf-460d-bd37-ce9029cc01c0"
-    },
-    "Tower Gatehouse": {
-     "conv": "40a89f9a-a41c-465c-a3ef-6c9ab5a07c8d",
-     "fail": "a43f9a3a-19cf-4c95-8124-1122fbcae655",
-     "success": "1fd4765f-78c5-4514-a7bf-074ca9b75a85"
-    },
-    "Tower of Penworth": {
-     "conv": "e0674a7b-81a0-480a-9c55-e18409378690",
-     "fail": "23f92d62-c827-44e8-aa9f-f1c4d98fab47",
-     "success": "34d48257-b16e-443c-940c-d322b47d00b9"
-    }
-   },
-   "quest_end": "922aa66e-e41c-41ad-94a2-adb84f356430",
-   "quest_start": "4cf66046-086b-40f8-8237-4e4d13e64a42"
-  },
-  "Orc": {
-   "ai_decks": {
-    "Castle Gatehouse": {
-     "champion_guid": "9a62d370-5029-4356-ad3f-7873792984c6",
-     "champion_name": "Vilefang Eremite",
-     "champion_race": "Vennen",
-     "deck_guid": "6d5144a4-3cf5-4c1c-8c50-2cd17a87ebc1"
-    },
-    "Tower Gatehouse": {
-     "champion_guid": "b6fe99d4-be07-4741-b072-eae38b6b7247",
-     "champion_name": "Nazhk Webguard",
-     "champion_race": "Vennen",
-     "deck_guid": "1aacb82b-fea5-4653-b190-41eae593233c"
-    },
-    "Tower of Penworth": {
-     "champion_guid": "22e3a199-4028-43b5-9290-7c646535360c",
-     "champion_name": "Zilth",
-     "champion_race": "Vennen",
-     "deck_guid": "306b9a87-29cc-4393-a547-5d090b3e1855"
-    }
-   },
-   "nodes": {
-    "Castle Gatehouse": {
-     "conv": "51bba89c-d583-4d34-a47f-a58bc84ccab8",
-     "fail": "9087e9ec-e219-4cec-b181-439d95374f0e",
-     "success": "8ae2c43e-e695-44df-adf8-f61d34d2c74b"
-    },
-    "Inner Bailey": {
-     "conv": "fe7818f3-df41-466f-8a1a-162ef7267493"
-    },
-    "The Drawbridge": {
-     "conv": "fd9b329c-2341-43b3-932e-6bea48ed4faf"
-    },
-    "The Watchtower": {
-     "conv": "3c0ee3b4-0453-43c4-bce9-d7882c9ea4e9"
-    },
-    "Tower Gatehouse": {
-     "conv": "7a31ca71-cc29-45c8-a698-fc5f9c65529b",
-     "fail": "c16ba7a4-9d23-4de9-ae84-b6074d3fc36e",
-     "success": "aa2da90c-9325-44fc-ad8b-abae6f6dba6d"
-    },
-    "Tower of Penworth": {
-     "conv": "a6a20599-fc46-48f4-8a29-134c34548936",
-     "fail": "1317c9bb-e1bc-4294-9806-52bf4f8fe953",
-     "success": "7b4fb960-9150-4175-8fee-444a29266c03"
-    }
-   },
-   "quest_end": "463a5ea3-847f-4102-83e4-512eb0ca97ab",
-   "quest_start": "578dd9ea-c5ab-49a0-93c5-44ad235cf0a9"
-  },
-  "Shin'hare": {
-   "ai_decks": {
-    "Castle Gatehouse": {
-     "champion_guid": "891cf0c5-3581-4d4e-910f-6cef50840d0e",
-     "champion_name": "Snarling Ambusher",
-     "champion_race": "Coyotle",
-     "deck_guid": "48e8d6a4-7b58-474e-b3d3-540597916e6d"
-    },
-    "Tower Gatehouse": {
-     "champion_guid": "aa99a0b5-b2b8-40ef-b180-0c0fb5ae4ca6",
-     "champion_name": "Wind Whisperer",
-     "champion_race": "Coyotle",
-     "deck_guid": "49e9ab78-7e97-40e4-881e-c5194be4ce61"
-    },
-    "Tower of Penworth": {
-     "champion_guid": "f1f76801-83be-452b-90e0-85731decd72e",
-     "champion_name": "Whispering Breeze",
-     "champion_race": "Coyotle",
-     "deck_guid": "6e6d3a29-64fe-47fc-a7e8-a7a6e1aecf49"
-    }
-   },
-   "nodes": {
-    "Castle Gatehouse": {
-     "conv": "78c4a18a-c212-4005-9619-aa08aa453a85",
-     "fail": "3afa146d-1c07-4abb-a0b2-f17889bda00f",
-     "success": "97acd02e-1821-4730-a8e2-2b8dd5e5091d"
-    },
-    "Inner Bailey": {
-     "conv": "5c735a25-ab19-46db-a281-3d895680f940"
-    },
-    "The Drawbridge": {
-     "conv": "c437e9e4-946f-4738-92a2-cb0ad621b349"
-    },
-    "The Watchtower": {
-     "conv": "f2e95564-a78e-4ae2-8ba9-be8b72b260f6"
-    },
-    "Tower Gatehouse": {
-     "conv": "263472e5-e4fa-43e2-b58b-0a30424320c4",
-     "fail": "8a3aac87-6501-41b8-9054-7abb69e07e05",
-     "success": "84cf84b9-ac29-4296-b9b9-96baaa48fc97"
-    },
-    "Tower of Penworth": {
-     "conv": "37191606-9653-48f8-8cb7-b72e54badc7b",
-     "fail": "97c516e9-8622-4b8d-849f-afc9164977ec",
-     "success": "b15bb1da-cffa-4f8e-9287-15bcee3706aa"
-    }
-   },
-   "quest_end": "5f119ac9-1018-4161-9b87-2cc23dba9c71",
-   "quest_start": "d89040c9-75c1-4f10-a647-f35679bcff72"
-  },
-  "Vennen": {
-   "ai_decks": {
-    "Castle Gatehouse": {
-     "champion_guid": "5e3982aa-9f7e-45f5-8d8f-ef611365053f",
-     "champion_name": "Ridge Raider",
-     "champion_race": "Orc",
-     "deck_guid": "4b78d914-c7a8-4b10-b787-5844ebb5d7c0"
-    },
-    "Tower Gatehouse": {
-     "champion_guid": "ef67a187-286d-4e4d-94c9-e92159617f3a",
-     "champion_name": "Bloodsoaked Brawler",
-     "champion_race": "Orc",
-     "deck_guid": "65407eee-6308-4958-a80f-6d9dc7bff23a"
-    },
-    "Tower of Penworth": {
-     "champion_guid": "0520c385-7e2d-4dc5-9fd0-61c85df69250",
-     "champion_name": "Moqui",
-     "champion_race": "Orc",
-     "deck_guid": "93acc9f3-2fe9-459f-a653-f0ffd2a48db2"
-    }
-   },
-   "nodes": {
-    "Castle Gatehouse": {
-     "conv": "4c4e84a4-dbdd-481d-a8f6-efd3362c1416",
-     "fail": "02d251fd-0f9a-435d-8586-2197aeb97ea2",
-     "success": "c16d9605-b12f-41ff-baf2-4d48f439f3f2"
-    },
-    "Inner Bailey": {
-     "conv": "6c08b7be-cd2e-40bc-9942-6d7328daad0f"
-    },
-    "The Drawbridge": {
-     "conv": "509c4971-4d29-450d-acd5-88050919df49"
-    },
-    "The Watchtower": {
-     "conv": "25bc2cf2-3ab5-418e-8301-ef34a74bd60e"
-    },
-    "Tower Gatehouse": {
-     "conv": "26c93c43-b10d-4387-b394-a373fc46bdc6",
-     "fail": "8e537c2d-edab-4b21-9ab8-09ef54f1ecb8",
-     "success": "5121dde6-9b5f-4895-b0bd-24675a2e3afa"
-    },
-    "Tower of Penworth": {
-     "conv": "9f7aa210-a89f-4b49-942e-44e0a9ea6eb1",
-     "fail": "087bb91d-add5-4ed1-a17e-31c6d10c843d",
-     "success": "9c20be5e-3e19-4a33-9fd5-30c3e74a9eae"
-    }
-   },
-   "quest_end": "49eaafb9-6645-4c04-9966-5190c4e8ca3d",
-   "quest_start": "782369c4-61c2-4a3e-97ce-660f2d062be7"
-  }
- }
-}
-### END CRAYBURN CASTLE SEED

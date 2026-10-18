@@ -1,0 +1,40 @@
+{
+ "schema_version": 1,
+ "campaign": "cavein",
+ "scene": "The Cave-In",
+ "generated_by": "tools/campaign_editor/import_az1_panoramas.py",
+ "start": {
+  "node": "Rizzix",
+  "node_completed": false,
+  "flags": []
+ },
+ "map": {
+  "paths": []
+ },
+ "nodes": {
+  "Ennis": {},
+  "Fahrny": {},
+  "Myaa": {
+   "visible": [
+    "questStarted(q_find_myaa)"
+   ]
+  },
+  "Myaa@cavein": {},
+  "Rizzix": {
+   "visible": [
+    "completedQuest(q_seawitch)"
+   ]
+  },
+  "Takumi": {},
+  "VB25351": {},
+  "Vincent": {},
+  "Wyatt": {}
+ },
+ "hooks": [],
+ "runtime": "rules",
+ "edited_states": {
+  "Rizzix": [
+   "visible"
+  ]
+ }
+}

@@ -11,10 +11,10 @@ lib/
 lib64/
 include/
 share/
-/Records/
-/HexClient/
 /HexPlugin/
 /BepInEx/
+# Keep the C# rules-oracle harness and fixtures reviewable. Its compiled
+# assemblies remain ignored by the global *.dll/*.exe rules and
 /experimental/
 /docs/generated/
 /generated/
@@ -26,3 +26,4 @@ share/
 .env
 .env.*
 .venv-pyright/
+.mcp.json

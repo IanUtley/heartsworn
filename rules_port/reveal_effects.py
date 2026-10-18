@@ -39,6 +39,14 @@ def _target_metadata(context):
 
 
 def _find_zone(filter_node):
+    """Return the authored InZone collection anywhere in the filter tree.
+
+    An empty string means the filter does not restrict a collection; callers
+    apply their own default.  Returning a truthy default here made the
+    recursive walk terminate on the first scalar leaf (the ``_t`` key) and
+    every nested filter looked like a deck reveal: "reveal a random card from
+    their hand" looked in the deck and revealed nothing.
+    """
     if isinstance(filter_node, dict):
         kind = str(filter_node.get("_t", "")).rsplit(".", 1)[-1]
         if kind == "InZone" and filter_node.get("m_Collection"):
@@ -52,7 +60,7 @@ def _find_zone(filter_node):
             found = _find_zone(value)
             if found:
                 return found
-    return "deck"
+    return ""
 
 
 def _reveal_owner(context, owner, target_kind):
@@ -77,7 +85,7 @@ def reveal_cards(context):
     """Select and project cards according to the Records target template."""
     from pvp_db import (db_target_template_filter,
                         db_target_template_resolution_info,
-                        db_reveal_card_row, db_reveal_cards,
+                        db_reveal_cards,
                         db_reveal_owned_card)
     from .targeting import legal_targets
     import game_engine
@@ -115,18 +123,42 @@ def reveal_cards(context):
             pass
     owner = int(context.bstate.get("resolving_owner_id", 0) or 0)
     owner = _reveal_owner(context, owner, target_kind)
-    zone = _find_zone(filt)
-    reveal_collection = card_collection_for_location(zone)
+    zone = _find_zone(filt) or "deck"
+    revealed_zones = {}
 
-    if target_kind == "AbilitySourceCardTargetTemplate":
+    # C# RevealCardsAbilityEffectTemplate applies to the complete
+    # AbilityEffectInstance.TargetInstance.m_SessionCardIds. The native
+    # resolver supplies that exact target set through effect_targets; do not
+    # reconstruct it from the filter's static m_Amount, which is often zero
+    # for dynamic TopNOfDeck targets such as "top X cards".
+    selected_uids = []
+    for value in context.effect_targets or ():
+        try:
+            selected_uids.append(int(value))
+        except (TypeError, ValueError):
+            continue
+    if selected_uids:
+        rows = []
+        for uid in dict.fromkeys(selected_uids):
+            row = context.db.execute(
+                "SELECT card_uid,position,template_guid,user_id,card_state,"
+                "location FROM game_cards WHERE session_id=? AND card_uid=?",
+                (context.session.session_id, int(uid))).fetchone()
+            if row:
+                rows.append(tuple(row[:5]))
+                revealed_zones[int(row[0])] = str(row[5] or zone)
+    elif target_kind == "AbilitySourceCardTargetTemplate":
         target = context.resolved_target()
         row = (db_reveal_owned_card(
             context.session.session_id, int(target), owner, conn=context.db)
                if target is not None else None)
-        rows = [row] if row else []
+        rows = [tuple(row[:5])] if row else []
         if row:
-            reveal_collection = card_collection_for_location(row[5])
+            revealed_zones[int(row[0])] = str(row[5] or zone)
     else:
+        rows = None
+
+    if rows is None:
         candidates = None
         if template_id and zone in ("hand", "deck"):
             candidates = legal_targets(
@@ -134,11 +166,15 @@ def reveal_cards(context):
                 context.bstate.get("resolving_source_uid"), both_players=False,
                 champions=[], battle_state=context.bstate)
         if random_target and candidates is not None:
-            selected = random.choice(candidates) if candidates else None
-            rows = ([db_reveal_card_row(
-                context.session.session_id, selected, owner, zone,
-                conn=context.db)] if selected is not None else [])
-            rows = [row for row in rows if row]
+            # MatchSecondaryTargetTemplate enumerates legal cards from both
+            # players, so a random sample must still be restricted to the
+            # previous target's controller ("a random card from their hand").
+            # Selecting outside that hand made the reveal silently project
+            # nothing when the other player happened to hold more cards.
+            owned = db_reveal_cards(
+                context.session.session_id, owner, zone, 1, candidates,
+                conn=context.db)
+            rows = [random.choice(owned)] if owned else []
         else:
             if zone == "hand" and candidates is not None:
                 if random_target and candidates:
@@ -151,6 +187,8 @@ def reveal_cards(context):
                     context.session.session_id, owner, zone, count, conn=context.db)
                 if zone == "hand" and rows:
                     rows = [random.choice(rows)]
+        rows = [tuple(row) for row in rows]
+        revealed_zones.update({int(row[0]): zone for row in rows})
 
     uids = [int(row[0]) for row in rows]
     context.bstate["revealed_cards"] = uids
@@ -173,27 +211,49 @@ def reveal_cards(context):
                 context.session, context.bstate, owner, rows,
                 context.player_uid, context.ai_uid))
     if not private:
-        for row in rows:
-            scid = game_engine.SessionCardId(game_engine.UID(int(row[0])))
-            card_owner = owner_uid(row[3], context.player_uid,
-                                   context.ai_uid, context.bstate)
-            _tpl, card_type, _name, cost, attack, defense, gems = \
-                context.handler._card_full_data(context.game, scid, row[2])
-            context.game.push_card_updated(
-                scid, card_owner, reveal_collection, card_type,
-                state=int(row[4] or 0), template_id=row[2], cost=cost,
-                attack=attack, defense=defense, gems=gems, nulling=False)
         event = game_engine.CardsRevealedSessionEventArgs()
         event.player_id = owner_uid(owner, context.player_uid,
                                     context.ai_uid, context.bstate)
         event.session_card_ids = [game_engine.SessionCardId(game_engine.UID(uid))
                                   for uid in uids]
-        event.collections = [reveal_collection] * len(uids)
-        event.owning_players = [event.player_id] * len(uids)
+        event.collections = [card_collection_for_location(
+            revealed_zones.get(uid, zone)) for uid in uids]
+        event.owning_players = [owner_uid(
+            row[3], context.player_uid, context.ai_uid, context.bstate)
+            for row in rows]
         event.positions = [int(row[1] or 0) for row in rows]
         # C# AuthoritativeSessionBase.RevealCards always sends Inactive=true:
         # the Coverflow shows the cards temporarily and does not keep them
         # revealed after a follow-up move puts them back into a hidden zone.
         event.inactive = True
+        # The client builds the coverflow from the revealed card views the
+        # moment CardsRevealed arrives, and hidden deck cards have no view until
+        # their CardUpdated lands. Send the card updates first.
+        for row in rows:
+            scid = game_engine.SessionCardId(game_engine.UID(int(row[0])))
+            card_owner = owner_uid(row[3], context.player_uid,
+                                   context.ai_uid, context.bstate)
+            card_collection = card_collection_for_location(
+                revealed_zones.get(int(row[0]), zone))
+            _tpl, card_type, _name, cost, attack, defense, gems = \
+                context.handler._card_full_data(context.game, scid, row[2])
+            context.game.push_card_updated(
+                scid, card_owner, card_collection, card_type,
+                state=int(row[4] or 0), template_id=row[2], cost=cost,
+                attack=attack, defense=defense, gems=gems, nulling=False)
+            # A deck card is face down to everyone unless a viewer-scoped reveal
+            # says otherwise; without the tag the packet filter nulls the template
+            # id, and the client's coverflow then has no card template to draw.
+            # An AI reveal is shown to everyone (owner 0 above), so the human
+            # player's packet gets the cards.
+            if reveal_targets.lower() in ("self", "you", "controller"):
+                context.game.events[-1]._hand_reveal_viewer_uid = card_owner
+            elif (reveal_targets.lower() == "everyone" and
+                  not context.bstate.get("pvp")):
+                context.game.events[-1]._hand_reveal_viewer_uid = \
+                    context.player_uid
+            if context.game.events[-1]._hand_reveal_viewer_uid is not None:
+                # Coverflow reveals are temporary (C# Inactive=true).
+                context.game.events[-1]._temporary_reveal = True
         context.game._push(event)
     return f"revealed {len(uids)}"
