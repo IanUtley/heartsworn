@@ -32,31 +32,43 @@
 
   <section id="battle" class="screen hidden">
     <div id="board">
-      <div class="side opponent">
-        <div class="hand-row" id="opp-hand"></div>
-        <div class="champion-slot" id="opp-champion"></div>
-        <div class="piles" id="opp-piles"></div>
-        <div class="field">
-          <div class="zone-row resources" id="opp-resources"></div>
+      <div id="scene" aria-hidden="true">
+        <div class="arena-plane">
+          <div class="arena"></div>
+          <div class="arena-field"></div>
+          <div class="arena-sigil"></div>
+          <div class="arena-arcs"><i></i><i></i><i></i></div>
+        </div>
+        <div class="brazier tl"></div><div class="brazier tr"></div>
+        <div class="brazier bl"></div><div class="brazier br"></div>
+      </div>
+
+      <div id="table">
+        <div class="plane">
           <div class="zone-row warzone" id="opp-warzone"></div>
-        </div>
-      </div>
-
-      <div id="chain-bar">
-        <div class="chain-label">Chain</div>
-        <div class="chain-items" id="chain"></div>
-        <div id="phase-track"></div>
-      </div>
-
-      <div class="side me">
-        <div class="field">
+          <div id="centre">
+            <div class="firebar left"></div><div class="firebar right"></div>
+            <div id="medallion"><div class="plate"></div><div class="coin" id="medallion-glyph"></div></div>
+            <div class="chain-label">Chain</div>
+            <div class="chain-items" id="chain"></div>
+          </div>
           <div class="zone-row warzone" id="my-warzone"></div>
-          <div class="zone-row resources" id="my-resources"></div>
         </div>
-        <div class="champion-slot" id="my-champion"></div>
-        <div class="piles" id="my-piles"></div>
-        <div class="hand-row" id="my-hand"></div>
       </div>
+
+      <div class="hand-row" id="opp-hand"></div>
+      <div class="hand-row" id="my-hand"></div>
+      <div class="champion-slot opp">
+        <div id="opp-champion"></div>
+        <div class="zone-row resources" id="opp-resources"></div>
+      </div>
+      <div class="champion-slot me">
+        <div class="zone-row resources" id="my-resources"></div>
+        <div id="my-champion"></div>
+      </div>
+      <div class="piles opp" id="opp-piles"></div>
+      <div class="piles me" id="my-piles"></div>
+      <div id="phase-dial"><div id="phase-track"></div><div id="phase-label"></div></div>
 
       <div id="action-panel">
         <div id="prompt-text"></div>

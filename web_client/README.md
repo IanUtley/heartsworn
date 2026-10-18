@@ -47,12 +47,21 @@ browser ──HTTP/JSON──> web_client.server ──3029 PlayerTransaction─
 
 ## Battle screen
 
-Opponent hand (sleeve backs) along the top, your hand along the bottom,
-champion portraits with life, resources, charges, thresholds and champion
-powers on the left, Deck / Graveyard / Void piles on the right, each side's
-Warzone and played resources in the middle, and the horizontal Chain bar
-between the two sides with the phase tracker. Hovering a card shows the full
-card; clicking a pile lists its cards.
+The board is a painted arena seen at a slight tilt: a stone ring around a
+field, braziers in the corners, and a centre medallion that shows a star in the
+main phases and an axe in combat (with fire across the board). Both warzones
+lie on a gently tilted table. The opponent's hand fans out along the top edge
+(sleeve backs) and yours along the bottom. Champion portraits with life,
+resources, charges, thresholds and champion powers sit at the left corners,
+Deck / Graveyard / Void piles at the right corners, and the phase dial on the
+left edge. Hovering a card shows the full card; clicking a pile lists its cards.
+
+When a card leaves a hand it flies to the centre of the board, flashes, then
+lands where the server put it: the warzone, or the Chain, which runs as a row
+of cards across the centre until it resolves. Resources fly straight to their
+player's resource row, and a resolving chain item bursts at the centre. The
+opponent's cards are revealed as they fly, from the identity the server sends
+once they leave its hidden hand.
 
 Playable cards glow (from the server's `PlayerOptionList`); targets the server
 offers in an option are highlighted when you play the card. Attack and block
@@ -60,8 +69,11 @@ declarations, trigger target pickers, play/draw and mulligan are prompts from
 the server's current decision.
 
 Card sleeves and gameboards are chosen in the lobby or the in-game menu and
-remembered in the browser. The opponent's sleeve is derived from the sleeve ID
-in its `DeckCreated` event.
+remembered in the browser. The gameboards are named after battleboards in the
+inventory data (Basic, Forest, Frost Ring, Badlands, Sanctum of Suffering,
+Coastline) and drawn in CSS, since the client's 3D board scenes are not
+extracted. The opponent's sleeve is derived from the sleeve ID in its
+`DeckCreated` event.
 
 ## Files
 

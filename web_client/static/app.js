@@ -26,13 +26,17 @@ const PHASE_NAMES = { 3: "Choose play/draw", 4: "Mulligan", 5: "Start", 6: "Star
   18: "Combat damage", 19: "Second main", 20: "End phase", 21: "Discard", 22: "End turn", 24: "Game over" };
 const PHASE_TRACK = [[7, "Ready"], [9, "Draw"], [10, "Main"], [12, "Attack"], [14, "Block"],
   [18, "Damage"], [19, "Main 2"], [20, "End"]];
-const PASS_LABELS = { 2: "Ready", 4: "Go to combat", 6: "Resolve", 7: "To second main",
+const PASS_LABELS = { 2: "Ready", 4: "Continue to combat", 6: "Resolve", 7: "Continue to second main",
   9: "End turn", 11: "End turn", 14: "Resolve combat", 15: "Pass", 16: "Pass" };
 const SLEEVES = ["classic", "blood", "ruby", "sapphire", "wild", "diamond", "cosmic"];
-const BOARDS = [["shards", "Shards of Fate"], ["ardent", "Ardent Sky"], ["underworld", "Underworld"],
-  ["frostring", "Frost Ring Arena"], ["shinhare", "Shin'hare Wilds"], ["aria", "Aria Shores"]];
+// Named after battleboards in the Hex inventory data (InventoryGameboardData).
+const BOARDS = [["basic", "Basic Battleboard"], ["forest", "Forest Battleboard"], ["frostring", "Frost Ring Battleboard"],
+  ["badlands", "Badlands Battleboard"], ["sanctum", "Sanctum of Suffering Battleboard"], ["coastline", "Coastline Battleboard"]];
+const AXE = `<svg viewBox="0 0 32 32" width="38" height="38"><path fill="currentColor" d="M15 3h2v27h-2z"/><path fill="currentColor" d="M17 7c5 0 9-2 11-4 1 5 1 13-1 18-2-2-6-3.5-10-3.5zM15 7C10 7 6 5 4 3c-1 5-1 13 1 18 2-2 6-3.5 10-3.5z"/></svg>`;
+const HAND_W = 112, HAND_H = 157;   // --hand-w / --hand-h
 
 const $ = (sel) => document.querySelector(sel);
+const boardChoice = () => { const b = storage("hex.board"); return BOARDS.some(([v]) => v === b) ? b : "basic"; };
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
 function storage(key, value) {
@@ -53,7 +57,7 @@ const S = {
   phase: {}, greenlight: {}, chain: [], options: new Map(), combats: new Map(), decks: {},
   prompt: null, busy: true, error: null, ended: false,
   ui: { mode: null }, catalog: { cards: {}, abilities: {} }, wanted: { cards: new Set(), abilities: new Set() },
-  artOk: null, log: [], prevLife: {}, rendered: new Set(),
+  artOk: null, log: [], prevLife: {}, rendered: new Set(), flying: new Set(), lastChain: 0,
 };
 
 function resetState() {
@@ -61,7 +65,7 @@ function resetState() {
     after: 0, cards: new Map(), players: {}, champions: {}, championTemplates: {}, names: {},
     phase: {}, greenlight: {}, chain: [], options: new Map(), combats: new Map(), decks: {},
     prompt: null, busy: true, error: null, ended: false, ui: { mode: null }, log: [], prevLife: {},
-    rendered: new Set(),
+    rendered: new Set(), flying: new Set(), lastChain: 0,
   });
 }
 
@@ -309,16 +313,18 @@ function keywordsOf(card) {
 }
 
 function freshClass(card) {
+  if (typeof card.uid === "string") return "";   // preview / flying copies
   const key = `${card.uid}:${card.collection}`;
   if (S.rendered.has(key)) return "";
   S.rendered.add(key);
   return "fresh";
 }
 
-function cardHTML(card, extra = "") {
+function cardHTML(card, extra = "", style = "") {
   const tpl = S.catalog.cards[(card.card_id || "").toLowerCase()];
   const hidden = !card.card_id || card.card_id === NO_GUID;
-  if (hidden) return `<div class="card back ${sleeveOf(card.controller)} ${freshClass(card)} ${extra}" data-uid="${card.uid}"></div>`;
+  const styleAttr = style ? ` style="${style}"` : "";
+  if (hidden) return `<div class="card back ${sleeveOf(card.controller)} ${freshClass(card)} ${extra}" data-uid="${card.uid}"${styleAttr}></div>`;
   const classes = ["card", shardClass(tpl), freshClass(card), extra];
   if (card.state & CSTATE.Tapped) classes.push("tapped");
   if (card.state & CSTATE.Attacking || S.combats.has(card.uid)) classes.push("attacking");
@@ -333,7 +339,7 @@ function cardHTML(card, extra = "") {
   const counters = (card.counter_counts || []).map((n) => n > 0 ? `<span class="counter">${n}</span>` : "").join("");
   const cost = tpl && tpl.type !== "Resource" ? `<div class="cost">${card.collection === COLL.Hand ? card.cost : (tpl ? tpl.cost : card.cost)}</div>` : "";
   const text = tpl ? `<div class="text-box">${gameText(tpl.text)}${tpl.flavor ? `<div class="flavor">${esc(tpl.flavor)}</div>` : ""}</div>` : "";
-  return `<div class="${classes.join(" ")}" data-uid="${card.uid}">
+  return `<div class="${classes.join(" ")}" data-uid="${card.uid}"${styleAttr}>
     ${cost}<div class="name">${esc(name)}</div>
     <div class="art"${artStyle(tpl)}>${artStyle(tpl) ? "" : (TYPE_GLYPH[tpl && tpl.type] || "")}</div>
     <div class="type-line">${esc(typeName)} ${thresholdGems(tpl)}</div>
@@ -366,7 +372,11 @@ function cardsIn(pid, collection) {
 
 function render() {
   if (!S.info) return;
-  document.body.dataset.board = storage("hex.board") || "shards";
+  const before = handRects();
+  const phase = S.phase.turn_phase;
+  document.body.dataset.board = boardChoice();
+  document.body.dataset.combat = phase >= 11 && phase <= 18 ? "1" : "";
+  document.body.classList.toggle("chain-active", S.chain.length > 0);
   renderChampion(S.opp, "#opp-champion");
   renderChampion(S.me, "#my-champion");
   renderHands();
@@ -378,6 +388,8 @@ function render() {
   renderActions();
   renderModal();
   $("#log").innerHTML = S.log.map((l) => `<div>${esc(l(cardName))}</div>`).join("");
+  animateMoves(before);
+  hideFlying();
 }
 
 function interactive(uid) {
@@ -457,12 +469,20 @@ function shardColor(tpl) {
   return c ? `var(--${c.toLowerCase()})` : "#7a6ca8";
 }
 
+function fan(cards, sign) {
+  // A hand fans around a point below (or above) the screen edge.
+  const spread = Math.min(3.5, 30 / Math.max(cards.length, 1));
+  return cards.map((c, i) => {
+    const off = i - (cards.length - 1) / 2;
+    const style = `--r:${(sign * off * spread).toFixed(2)}deg;--y:${(sign * off * off * spread * 0.6).toFixed(1)}px`;
+    return cardHTML(c, interactive(c.uid), style);
+  }).join("");
+}
+
 function renderHands() {
   const opp = cardsIn(S.opp, COLL.Hand);
-  $("#opp-hand").innerHTML = opp.map((c) => cardHTML(c, interactive(c.uid))).join("") +
-    `<span class="hand-count">${opp.length} in hand</span>`;
-  const mine = cardsIn(S.me, COLL.Hand);
-  $("#my-hand").innerHTML = mine.map((c) => cardHTML(c, interactive(c.uid))).join("");
+  $("#opp-hand").innerHTML = fan(opp, -1) + `<span class="hand-count">${opp.length} in hand</span>`;
+  $("#my-hand").innerHTML = fan(cardsIn(S.me, COLL.Hand), 1);
 }
 
 function renderZones() {
@@ -496,14 +516,15 @@ function renderChain() {
     const ability = S.catalog.abilities[(item.ability || "").toLowerCase()];
     const mine = src && src.controller === S.me;
     const title = tpl ? tpl.name : (ability ? ability.name : "Ability");
-    const text = item.ability === PLAY_ABILITY ? (tpl ? tpl.text : "") : (ability ? ability.text : "");
+    const isPlay = item.ability === PLAY_ABILITY;
+    const text = isPlay ? (tpl ? tpl.text : "") : (ability ? ability.text : "");
+    const plain = gameText(text).replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
     const targets = (item.targets || []).map(cardName).join(", ");
-    return `<div class="chain-item ${mine ? "mine" : "theirs"} ${i === S.chain.length - 1 ? "top" : ""}"
-        data-uid="${item.source}" style="--shard:${shardColor(tpl)}">
-      <div class="thumb"${artStyle(tpl)}></div>
-      <div class="ci-name">${esc(title)}</div>
-      <div class="ci-text">${targets ? `&rarr; ${esc(targets)}<br>` : ""}${gameText(text)}</div>
-    </div>`;
+    const caption = targets ? `\u2192 ${targets}` : (isPlay ? (mine ? "You cast" : "Opponent casts") : plain);
+    const face = tpl ? cardHTML(src, "chain-card")
+      : `<div class="card blank chain-card" data-uid="${item.source}"><div class="name">${esc(title)}</div></div>`;
+    return `<div class="chain-entry ${mine ? "mine" : "theirs"} ${i === S.chain.length - 1 ? "top" : ""}"
+        data-uid="${item.source}" title="${esc(`${title}: ${plain}`)}">${face}<div class="caption">${esc(caption)}</div></div>`;
   }).join("");
 }
 
@@ -515,6 +536,9 @@ function renderPhases() {
     const current = phase >= value && phase < next ? "current" : "";
     return `<span class="phase ${current} ${theirs}">${label}</span>`;
   }).join("");
+  const turn = S.phase.active_player_id === S.me ? "Your turn" : (S.phase.active_player_id ? "Opponent's turn" : "");
+  $("#phase-label").innerHTML = `<small>${turn}</small><b>${esc(PHASE_NAMES[phase] || "")}</b>`;
+  $("#medallion-glyph").innerHTML = document.body.dataset.combat ? AXE : "&#9733;";
 }
 
 function passLabel() {
@@ -536,11 +560,11 @@ function renderActions() {
     label = `${esc(step.label)} (${(ui.picked[step.key] || []).length}/${step.max})`;
     html = `<button data-act="confirm-targets">Confirm</button><button class="secondary" data-act="cancel">Cancel</button>`;
   } else if (p.kind === "priority") {
-    label = `${p.your_turn ? "Your turn" : "Opponent's turn"} · ${phaseName}`;
+    label = S.chain.length ? "Respond, or let the chain resolve" : "";
     html = `<button data-act="pass">${passLabel()}</button>`;
   } else if (p.kind === "attack") {
     label = "Choose attackers, then attack.";
-    html = `<button data-act="commit-attack">${ui.chosen && ui.chosen.size ? `Attack with ${ui.chosen.size}` : "No attack"}</button>`;
+    html = `<button class="urgent" data-act="commit-attack">${ui.chosen && ui.chosen.size ? `Attack with ${ui.chosen.size}` : "No attack"}</button>`;
   } else if (p.kind === "defend") {
     label = ui.blocker ? "Now pick the attacker to block." : "Pick a blocker, then the attacker it blocks.";
     html = `<button data-act="commit-defense">Confirm blocks</button>`;
@@ -714,6 +738,94 @@ function showPile(owner, collection) {
   openModal(`<h2>${who(Number(owner))} — ${title}</h2><div class="row">${cards.map((c) => cardHTML(c)).join("") || "<p>Empty</p>"}</div>`);
 }
 
+/* ------------------------------------------------------------------ */
+/* Card flights                                                        */
+/* ------------------------------------------------------------------ */
+
+function handRects() {
+  const out = new Map();
+  document.querySelectorAll("#my-hand [data-uid], #opp-hand [data-uid]").forEach((el) => {
+    const r = el.getBoundingClientRect();
+    if (r.width) out.set(Number(el.dataset.uid), r);
+  });
+  return out;
+}
+
+function centrePoint() {
+  const r = $("#centre").getBoundingClientRect();
+  return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+}
+
+function burstAt(p) {
+  const el = document.createElement("div");
+  el.className = "burst";
+  el.style.left = `${p.x}px`;
+  el.style.top = `${p.y}px`;
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 850);
+}
+
+function animateMoves(before) {
+  if (S.chain.length < S.lastChain) burstAt(centrePoint());   // something resolved
+  S.lastChain = S.chain.length;
+  for (const [uid, from] of before) {
+    const card = S.cards.get(uid);
+    if (card && card.collection !== COLL.Hand && !S.flying.has(uid)) flyCard(card, from);
+  }
+}
+
+function landingOf(card) {
+  const side = card.controller === S.me ? "my" : "opp";
+  switch (card.collection) {
+    case COLL.PlayedResources: return { el: $(`#${side}-resources [data-uid="${card.uid}"]`), viaCentre: false };
+    case COLL.Deck: return { el: $(`#${side}-piles .deck`), viaCentre: false, fade: true };
+    case COLL.Discard: return { el: $(`#${side}-piles .graveyard`), viaCentre: true, fade: true };
+    case COLL.Void: return { el: $(`#${side}-piles .void`), viaCentre: true, fade: true };
+    default: return { el: document.querySelector(`#table [data-uid="${card.uid}"]`), viaCentre: true };
+  }
+}
+
+function flyCard(card, from) {
+  // A card leaving a hand flies from where it was drawn to the centre of the
+  // board, flashes, then settles where the server put it.
+  const land = landingOf(card);
+  const holder = document.createElement("div");
+  holder.innerHTML = cardHTML({ ...card, uid: `f${card.uid}`, state: 0 }, "flying");
+  const el = holder.firstElementChild;
+  el.style.setProperty("--card-w", `${HAND_W}px`);
+  el.style.setProperty("--card-h", `${HAND_H}px`);
+  document.body.appendChild(el);
+  S.flying.add(card.uid);
+
+  const pose = (x, y, s, extra = {}) => ({ transform: `translate(${x - HAND_W / 2}px, ${y - HAND_H / 2}px) scale(${s})`, ...extra });
+  const c = centrePoint();
+  const frames = [pose(from.left + from.width / 2, from.top + from.height / 2, from.width / HAND_W)];
+  if (land.viaCentre) {
+    frames.push(pose(c.x, c.y, 1.55, { offset: 0.36, filter: "brightness(1.6)" }),
+      pose(c.x, c.y, 1.5, { offset: 0.62, filter: "brightness(1)" }));
+  }
+  const to = land.el && land.el.getBoundingClientRect();
+  if (to && to.width) {
+    frames.push(pose(to.left + to.width / 2, to.top + to.height / 2, to.width / HAND_W, { opacity: land.fade ? 0 : 1 }));
+  } else {
+    frames.push(pose(c.x, c.y, 0.7, { opacity: 0 }));
+  }
+  const duration = land.viaCentre ? 1300 : 600;
+  if (land.viaCentre) setTimeout(() => burstAt(c), duration * 0.36);
+  const done = () => {
+    el.remove();
+    S.flying.delete(card.uid);
+    document.querySelectorAll(`[data-uid="${card.uid}"].in-flight`).forEach((e) => e.classList.remove("in-flight"));
+  };
+  el.animate(frames, { duration, easing: "cubic-bezier(.3,.7,.3,1)" }).finished.then(done, done);
+}
+
+function hideFlying() {
+  for (const uid of S.flying) {
+    document.querySelectorAll(`#board [data-uid="${uid}"]`).forEach((e) => e.classList.add("in-flight"));
+  }
+}
+
 function toast(text) {
   const el = document.createElement("div");
   el.className = "toast";
@@ -803,7 +915,7 @@ async function loadLobby() {
   sleeve.innerHTML = SLEEVES.map((s) => `<option value="${s}">${s[0].toUpperCase() + s.slice(1)}</option>`).join("");
   board.innerHTML = BOARDS.map(([v, n]) => `<option value="${v}">${n}</option>`).join("");
   sleeve.value = storage("hex.sleeve") || "classic";
-  board.value = storage("hex.board") || "shards";
+  board.value = boardChoice();
   $("#player-name").value = storage("hex.name") || "You";
   try {
     const { decks } = await api("/api/decks");
@@ -860,11 +972,11 @@ $("#menu-button").addEventListener("click", () => {
   openModal(`<h2>Menu</h2>
     <div class="lobby-panel" style="background:none;border:0;box-shadow:none;padding:0">
       <label>Card sleeve <select id="menu-sleeve">${SLEEVES.map((s) => `<option ${s === (storage("hex.sleeve") || "classic") ? "selected" : ""}>${s}</option>`).join("")}</select></label>
-      <label>Gameboard <select id="menu-board">${BOARDS.map(([v, n]) => `<option value="${v}" ${v === (storage("hex.board") || "shards") ? "selected" : ""}>${n}</option>`).join("")}</select></label>
+      <label>Gameboard <select id="menu-board">${BOARDS.map(([v, n]) => `<option value="${v}" ${v === (boardChoice()) ? "selected" : ""}>${n}</option>`).join("")}</select></label>
     </div>
     <div class="buttons"><button class="secondary" data-act="new-match">Concede and leave</button></div>`);
   $("#menu-sleeve").addEventListener("change", (e) => { storage("hex.sleeve", e.target.value); render(); });
   $("#menu-board").addEventListener("change", (e) => { storage("hex.board", e.target.value); render(); });
 });
-document.body.dataset.board = storage("hex.board") || "shards";
+document.body.dataset.board = boardChoice();
 loadLobby();
