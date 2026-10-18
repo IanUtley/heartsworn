@@ -250,6 +250,13 @@ class RecordsTriggerDiscovery:
         # not broadcast to every registered trigger listener.
         if event_type == "CardCreatedEvent":
             return self._freeze(candidates)
+        # RegisterTriggerAbilityEffectTemplate stores a session-level handler
+        # (C# Session.RegisterTriggerEventHandler) that is not part of the
+        # card's printed or granted list; offer it as a candidate here.
+        for key, values in (self.battle_state.get(
+                "registered_triggers") or {}).items():
+            candidates.setdefault(int(key), []).extend(
+                str(value).lower() for value in values)
         # CardCastEvent's target is the card being cast, not another
         # registered trigger source. A troop that only gained Warzone trigger
         # registration as this cast resolved cannot hear its own earlier cast

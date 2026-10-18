@@ -29,14 +29,9 @@ in place because each needs a design decision or a larger change.
 
 ### Related port gaps surfaced by the same audit (not FRA-champion-specific)
 
-- [ ] `RegisterTriggerAbilityEffectTemplate` writes
-      `bstate["registered_triggers"]` but nothing reads it, so registered
-      triggers never fire (C# `Session.RegisterTriggerEventHandler`).
-- [ ] `GrantAbilityEffectTemplate` caches the random power in
-      `bstate["random_power_template"]` for the whole battle instead of per
-      activation (C# stores it on the ability instance), and the
-      random-Inspire pool is not format/rarity filtered
-      (`rules_port/effects.py:237`).
+- [ ] `GrantAbilityEffectTemplate`'s random-Inspire pool is not format/rarity
+      filtered (C# `GetRandomInspirePower` uses `setsValidInFormat`;
+      `rules_port/effects.py` ~243).
 - [ ] `RevertPermanentModificationsAbilityEffectTemplate` non-transform path
       only clears stat mods via `db_reset_card_modifiers`; C# `Card.Revert`
       also clears damage, counters, dynamic abilities, damage shields,
