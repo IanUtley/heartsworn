@@ -17,11 +17,6 @@ in place because each needs a design decision or a larger change.
       target's name). Affects FRA **Tormented Locksmith/Elite** (`9484265f`),
       **Midnight Gatherer Elite** (`78c19418`), encounter **Wormoid Queen**
       (`609f5a87`).
-- [ ] **CreateTokenCopy does not copy the source card's live state.**
-      `rules_port/token_effects.py:859` inserts the base template; C#
-      `CreateTokenCopies` calls `Card.CopyFrom(copyFrom, isReplica)`, copying
-      damage, counters, boons, revoked abilities, uses/cooldowns, gems, etc.
-      Affects FRA **Jovial Pippit/Elite** ("create two copies of it and put
       them into their deck").
 - [ ] **CreateAndCastSpell resolves the copy inline and ignores locks.**
       `rules_port/effects.py:436` resolves the created spell synchronously
@@ -61,13 +56,6 @@ in place because each needs a design decision or a larger change.
 - [ ] `LoadPlayerDeckAbilityEffectTemplate` does not shuffle the loaded deck
       (C# `Deck.Shuffle`) and uses `resolving_owner_id` instead of the resolved
       target's controller (`rules_port/deck_effects.py`).
-- [ ] `SummonTokenTroopAbilityEffectTemplate` ignores
-      `m_EntersPlayExhausted`/`m_EntersPlayAttacking` on the native path, and
-      filter-based multi-token picks use `random.sample` (without replacement)
-      where C# allows duplicates (`rules_port/token_effects.py`).
-- [ ] `CreateTokenMatchingTargetAbilityEffectTemplate` forces count to >= 1
-      and skips the token/non-warzone and `CantCreateCopies` guards
-      (`rules_port/token_effects.py`).
 - [ ] `TransformSelfAbilityEffectTemplate` non-PlantGarden path does not copy
       the target's gems/boons/counters/damage; `TransformCardToTarget` moves
       the source to the warzone instead of keeping its zone

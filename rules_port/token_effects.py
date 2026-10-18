@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import random
 import json
 from collections.abc import Iterable
 from typing import Any
@@ -43,6 +42,83 @@ def _tac_flag(context, name):
         return False
     from .tac import tac_int
     return bool(tac_int(str(raw), name, 0))
+
+
+# C# Extensions.IsCombatPhase.
+_COMBAT_PHASE_NAMES = frozenset({
+    "DeclareCombatPriorityWindow", "DeclareAttack",
+    "DeclareAttackPriorityWindow", "DeclareDefense",
+    "DeclareDefensePriorityWindow", "AssignFirstStrikeDamage",
+    "FirstStrikePriorityWindow", "AssignDamage"})
+
+
+def _in_combat_phase(context):
+    """Return True when the battle is in one of the client's combat phases."""
+    from domain.enums import ETurnPhases
+    phase = context.bstate.get("phase")
+    if phase is None:
+        from .persistence import current_phase
+        phase = current_phase(context.bstate)
+    if isinstance(phase, str) and phase.lstrip("-").isdigit():
+        phase = int(phase)
+    if isinstance(phase, int):
+        return any(getattr(ETurnPhases, name, None) == phase
+                   for name in _COMBAT_PHASE_NAMES)
+    return str(phase or "").rsplit(".", 1)[-1] in _COMBAT_PHASE_NAMES
+
+
+def _copy_boons_and_revocations(context, copy_uid, source_uid):
+    """Port the boon and revoked-ability parts of C# ``Card.CopyFrom``.
+
+    Boons are the boon attribute bits plus the boon IntAttrs; a revoked base
+    ability is one the source no longer lists among its abilities.
+    """
+    import json
+    from pvp_db import (db_card_abilities_state, db_card_attribute_value,
+                        db_card_mutation_field, db_set_card_abilities_and_attributes,
+                        db_set_card_mutation_field)
+    from .attribute_effects import _BOON_FLAGS, _BOON_INT_ATTRIBUTES
+    session_id = context.session.session_id
+    boon_mask = 0
+    for flag in _BOON_FLAGS:
+        boon_mask |= int(flag)
+    source_attrs = int(db_card_attribute_value(
+        session_id, source_uid, "card_attributes", conn=context.db) or 0)
+    copy_attrs = int(db_card_attribute_value(
+        session_id, copy_uid, "card_attributes", conn=context.db) or 0)
+    attrs = (copy_attrs & ~boon_mask) | (source_attrs & boon_mask)
+    source_row = db_card_abilities_state(session_id, source_uid, conn=context.db)
+    copy_row = db_card_abilities_state(session_id, copy_uid, conn=context.db)
+    try:
+        source_abilities = {str(guid).lower() for guid in
+                            json.loads((source_row[0] if source_row else None) or "[]")}
+        copy_abilities = json.loads((copy_row[0] if copy_row else None) or "[]")
+    except (TypeError, ValueError, json.JSONDecodeError):
+        source_abilities, copy_abilities = set(), []
+    kept = [guid for guid in copy_abilities
+            if str(guid).lower() in source_abilities]
+    db_set_card_abilities_and_attributes(
+        session_id, copy_uid, json.dumps(kept), attrs, conn=context.db)
+    try:
+        source_buffs = json.loads(db_card_mutation_field(
+            session_id, source_uid, "permanent_buffs", conn=context.db) or "{}")
+        copy_buffs = json.loads(db_card_mutation_field(
+            session_id, copy_uid, "permanent_buffs", conn=context.db) or "{}")
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return
+    source_ints = source_buffs.get("int_attrs") if isinstance(source_buffs, dict) else None
+    boons = {name: value for name, value in (source_ints or {}).items()
+             if name in _BOON_INT_ATTRIBUTES.values()}
+    if boons and isinstance(copy_buffs, dict):
+        copy_ints = copy_buffs.get("int_attrs")
+        if not isinstance(copy_ints, dict):
+            copy_ints = {}
+        copy_ints.update(boons)
+        copy_buffs["int_attrs"] = copy_ints
+        db_set_card_mutation_field(
+            session_id, copy_uid, "permanent_buffs",
+            json.dumps(copy_buffs, separators=(",", ":"), sort_keys=True),
+            conn=context.db)
 
 
 def create_matching_target(context, target, count, collection,
@@ -620,11 +696,10 @@ def summon_token(context, payload=None):
                 selected_guids = [rng_choice(context.bstate, candidates)
                                   for _ in range(max(0, count))]
             else:
-                # Choice-zone effects such as the champion charge power present
-                # separate options.  Select without replacement so one
-                # activation cannot show the same card three times.
-                selected_guids = random.sample(
-                    candidates, min(count, len(candidates)))
+                # C# SummonTokenTroop draws each card from the session RNG with
+                # replacement, so one activation may repeat a candidate.
+                selected_guids = [rng_choice(context.bstate, candidates)
+                                  for _ in range(max(0, count))]
             guid = selected_guids[0] if selected_guids else ""
         candidate_count = len(candidates)
     if not guid or not db_template_exists(guid, conn=context.db):
@@ -751,6 +826,14 @@ def summon_token(context, payload=None):
                         context.db, context.session.session_id,
                         context.bstate, 0, owner, create_guid)):
                 token_state = int(game_engine.ECardStates.Tapped)
+            # C# Session.MoveCard declares the entering troop as an attacker
+            # when the ability sets EntersPlayAttacking during a combat phase.
+            if (_truthy(context.template_value(
+                    "m_EntersPlayAttacking",
+                    payload.get("attacking", False))) and
+                    _in_combat_phase(context)):
+                token_state |= (int(game_engine.ECardStates.Attacking) |
+                                int(game_engine.ECardStates.HasAttacked))
         db_insert_generated_card(
             context.session.session_id, owner, uid, create_guid, location,
             create_template[0], create_template[1], create_template[2],
@@ -906,6 +989,7 @@ def create_token_copy(context):
     if not destination:
         raise RuntimeError(
             "RulesPort CreateTokenCopy effect is missing typed destination metadata")
+    authored_destination = destination
     if context.bstate.get("choice_copy_to_hand"):
         destination = "hand"
     # C# CreateTokenCopies creates the copy directly into m_CardCollection.
@@ -918,7 +1002,14 @@ def create_token_copy(context):
     payload = db_copy_template_payload(row[0], conn=context.db)
     if not payload:
         return "copy: target template payload missing"
+    # C# CreateTokenCopyAbilityEffectTemplate: a token may only be copied into
+    # the warzone.
+    from domain.enums import CARD_TYPE_BY_DB, ECardTypes
+    if (CARD_TYPE_BY_DB.get(str(payload[0] or ""), 0) & ECardTypes.Token and
+            authored_destination != "warzone"):
+        return "copy: token can only be copied into the warzone"
     owner_id = int(context.bstate.get("resolving_owner_id", 0) or 0)
+    responsible_id = owner_id
     # C# places the copies under the responsible player unless the authored
     # m_SameOwner asks for the target card's controller.
     if context.template_value("m_SameOwner", False):
@@ -929,6 +1020,15 @@ def create_token_copy(context):
     import game_engine
     created = []
     is_replica = bool(context.template_value("m_IsReplica", False))
+    if is_replica:
+        # C#: a replica is refused when the responsible champion forbids it.
+        from .static_rules import _champion_int_attrs
+        champion_attrs = {str(name).lower(): value for name, value in
+                          _champion_int_attrs(
+                              context.bstate, responsible_id).items()}
+        if any(int(champion_attrs.get(name.lower(), 0) or 0)
+               for name in ("CantCreateReplicas", "CantCreateCopies")):
+            return "copy: responsible champion cannot create replicas"
     from pvp_db import db_card_gem_type
     source_gem = db_card_gem_type(
         context.session.session_id, int(target), conn=context.db)
@@ -955,9 +1055,12 @@ def create_token_copy(context):
         else:
             # C# Card.CopyFrom (non-replica) clones the source's per-game,
             # per-turn and cooldown usage, so a spent ONE-SHOT stays spent.
-            from pvp_db import db_copy_card_uses
-            db_copy_card_uses(context.session.session_id, int(target), uid,
-                              conn=context.db)
+            # Damage, uses/cooldowns, counters, shields and gems.
+            from pvp_db import db_copy_transform_instance_state
+            db_copy_transform_instance_state(
+                context.session.session_id, uid, int(target),
+                is_replica=False, conn=context.db)
+            _copy_boons_and_revocations(context, uid, int(target))
         scid = game_engine.SessionCardId(game_engine.UID(uid))
         _tpl, card_type, _name, cost, attack, defense, _gems = \
             context.handler._card_full_data(context.game, scid, row[0])

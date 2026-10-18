@@ -1555,15 +1555,15 @@ class EffectContext:
             "m_CardLocation", "") or "").rsplit(".", 1)[-1].lower()
         if self.native_context or self.bstate.get("_rules_port_native_effect"):
             from rules_port.token_effects import create_matching_target
+            # C# CreateTokenMatchingTarget: a typed zero creates nothing.
             made = create_matching_target(
-                self, int(target), max(1, int(count)), collection,
-                deck_location)
+                self, int(target), int(count), collection, deck_location)
         else:
             from abilities.framework.effects.utility import _create_matching_target
             made = _create_matching_target(
                 self.game, self.session, self.db, self.handler,
                 self.player_uid, self.ai_uid, self.bstate, int(target),
-                max(1, int(count)), collection, deck_location)
+                int(count), collection, deck_location)
         return f"created {made} matching token(s)"
 
     def transform_replica(self) -> str:
