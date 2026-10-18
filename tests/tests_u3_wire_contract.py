@@ -1313,6 +1313,8 @@ def test_fire_and_forget_setup_and_reconnect_routes_send_no_typed_reply():
             return_value=session), \
             mock.patch.object(hconnect_server, "_pvp_events_ready", ready), \
             mock.patch.object(tournament_game, "pvp_start_priority_watchdog"), \
+            mock.patch.object(tournament_game, "_session_has_reconnect_player",
+                              return_value=True), \
             mock.patch.object(tournament_game, "_pvp_push_reconnect_snapshot") as snapshot:
         handler.handle_service_request(
             "ServiceLoadBalancer", "test-instance", 22029,

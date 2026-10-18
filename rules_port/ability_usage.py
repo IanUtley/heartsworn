@@ -41,6 +41,8 @@ def remaining_uses_per_game(db, session_id, source_uid, ability_guids,
             used, _turn = db_card_ability_use_counts(
                 session_id, source, guid,
                 state.get("turn_number", 1), conn=db)
-        if used > 0 and used < limit:
-            remaining[guid] = limit - used
+        # A spent one-shot is reported with zero remaining, so the client
+        # clears it instead of keeping its last shown count.
+        if used > 0:
+            remaining[guid] = max(0, limit - used)
     return remaining

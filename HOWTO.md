@@ -291,8 +291,15 @@ controller of the parent ActivateAbility effect's target (`You` → activator;
 "target/each opposing champion" → that champion's controller); see
 `_pvp_discard_prompt_pid`. A phase-entry resolver
 (`set_turn_phase_entry_resolver`) must publish the wire events its projection
-queued: readiness is applied at Prep, and leaving those events queued until
-the drive stops made Unity untap troops when Main began instead.
+queued: the Prep refill/cooldown events, and leaving those events queued
+until the drive stops made Unity update the board only when Main began.
+The ready step (C# `ReadyState`: StartTurn `BeginningOfOwnersTurn` expiry,
+`ReadyAllCardsThatCanBeReadied`, `ResetArmor`) runs at StartTurn *before*
+`TurnStartedEvent` is dispatched (`rules_port.lifecycle.ready_step_for_turn`,
+via `_ready_side_for_turn` in PvE and `_pvp_ready_step` in PvP), so a
+start-of-turn trigger that exhausts its own card (Ravenous Zombies) leaves it
+exhausted. `battle_state["_readied_for"]` (`{side: turn_number}`) records it;
+Prep readies only a side not yet readied this turn.
 Champion counters must be published as a `CardUpdated` for the champion
 carrying `counters`, with the collection the champion already sits in
 (`None_`): Unity derives the champion HUD effect icons (Stealth, Burning,

@@ -18,16 +18,26 @@ from rules_port.combat_damage import resolve
 from rules_port import static_rules
 
 
+from tests.test_db import fresh_database
+
+SRC = fresh_database()
+
+
 class DamageRules(unittest.TestCase):
     def setUp(self):
+        # An in-memory copy of the production schema (the metadata baseline).
         self.db = sqlite3.connect(':memory:')
         self.addCleanup(self.db.close)
-        self.db.execute('CREATE TABLE game_cards (session_id INTEGER, card_uid INTEGER, '
-                        'user_id INTEGER, template_guid TEXT, card_type TEXT, location TEXT, '
-                        'permanent_buffs TEXT, temporary_buffs TEXT, card_damage INTEGER)')
+        src = sqlite3.connect(SRC)
+        src.backup(self.db)
+        src.close()
+        self.db.execute('DELETE FROM game_cards')
         for uid, owner in ((769, 5), (1025, 0), (1281, 0)):
-            self.db.execute('INSERT INTO game_cards VALUES (1, ?, ?, ?, ?, ?, ?, ?, 0)',
-                            (uid, owner, 'fixture', 'Troop', 'warzone', '{}', '{}'))
+            self.db.execute(
+                'INSERT INTO game_cards (session_id, card_uid, user_id, template_guid, '
+                'card_template_id, card_type, location, permanent_buffs, temporary_buffs, '
+                'card_damage) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, 0)',
+                (uid, owner, 'fixture', 'fixture', 'Troop', 'warzone', '{}', '{}'))
         self.state = {'resolving_source_uid': 769, 'player_health': 20, 'ai_health': 20}
         self.events = []
         self.health = {769: 20, 1025: 20, 1281: 20}

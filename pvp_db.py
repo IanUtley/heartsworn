@@ -697,6 +697,19 @@ def db_warzone_troops_basic(session_id, user_id=None, conn=None):
     return connection.execute(sql, params).fetchall()
 
 
+def db_owner_card_uids_with_counters(session_id, user_id, conn=None):
+    """Return ``(card_uid,)`` for one player's cards carrying any counter.
+
+    A coarse text prefilter over ``permanent_buffs``; callers decode the
+    JSON and test the specific counter template.
+    """
+    connection = conn or _db_layer._db
+    return connection.execute(
+        "SELECT card_uid FROM game_cards WHERE session_id=? AND user_id=? "
+        "AND permanent_buffs LIKE '%\"counters\"%'",
+        (session_id, user_id)).fetchall()
+
+
 def db_warzone_troops_with_state(session_id, user_id=None, conn=None):
     """Return ``(uid, template_guid, state, user_id)`` warzone troops."""
     connection = conn or _db_layer._db
@@ -2562,7 +2575,8 @@ def db_card_static_fields(session_id, card_uid, conn=None):
         "gc.temporary_buffs AS temporary_buffs, "
         "gc.card_cost_mod AS card_cost_mod, gc.cost_mod_json AS cost_mod_json, "
         "gc.location AS location, ct.guid AS template_guid, ct.cost AS cost, "
-        "ct.threshold_json AS threshold_json, ct.subtype AS subtype "
+        "ct.threshold_json AS threshold_json, ct.subtype AS subtype, "
+        "COALESCE(gc.card_type, ct.card_type) AS card_type "
         "FROM game_cards gc LEFT JOIN card_templates ct "
         "ON ct.guid=gc.template_guid "
         "WHERE gc.session_id=? AND gc.card_uid=?",

@@ -36,6 +36,9 @@ _CHAMPION_INTATTR_FLAGS = {
     "cantgainhealth": "cant_gain_health",
     "cantlosehealth": "cant_lose_health",
     "cantplaycards": "cant_play_cards",
+    "cantdrawcards": "cant_draw_cards",
+    "cantplaycardsfromhand": "cant_play_cards_from_hand",
+    "skipsdrawphase": "skips_draw_phase",
     "unlimitedhandsize": "no_max_hand_size",
 }
 
@@ -1627,7 +1630,9 @@ def _scan_static_deltas(db, session_id, battle_state, card_uid, cache,
                     elif attribute == "gladiator":
                         total["gladiator"] += value
                     elif attribute in {"cantgainhealth", "cantlosehealth",
-                                       "cantplaycards", "unlimitedhandsize"}:
+                                       "cantplaycards", "cantdrawcards",
+                                       "cantplaycardsfromhand",
+                                       "skipsdrawphase", "unlimitedhandsize"}:
                         total["flags"].add(_CHAMPION_INTATTR_FLAGS[attribute])
                     elif attribute in {"lethal", "crush"}:
                         total["flags"].add(attribute)
@@ -2140,7 +2145,8 @@ def _effective_cost(db, session_id, battle_state, card_uid):
             f"RulesPort static cost has no native handler for card {card_uid}")
     if _card_play_for_free(db, session_id, battle_state, card_uid):
         return 0
-    return _cost_from_deltas(db, session_id, card_uid, native)
+    return _cost_from_deltas(db, session_id, card_uid, native,
+                             battle_state=battle_state)
 
 
 def player_int_attributes(db, session_id, battle_state, owner_id, *,
@@ -2362,7 +2368,8 @@ def player_int_attributes(db, session_id, battle_state, owner_id, *,
     return result
 
 
-def _cost_from_deltas(db, session_id, card_uid, native):
+def _cost_from_deltas(db, session_id, card_uid, native, *,
+                      battle_state=None):
     """Project an effective cost from an already-computed native delta view."""
     with _projection_cache() as cache:
         fields = _card_fields(db, session_id, int(card_uid), cache)
@@ -2386,6 +2393,12 @@ def _cost_from_deltas(db, session_id, card_uid, native):
                     cost += int(modifier.get("delta", 0) or 0)
                 except (TypeError, ValueError):
                     continue
+    if str(fields.get("location") or "").lower() == "hand":
+        # Champion built-in Dazed (BuiltInResources 16ffaa33): "While you
+        # are Dazed, non-resource cards in your hand have cost +1."
+        from .builtin_rules import dazed_cost_increase
+        cost += dazed_cost_increase(None, battle_state, fields.get("user_id"),
+                                    fields.get("card_type"))
     return max(0, cost + int(native["cost_mod"]))
 
 
@@ -2418,7 +2431,8 @@ def _effective_option_projection(db, session_id, battle_state, card_uid):
         db, session_id, card_uid, native, battle_state)[2]
     if _card_play_for_free(db, session_id, battle_state, card_uid):
         return attributes, 0
-    return attributes, _cost_from_deltas(db, session_id, card_uid, native)
+    return attributes, _cost_from_deltas(db, session_id, card_uid, native,
+                                         battle_state=battle_state)
 
 
 def _ability_targets_champions(db, ability_guid, cache):

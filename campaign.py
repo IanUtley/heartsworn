@@ -2105,6 +2105,28 @@ def _zone_is_dungeon(zone_id):
     return bool(entry and entry.get("kind") == "dungeon")
 
 
+def _champion_claimed_elsewhere(db, champion_id, keys):
+    """True when any campaign of this champion already recorded one of ``keys``.
+
+    A one-time reward belongs to the champion. Each campaign keeps its own
+    claim table, so starting the same dungeon again must not grant it twice.
+    """
+    rows = db.execute("SELECT state_json FROM campaigns WHERE champion_id=?",
+                      (int(champion_id or 0),)).fetchall()
+    for (raw,) in rows:
+        try:
+            state = json.loads(raw or "{}")
+        except (TypeError, ValueError, json.JSONDecodeError):
+            continue
+        if not isinstance(state, dict):
+            continue
+        for field in ("_encounter_reward_claims", "_conversation_reward_claims"):
+            claims = state.get(field)
+            if isinstance(claims, dict) and any(claims.get(key) for key in keys):
+                return True
+    return False
+
+
 def _apply_reward_dict(handler, db, camp_id, state, reward, one_time,
                        claim_name, label):
     """Grant ``reward`` (gold/xp/cards/items/chest) to the campaign's champion."""
@@ -2126,7 +2148,9 @@ def _apply_reward_dict(handler, db, camp_id, state, reward, one_time,
     # conversation/campaign template.  Accept the legacy unscoped key so a
     # reward already claimed by an older server build is not duplicated.
     claim_key = f"{champ_id}:{claim_name}"
-    if bool(one_time) and (claims.get(claim_key) or claims.get(str(claim_name))):
+    if bool(one_time) and (claims.get(claim_key) or claims.get(str(claim_name)) or
+                           _champion_claimed_elsewhere(
+                               db, champ_id, (claim_key, str(claim_name)))):
         return applied
     try:
         gold = max(0, int(reward.get("gold", 0) or 0))
@@ -2431,7 +2455,8 @@ def _apply_encounter_end_rewards(handler, db, session, camp_id, won,
         one_time = bool(one_time)
         claim_key = (f"{scene_guid}:{record_index}" if one_time else
                      f"{scene_guid}:{record_index}:{session.session_id}")
-        if claims.get(claim_key):
+        if claims.get(claim_key) or (one_time and _champion_claimed_elsewhere(
+                db, champion_id, (claim_key,))):
             continue
         # ``when``: flag tags that must hold (set by the battle's events via
         # the rules hooks, see _record_battle_flags).
@@ -2922,6 +2947,13 @@ def _launch_encounter(handler, db, camp_id, champ_id, encounter_guid,
      recorded so resolve_encounter can resolve the correct AI deck/name
     when the battle session is later set up.
     """
+    from campaign_playtest import is_playtest_campaign
+    if champ_id and not is_playtest_campaign(camp_id):
+        # The editor Play resolves its default champion from the last one
+        # played, so every real launch that names a champion records it.  A
+        # playtest saves nothing, so it does not stamp the champion either.
+        from profile_db import db_mark_champion_played
+        db_mark_champion_played(champ_id, conn=db)
     if isinstance(encounter_guid, dict):
         encounter_action = encounter_guid
         encounter_guid = encounter_action.get("scene")

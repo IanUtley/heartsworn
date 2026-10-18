@@ -111,7 +111,7 @@ def test_until_your_next_turn_debuff_outlives_the_end_of_turn(db):
     assert attack_buff() == 0
 
 
-def test_pvp_effect_view_keeps_duration_ledgers(_db):
+def test_pvp_effect_view_keeps_duration_ledgers(*_args):
     """A grant or champion IntAttr recorded while resolving in the PvP view
     must reach the checkpoint (Raven Talon's "this turn" grant; Succubus
     crashed appending to a dict-aliased champion ledger)."""

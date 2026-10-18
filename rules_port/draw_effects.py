@@ -37,7 +37,7 @@ def draw_cards(context, count, owner=None):
     from pvp_db import db_deck_top_card_details, db_draw_card_to_hand
     from .runtime_helpers import owner_uid, raw_uid
     from .static_rules import champion_int_attribute, \
-        champion_int_attr_optional
+        champion_int_attr_optional, controller_flags
     count = max(0, int(count or 0))
     if owner is None:
         owner = context.target_owner(default=None)
@@ -46,9 +46,14 @@ def draw_cards(context, count, owner=None):
     owner = int(owner or 0)
     # Session.DrawCard: MaxCardsDrawablePerTurn (-1/absent is unlimited,
     # CantDrawCards forces zero) refuses a draw without a deck-out loss.
+    # A champion's authored "can't draw cards" is a WhileCardInPlay static,
+    # so it arrives as the cant_draw_cards flag rather than a dynamic intattr.
     draw_cap = champion_int_attr_optional(
         context.bstate, owner, "MaxCardsDrawablePerTurn")
-    if champion_int_attribute(context.bstate, owner, "CantDrawCards") > 0:
+    if (champion_int_attribute(context.bstate, owner, "CantDrawCards") > 0
+            or "cant_draw_cards" in controller_flags(
+                context.db, context.session.session_id, context.bstate,
+                owner)):
         draw_cap = 0
     drawn = 0
     for _ in range(count):

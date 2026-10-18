@@ -257,6 +257,23 @@ def _target_field(template_id, name, default=None):
         return default
 
 
+def ability_source_target_uid(db, session_id, source_uid, template_id,
+                              controller_uid):
+    """Resolve an automatic AbilitySourceCard target to one card uid.
+
+    A target with ``m_ChoiceOverride`` refers to the card that created the
+    source (a Choice card's parent) when that link exists; every other target
+    is the ability's source card.
+    """
+    if source_uid is None:
+        return None
+    if not bool(_target_field(template_id, "m_ChoiceOverride", False)):
+        return int(source_uid)
+    source = _source_card(db, session_id, int(source_uid), controller_uid)
+    parent = int((source or {}).get("parent_uid") or 0)
+    return parent or int(source_uid)
+
+
 def _target_spec(template_id):
     record = _target_record(template_id)
     return getattr(record, "target_spec", None) if record is not None else None
@@ -441,15 +458,17 @@ def _card(row, battle_state=None, db=None, session_id=None):
     guarded = bool((battle_state or {}).get(
         "_rules_port_suppress_card_properties"))
     key = (int(session_id), int(row[0]), guarded)
+    # The write counter only moves for writes through the server connection,
+    # so an entry is reusable only on the connection that built it.
     with _CARD_MEMO_LOCK:
         entry = _CARD_MEMO.get(key)
-    if entry is not None and entry[0] == version:
+    if entry is not None and entry[0] == version and entry[2] is db:
         return _copy_projection(entry[1])
     card = _project_card(row, battle_state, db, session_id)
     with _CARD_MEMO_LOCK:
         if len(_CARD_MEMO) >= _CARD_MEMO_LIMIT:
             _CARD_MEMO.clear()
-        _CARD_MEMO[key] = (version, _copy_projection(card))
+        _CARD_MEMO[key] = (version, _copy_projection(card), db)
     return card
 
 
@@ -568,11 +587,48 @@ def _champion_filter_cards(champions, battle_state=None):
             "controller_id": owner, "template_guid": guid,
             "template_id": guid,
             "name": champion[2] if len(champion) > 2 else "Champion",
+            "subtype": _champion_subtype(guid),
             "attack": 0,
             "defense": int(champion[3] or 0)
             if len(champion) > 3 else 0,
         })
     return cards
+
+
+def _champion_subtype(guid):
+    """The authored race/class subtype line of a champion template.
+
+    C# ``IsSubType`` reads the champion card's ``m_SubType`` ("Human
+    Cleric").  Champions have no ``game_cards`` row, so the projection must
+    carry it from the ChampionTemplate record or race filters ("each
+    opposing Human champion") never match a champion.
+    """
+    if not guid:
+        return ""
+    try:
+        from gamedata import DEFAULT_RECORD_STORE
+    except (ImportError, AttributeError):
+        return ""
+    for kind in ("ChampionTemplate", "CardTemplate"):
+        record = DEFAULT_RECORD_STORE.get(kind, str(guid).lower())
+        if record is None:
+            continue
+        value = record.field("m_SubType")
+        if not value:
+            continue
+        subtype = str(value)
+        # Some champion templates store only the class ("Cleric") and keep the
+        # race in m_Race ("ShinHare"). The race is part of the subtype line
+        # ("Shin'hare Cleric"), so race filters must see it too.
+        race = record.field("m_Race")
+        race_name = _RACE_SUBTYPE_NAMES.get(str(race or ""), str(race or ""))
+        if race_name and race_name != "None" and race_name not in subtype:
+            subtype = f"{race_name} {subtype}"
+        return subtype
+    return ""
+
+
+_RACE_SUBTYPE_NAMES = {"ShinHare": "Shin'hare"}
 
 
 def _parent_uid(serialized_buffs):

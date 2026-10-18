@@ -23,6 +23,23 @@ def _resource_guids(value):
     return result
 
 
+def choice_art_related_cards(source_uid, card_uid=None):
+    """CardUpdated.RelatedCards for a generated Choosing-zone card.
+
+    GoCardBuilder.UpdateArtOverride draws a Choice card whose template has no
+    m_CardImagePath with the art of ``RelatedCards[0]`` (the card whose
+    ability created it, e.g. the champion for a charge power).  Without that
+    link the client looks up an empty asset name and renders ERROR.
+    """
+    try:
+        source = int(source_uid or 0)
+    except (TypeError, ValueError):
+        return []
+    if not source or (card_uid is not None and source == int(card_uid)):
+        return []
+    return [game_engine.SessionCardId(game_engine.UID(source))]
+
+
 def _clear_choice_zone(context):
     from pvp_db import db_choice_card_rows, db_move_choice_to_played_resources
     from .runtime_helpers import owner_uid
@@ -76,7 +93,8 @@ def _create_choice_cards(context, owner_id, template_guids, parent_uid=None):
         context.game.push_card_updated(
             scid, player, game_engine.ECardCollections.Choosing, card_type,
             template_id=template_guid, card_name=name, cost=cost,
-            attack=attack, defense=defense, gems=gems, state=0)
+            attack=attack, defense=defense, gems=gems, state=0,
+            related_cards=choice_art_related_cards(parent_uid, uid))
         # A first CardUpdated seeds the client cache and derives the UI move
         # from None -> Choosing; class 50 would duplicate that notification.
     return [uid for uid, _template in created]

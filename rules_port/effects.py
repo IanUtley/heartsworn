@@ -693,8 +693,10 @@ def _resource_modifier(context, effect):
     # TurnStarted triggers resolve before the following Prep refill. Preserve
     # positive temporary current-resource gains so Prep restores the normal
     # total and then reapplies the authored bonus (for example Lithe
-    # Lyricist's +1 current resource).
-    if property_name == "currentresource" and amount > 0:
+    # Lyricist's +1 current resource).  A current gain that came with a total
+    # gain in the same StartTurn (Chained Goliath's [L1][R1]) is not a bonus:
+    # the refill to total already grants it, so the two are netted here.
+    if property_name in ("currentresource", "totalresource") and amount > 0:
         import game_engine
         phase = context.bstate.get("phase")
         if phase == game_engine.ETurnPhases.StartTurn:
@@ -705,8 +707,10 @@ def _resource_modifier(context, effect):
                 bonus_key = ("start_turn_resource_bonus_player"
                              if owner_id else
                              "start_turn_resource_bonus_ai")
-            context.bstate[bonus_key] = int(
-                context.bstate.get(bonus_key, 0) or 0) + int(amount)
+            from .resources import record_start_turn_resource_gain
+            record_start_turn_resource_gain(
+                context.bstate, bonus_key, property_name, int(amount),
+                int(context.bstate.get("turn_number", 1) or 1))
     label = {"currentresource": "resources",
              "totalresource": "total",
              "chargepoints": "charges",

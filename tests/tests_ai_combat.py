@@ -118,3 +118,23 @@ def test_attacker_orders_damage_through_the_blocker_that_gives_most_value():
     cheap = Hint(StubCard(3, 0, 1), evaluator)
     ordered = best_damage_order(attacker, [cheap, valuable], evaluator)
     assert [h.uid for h in ordered][0] == 2, [h.uid for h in ordered]
+
+
+def test_group_attack_value_charges_an_attacker_that_is_double_blocked():
+    """A 2/4 attacker that two 2/4 blockers can double-block is not a profitable
+    group attack: the solver stacks both blockers on it and it dies."""
+    import ai
+
+    class GroupEvaluator(StubEvaluator):
+        player_health = 20
+
+        def _can_block(self, blocker, attacker):
+            return True
+
+        def value_attack(self, attacker, blockers):
+            return 0, 0.0
+
+    evaluator = GroupEvaluator()
+    attacker = StubCard(1, 2, 4)
+    two_blockers = [StubCard(201, 2, 4), StubCard(202, 2, 4)]
+    assert ai._aieval_attack_set_value(evaluator, [attacker], two_blockers) < 0

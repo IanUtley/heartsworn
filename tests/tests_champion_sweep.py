@@ -37,10 +37,6 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 
 from tests.test_db import fresh_database
 
-# Bind the test database before runtime modules open db._db. The live
-# hconnect.db is never opened by this sweep.
-SRC = fresh_database()
-
 import db as dbmod
 import game_engine
 import services.tournament_game as tournament_game
@@ -452,17 +448,19 @@ def _activation_selection(db, graph, handler, state, session, source_uid):
     cost_rows = tournament_game._pvp_ability_cost_targets(
         session, state, PLAYER_PID, int(source_uid), graph.guid, champions)
     if cost_rows is None:
-        return None, {}
+        return None, {}, {}
     selected = []
+    cost_map = {}
     used = set()
-    for _tid, _cost_type, candidates, minimum, _maximum in cost_rows:
+    for index, (_tid, _cost_type, candidates, minimum, _maximum) in enumerate(cost_rows):
         if not candidates or not int(minimum or 0):
             continue
         available = [int(uid) for uid in candidates if int(uid) not in used]
         if len(available) < int(minimum):
-            return None, {}
+            return None, {}, {}
         chosen = available[:int(minimum)]
         selected.extend(chosen)
+        cost_map[index] = tuple(chosen)
         used.update(chosen)
 
     target_map = {}
@@ -476,7 +474,7 @@ def _activation_selection(db, graph, handler, state, session, source_uid):
         if not candidates:
             if getattr(target, "optional", False) or minimum == 0:
                 continue
-            return None, {}
+            return None, {}, {}
         maximum = int(target.resolved_maximum() or 0)
         wanted = max(1, minimum)
         if maximum > 0:
@@ -485,14 +483,14 @@ def _activation_selection(db, graph, handler, state, session, source_uid):
         if not available:
             if getattr(target, "target_kind", "") in _SPECIAL_TARGET_KINDS:
                 continue
-            return None, {}
+            return None, {}, {}
         chosen = available[:wanted]
         selected.extend(chosen)
         used.update(chosen)
         if (not getattr(target, "is_auto", False) and
                 getattr(target, "target_kind", "") not in _SPECIAL_TARGET_KINDS):
             target_map[index] = tuple(chosen)
-    return selected, target_map
+    return selected, target_map, cost_map
 
 
 def _last_option_list(game):
@@ -1072,6 +1070,88 @@ def _fixture_skip_result():
             "trigger_mode": "fixture-skip"}
 
 
+class _SweepSessionKey:
+    """Carries only the session id that the shared-port cache is keyed on."""
+
+    def __init__(self, session_id):
+        self.session_id = session_id
+
+
+def _rulesport_champion_activation(db, metadata, state, source_uid, target_map, cost_map):
+    """Activate a manual power through the production RulesPort ingress.
+
+    A real tournament session is built over the sweep's board: both players are
+    registered, the tournament rows exist, and the RulesPort host is attached.
+    The activation then enters through the same request path as a client packet.
+    Returns the battle state after the activation, or None when the host refuses it.
+    """
+    import pvp_autoplay as autoplay
+    import game_session as gs
+    import hconnect_server
+    # Every case reuses session id 1, and the tournament keeps one RulesPort
+    # host per session id; drop the previous case's host so this one starts fresh.
+    tournament_game.set_pvp_shared_port(
+        _SweepSessionKey(SESSION_ID), None)
+    state["champ_guid_map"] = {str(PLAYER_PID): metadata["champion_guid"],
+                               str(OPPONENT_PID): metadata["champion_guid"]}
+    tournament_type = db.execute("SELECT id FROM tournament_types LIMIT 1").fetchone()
+    if tournament_type is None:
+        db.execute("INSERT INTO tournament_types (id, name) VALUES (1, 'sweep')")
+        tournament_type = (1,)
+    db.execute("INSERT OR IGNORE INTO tournaments (id, type_id, status, session_id) "
+               "VALUES (1, ?, 'active', ?)", (tournament_type[0], str(SESSION_ID)))
+    for uid in (PLAYER_PID, OPPONENT_PID):
+        db.execute("INSERT OR IGNORE INTO users (id, name, gold, platinum) VALUES (?, ?, 0, 0)",
+                   (uid, f"sweep{uid}"))
+        db.execute("INSERT OR IGNORE INTO tournament_signups "
+                   "(tournament_id, player_uid, player_name) VALUES (1, ?, ?)",
+                   (uid, f"sweep{uid}"))
+    db.commit()
+    hconnect_server._db = db
+    dbmod._db = db
+    tournament_game._db = db
+    handler = hconnect_server.HCPHandler(None, ("127.0.0.1", 0))
+    handler.user_profile = {"id": PLAYER_PID, "name": "sweep"}
+    handler.client_reck_id = PLAYER_PID
+    handler.send = lambda header, body: None
+    session = gs.GameSession(SESSION_ID, SESSION_ID * 1000, "tourney-sweep", PLAYER_PID)
+    for uid in (PLAYER_PID, OPPONENT_PID):
+        session.add_player(hconnect_server.make_uid(
+            hconnect_server.UID_TYPE["ServicePlayer"], uid), 0)
+    session.turn_order = state
+    session._rules_port_battle_state = state
+    handler._current_bstate = state
+    game = game_engine.Game(SESSION_ID, PLAYER_UID, OPPONENT_UID)
+    handler._maybe_attach_rules_port(session, game, state)
+    port = session._rules_port_session
+    before = len(port.transaction_history)
+    typed = {
+        "source_card_id": int(source_uid),
+        "ability_template_id": metadata["ability_guid"],
+        "activation_data": {
+            "target_map": {int(index): [int(uid) for uid in uids]
+                           for index, uids in (target_map or {}).items()},
+            "cost_target_map": {int(index): [int(uid) for uid in uids]
+                                for index, uids in (cost_map or {}).items()}},
+        "ability_instance_id": 0,
+    }
+    raw = autoplay._champion_power_bytes(
+        int(source_uid), {"ability_guid": metadata["ability_guid"]})
+    autoplay._transaction(handler, session, raw, typed_payload=typed)
+    if not autoplay._accepted_ability_activation(
+            port.transaction_history, before, source_uid, metadata["ability_guid"]):
+        return None
+    # The activation opens a priority window; both players pass to resolve it.
+    for _ in range(8):
+        window = port.action_stack.peek()
+        pid = getattr(window, "priority_player_id", None)
+        if pid is None:
+            break
+        port.pass_player_priority(pid)
+        port.drive_until_input(max_steps=64)
+    return session._rules_port_battle_state
+
+
 def _run_case(db, metadata, path, *, option_check=True):
     graph = _metadata_graph(metadata)
     board = _seed_board(db, metadata)
@@ -1090,10 +1170,10 @@ def _run_case(db, metadata, path, *, option_check=True):
     # generated board is a fixture limitation: the option path correctly keeps
     # it greyed out and the activation cannot be driven.  Detect that once and
     # use it both to relax the option assertion and to skip the activation.
-    selected = target_map = None
+    selected = target_map = cost_map = None
     fixture_unsatisfied = False
     if graph.manual:
-        selected, target_map = _activation_selection(
+        selected, target_map, cost_map = _activation_selection(
             db, graph, handler, state, session, source_uid)
         fixture_unsatisfied = selected is None
 
@@ -1139,28 +1219,14 @@ def _run_case(db, metadata, path, *, option_check=True):
     if graph.manual:
         _activation_context["guid"] = metadata["ability_guid"]
         _activation_context["selected"] = list(selected)
-        if not tournament_game._pvp_activate_champion_ability(
-                handler, session, b"", PLAYER_PID):
+        live = _rulesport_champion_activation(
+            db, metadata, state, source_uid, target_map, cost_map)
+        if live is None:
             raise ChampionSweepFailure(
                 f"{metadata['champion_name']} / {metadata['ability_name']}: "
-                "production PvP activation rejected legal fixture data")
-        item = next(
-            (value for value in reversed(state.get("stack") or [])
-             if str(value.get("ability_guid") or "").lower()
-             == metadata["ability_guid"]), None)
-        if item is None:
-            raise ChampionSweepFailure(
-                f"{metadata['ability_guid']}: activation did not enqueue a "
-                "typed PvP chain item")
-        state["stack"] = []
-        state["resolving_source_uid"] = source_uid
-        state["resolving_owner_id"] = PLAYER_PID
+                "RulesPort rejected the legal fixture activation")
+        state = live
         game = handler._fresh_game(session, PLAYER_UID, OPPONENT_UID, state)
-        resolve_port_ability(
-            handler, game, session, db, PLAYER_UID, OPPONENT_UID, state,
-            metadata["ability_guid"], source_uid, PLAYER_PID,
-            target_map=target_map,
-            instance_id=int(item.get("instance_id", 1) or 1))
     elif graph.trigger_event_type:
         event = _trigger_event(graph, board)
         game = handler._fresh_game(session, PLAYER_UID, OPPONENT_UID, state)
@@ -1293,7 +1359,9 @@ _activation_context = {"guid": "", "selected": []}
 
 def _run_sweep(limit=None, only=None):
     _SWEEP_STATS.clear()
-    _src = sqlite3.connect(SRC)
+    # Resolved here, not at import: importing this file must not rebind the
+    # process database for the tests collected after it.
+    _src = sqlite3.connect(fresh_database())
     db = sqlite3.connect(":memory:")
     _src.backup(db)
     _src.close()
@@ -1365,10 +1433,6 @@ def _run_sweep(limit=None, only=None):
              previous["main_options"], previous["extract"],
              previous["transaction_uids"])
         db.close()
-        try:
-            os.remove(sandbox_path)
-        except OSError:
-            pass
 
     print(
         f"Champion PvP dynamic sweep: {passed}/{len(attachments)} "

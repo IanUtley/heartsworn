@@ -60,6 +60,7 @@ full restart. The reloaded set is defined by `reload_runtime_modules()` in
   `profile_db.py`, `pve_db.py`, `chat_db.py`, `replay_db.py`,
   `tournament_db.py`, `campaign/campaign_rules.py`,
   `campaign_playtest.py`, `game_engine.py`, `game_session.py`, `battle_engine.py`, `campaign.py`,
+  `ai_eval.py`,
   `application/dispatcher.py`, `application/player_transactions.py`,
   `rules_port/wire.py`, `rules_port/runtime_adapter.py`,
   `rules_port/transactions.py`, `ai.py`, `encoder.py`,

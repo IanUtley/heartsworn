@@ -7,6 +7,9 @@ file is executed as a script).  This fixture repeats those steps for pytest.
 
 import pytest
 
+# Opt-in catalogue audit: run it directly, not as part of the full suite.
+collect_ignore = ["tests_card_play_matrix.py","tests_set1_pvp_sweep.py","tests_core_sets_sweep.py"]
+
 
 @pytest.fixture
 def db(request):
@@ -50,4 +53,11 @@ def db(request):
     finally:
         for module, previous in bound:
             module._db = previous
+        # Modules first imported during the test (``from db import _db``)
+        # captured this connection; rebind them before it is closed so a later
+        # test does not inherit a closed database.
+        import sys
+        for module in list(sys.modules.values()):
+            if getattr(module, "_db", None) is connection:
+                module._db = dbmod._db
         connection.close()

@@ -374,6 +374,21 @@ def test_ember_cant_gain_health_reaches_the_native_heal_path(db):
     assert bstate["player_health"] == 13
 
 
+def test_champion_draw_intattrs_map_to_flags():
+    """Authored champion draw intattrs must name the flags the engine reads.
+
+    Chained Goliath's CantDrawCards and Corinth's SkipsDrawPhase are authored
+    on the champion, so they reach controller_flags through
+    _CHAMPION_INTATTR_FLAGS.  Their card-level twins use _flag_from_typed_intattr.
+    """
+    from rules_port.static_rules import _CHAMPION_INTATTR_FLAGS
+    from abilities.framework.statics import _flag_from_typed_intattr
+    assert _CHAMPION_INTATTR_FLAGS["cantdrawcards"] == "cant_draw_cards"
+    assert _CHAMPION_INTATTR_FLAGS["skipsdrawphase"] == "skips_draw_phase"
+    assert _flag_from_typed_intattr("CantDrawCards") == {"cant_draw_cards"}
+    assert _flag_from_typed_intattr("SkipsDrawPhase") == {"skips_draw_phase"}
+
+
 def test_unblockable_except(db):
     card(db, 101, 5, "11111111-1111-1111-1111-111111111118", "warzone",
          json.dumps([HARVESTER]))

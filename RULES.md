@@ -85,6 +85,12 @@ chain/stack model when the path supports responses:
 3. Publish resolution/removal events, then grant priority for the next item.
 4. When the chain is empty, apply state-based effects and continue the phase.
 
+An ability that ignores the chain (authored `m_IgnoresChain`, or a trigger with
+no explicit target template) still takes its stack position and resolves in
+order, but gets no priority window. The client shows such an item as a flash of
+its source card instead of a chain entry, so the server publishes
+`AbilityPushedOnChain` with `ignores_chain=True` for it.
+
 Within one ability, effect groups execute in the metadata's
 `m_AbilityEffectList` order. Those leaves are not separate priority items.
 The legacy trigger scanner remains for non-attached compatibility callers.

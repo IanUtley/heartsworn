@@ -128,7 +128,10 @@ class EncounterModDialogSessionEventArgs(SessionEventArgs):
         self.begin_write()
         self.ser.add_uid(self.player_id)
         self.ser.add_resource_id(self.conversation_template_id)
-        return self.end_write()
+        data = self.end_write()
+        # Like class 54, the client's class 55 writer fills a 256-byte buffer
+        # (tests/goldens/session_encounter_mod_dialog_55.golden).
+        return data + b"\x00" * max(0, 256 - len(data))
 
 
 class TurnPhaseUpdatedSessionEventArgs(SessionEventArgs):
@@ -782,7 +785,11 @@ class CardCountersChangedSessionEventArgs(SessionEventArgs):
         self.ser.add_resource_id(self.card_counter_template_id)
         self.ser.add_int(self.new_value)
         self.ser.add_int(self.old_value)
-        return self.end_write()
+        data = self.end_write()
+        # The client's writer for class 54 fills a fixed 256-byte buffer; the
+        # captured golden (tests/goldens/session_card_counters_changed_54.golden)
+        # is those bytes followed by zero padding, so match that layout.
+        return data + b"\x00" * max(0, 256 - len(data))
 
 
 class CombatsThatNeedDamageSessionEventArgs(SessionEventArgs):

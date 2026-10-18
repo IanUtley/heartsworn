@@ -409,7 +409,7 @@ def projected_ability_ignores_chain(descriptor) -> bool:
         graph = ability_graph(DEFAULT_RECORD_STORE, guid)
     except Exception:
         return False
-    return bool(graph and getattr(graph, "ignores_chain", False))
+    return bool(graph and getattr(graph, "client_ignores_chain", False))
 
 
 @dataclass
@@ -2311,6 +2311,29 @@ class AuthoritativeSession:
             self.persist()
         finally:
             self._phase_transition_depth -= 1
+
+    def discard_phase_priority_windows(self) -> None:
+        """Drop consumed phase priority windows, keeping chain actions.
+
+        A host that resolves a phase's transaction itself (combat damage)
+        then advances the phase directly.  Triggers raised while it resolved
+        (a "when you gain health" from Lifedrain) already own chain actions on
+        top of that phase window.  Clearing the whole stack orphaned those
+        chain items: with an ignores-chain item on top, every later phase
+        window completed at once, so drive_until_input ran whole turns for
+        both players in one request.  Keep the chain actions so the next
+        phase's window is pushed behind them and the chain resolves first.
+        """
+        stack = self.action_stack
+        stack._stack[:] = [
+            action for action in stack._stack
+            if not (isinstance(action, PriorityWindowAction) and
+                    getattr(action, "ability_responding_to", None) is None)]
+        stack.current_action = None
+        top = stack.peek()
+        stack.priority_player_id = (
+            top.priority_player_id if isinstance(top, PriorityWindowAction)
+            else None)
 
     def advance_turn_phase(self):
         """Use the current C# phase-state object to choose the next phase.

@@ -17,9 +17,9 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 
 from tests.test_db import fresh_database
 
-# Bind this process's test database before any runtime import
-# opens ``db``; the live ``hconnect.db`` is never opened.
-SRC = fresh_database()
+# Point the process at the test database before ``db`` is imported below; the
+# live ``hconnect.db`` must never be opened.  The path is resolved per use.
+fresh_database()
 
 import game_engine
 import db as dbmod
@@ -171,7 +171,7 @@ def make_db():
     Hand-built tables drifted from ``static.py``; copying the baseline keeps
     every column and table the engine reads.
     """
-    src = sqlite3.connect(SRC)
+    src = sqlite3.connect(fresh_database())
     db = sqlite3.connect(":memory:")
     src.backup(db)
     src.close()
@@ -298,7 +298,7 @@ def test_lifeweaver_shamans_stack_on_each_health_gain(db):
 def test_dimmid_starting_health(db):
     """Dimmid's starting health comes from the champion table (19), and the
     LifeSteal deck resolves to Dimmid."""
-    src = sqlite3.connect(SRC)
+    src = sqlite3.connect(fresh_database())
     pguid = src.execute(
         "SELECT pvp_champion_guid FROM decks WHERE id=4").fetchone()
     hp = src.execute(
@@ -314,7 +314,11 @@ def test_prairie_scout_activation_gating(db):
     in a main phase with no attackers, and MUST be activatable during a combat
     step once a troop is actually attacking."""
     import battle_engine as be
+    import hconnect_server as hmod
     from hconnect_server import HCPHandler
+
+    # The affordable-ability query reads hconnect_server's connection.
+    hmod._db = db
 
     class PrairieHandler:
         user_profile = {"id": 5}
@@ -443,7 +447,7 @@ def test_pregame_health_counts_only_heals(db):
     +1 starting health; only real PreGame heal talents (healhero leaves with a
     pregame_* condition) contribute."""
     from abilities.framework.conditions import _apply_bom_health
-    src = sqlite3.connect(SRC)
+    src = sqlite3.connect(fresh_database())
     lifedrain = _apply_bom_health(
         src, "3ccc7773-0697-86ac-ab88-b40379aed08b")
     shard_attuned = _apply_bom_health(
@@ -715,11 +719,13 @@ def test_gem_survives_repush(db):
     from hconnect_server import HCPHandler
     dbmod._db = db
     hmod._db = db
+    # card_template_id carries the FRA instance id; gems is the socketed gem
+    # persisted on the card row.
     db.execute(
         "INSERT INTO game_cards (session_id,user_id,card_uid,template_guid,"
         "card_template_id,location,position,card_state,card_abilities,"
-        "card_type,card_attributes) VALUES (1,5,101,?,?, 'warzone',0,0,"
-        "'[]','Troop',0)", (TPL["gladiator"], 6515))
+        "card_type,card_attributes,gems) VALUES (1,5,101,?,?, 'warzone',0,0,"
+        "'[]','Troop',0,5)", (TPL["gladiator"], 6515))
     db.commit()
 
     class Stub:
@@ -799,7 +805,7 @@ def test_move_into_play_fires_deploy(db):
     deploy = "dfc60750-4bb5-8218-770e-7d3a37be8da7"
     one_shot = "89285cf9-97ba-5b40-3a91-ba14ecfccd2a"
     move_effect = "e162c350-9df1-f4d8-cbce-2563eab4f05f"
-    src = sqlite3.connect(SRC)
+    src = sqlite3.connect(fresh_database())
     row = src.execute(
         "SELECT guid, name, card_type, cost, attack, defense, attributes, "
         "abilities_json, threshold_json, subtype FROM card_templates "
@@ -809,7 +815,7 @@ def test_move_into_play_fires_deploy(db):
                "threshold_json, subtype) VALUES (?,?,?,?,?,?,?,?,?,?)", row)
     src.close()
     for ability_guid in (deploy, one_shot):
-        src = sqlite3.connect(SRC)
+        src = sqlite3.connect(fresh_database())
         meta = src.execute(
             "SELECT ability_guid, is_triggered, trigger_event_type, game_text, "
             "raw_json, casting_behavior, is_manual, activation_cost, "
@@ -958,18 +964,19 @@ def test_angel_draw(db):
     pl_t, ai_t, game, bstate = new_game(db)
     # Thresholds are keyed by shard flag bits (Diamond = 64), as in live state.
     bstate["player_threshold"] = {int(game_engine.SHARD_TO_FLAG["diamond"]): 1}
-    bstate["player_draws_this_turn"] = 1
     session = SessionStub()
     handler = HandlerStub()
     handler._db = db
-    # CardDrawnEvent's source is the drawing champion and its target is the
-    # card drawn.  Angel's TriggerTarget condition and play effect depend on
-    # that distinction.
+    # The draw path (draw_effects.py) emits CardDrawnEvent from the drawing
+    # champion, targets the card drawn, and carries this player's draw ordinal.
+    # Angel's TriggerSource Nth-draw condition reads that ordinal.
     from rules_port.triggers import dispatch_native_trigger
     dispatch_native_trigger(
         db=db, handler=handler, game=game, session=session, player_uid=pl_t,
         ai_uid=ai_t, battle_state=bstate, event_type="CardDrawnEvent",
-        source_card_id=999999, source_player_id=5, target_card_id=400)
+        source_card_id=int(handler._player_champ_scid.uid.uid64),
+        source_player_id=5, target_card_id=400,
+        data={"nth_card_drawn_this_turn_by_this_player": 1})
     drain_stack(db, handler, game, session, pl_t, ai_t, bstate)
     loc = db.execute(
         "SELECT location FROM game_cards WHERE card_uid=400").fetchone()[0]

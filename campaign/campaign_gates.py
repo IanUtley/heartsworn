@@ -121,6 +121,7 @@ def apply(campaign, db, champ_id, state, template="AZ1") -> None:
         return
     view = engine_state(campaign, db, rules, champ_id, state)
     pdata = state.setdefault("PublicState", {}).setdefault("Data", {})
+    layout_nodes = campaign_rules.layout(rules, view)["nodes"]
     for node_id, spec in (rules.get("nodes") or {}).items():
         if "impassable" in spec:
             # The location's /impassable field: the client draws it red and
@@ -140,7 +141,9 @@ def apply(campaign, db, champ_id, state, template="AZ1") -> None:
         _set_member(pdata, "quest_hidden_nodes", node_id, gate["hidden"])
         _set_member(pdata, "quest_reveal_nodes", node_id, gate["visible"])
         _set_member(pdata, "unlocked_nodes", node_id, gate["visible"])
-        _set_member(pdata, "quest_nodes", node_id, gate["marker"])
+        # A quest marker needs the node visible: a marked node the player cannot see stays unmarked.
+        marked = gate["marker"] and bool((layout_nodes.get(node_id) or {}).get("visible"))
+        _set_member(pdata, "quest_nodes", node_id, marked)
         if gate["hidden"]:
             _forget_visits(state, pdata, node_id)
 

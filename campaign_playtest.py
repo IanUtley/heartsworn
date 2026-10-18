@@ -229,14 +229,14 @@ def build_battle(db, request: dict, user_id: int) -> dict:
     Read-only; the campaign battle setup applies the scene overrides itself
     (``campaign.resolve_battle_config``)."""
     import pve_db
-    from profile_db import db_latest_champion_for_user
+    from profile_db import db_last_played_champion_for_user
     scene = str(request.get("scene") or "").lower()
     row = pve_db.db_encounter_scene_runtime(scene, conn=db)
     if not row:
         raise LookupError(f"unknown encounter scene {scene}")
     if not row[4]:
         raise ValueError(f"scene {row[1]} has no AI deck (not a battle)")
-    champ = db_latest_champion_for_user(user_id, conn=db)
+    champ = db_last_played_champion_for_user(user_id, conn=db)
     champion_id = int(champ[0]) if champ else None
     deck_id = int(champ[1]) if champ and champ[1] else None
     if not deck_id:

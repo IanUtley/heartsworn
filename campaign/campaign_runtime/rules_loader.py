@@ -101,6 +101,8 @@ def _build(db, zone_id: str, path: Path):
     # Overworld battles stay replayable after a win (the client shows them as
     # Repeatable); a dungeon's battles complete when won.
     merged["battles_repeat"] = entry.get("kind") == "overworld"
+    # A dungeon battle that is won completes its node, so it cannot be redone.
+    merged["dungeon"] = entry.get("kind") == "dungeon"
     # Starter panoramas (own AZ0 rows) have rules: NPCs are nodes.
     if db is not None and entry.get("server_template") and (
             entry["kind"] != "panorama" or entry.get("race") or entry.get("npcs")):
@@ -161,13 +163,50 @@ def _build(db, zone_id: str, path: Path):
     # Authored offer order (the editor's drag-and-drop): offers named in the
     # saved order come first in that order; the others keep their generated
     # order after them. Conditions still decide which offer applies.
-    for node_id, order in (merged.get("offer_order") or {}).items():
-        spec = (merged.get("nodes") or {}).get(node_id)
+    # Without a saved order a node's offers are listed encounters first, then
+    # conversations, each group by name in alphabetical order, then the rest in
+    # their generated order.
+    kind_rank = {"conversation": 0, "encounter": 1}
+    saved_orders = merged.get("offer_order") or {}
+    for node_id, spec in (merged.get("nodes") or {}).items():
         if not spec or not spec.get("entries"):
             continue
-        rank = {offer: index for index, offer in enumerate(order or ())}
-        spec["entries"] = sorted(
-            spec["entries"],
-            key=lambda entry: rank.get(entry.get("id"), len(rank)))
+        # An offer id names one offer: a repeated entry (the same conversation
+        # merged from two sources) is dropped, keeping the first.
+        seen_offers = set()
+        seen_conversations = set()
+        kept = []
+        for entry in spec["entries"]:
+            if entry.get("id") in seen_offers:
+                continue
+            seen_offers.add(entry.get("id"))
+            # A conversation guid is offered once per node: the first entry for
+            # it wins (the editor lists it once too).
+            guid = entry.get("conversation") if entry.get("kind") == "conversation" else None
+            if guid:
+                if guid in seen_conversations:
+                    continue
+                seen_conversations.add(guid)
+            kept.append(entry)
+        spec["entries"] = kept
+        # Offers the rules file removes for this node (a battle that a second,
+        # tagged conversation would otherwise offer again).
+        removed = set((merged.get("offer_exclude") or {}).get(node_id) or ())
+        spec["entries"] = [entry for entry in spec["entries"]
+                           if entry.get("id") not in removed]
+        if node_id in saved_orders:
+            order = saved_orders[node_id]
+            rank = {offer: index for index, offer in enumerate(order or ())}
+            spec["entries"] = sorted(
+                spec["entries"],
+                key=lambda entry: rank.get(entry.get("id"), len(rank)))
+        else:
+            by_name = lambda e: str(e.get("label") or e.get("id") or "").lower()
+            battles = sorted((e for e in spec["entries"] if e.get("kind") == "encounter"),
+                             key=by_name)
+            talks = sorted((e for e in spec["entries"] if e.get("kind") == "conversation"),
+                           key=by_name)
+            others = [e for e in spec["entries"] if e.get("kind") not in kind_rank]
+            spec["entries"] = battles + talks + others
     # Checked after merging: live scene-action hooks set flags too.
     return merged, engine.validate(merged)

@@ -409,6 +409,39 @@ def _set_life(handler, session, state, pid, value, game):
     game.push_player_updated(game.player_uid, champ_id=getattr(handler, "_player_champ_scid", None))
 
 
+def _card_type_for_play(card_uid):
+    """The card type recorded for a cheat-played card in this session."""
+    row = _db.execute(
+        "SELECT ct.card_type FROM game_cards gc JOIN card_templates ct "
+        "ON ct.guid=gc.template_guid WHERE gc.card_uid=?",
+        (int(card_uid),)).fetchone()
+    return row[0] if row else ""
+
+
+def _play_pvp_card_via_rulesport(handler, session, card_uid, card_type):
+    """Cast a debug-played PvP card through the RulesPort card-play seam.
+
+    The cheat supplies no client packet, so the typed intent is built here.  With
+    no attached RulesPort host there is no legacy engine to fall back to.
+    """
+    from types import SimpleNamespace
+    if getattr(session, "_rules_port_session", None) is None:
+        log_req("    Debug cheat play: no RulesPort host attached; refusing legacy play")
+        return False
+    ctype = _ge.card_type_from_db(card_type)
+    if ctype & (_ge.ECardTypes.BasicAction | _ge.ECardTypes.QuickAction):
+        kind = "play_spell"
+    elif ctype & _ge.ECardTypes.Troop:
+        kind = "play_troop"
+    elif ctype & _ge.ECardTypes.Artifact:
+        kind = "play_artifact"
+    else:
+        log_req(f"    Debug cheat play: unsupported card type {card_type}")
+        return False
+    play = SimpleNamespace(kind=kind, payload={"card_id": int(card_uid)})
+    return bool(handler._handle_rules_port_card_play(session, play))
+
+
 def _handle(handler, session, raw):
     action = _enum(handler, raw, "DebugAction")
     if action is None:
@@ -481,17 +514,10 @@ def _handle(handler, session, raw):
                     game.push_player_updated(me, champ_id=getattr(handler, "_player_champ_scid", None))
                 if action == 14:
                     if state and state.get("pvp") and pid == int(handler.client_reck_id):
-                        from services.tournament_game import (
-                            _pvp_play_spell, _pvp_play_troop, pvp_save_state)
+                        from services.tournament_game import pvp_save_state
                         _add_card_requirements(state, pid, tpl)
                         pvp_save_state(session, state)
-                        ctype = _ge.card_type_from_db(tpl[1])
-                        if ctype & (_ge.ECardTypes.BasicAction | _ge.ECardTypes.QuickAction):
-                            _pvp_play_spell(handler, session, card_uid, pid, raw)
-                        elif ctype & (_ge.ECardTypes.Troop | _ge.ECardTypes.Artifact | _ge.ECardTypes.Constant):
-                            _pvp_play_troop(handler, session, card_uid, pid, raw)
-                        else:
-                            log_req(f"    Debug cheat Play: unsupported card type {tpl[1]}")
+                        _play_pvp_card_via_rulesport(handler, session, card_uid, tpl[1])
                         return True
                     log_req("    Debug cheat Play: PvE/unowned-player play remains acknowledgement-only")
             _send(handler, session, game, me, bool(state and state.get("pvp")))
@@ -499,7 +525,7 @@ def _handle(handler, session, raw):
 
     if action == 13 and target_card:
         if state and state.get("pvp") and pid == int(handler.client_reck_id):
-            from services.tournament_game import pvp_handle_transaction, pvp_save_state
+            from services.tournament_game import pvp_save_state
             cost = db_card_cost(session.session_id, target_card, conn=_db)
             extra = max(0, int(cost or 0) - int(state.get(f"res_{pid}", 0)))
             if extra:
@@ -509,8 +535,8 @@ def _handle(handler, session, raw):
             # ``SessionCardId``; ordinary Play* transactions expose the
             # backing member ``m_SessionCardId``.  Reuse the normal PvP play
             # router after normalizing that one wire field.
-            play_raw = raw.replace(b"SessionCardId", b"m_SessionCardId", 1)
-            if pvp_handle_transaction(handler, session, play_raw):
+            if _play_pvp_card_via_rulesport(handler, session, target_card,
+                                            _card_type_for_play(target_card)):
                 return True
         log_req(f"    Debug cheat PlayCard: target {target_card} was acknowledged but not playable in this session")
         return True

@@ -944,13 +944,13 @@ def test_choice_ability_transforms_real_parent(db):
         handler = HandlerStub(db)
         bstate = {"resolving_source_uid": source_uid,
                   "resolving_owner_id": 5}
-        from rules_port.token_effects import summon_token
-        summon_token(
+        # The source card's DoubleChoice creates its choice cards with a
+        # parent link to that source (choice_effects._create_choice_cards).
+        from rules_port.choice_effects import _create_choice_cards
+        choice_uid = _create_choice_cards(
             EffectContext.from_rules_port(
                 game, session, db, handler, pl_t, ai_t, bstate, "", ""),
-            {"token_guid": choice_tpl, "amount": 1,
-             "collection": "Choosing"})
-        choice_uid = bstate["created_token_uids"][0]
+            5, [choice_tpl], parent_uid=source_uid)[0]
         context = EffectContext.from_rules_port(
             game, session, db, handler, pl_t, ai_t, bstate, "", "")
         assert _play_choice_card(context, choice_uid, 5)

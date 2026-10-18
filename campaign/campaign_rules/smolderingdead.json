@@ -47,9 +47,20 @@
   "NodeB": {},
   "NodeC": {},
   "NodeD": {},
-  "NodeF": {},
-  "NodeG": {}
+  "NodeF": {}
  },
  "hooks": [],
- "edited_states": {}
+ "edited_states": {
+  "NodeG": [
+   "visible"
+  ]
+ },
+ "offer_order": {
+  "NodeG": [
+   "conv:0f5ec71e",
+   "battle:f7741fa9",
+   "conv:4b7b696c",
+   "conv:72b9bbf9"
+  ]
+ }
 }

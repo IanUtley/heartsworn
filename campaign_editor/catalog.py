@@ -255,6 +255,107 @@ def zone_catalog(db, entry, authored=None):
     return _catalog_data.zone_catalog(db, entry, authored, ui=True)
 
 
+# Threshold indexes follow the client's ECardShard values (0=Colorless .. 5=Diamond).
+SHARD_NAMES = ("Colorless", "Blood", "Ruby", "Sapphire", "Wild", "Diamond")
+
+
+def _card_thresholds(threshold_json: Any) -> list[dict[str, Any]]:
+    """Decode a card's threshold requirement as ``[{shard, count}]``."""
+    try:
+        data = json.loads(threshold_json or "{}")
+    except (TypeError, ValueError):
+        return []
+    if isinstance(data, list):
+        values, indexes = data, range(len(data))
+    else:
+        values = data.get("values") or []
+        indexes = data.get("list") or []
+    result = []
+    for index in dict.fromkeys(int(value) for value in indexes):
+        count = values[index] if 0 <= index < len(values) else 0
+        if count and 0 <= index < len(SHARD_NAMES):
+            result.append({"shard": SHARD_NAMES[index], "count": count})
+    return result
+
+
+def encounter_deck(db: sqlite3.Connection, scene_guid: str) -> dict[str, Any]:
+    """The opposing champion's deck for one encounter scene, one entry per card."""
+    row = db.execute(
+        "SELECT name, title, ai_deck_guid FROM encounter_scenes WHERE LOWER(guid)=?",
+        (str(scene_guid or "").lower(),)).fetchone()
+    if row is None:
+        raise LookupError("no such encounter scene")
+    deck_guid = str(row[2] or "").lower()
+    cards = []
+    if deck_guid:
+        for card_guid, quantity, name, cost, card_type, attack, defense, thresholds in db.execute(
+                "SELECT d.card_guid, d.quantity, c.name, c.cost, c.card_type, "
+                "c.attack, c.defense, c.threshold_json "
+                "FROM encounter_deck_cards d "
+                "LEFT JOIN card_templates c ON LOWER(c.guid)=LOWER(d.card_guid) "
+                "WHERE LOWER(d.deck_guid)=? ORDER BY c.cost, c.name",
+                (deck_guid,)).fetchall():
+            cards.append({
+                "guid": str(card_guid or "").lower(),
+                "quantity": int(quantity or 0),
+                "name": name or "",
+                "cost": int(cost or 0),
+                "card_type": card_type or "",
+                "attack": attack,
+                "defense": defense,
+                "thresholds": _card_thresholds(thresholds),
+            })
+    return {"scene": str(scene_guid).lower(), "name": row[1] or row[0] or "",
+            "deck_guid": deck_guid or None, "card_count": sum(c["quantity"] for c in cards),
+            "cards": cards}
+
+
+def _plain_game_text(value: Any) -> str:
+    """Authored game text without its markup: tags and [SHARD] brackets."""
+    text = html.unescape(str(value or ""))
+    text = re.sub(r"<[^>]*>", "", text)
+    text = re.sub(r"\[[^\]]*\]", " ", text)
+    return re.sub(r"\s+", " ", text).strip(" :,.")
+
+
+def encounter_champion_abilities(db: sqlite3.Connection, scene_guid: str) -> dict[str, Any]:
+    """The opposing champion's powers for one encounter: a title and description each."""
+    row = db.execute(
+        "SELECT name, title, ai_champion_guid FROM encounter_scenes WHERE LOWER(guid)=?",
+        (str(scene_guid or "").lower(),)).fetchone()
+    if row is None:
+        raise LookupError("no such encounter scene")
+    champion = str(row[2] or "").lower()
+    abilities = []
+    if champion:
+        seen = set()
+        for ability_guid, charge_cost, spell_cost, game_text, triggered in db.execute(
+                "SELECT c.ability_guid, c.charge_cost, c.spell_cost, c.game_text, "
+                "m.is_triggered FROM champion_abilities c "
+                "LEFT JOIN card_abilities_meta m ON m.ability_guid=c.ability_guid "
+                "WHERE LOWER(c.champion_guid)=? ORDER BY c.ability_guid",
+                (champion,)).fetchall():
+            charges, spells = int(charge_cost or 0), int(spell_cost or 0)
+            # Powers with a cost, and triggered abilities (their text says when
+            # they fire).  A zero-cost, untriggered copy of a power is not listed.
+            if charges:
+                title = f"Charge power · {charges} charge{'s' if charges != 1 else ''}"
+            elif spells:
+                title = f"Spell power · {spells} spell point{'s' if spells != 1 else ''}"
+            elif triggered:
+                title = "Triggered ability"
+            else:
+                continue
+            description = _plain_game_text(game_text)
+            if (title, description) in seen:
+                continue
+            seen.add((title, description))
+            abilities.append({"guid": str(ability_guid or "").lower(), "title": title,
+                              "description": description})
+    return {"scene": str(scene_guid).lower(), "champion": champion or None,
+            "abilities": abilities}
+
+
 def rewards_catalog(db: sqlite3.Connection | None) -> dict[str, Any]:
     """Names and accessible text for the reward editor's pickers."""
     def plain_text(value: Any) -> str:
@@ -456,8 +557,13 @@ def area_payload(db: sqlite3.Connection | None, zone_id: str = AREA_TEMPLATE
             merged.setdefault(canon(node_id), []).extend(items)
         return merged
 
-    node_conversations = by_node(data["node_conversations"])
-    quest_links = by_node(data["quest_links"])
+    def once_per_guid(grouped):
+        # A conversation guid is listed once per node (the catalog tables repeat rows).
+        return {node: list({row["guid"]: row for row in reversed(rows)}.values())[::-1]
+                for node, rows in grouped.items()}
+
+    node_conversations = once_per_guid(by_node(data["node_conversations"]))
+    quest_links = once_per_guid(by_node(data["quest_links"]))
     # A panorama's NPC content is shown inside the panorama, not on its node.
     claims = offers.panorama_claims(zone_id) if entry["kind"] == "overworld" else {}
     for node_id, claim in claims.items():
@@ -641,6 +747,10 @@ _RULES_LOCK = threading.Lock()
 _RULES_CACHE: dict[str, dict[str, Any]] = {}
 
 
+# Node states the editor no longer offers or shows.
+EDITOR_HIDDEN_STATES = frozenset({"hidden", "blocked"})
+
+
 def _rules_module():
     import sys
     if str(REPO) not in sys.path:
@@ -671,7 +781,7 @@ def rules(db: sqlite3.Connection | None, zone_id: str = AREA_TEMPLATE
     merged = dict(built, state_tags={
         node_id: {gate: engine.condition_tags(spec[gate])
                   if not isinstance(spec[gate], list) else spec[gate]
-                  for gate in engine.GATES if gate in spec}
+                  for gate in engine.GATES if gate in spec and gate not in EDITOR_HIDDEN_STATES}
         for node_id, spec in (loaded.get("nodes") or {}).items()})
     with _RULES_LOCK:
         _RULES_CACHE[zone_id] = {"source": built, "rules": merged}

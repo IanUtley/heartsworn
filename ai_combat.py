@@ -375,8 +375,9 @@ class AttackResult:
                     b = blockers[slot]
                     if b is not None and self.destroys_blocker(attacker, b, remaining):
                         value += b.value
-                        remaining -= (1 if attacker.card.has_attribute(
-                            ECardAttributes.Lethal) else b.defense(False))
+                        remaining -= (1 if bool(getattr(
+                            attacker.card, "lethal", False))
+                            else b.defense(False))
                         blockers[slot] = None
             else:
                 open_slots = sum(1 for b in blockers if b is None)

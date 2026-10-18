@@ -64,6 +64,7 @@ def reload_runtime_modules():
     import rules_port.transactions as rules_transactions
     import domain.constants as domain_constants
     import campaign_playtest as campaign_playtest_module
+    import ai_eval as ai_eval_module
 
     # Reload foundational modules first, then all already-loaded modules in
     # the application/runtime packages.  Filtering sys.modules avoids
@@ -82,6 +83,7 @@ def reload_runtime_modules():
          application_dispatcher, player_transactions, campaign,
          campaign_playtest_module],
         [rules_transactions, rules_runtime, rules_wire],
+        [ai_eval_module],
         [aim, te, ts, tg, sch, arena_service, mail_service, en],
     ]
     prefixes = ("abilities", "rules_port", "application", "services",
@@ -706,7 +708,7 @@ _DEVELOPER_HELP_LINES = (
     "!top <id|name> — put a card from your hand on top of your deck",
     "!zones — list cards by zone",
     "!move <id> <zone> — move card to zone",
-    "!give [me|opp] <troop name> — put a troop in your or the opponent's warzone, as if played this turn",
+    "!give [me|opp] <card name> — put a card in your or the opponent's hand, with the thresholds to play it (opp is the default)",
     "!state <id> <flags> — set card state (Tapped|Attacking|...)",
     "!attr/!attributes <id> <flags> — set card attributes (Flight|Speed|...)",
     "!update <id> — resend CardUpdated for a card",
@@ -1892,23 +1894,22 @@ def _dispatch(handler, action, args, session, pl_t, ai_t, room, username):
         return f"Generated card: {name} ({tpl_guid})"
 
     elif action == "give":
-        # Put a troop straight into a warzone.  A newly placed troop has no
-        # StartedATurnOnYourSide state, so it is summoning sick, the same as a
-        # troop played this turn.  No cost is paid and no Deploy triggers.
+        # Put a card in a player's hand, with the thresholds it needs to play.
+        # ``opp`` (the default) is the opponent's hand; ``me`` is yours.
         if args and args[0].lower() in ("me", "opp"):
             target, name_parts = args[0].lower(), args[1:]
         else:
-            target, name_parts = "me", args
+            target, name_parts = "opp", args
         name = " ".join(name_parts).strip().lower()
         if not name:
-            return "Usage: give [me|opp] <troop name>"
+            return "Usage: !give [me|opp] <card name>"
         row = db.execute(
-            "SELECT guid, card_type FROM card_templates "
-            "WHERE LOWER(name)=? AND card_type LIKE '%Troop%' "
+            "SELECT guid, card_type, threshold_json FROM card_templates "
+            "WHERE LOWER(name)=? "
             "ORDER BY COALESCE(equipment_modified,0), guid LIMIT 1",
             (name,)).fetchone()
         if not row:
-            return f"No troop named '{name}'"
+            return f"No card named '{name}'"
         if is_tourney:
             from pvp_db import db_game_session_pids
             mine = int(handler.client_reck_id)
@@ -1925,10 +1926,9 @@ def _dispatch(handler, action, args, session, pl_t, ai_t, room, username):
                             db_set_card_abilities)
         card_uid = db_next_card_uid(session.session_id, conn=db)
         card_uid, _template = db_insert_debug_card(
-            session.session_id, owner, card_uid, row, "warzone", conn=db)
-        # The debug insert carries no ability list, so a troop given this way
-        # lost its authored triggers (e.g. Nameless Citizen's bury-on-block).
-        # Copy the template's own abilities, as a deck-built card has them.
+            session.session_id, owner, card_uid, row, "hand", conn=db)
+        # The debug insert carries no ability list, so copy the template's own
+        # abilities, as a deck-built card has them.
         template_abilities = db.execute(
             "SELECT abilities_json FROM card_templates WHERE guid=?",
             (row[0],)).fetchone()
@@ -1936,9 +1936,40 @@ def _dispatch(handler, action, args, session, pl_t, ai_t, room, username):
                               (template_abilities[0] if template_abilities
                                else None) or "[]", conn=db)
         db.commit()
+        # Thresholds: raise the receiver's counts to what the card needs.
+        try:
+            needed = [max(0, int(v)) for v in
+                      (_json.loads(row[2] or "{}").get("values") or [])][:6]
+        except (TypeError, ValueError, _json.JSONDecodeError):
+            needed = []
+        needed += [0] * (6 - len(needed))
+        flags = [1, 4, 8, 16, 32, 64]
+        if is_tourney:
+            from services import tournament_game as _tg
+            state = _tg.pvp_load_state(session) or {}
+            current = dict(state.get(f"thresh_{owner}") or {})
+            for flag, count in zip(flags, needed):
+                current[flag] = max(int(current.get(flag, 0) or 0), count)
+            state[f"thresh_{owner}"] = {f: c for f, c in current.items() if c}
+            _tg.pvp_save_state(session, state)
+            _tg._pvp_sync_game_state(session)
+            _refresh_pvp_debug_options(_tg, session, state)
+        else:
+            import battle_engine as _be
+            bstate = _be.load_state(session)
+            threshold_key = "player_threshold" if owner == command_owner_id else "ai_threshold"
+            shard_keys = [game_engine.ECardShards.Colorless, game_engine.ECardShards.Blood,
+                          game_engine.ECardShards.Ruby, game_engine.ECardShards.Sapphire,
+                          game_engine.ECardShards.Wild, game_engine.ECardShards.Diamond]
+            current = dict(bstate.get(threshold_key) or {})
+            for key, count in zip(shard_keys, needed):
+                current[key] = max(int(current.get(key, 0) or 0), count)
+            bstate[threshold_key] = current
+            _be.save_state(session, bstate)
         _push_card_update(handler, db, session, pl_t, card_uid, user_id=owner,
-                          collection_override=game_engine.ECardCollections.Warzone)
-        return f"Gave {name} to {target} warzone (card {card_uid}, summoning sick)"
+                          collection_override=game_engine.ECardCollections.Hand)
+        return (f"Gave {name} to {target}'s hand (card {card_uid}); "
+                f"thresholds set for it to play")
 
     elif action == "help":
         lines = _help_lines(True)

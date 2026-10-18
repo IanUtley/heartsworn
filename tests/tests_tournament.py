@@ -139,11 +139,15 @@ def test_orphaned_started_tournaments_are_closed_but_live_and_waiting_remain():
     try:
         test_db.executescript(
             """
+            CREATE TABLE tournament_types (
+                id INTEGER PRIMARY KEY, style TEXT
+            );
             CREATE TABLE tournaments (
-                id INTEGER PRIMARY KEY, status TEXT, session_id TEXT
+                id INTEGER PRIMARY KEY, status TEXT, session_id TEXT,
+                type_id INTEGER
             );
             CREATE TABLE game_sessions (session_id TEXT PRIMARY KEY);
-            INSERT INTO tournaments VALUES
+            INSERT INTO tournaments (id, status, session_id) VALUES
                 (10001, 'started', 'missing-session'),
                 (10002, 'started', 'live-session'),
                 (10003, 'waiting', NULL),
@@ -309,11 +313,24 @@ def test_pvp_result_is_published_before_game_over():
     class Session:
         session_id = 42765
         server_id = 1
+        session_name = "tourney-1"
+        turn_order = {}
 
         def set_state(self, state):
             events.append(state)
 
-    handlers = {1001: object(), 1002: object()}
+        def _persist(self):
+            pass
+
+    class ClientHandler:
+        """The per-player connection the game publishes through."""
+        scnt = 0
+        sid = 1
+
+        def send(self, *_args, **_kwargs):
+            pass
+
+    handlers = {1001: ClientHandler(), 1002: ClientHandler()}
     with mock.patch.object(tournament_game, "db_game_session_pids",
                            return_value=[1001, 1002]), \
             mock.patch.object(tournament_game, "player_handlers", handlers), \

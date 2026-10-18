@@ -369,9 +369,10 @@ def test_battle_damage(db):
     bstate["_rules_port_native_effect"] = True
     context = EffectContext.from_rules_port(
         game, SessionStub(), db, HandlerStub(), pl_t, ai_t, bstate, "e", "")
-    native_effects.dispatch(
-        "Battle2CardsAbilityEffectTemplate", context,
-        {"param": "", "target_index": 1, "secondary_target_index": 0})
+    # Direct call without an authored effect: the attacker is the resolving
+    # source and the defender the resolved target (battle_effects.battle_cards).
+    from rules_port.battle_effects import battle_cards
+    battle_cards(context)
     row = db.execute(
         "SELECT location, card_damage FROM game_cards WHERE card_uid=200").fetchone()
     # 1 ATK vs 1 DEF: the battle deals 1 damage.  The lethal death is applied

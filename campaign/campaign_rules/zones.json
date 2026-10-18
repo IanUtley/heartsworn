@@ -80,7 +80,9 @@
    "parent": "AZ1",
    "parent_node": "Node024",
    "server_template": "The Smoldering Dead",
-   "scene_match": "items"
+   "scene_match": "items",
+   "prefab_root": "campaign/az01/smolderingdead",
+   "campaign_template_id": "a8d2ad0e-306e-4d07-9cd1-e4d7c82cdf1c"
   },
   {
    "id": "theusurper",
@@ -90,7 +92,9 @@
    "parent": "AZ1",
    "parent_node": "Node008",
    "server_template": "The Usurper",
-   "scene_match": "items"
+   "scene_match": "items",
+   "prefab_root": "campaign/az01/theusurper",
+   "campaign_template_id": "39f31d36-c96d-4858-a581-6bc4dfc90b5f"
   },
   {
    "id": "tranquildream",
@@ -112,7 +116,9 @@
    "parent": "AZ2",
    "parent_node": "Node002",
    "server_template": "Brutecrown Bluff",
-   "scene_match": "items"
+   "scene_match": "items",
+   "prefab_root": "campaign/az02/brutecrownbluff",
+   "campaign_template_id": "b730906f-a446-4fe0-869a-147857e4396e"
   },
   {
    "id": "greatmachinegraveyard",
@@ -122,7 +128,9 @@
    "parent": "AZ2",
    "parent_node": "Node044",
    "server_template": "Great Machine Graveyard",
-   "scene_match": "items"
+   "scene_match": "items",
+   "prefab_root": "campaign/az02/greatmachinegraveyard",
+   "campaign_template_id": "c875a374-7871-4a51-bb2e-cca8d5061ae2"
   },
   {
    "id": "kraken",
@@ -132,7 +140,9 @@
    "parent": "AZ2",
    "parent_node": "Node019B",
    "server_template": "The Kraken",
-   "scene_match": "items"
+   "scene_match": "items",
+   "prefab_root": "campaign/az02/kraken",
+   "campaign_template_id": "6b73c598-3b92-46ea-bd57-62ca564b2e57"
   },
   {
    "id": "ruinsofkukatan",
@@ -142,7 +152,9 @@
    "parent": "AZ2",
    "parent_node": "Node040",
    "server_template": "Ruins of Kukatan",
-   "scene_match": "items"
+   "scene_match": "items",
+   "prefab_root": "campaign/az02/ruinsofkukatan",
+   "campaign_template_id": "d7dc66e5-a3e4-4713-92c9-68717ae87442"
   },
   {
    "id": "cavein",

@@ -65,6 +65,7 @@ from application.player_transactions import (classify_player_transaction,
 import gamemodes.tournament_server as tournament_server
 from application.service_dispatch import dispatch_service
 from application.profile_stream import ProfileStreamMixin
+from application.rules_port_projections import RulesPortProjectionMixin
 from gamemodes.tournament_engine import (
     _encode_enter_tournament_error, _make_deck_data,
     _tournament_format_bitmask, _tournament_session_flags,
@@ -401,7 +402,7 @@ def _dispatch_service(handler, data_type, target, instance, reqid, comp,
         log_req=log_req)
 
 
-class HCPHandler(ProfileStreamMixin, CardPlayMixin, CardStateMixin, CombatMixin, ChainMixin, TurnFlowMixin, PendingChoicesMixin, TransactionsMixin, FraBattleMixin):
+class HCPHandler(RulesPortProjectionMixin, ProfileStreamMixin, CardPlayMixin, CardStateMixin, CombatMixin, ChainMixin, TurnFlowMixin, PendingChoicesMixin, TransactionsMixin, FraBattleMixin):
     def __init__(self, conn, addr):
         self.conn = conn
         self.addr = addr
@@ -1304,123 +1305,21 @@ class HCPHandler(ProfileStreamMixin, CardPlayMixin, CardStateMixin, CombatMixin,
             # native resolver and the host projection are available.
             port.rehydrate_projected_chain()
             def card_projection(kind, transaction):
-                """Dispatch only the explicit typed card-play mutations."""
-                if kind in ("play_troop", "play_artifact", "play_spell",
-                            "play_champion"):
-                    handled = self._handle_rules_port_card_play(
-                        session, transaction)
-                    if handled:
-                        session._rules_port_mutation_emitted = True
-                    return handled
-                return False
+                return self._rp_card_projection(session, kind, transaction)
             def resource_mutation(transaction):
-                """Apply every resource through the port-owned seam."""
-                handled = self._handle_rules_port_resource(
-                    session, transaction)
-                if handled:
-                    session._rules_port_mutation_emitted = True
-                return handled
+                return self._rp_resource_mutation(session, transaction)
             def discard_projection(transaction):
-                """Consume a validated DiscardTransaction through the port."""
-                original = getattr(session, "_rules_port_dispatch_command", None)
-                if original is None:
-                    return False
-                try:
-                    card_uid = (getattr(transaction, "payload", {}) or {}).get(
-                        "card_id")
-                    handled = bool(self._handle_discard_transaction(
-                        session, original, card_uid=card_uid))
-                    if handled:
-                        session._rules_port_mutation_emitted = True
-                    return handled
-                except Exception as exc:
-                    log_req(f"    RulesPort discard mutation failed: {exc}")
-                    return False
+                return self._rp_discard_projection(session, transaction)
             def hand_projection(kind, transaction):
-                """Consume opening-hand mutations through the port boundary."""
-                original = getattr(session, "_rules_port_dispatch_command", None)
-                if original is None:
-                    return False
-                try:
-                    if kind == "accept_starting_hand":
-                        handled = bool(self._handle_mulligan_keep_transaction(
-                            session, original))
-                    elif kind == "mulligan":
-                        handled = bool(self._handle_mulligan_redraw_transaction(
-                            session, original))
-                    else:
-                        handled = False
-                    if handled:
-                        session._rules_port_mutation_emitted = True
-                    return handled
-                except Exception as exc:
-                    log_req(f"    RulesPort hand mutation failed: {exc}")
-                    return False
+                return self._rp_hand_projection(session, kind, transaction)
             def attack_projection(transaction):
-                original = getattr(session, "_rules_port_dispatch_command", None)
-                if original is None:
-                    return False
-                try:
-                    handled = bool(self._handle_commit_attack_transaction(
-                        session, original,
-                        declarations=(getattr(transaction, "payload", {}) or
-                                      {}).get("declarations"),
-                        authoritative_port=port))
-                    if handled:
-                        session._rules_port_mutation_emitted = True
-                    return handled
-                except Exception as exc:
-                    log_req(f"    RulesPort attack mutation failed: {exc}")
-                    return False
+                return self._rp_attack_projection(session, transaction, port)
             def defense_projection(transaction):
-                original = getattr(session, "_rules_port_dispatch_command", None)
-                if original is None:
-                    return False
-                try:
-                    handled = bool(self._handle_commit_defense_transaction(
-                        session, original,
-                        declarations=(getattr(transaction, "payload", {}) or
-                                      {}).get("declarations"),
-                        authoritative_port=port))
-                    if handled:
-                        session._rules_port_mutation_emitted = True
-                    return handled
-                except Exception as exc:
-                    log_req(f"    RulesPort defense mutation failed: {exc}")
-                    return False
+                return self._rp_defense_projection(session, transaction, port)
             def damage_projection(transaction):
-                original = getattr(session, "_rules_port_dispatch_command", None)
-                if original is None:
-                    return False
-                try:
-                    handled = bool(self._handle_assign_damage_transaction(
-                        session, original,
-                        assignments=(getattr(transaction, "payload", {}) or
-                                     {}).get("assignments"),
-                        native_combat=True))
-                    if handled:
-                        session._rules_port_mutation_emitted = True
-                    return handled
-                except Exception as exc:
-                    log_req(f"    RulesPort damage mutation failed: {exc}")
-                    return False
+                return self._rp_damage_projection(session, transaction)
             def choice_projection(transaction):
-                """Resume a metadata choice prompt through the port boundary."""
-                original = getattr(session, "_rules_port_dispatch_command", None)
-                if original is None:
-                    return False
-                try:
-                    pl_t = game_engine.UID.make(244, int(self.client_reck_id))
-                    ai_t = game_engine.UID.make(game_engine.SERVICE_AI_UID_TYPE, 1000)
-                    handled = bool(self._resolve_pending_choice(
-                        session, pl_t, ai_t, original.inner_bytes,
-                        typed_payload=getattr(original, "typed_payload", None)))
-                    if handled:
-                        session._rules_port_mutation_emitted = True
-                    return handled
-                except Exception as exc:
-                    log_req(f"    RulesPort choice continuation failed: {exc}")
-                    return False
+                return self._rp_choice_projection(session, transaction)
             def refresh_player_options(transaction):
                 """RulesPort request checkpoint; projection stays host-owned."""
                 # Tournament PvP has raw participant IDs and a separate

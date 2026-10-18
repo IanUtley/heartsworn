@@ -200,6 +200,47 @@ address in both clients. This avoids Steam's single-instance and ticket
 authentication behavior. Steam configuration remains available when Steam
 authentication itself is the behavior under test.
 
+## Campaign editor
+
+The campaign editor is a local web tool for the campaign zones: the overworlds,
+dungeons and panoramas. Open it at `http://127.0.0.1:8765/` (see
+[Starting the server](#starting-the-server)) and log in with a Hex account.
+`campaign_editor/README.md` has the full reference.
+
+- **Admins** edit the shared campaign (the authored data and rules in
+  `campaign/campaign_data/` and `campaign/campaign_rules/`), and can open any
+  player's saved character from the **Character state** list.
+- **Everyone else** can simulate the campaign and load only their own characters.
+  They can't change the shared campaign.
+
+### Fixing a campaign state
+
+Use this when a champion's campaign is stuck or a node shows the wrong state
+(for example, a node that should be incomplete shows as completed, or a
+conversation won't replay).
+
+1. Pick the champion in the **Character state** dropdown at the top of the
+   editor. The dropdown keeps its choice when you switch zones, if that
+   champion has a campaign in the new zone.
+2. Open the **Simulate** tab and click **From live state**. This loads the
+   champion's real saved progress, not a reconstruction. The button is enabled
+   only while a character is chosen. The simulator also lists the nodes where
+   the rules-derived map and the server's live map disagree.
+3. Check the node in question. The node panel shows its flags, progress and
+   what it offers now. Fix the state with **Move champion here**, the node and
+   flag controls, or the quest steps.
+4. Click **Save to champion** to write the fixed state back to the champion's
+   progress. Save while the champion isn't playing. The game picks it up when
+   the zone next loads or the champion logs in.
+
+To keep a copy of a state before you change it, use **Export state**. **Import
+state** loads one back (admins only), and **Undo** steps back through your edits.
+
+Saving only changes progress rows. It doesn't change the shared campaign rules.
+If the rule itself is wrong (for example, the wrong tags on a node), an admin can
+fix it in the editor. The server picks up a changed rules file the next time the
+zone loads; it doesn't need a restart for that.
+
 ## Architecture at a glance
 
 `hconnect_server.py` serves the TCP HConnect protocol on port 9933.

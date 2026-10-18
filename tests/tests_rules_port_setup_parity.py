@@ -119,18 +119,20 @@ def test_pvp_setup_coin_winner_is_persisted_and_shared_by_both_players():
         persisted.update(value)
 
     def collect_uids(value):
-        found = []
-        pending = [value]
-        while pending:
-            current = pending.pop()
-            if isinstance(current, dict):
-                if "m_UID64" in current:
-                    found.append(int(current["m_UID64"]))
-                else:
-                    pending.extend(current.values())
-            elif isinstance(current, (list, tuple)):
-                pending.extend(current)
-        return tuple(found)
+        """UIDs in document order (a depth-first walk, not a reversed stack)."""
+        if isinstance(value, dict):
+            if "m_UID64" in value:
+                return (int(value["m_UID64"]),)
+            found = ()
+            for item in value.values():
+                found += collect_uids(item)
+            return found
+        if isinstance(value, (list, tuple)):
+            found = ()
+            for item in value:
+                found += collect_uids(item)
+            return found
+        return ()
 
     responses = []
     with mock.patch.object(tournament_game, "db_game_session_pids",

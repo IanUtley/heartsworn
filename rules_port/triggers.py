@@ -292,7 +292,7 @@ class NativeTriggerBackend:
                 import game_engine
                 scid = game_engine.SessionCardId(game_engine.UID(int(uid)))
                 from .runtime_helpers import (card_collection_for_location,
-                                              owner_uid)
+                                              owner_uid, raw_uid)
                 collection = card_collection_for_location(location)
                 # Skip when this batch already published the card in the same
                 # collection (the death transition pushes its own discard
@@ -327,13 +327,24 @@ class NativeTriggerBackend:
                     break
                 tpl, ctype, _name, cost, attack, defense, gems = \
                     handler._card_full_data(game, scid, template_guid)
+                card_recipient = owner_uid(owner, player_uid, ai_uid,
+                                           battle_state)
+                # The chain reveal shows the card to both players, but a card
+                # in a hidden zone stays nulled for anyone who does not own it:
+                # an opponent's deck card (Voracious Vultures' trigger source)
+                # must not show its face.
+                hidden_zone = str(location).lower()
+                nulling = hidden_zone == "deck" or (
+                    hidden_zone in {"hand", "choosing"} and
+                    raw_uid(card_recipient) != raw_uid(player_uid))
                 game.push_card_updated(
-                    scid, owner_uid(owner, player_uid, ai_uid, battle_state),
+                    scid, card_recipient,
                     collection, ctype,
                     template_id=tpl, cost=cost, attack=attack,
                     defense=defense, gems=gems,
                     state=int(db_card_state_value(
-                        session.session_id, int(uid), conn=db) or 0))
+                        session.session_id, int(uid), conn=db) or 0),
+                    nulling=nulling)
                 if str(location).lower() in {"hand", "deck", "choosing"}:
                     # Game.make_network_packet uses this marker to retain the
                     # public chain reveal when the normal hidden-hand/deck
@@ -345,6 +356,16 @@ class NativeTriggerBackend:
         for candidate in discovered:
             source_uid = int(candidate.source_uid)
             source_owner = owner_of(source_uid, event.source_player_id or 0)
+            # PreGameEvent is one game event, but the setup loop dispatches it
+            # once per participant. A champion's own setup ability belongs to
+            # its controller's pass only, or it applies twice (Chained
+            # Goliath's Pure Hatred gave 4 Blood/4 Ruby instead of 2/2).
+            if (event_name == "PreGameEvent" and
+                    source_owner != (event.source_player_id or 0) and
+                    source_uid in {int(uid) for uid in
+                                   (battle_state.get("champ_map") or {}
+                                    ).values()}):
+                continue
             for ability_guid in candidate.ability_guids:
                 key = (source_uid, str(ability_guid).lower())
                 if key in seen:
@@ -527,6 +548,22 @@ class NativeTriggerBackend:
                 requires_input_index = next(
                     (index for index, spec in enumerate(graph.targets)
                      if spec.requires_input), None)
+                # The source card is only a default target when the input target
+                # template can select it.  Moldmass's Deploy (void a troop from
+                # your crypt) fired on its own entry with an empty crypt and
+                # voided itself through this fallback.
+                if (requires_input_index is not None and
+                        event.target_card_id is None and target is not None and
+                        int(target) == int(source_uid)):
+                    from .targeting import legal_targets
+                    legal = legal_targets(
+                        db, session.session_id, source_card_owner,
+                        graph.targets[requires_input_index].guid, source_uid,
+                        both_players=True,
+                        champions=(getattr(handler, "_champion_targets", lambda: [])() or []),
+                        battle_state=battle_state)
+                    if int(source_uid) not in {int(uid) for uid in legal}:
+                        target = None
                 if explicit:
                     from .targeting import legal_targets
                     template = graph.targets[explicit[0]].guid
@@ -579,6 +616,17 @@ class NativeTriggerBackend:
                     str(location or "").lower() == "underground" or
                     continuous_card_aura)
                 if ignores:
+                    # The client flashes the source card for an ignores-chain
+                    # ability (UIBattle.OnAbilityPushedOnChain) instead of
+                    # adding it to the chain. Publish that event before the
+                    # inline resolution so the same flash plays here.
+                    import game_engine as _ge
+                    game.push_ability_on_chain(
+                        _ge.SessionCardId(_ge.UID(int(source_uid))),
+                        _ge.ResourceId.from_str(key[1]),
+                        ability_instance_id=instance_id,
+                        target_card_ids=chain_targets(target),
+                        ignores_chain=True)
                     from .resolution import resolve_port_ability
                     old_source = battle_state.get("resolving_source_uid")
                     old_owner = battle_state.get("resolving_owner_id")
@@ -672,7 +720,8 @@ class NativeTriggerBackend:
                         game_engine.SessionCardId(game_engine.UID(source_uid)),
                         game_engine.ResourceId.from_str(key[1]),
                         ability_instance_id=instance_id,
-                        target_card_ids=chain_targets(target), ignores_chain=False)
+                        target_card_ids=chain_targets(target),
+                        ignores_chain=graph.client_ignores_chain)
                     # In tournament PvP the mode adapter owns a typed native
                     # chain as well as the wire-compatible checkpoint. Keep
                     # the two projections aligned at creation time. Without

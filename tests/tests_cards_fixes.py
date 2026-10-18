@@ -2222,6 +2222,44 @@ def test_hidden_scene_static_resource_grant_runs_at_game_start(db):
         for event in game.events) == 2
 
 
+def test_battleboard_mod_summons_token_for_opposing_race_champion(db):
+    """Scene mod "Aid from the Coalition" (Ardent Smoldering Dead Flask).
+
+    The hidden AI battleboard card's setup ability auto-targets "each
+    opposing Human champion" (IsNotControlledBy + IsSubType(Human) + IsHero)
+    and that champion summons a Flask of Holy Water.  Champions have no
+    ``game_cards`` row, so the race must come from the champion template in
+    ``champ_guid_map``.
+    """
+    from battle_engine import default_state
+    from rules_port.resolution import resolve_port_ability
+
+    flask_mod = "81e506df-f1f1-473d-a9a5-b8f7dd2995c4"
+    human_ability = "ea7e80fb-2b38-4b7a-545c-75c2f8a91932"
+    holy_water = "0154bf21-51b7-4ccf-aacd-11b28de231d7"
+    human_cleric = "d02f27c5-8ca4-4189-ba3b-a9aacb0d63ca"
+    _copy_card(db, flask_mod)
+    _copy_card(db, holy_water)
+    add_card(db, 777, 0, flask_mod, loc="mod")
+
+    pl_t = game_engine.UID.make(244, 5)
+    ai_t = game_engine.UID.make(3, 1000)
+    game = game_engine.Game(1, pl_t, ai_t)
+    handler = HandlerStub(db)
+    bstate = default_state()
+    bstate.update({"player_health": 20, "ai_health": 10,
+                   "champ_guid_map": {"5": human_cleric, "0": ""}})
+    handler._current_bstate = bstate
+
+    resolve_port_ability(handler, game, SessionStub(), db, pl_t, ai_t,
+                         bstate, human_ability, 777, 0)
+
+    owners = [row[0] for row in db.execute(
+        "SELECT user_id FROM game_cards WHERE template_guid=? "
+        "AND location='warzone'", (holy_water,))]
+    assert owners == [5]
+
+
 def test_chlorophyllia_plays_wild_shard_from_deck(db):
     """The nested PlayCard effect selects the gamedata target, then applies
     the same resource/threshold/charge events as a normal Wild Shard play."""
@@ -3003,3 +3041,67 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+def test_action_target_selection_covers_intent_preference_and_legacy_fallbacks():
+    """choose_action_target: a legal preferred target is kept, authored intent
+    picks the matching side (troop first, then that side's champion), and
+    metadata-less effects fall back to the legacy target rules."""
+    from types import SimpleNamespace
+    import ai_eval
+
+    def troop(uid, attack):
+        return SimpleNamespace(card_uid=uid, value=attack, is_troop=lambda: True,
+                               effective_attack=lambda: attack,
+                               effective_defense=lambda: attack)
+
+    ev = object.__new__(ai_eval.CardEvaluator)
+    ev.choose_action_target_map = lambda card, preferred_target=None: None
+    ev.ai_warzone = [troop(101, 2)]
+    ev.player_warzone = [troop(201, 2), troop(202, 3)]
+    ev.player_champ_uid = 900
+    ev._target_side_uids = lambda: ({101, 800}, {201, 202, 900})
+    ev._best_target = lambda cards, card=None: max(
+        cards, key=lambda c: c.effective_attack())
+    state = {"intent": None, "candidates": None, "effects": []}
+    ev._action_target_intent = lambda card, ag: state["intent"]
+    ev._metadata_action_targets = lambda card, ag: state["candidates"]
+    ev.effects_for = lambda ag: state["effects"]
+    card = SimpleNamespace(ability_guids=["ag"])
+
+    def choose(intent, candidates, preferred=None, effects=()):
+        state.update(intent=intent, candidates=candidates, effects=list(effects))
+        return ev.choose_action_target(card, preferred_target=preferred)
+
+    # Authored candidates with no intent: the strongest legal one.
+    assert choose(None, [201, 202]) == 202
+    # A legal preferred target is kept; an illegal one yields no target.
+    assert choose(None, [201, 202], preferred=201) == 201
+    assert choose(None, [201, 202], preferred=101) is None
+    # Opponent intent: the best opposing troop, else the opposing champion.
+    assert choose("opponent", [201, 202]) == 202
+    assert choose("opponent", [900]) == 900
+    assert choose("opponent", [101]) is None
+    assert choose("opponent", [201], preferred=101) is None
+    # Friendly intent: the friendly troop, else the friendly champion.
+    assert choose("friendly", [101]) == 101
+    assert choose("friendly", [800]) == 800
+    assert choose("friendly", [201]) is None
+    # Metadata-less effects use the legacy rules, keeping a legal opposing
+    # preferred target and refusing a friendly one.
+    assert choose(None, None, preferred=201) == 201
+    assert choose(None, None, preferred=101) is None
+    # Opponent intent takes the strongest opposing troop before any effect.
+    assert choose("opponent", None,
+                  effects=[("CardModifierAbilityEffectTemplate",
+                            {"property": "damage"})]) == 202
+    # Without an intent, damage hits the weakest opposing troop.
+    assert choose(None, None,
+                  effects=[("CardModifierAbilityEffectTemplate",
+                            {"property": "damage"})]) == 201
+    # Friendly intent with no authored candidates takes the friendly troop.
+    assert choose("friendly", None) == 101
+    assert choose(None, None,
+                  effects=[("TapCardAbilityEffectTemplate", {})]) == 202
+    assert choose(None, None,
+                  effects=[("DestroyCardAbilityEffectTemplate", {})]) == 201

@@ -375,6 +375,7 @@ class Hints:
         self.conscript = False
         self.conscript_value = 0.0
         self._value = None
+        self._noise = 0.0
         self._analyze()
 
     def _analyze(self):
@@ -436,6 +437,15 @@ class Hints:
     def _find_removal(self, ag):
         card = self.card
         effects = self.evaluator.effects_for(ag)
+        # AIHints.FindRemoval: a MoveCardToZone is hard removal when it moves
+        # a non-Self Warzone target to Hand/Void (or Deck, unless the card is
+        # a buff).  The destination is the typed m_DestinationCollection; the
+        # compact BOM param usually leaves it empty.
+        hard_move = any(
+            hostile and (destination in ("hand", "void") or (
+                destination == "deck" and self.buff is None))
+            for destination, hostile
+            in self.evaluator.authored_move_destinations(ag))
         hard_kinds = ("DestroyCardAbilityEffectTemplate",
                       "VoidCardAbilityEffectTemplate",
                       "ReturnToHandAbilityEffectTemplate",
@@ -455,10 +465,8 @@ class Hints:
                     self.removal = RemovalParams()
                 self.removal.hard = True
                 # MoveCardToZone: destination decides whether it is removal.
-                if etype == "MoveCardToZoneEffectTemplate":
-                    dest = (pm.get("destination") or "").lower()
-                    if dest not in ("hand", "deck", "void"):
-                        self.removal.hard = False
+                if etype == "MoveCardToZoneEffectTemplate" and not hard_move:
+                    self.removal.hard = False
                 text = ((card.name or "") + " " +
                         json.dumps(pm)).lower()
                 if ("all" in text or "each" in text) \
@@ -537,6 +545,11 @@ class Hints:
             self._value = self.evaluator.calculate_card_value(self)
         return self._value
 
+    @property
+    def base_value(self):
+        """The value without CardNoiseRange, for ranking targets."""
+        return self.value - self._noise
+
 
 # ---------------------------------------------------------------------------
 # Evaluator (AICardEvaluator.cs)
@@ -583,6 +596,7 @@ class CardEvaluator:
         self._effect_metadata_cache = {}
         self._random_transform_intent_cache = {}
         self._summon_effect_cache = {}
+        self._move_destination_cache = {}
         self._template_value_cache = {}
         self.hand = self._load_hand()
         self.ai_warzone = self._load_warzone(self.ai_owner_id)
@@ -628,11 +642,19 @@ class CardEvaluator:
         rows = db_ai_evaluator_card_rows(
             self.session.session_id, user_id, "warzone",
             conn=self._connection())
+        from rules_port.static_rules import effective_attributes
         cards = []
         for r in rows:
             c = CardInfo(r)
             c.card_attack_mod = int(r[22] or 0)
             c.card_defense_mod = int(r[23] or 0)
+            # Attributes granted by in-play abilities (e.g. Dandelion Sprite's
+            # Flight, gated by its controller's threshold) live in the static
+            # projection, not on the card row.  Use the same projection the
+            # attack-legality gates use, so evaluation and legality agree.
+            c.attributes |= int(effective_attributes(
+                self._connection(), self.session.session_id, self.bstate,
+                c.card_uid) or 0)
             cards.append(c)
         return cards
 
@@ -782,6 +804,203 @@ class CardEvaluator:
                 (str(effect_guid).lower(), effect_type)
                 for effect_guid, effect_type in rows]
         return self._effect_metadata_cache[ability_guid]
+
+    def authored_move_destinations(self, ability_guid):
+        """Return ``(destination, hostile)`` for each MoveCardToZone leaf.
+
+        ``destination`` is the typed ``m_DestinationCollection`` (lowercase).
+        ``hostile`` mirrors AIHints.FindRemoval: the effect's authored target
+        is a card target (not the source or a player), its player filter is
+        not Self, and it selects from the Warzone.
+        """
+        key = str(ability_guid).lower()
+        cache = getattr(self, "_move_destination_cache", None)
+        if cache is None:
+            cache = self._move_destination_cache = {}
+        if key in cache:
+            return cache[key]
+        from pvp_db import (db_ability_effect_rows,
+                            db_ability_effect_target_index,
+                            db_ability_target_template_ids,
+                            db_target_template_row)
+        from rules_port.bom_fields import effect_template_value
+        connection = self._connection()
+        try:
+            template_ids = json.loads(db_ability_target_template_ids(
+                key, conn=connection) or "[]") or []
+        except (TypeError, ValueError, json.JSONDecodeError):
+            template_ids = []
+        moves = []
+        for effect_guid, effect_type, param in db_ability_effect_rows(
+                key, conn=connection) or ():
+            if effect_type != "MoveCardToZoneEffectTemplate":
+                continue
+            try:
+                params = json.loads(param) if param else {}
+            except (TypeError, ValueError, json.JSONDecodeError):
+                params = {}
+            if not isinstance(params, dict):
+                params = {}
+            destination = (effect_template_value(
+                connection, self.bstate, effect_guid,
+                "m_DestinationCollection", "") or params.get("destination")
+                or "")
+            destination = str(destination).rsplit(".", 1)[-1].lower()
+            hostile = False
+            try:
+                index = int(db_ability_effect_target_index(
+                    key, effect_guid, conn=connection))
+            except (TypeError, ValueError):
+                index = -1
+            if 0 <= index < len(template_ids):
+                row = db_target_template_row(
+                    str(template_ids[index]), conn=connection)
+                if row is not None:
+                    kind = str(row[11] or "")
+                    player_filter = str(row[6] or "").lower()
+                    zones = str(row[7] or "").lower()
+                    hostile = (kind not in (
+                        "PlayerTargetTemplate",
+                        "AbilitySourceCardTargetTemplate")
+                        and player_filter != "self"
+                        and "warzone" in zones)
+            moves.append((destination, hostile))
+        cache[key] = tuple(moves)
+        return cache[key]
+
+    def is_bounce_action(self, card):
+        """An action that returns a non-Self Warzone target to its hand."""
+        return bool(card.is_action()) and any(
+            destination == "hand" and hostile
+            for ability_guid in card.ability_guids
+            for destination, hostile
+            in self.authored_move_destinations(ability_guid))
+
+    def opponent_chain_target_uids(self):
+        """Card IDs targeted by chain items the opponent controls."""
+        from pvp_db import db_session_card_owners
+        owners = {}
+        for uid, owner in db_session_card_owners(
+                self.session.session_id, conn=self._connection()) or ():
+            try:
+                owners[int(uid)] = int(owner)
+            except (TypeError, ValueError):
+                continue
+
+        def flatten(value):
+            if isinstance(value, dict):
+                value = value.get("value", value.get("uid64"))
+            if isinstance(value, (list, tuple, set)):
+                for item in value:
+                    yield from flatten(item)
+                return
+            try:
+                if value is not None:
+                    yield int(value)
+            except (TypeError, ValueError):
+                return
+
+        targeted = []
+        for item in self.bstate.get("stack") or ():
+            if not isinstance(item, dict):
+                continue
+            try:
+                source = int(item.get("source_uid") or 0)
+            except (TypeError, ValueError):
+                continue
+            if not (owners.get(source) == self.player_db_id or (
+                    self.player_champ_uid is not None
+                    and source == int(self.player_champ_uid))):
+                continue
+            values = [item.get("target_uid"), item.get("target_uids")]
+            activations = [item.get("activation_data")]
+            nested = item.get("activations")
+            if isinstance(nested, dict):
+                activations.extend(nested.values())
+            elif isinstance(nested, (list, tuple)):
+                activations.extend(nested)
+            for activation in activations:
+                if isinstance(activation, dict):
+                    values.extend((activation.get("target_map") or {}).values())
+            for uid in flatten(values):
+                if uid not in targeted:
+                    targeted.append(uid)
+        return targeted
+
+    def bounce_target_order(self, cards):
+        """Largest troop first, then the most costly card, then card value."""
+        def size(card):
+            if not card.is_troop():
+                return 0
+            return (int(card.effective_attack(in_play=True) or 0) +
+                    int(card.effective_defense(in_play=True) or 0))
+        return sorted(cards, key=lambda card: (
+            card.is_troop(), size(card), int(card.cost or 0),
+            self.get_card_value(card), card.card_uid), reverse=True)
+
+    def lethal_blocker_uids(self, attackers):
+        """Opposing potential blockers whose removal makes this attack lethal.
+
+        ``attackers`` are our declared attacking CardInfos. Empty when the
+        attack is already lethal through every blocker or no single blocker
+        removal changes the outcome (AICardEvaluator.AlphaStrikeWins).
+        """
+        from game_engine import ECardStates
+        attackers = list(attackers or ())
+        blockers = [card for card in self.player_warzone
+                    if card.is_troop()
+                    and not (int(card.card_state or 0) & ECardStates.Tapped)
+                    and not card.has_attribute(ECardAttributes.CantBlock)]
+        if not attackers or not blockers:
+            return []
+        health = int(self.player_health)
+        if self.alpha_strike_wins(health, attackers, blockers):
+            return []
+        return [int(blocker.card_uid) for blocker in blockers
+                if self.alpha_strike_wins(
+                    health, attackers,
+                    [other for other in blockers if other is not blocker])]
+
+    def choose_bounce(self, attackers=(), chain_targets=(),
+                      lethal_blockers=(), fallback=False):
+        """Pick a playable quick bounce action and its opposing target.
+
+        Priority: (1) an attacking opposing troop, (2) an opposing card that
+        an opponent-controlled chain item targets, (3) a potential blocker
+        whose removal makes our declared attack lethal, (4) when ``fallback``
+        is set, the largest troop / most costly / highest valued opposing card.
+        Legality is the authored target template (via choose_action_target).
+        Returns ``(card, target_uid, reason)`` or None.
+        """
+        opposing = {int(card.card_uid): card for card in self.player_warzone}
+
+        def pick(uids):
+            return self.bounce_target_order(
+                [opposing[int(uid)] for uid in dict.fromkeys(uids)
+                 if int(uid) in opposing])
+
+        tiers = [("bounce_attacker", pick(attackers)),
+                 ("bounce_chain_target", pick(chain_targets)),
+                 ("bounce_lethal_blocker", pick(lethal_blockers))]
+        if fallback:
+            # End of the opponent's turn: bounce the opposing troop with the
+            # highest card evaluation (value, then cost, then uid).
+            troops = [card for card in opposing.values() if card.is_troop()]
+            tiers.append(("bounce_best_target", sorted(
+                troops, key=lambda card: (
+                    self.get_card_value(card), int(card.cost or 0),
+                    int(card.card_uid)), reverse=True)))
+        bounces = [card for card in self.hand
+                   if card.is_quick_action() and self.is_bounce_action(card)
+                   and self.is_playable(card) == "True"]
+        for reason, targets in tiers:
+            for target in targets:
+                for card in bounces:
+                    if self.choose_action_target(
+                            card, preferred_target=target.card_uid) == \
+                            target.card_uid:
+                        return card, int(target.card_uid), reason
+        return None
 
     def _template_value_from_catalog_row(self, row):
         """Value a generated card from typed template fields, as in
@@ -1075,8 +1294,11 @@ class CardEvaluator:
         if self.is_high_value_target(card):
             num *= 1.5
         num *= hint.multiplier
-        # CardNoiseRange: +/- 0.5 (client uses a small RNG; deterministic here).
-        num += random.uniform(-0.5, 0.5)
+        # CardNoiseRange: +/- 0.5. Seeded by session and card so one board
+        # always evaluates the same way; the process-wide RNG is never drawn.
+        noise_rng = random.Random(f"{self.session.session_id}:{card.card_uid}")
+        hint._noise = noise_rng.uniform(-0.5, 0.5)
+        num += hint._noise
         return num
 
     def _card_has_keyword(self, card, keyword):
@@ -1906,8 +2128,9 @@ class CardEvaluator:
                     "TransformCardAbilityEffectTemplate"):
                 hostile = True
             elif effect_type == "MoveCardToZoneEffectTemplate":
-                if (params.get("destination") or "").lower() in (
-                        "hand", "deck", "void"):
+                if any(destination in ("hand", "deck", "void")
+                       for destination, _hostile
+                       in self.authored_move_destinations(ability_guid)):
                     hostile = True
             elif effect_type == "TransformCardAtRandomAbilityEffectTemplate":
                 transform_intent = self.random_transform_target_intent(

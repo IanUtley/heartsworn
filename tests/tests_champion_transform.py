@@ -90,8 +90,25 @@ def _lose_and_convert(handler, session, db, state):
     return pending
 
 
+def _fresh_copy():
+    """An in-memory copy of the shared baseline: the test writes freely, and
+    no connection to the shared file is left holding a lock."""
+    db = sqlite3.connect(":memory:")
+    src = sqlite3.connect(matrix.SRC)
+    src.backup(db)
+    src.close()
+    return db
+
+
 def test_j1_gnoll_chain_transforms_through_four_champions():
-    db = sqlite3.connect(matrix.SRC)
+    db = _fresh_copy()
+    try:
+        _j1_gnoll_chain(db)
+    finally:
+        db.close()
+
+
+def _j1_gnoll_chain(db):
     db.row_factory = sqlite3.Row
     _seat_rabid_gnoll(db)
     handler = matrix.HandlerStub(db)

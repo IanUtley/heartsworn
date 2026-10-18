@@ -156,6 +156,18 @@ class ConditionContext:
                     except (TypeError, ValueError):
                         continue
             counters, guids = self._counter_counts(uid)
+            # Live champions are synthetic SessionCardIds: CounterModifier
+            # persists their counters in the battle state keyed by counter
+            # template GUID (``counter_effects.change_counter``), not in a
+            # game_cards row.  Without them HasCountersValue never saw a
+            # champion counter ("if you are Burning/Dazed").
+            persisted = (self.bstate.get("champion_counters") or {}).get(
+                str(uid)) or {}
+            if isinstance(persisted, dict) and persisted:
+                counters, guids = dict(counters), dict(guids)
+                for guid, count in persisted.items():
+                    counters[str(guid)] = count
+                    guids[str(guid)] = str(guid)
             int_attrs = dict((self.bstate.get("champion_int_attrs") or {}).get(
                 str(uid), {}) or {})
             return {"card_uid": uid, "card_type": "Champion",

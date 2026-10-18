@@ -43,7 +43,12 @@ class _FixedRng:
 
 
 def _fixture():
-    db = sqlite3.connect(matrix.SRC)
+    # An in-memory copy: the test writes freely, and the shared baseline file
+    # every later test copies from stays untouched.
+    db = sqlite3.connect(":memory:")
+    src = sqlite3.connect(matrix.SRC)
+    src.backup(db)
+    src.close()
     db.row_factory = sqlite3.Row
     db.execute("DELETE FROM game_cards")
     db.commit()

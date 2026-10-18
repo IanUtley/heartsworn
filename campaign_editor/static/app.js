@@ -274,7 +274,7 @@ function nodeState(node) {
     if (!n) return { known: false, visible: false, data: null };
     return {
       known: true, visible: n.visible, enabled: n.enabled,
-      visited: Boolean(n.visited), completed: n.completed, repeatable: n.retryable, blocked: n.blocked,
+      visited: Boolean(n.visited), completed: n.completed, repeatable: n.retryable,
       impassable: Boolean(n.impassable),
       quest: n.marker, failed: n.failed, current: sim.state.current === node.id,
       data: null, sim: n,
@@ -291,7 +291,6 @@ function nodeState(node) {
     visited: has("visited_nodes") || Boolean(data && (data.completed || data.visits > 0)),
     completed: Boolean(data && data.completed),
     repeatable: Boolean(data && data.repeatable),
-    blocked: has("blocked_nodes") || Boolean(data && data.enabled === false),
     impassable: Boolean(data && data.impassable),
     quest: has("quest_nodes"),
     failed: has("failed_nodes"),
@@ -351,10 +350,10 @@ function nodeColors(node) {
   return { fill: css("--hidden"), ring, alpha: 1 };   // new
 }
 
-// Design view: which rule states can stop travel at / to this node.
+// Design view: a node the rules can make impassable.
 function designGate(node) {
   const spec = nodeRules(node) || {};
-  return [spec.impassable !== undefined ? "⛔" : "", spec.blocked !== undefined ? "🔒" : ""].join("");
+  return spec.impassable !== undefined ? "⛔" : "";
 }
 
 // Glyphs drawn beside a node / NPC for its state.
@@ -367,7 +366,6 @@ function stateGlyphs(s, nodeId) {
   let text = "";
   if (s.completed && !s.repeatable) text += "✓";
   if (s.repeatable && s.visible) text += "↻";
-  if (s.blocked) text += "🔒";
   if (s.impassable) text += "⛔";
   if (s.failed) text += "✗";
   if (s.quest || n.givequest) text += "!";
@@ -418,13 +416,13 @@ function renderLegend() {
   const items = hasState() ? [
     ["Not visited yet", "--hidden"], ["Visited, unfinished", "--incomplete"],
     ["Repeatable ↻", "--repeatable"], ["Impassable ⛔ (token stops)", "--blocked"],
-    ["Complete ✓", "--done"], ["Blocked 🔒 (hidden until it opens)", "--panel-2"],
+    ["Complete ✓", "--done"],
     ["Failed ✗ · battle ⚔️", "--panel-2"],
     ["Quest marker", "--panel-2", "--quest"],
   ] : [
     ["Battle", "--encounter"], ["Conversation / lore", "--conversation"],
     ["No content", "--empty"], ["Quest giver", "--panel-2", "--quest"],
-    ["Can be blocked 🔒 / impassable ⛔", "--panel-2", "--blocked"],
+    ["Can be impassable ⛔", "--panel-2", "--blocked"],
   ];
   els.legend.innerHTML = items.map(([label, fill, ring]) =>
     `<span style="--c:var(${fill});${ring ? `--b:var(${ring})` : ""}">${label}</span>`).join("");
@@ -733,7 +731,7 @@ function select(node) {
   if (s && !sim) {
     const flags = s.data ? ["visible", "enabled", "completed", "repeatable", "autostart", "givequest", "turninquest", "impassable"]
       .map((key) => `<span class="chip ${s.data[key] ? "on" : "off"}">${key}</span>`).join("") : "";
-    const lists = ["blocked_nodes", "quest_nodes", "quest_hidden_nodes", "quest_reveal_nodes", "unlocked_nodes", "failed_nodes", "visited_nodes"]
+    const lists = ["quest_nodes", "quest_hidden_nodes", "quest_reveal_nodes", "unlocked_nodes", "failed_nodes", "visited_nodes"]
       .filter((key) => (state.public[key] || []).includes(node.id));
     html += `<h3>Live state · ${esc(state.champion_name)}</h3>`;
     html += s.data ? `<div class="chips">${flags}</div>${chips(lists, "event")}
@@ -767,7 +765,7 @@ function select(node) {
       const mods = (e.mods || []).map((m) => m.title).filter(Boolean);
       html += `<div class="card"><div class="title">${esc(e.title)} <span class="muted">· ${esc(e.kind)}</span></div>
         <div class="muted">${esc(e.name)}</div>
-        <dl class="kv"><dt>opponent</dt><dd>${esc(e.champion_name || e.champion || "—")}</dd>
+        <dl class="kv"><dt>opponent</dt><dd>${esc(e.champion_name || e.champion || "—")}${deckIconButton(e)}</dd>
         <dt>scene</dt><dd><code>${esc(e.guid)}</code></dd></dl>
         ${rules && rules.rules ? `<div class="actions">${simButton("▶ Win", { type: "encounter_result", node: node.id, scene: e.guid, victory: true, events: [] }, true)}${sceneChecksTamed(e.guid) ? simButton("▶ Win (tamed)", { type: "encounter_result", node: node.id, scene: e.guid, victory: true, events: ["tamed_troop"] }, true) : ""}${simButton("▶ Lose", { type: "encounter_result", node: node.id, scene: e.guid, victory: false })}</div>` : ""}
         ${sceneRewardSummary(e.rewards)}
@@ -778,7 +776,7 @@ function select(node) {
   }
 
   html += hiddenNote(node.encounters.length, encounters.length);
-  const conversations = node.conversations.filter((c) => rowAllowsRace(c));
+  const conversations = uniqueByGuid(node.conversations.filter((c) => rowAllowsRace(c)));
   if (conversations.length) {
     html += `<h3>Conversations</h3>`;
     for (const c of bySimMatch(conversations, node.id)) html += conversationCard(c, node.id);
@@ -835,22 +833,28 @@ function rulesNodeSection(node) {
   const active = evaluated ? evaluated.entry : null;
   const why = new Map(simEntries(node.id).map((e) => [e.id, e]));
   if ((spec.entries || []).length) {
-    html += `<div class="muted" style="margin-top:8px">Offers — first matching entry wins${sim ? "" : " (start the simulator to evaluate)"}</div>`;
+    const overridden = Boolean(rules && rules.rules && rules.rules.offer_order && rules.rules.offer_order[node.id]);
+    html += `<div class="offers-head">Offers — first matching entry wins${sim ? "" : " (start the simulator to evaluate)"}${overridden
+      ? ` <span class="offer-order-flag" title="This node's offer order was set by hand; the default order is not used.">· order set by hand</span>` : ""}</div>`;
     const entries = spec.entries.filter((e) => condAllowsRace(e.when));
     html += hiddenNote(spec.entries.length, entries.length);
-    html += `<div class="offer-list" data-offer-node="${esc(node.id)}"><div class="muted small-text">Drag an offer to reorder; the first applicable offer is used.</div>`;
+    html += `<div class="offer-list" data-offer-node="${esc(node.id)}"><div class="muted small-text">Drag an offer to reorder, or right-click it to move it to the top or bottom; the first applicable offer is used.</div>`;
     for (const entry of entries) {
-      const convs = ["conversation", "pre", "victory", "defeat"].filter((k) => entry[k])
-        .map((k) => `<button class="link" data-conv="${esc(entry[k])}">${k}</button>`).join(" · ");
-      html += `<div class="card entry ${entry.id === active ? "active" : ""}" draggable="true" data-offer-id="${esc(entry.id)}">
-        <div class="title">${esc(entry.label || entry.id)} <span class="muted">· ${esc(entry.kind)}${entry.npc ? ` · ${esc(entry.npc)}` : ""}</span></div>
-        <div class="cond">when ${esc(fmtCond(entry.when))}</div>
-        ${blockedRow(why.get(entry.id))}
-        ${convs ? `<div class="cond">${convs}</div>` : ""}
-        ${(entry.results || []).filter((r) => condAllowsRace(r.when)).map((r) => `<div class="cond">${esc(r.outcome)}: <button class="link" data-conv="${esc(r.conversation)}">${esc(r.label)}</button> when ${esc(fmtCond(r.when))}</div>`).join("")}
-        ${entry.complete_requires_events ? chips(entry.complete_requires_events.map((e) => `completes on ${e}`), "prereq") : ""}
-        ${entry.repeatable ? chips(["repeatable"], "") : ""}
-        ${entry.review ? `<div class="cond">⚠ ${esc(entry.review)}</div>` : ""}</div>`;
+      // Compact: the offer's name and type; its condition is in the tooltip.
+      const tipLines = [`${entry.label || entry.id} (${entry.kind})`, `when ${fmtCond(entry.when)}`];
+      const explained = why.get(entry.id);
+      if (explained && !explained.holds && explained.blocked_by && explained.blocked_by.length) {
+        tipLines.push(`blocked by ${explained.blocked_by.join(", ")}`);
+      }
+      for (const r of (entry.results || []).filter((r) => condAllowsRace(r.when))) {
+        tipLines.push(`${r.outcome}: ${r.label || r.conversation} when ${fmtCond(r.when)}`);
+      }
+      if (entry.complete_requires_events) tipLines.push(`completes on ${entry.complete_requires_events.join(", ")}`);
+      if (entry.repeatable) tipLines.push("repeatable");
+      if (entry.review) tipLines.push(`⚠ ${entry.review}`);
+      const tip = tipLines.join("\n");
+      html += `<div class="card entry compact ${entry.id === active ? "active" : ""}" draggable="true" data-offer-id="${esc(entry.id)}" title="${esc(tip)}">
+        <div class="title">${esc(entry.label || entry.id)} <span class="muted">· ${esc(entry.kind)}</span></div></div>`;
     }
     html += `</div>`;
   }
@@ -889,6 +893,115 @@ async function playScene(scene, nodeId) {
     els.status.textContent = `Play: ${error.message}`;
   }
 }
+
+// ---- Opponent deck: the encounter champion's cards, stacked by cost ----
+function deckIconButton(e) {
+  const name = e.champion_name || e.champion || "opponent";
+  return ` <button type="button" class="deck-icon" data-encounter-deck="${esc(e.guid)}" ` +
+    `title="${esc(name)}'s deck" aria-label="Show ${esc(name)}'s deck">🂠</button>` +
+    ` <span class="ability-icon" tabindex="0" data-encounter-abilities="${esc(e.guid)}" ` +
+    `aria-label="${esc(name)}'s powers">⚡</span>`;
+}
+
+// Hover popover: the opponent champion's powers, each with its title and description.
+const encounterAbilityCache = new Map();
+function abilityPopover() {
+  let pop = document.getElementById("ability-popover");
+  if (!pop) {
+    pop = document.createElement("div");
+    pop.id = "ability-popover";
+    pop.className = "ability-popover";
+    pop.hidden = true;
+    document.body.appendChild(pop);
+  }
+  return pop;
+}
+async function showAbilityPopover(anchor) {
+  const guid = anchor.dataset.encounterAbilities;
+  if (!encounterAbilityCache.has(guid)) {
+    encounterAbilityCache.set(guid, getJSON(`/api/encounter-abilities?scene=${encodeURIComponent(guid)}`)
+      .catch((error) => { encounterAbilityCache.delete(guid); throw error; }));
+  }
+  const data = await encounterAbilityCache.get(guid);
+  if (!anchor.matches(":hover, :focus")) return;   // the pointer left while it loaded
+  const pop = abilityPopover();
+  pop.innerHTML = `<div class="ability-head">Powers</div>` + (data.abilities.length
+    ? data.abilities.map((a) => `<div class="ability"><div class="ability-title">${esc(a.title)}</div>` +
+      `<div class="ability-text">${esc(a.description) || "<span class=\"muted\">No description</span>"}</div></div>`).join("")
+    : `<p class="muted">This opponent has no powers.</p>`);
+  const box = anchor.getBoundingClientRect();
+  pop.style.left = `${Math.min(box.left, window.innerWidth - 380)}px`;
+  pop.style.top = `${box.bottom + 6}px`;
+  pop.hidden = false;
+}
+function hideAbilityPopover() {
+  const pop = document.getElementById("ability-popover");
+  if (pop) pop.hidden = true;
+}
+document.addEventListener("mouseover", (event) => {
+  const anchor = event.target.closest("[data-encounter-abilities]");
+  if (anchor) showAbilityPopover(anchor).catch(() => {});
+});
+document.addEventListener("mouseout", (event) => {
+  if (event.target.closest("[data-encounter-abilities]")) hideAbilityPopover();
+});
+document.addEventListener("focusin", (event) => {
+  const anchor = event.target.closest("[data-encounter-abilities]");
+  if (anchor) showAbilityPopover(anchor).catch(() => {});
+});
+document.addEventListener("focusout", (event) => {
+  if (event.target.closest("[data-encounter-abilities]")) hideAbilityPopover();
+});
+
+// One card's stacked strip: its title row shows; hovering expands the full card in place.
+function deckStrip(card) {
+  // Thresholds sit in a vertical stack to the left of the card, as shard counts.
+  const thresholds = card.thresholds.map((t) => `<span class="deck-shard shard-${esc(t.shard.toLowerCase())}" title="${esc(t.shard)}">${esc(t.count)}</span>`).join("");
+  const text = ((rewardCatalog && rewardCatalog.cards || []).find((c) => c.guid === card.guid) || {}).text || "";
+  const art = cardIconUrl(card.guid);
+  const stats = card.card_type === "Troop" ? `<span class="deck-stats">${esc(card.attack)}/${esc(card.defense)}</span>` : "";
+  return `<div class="deck-slot"><div class="deck-thresh">${thresholds}</div>` +
+    `<div class="deck-strip" tabindex="0" data-deck-card="${esc(card.guid)}">` +
+    `<div class="deck-row"><span class="deck-badge">${esc(card.cost)}</span>` +
+    `<span class="deck-title">${esc(card.name)}</span></div>` +
+    `<div class="deck-face">${art ? `<img src="${art}" alt="${esc(card.name)}">` : ""}` +
+    `<div class="deck-face-meta">${esc(card.card_type)} · cost ${esc(card.cost)}${stats ? " · " : ""}${stats}` +
+    `${card.thresholds.length ? `<br>requires ${card.thresholds.map((t) => `${esc(t.count)} ${esc(t.shard)}`).join(", ")}` : ""}</div>` +
+    (text ? `<p class="deck-text">${esc(text)}</p>` : "") + `</div></div></div>`;
+}
+
+let state_deck = null;   // the deck currently shown in the Opponent deck dialog
+
+async function showEncounterDeck(guid) {
+  const dialog = document.getElementById("deck");
+  const body = document.getElementById("deck-body");
+  body.innerHTML = `<p class="muted">Loading deck…</p>`;
+  if (!dialog.open) dialog.showModal();
+  await loadRewardCatalog();
+  state_deck = await getJSON(`/api/encounter-deck?scene=${encodeURIComponent(guid)}`);
+  // Columns run from the lowest cost (left) to the highest (right).
+  const byCost = new Map();
+  for (const card of state_deck.cards) {
+    if (!byCost.has(card.cost)) byCost.set(card.cost, []);
+    byCost.get(card.cost).push(card);
+  }
+  const columns = [...byCost.keys()].sort((a, b) => a - b).map((cost) =>
+    `<div class="deck-column">${byCost.get(cost).flatMap((card) => Array(card.quantity).fill(card)).map(deckStrip).join("")}</div>`).join("");
+  body.innerHTML = `
+    <header class="deck-head"><h2>${esc(state_deck.name)}</h2>
+      <span class="muted">${esc(state_deck.card_count)} cards</span>
+      <button type="button" class="deck-close" data-deck-close>Close</button></header>
+    <div class="deck-layout">
+      <div class="deck-columns">${columns || `<p class="muted">This opponent has no deck.</p>`}</div>
+    </div>`;
+}
+
+document.addEventListener("click", (event) => {
+  const icon = event.target.closest("[data-encounter-deck]");
+  if (icon) { showEncounterDeck(icon.dataset.encounterDeck).catch((error) => { els.status.textContent = error.message; }); return; }
+  const deck = document.getElementById("deck");
+  if (event.target.closest("[data-deck-close]") || (event.target === deck)) deck.close();
+});
 
 // The Play panel: the chat command to paste into the game client.
 function showPlayCommand(result) {
@@ -953,7 +1066,7 @@ function simNodeSection(node) {
   const spec = nodeRules(node) || {};
   const entry = (spec.entries || []).find((e) => e.id === n.entry);
   const progress = sim.state.nodes[node.id] || {};
-  const chipKeys = isPanorama() ? [...NPC_STATES, "failed"] : ["visible", "blocked", "hidden", "marker", "completed", "retryable", "impassable", "failed"];
+  const chipKeys = isPanorama() ? [...NPC_STATES, "failed"] : ["visible", "marker", "completed", "retryable", "impassable", "failed"];
   // The completed chip is a toggle: clicking it flips the node's completed flag.
   const chipFor = (k) => {
     const on = n[k] ? "on" : "off";
@@ -1042,7 +1155,8 @@ const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 async function autoRun() {
   if (auto && auto.running) return;
   const race = (document.getElementById("sim-race") || {}).value || viewRace() || "Human";
-  const home = autoOpts.home;
+  // AZ0 is the race's starter panorama (az0-<race>), which leads into AZ1.
+  const home = autoOpts.home === "AZ0" ? starterZone(race) : autoOpts.home;
   auto = { running: true, home, race, memo: null, summary: null, error: "" };
   selected = null;   // keep the Simulate tab in front while the map moves
   if (String(zoneId).toLowerCase() !== home.toLowerCase()) await loadZone(home);
@@ -1097,7 +1211,7 @@ function autoPanel() {
   let html = `<div class="card auto-run"><div class="title">Simulate all${auto ? `<button type="button" id="auto-close" class="auto-close" title="Clear the results">×</button>` : ""}</div>
     <div class="muted small-text">Plays every quest it can in the zone (and its dungeons and panoramas) for the race above,
       always winning, and tallies the rewards the server grants. Nothing is saved.</div>
-    <div class="row"><select id="auto-home" ${running ? "disabled" : ""}>${["AZ1", "AZ2"].map((z) => `<option ${z === autoOpts.home ? "selected" : ""}>${z}</option>`).join("")}</select>
+    <div class="row"><select id="auto-home" ${running ? "disabled" : ""}>${["AZ0", "AZ1", "AZ2"].map((z) => `<option value="${z}" ${z === autoOpts.home ? "selected" : ""}>${z === "AZ0" ? "AZ0 (race starter)" : z}</option>`).join("")}</select>
       <label class="small-text">steps <input id="auto-limit" type="number" min="1" max="20000" value="${esc(autoOpts.limit)}" ${running ? "disabled" : ""}></label>
       <select id="auto-speed">${Object.keys(AUTO_SPEEDS).map((k) => `<option ${k === autoOpts.speed ? "selected" : ""}>${k}</option>`).join("")}</select>
       ${running ? `<button type="button" id="auto-stop">Stop</button>` : `<button type="button" id="auto-run" class="primary">Simulate all</button>`}</div>`;
@@ -1180,7 +1294,6 @@ async function simImport(file) {
     const result = await postJSON("/api/sim/load", { zone: zoneId, state: data.state });
     sim = { state: result.state, layout: result.layout, history: [], label: `Imported ${file.name}`, diff: null };
     state = null;
-    els.campaign.value = "";
     els.playerView.disabled = false;
     refreshSim();
     showTab("sim");
@@ -1207,7 +1320,6 @@ async function simStart(body, label) {
       };
     }
     state = null;
-    els.campaign.value = "";
     els.playerView.disabled = false;
     refreshSim();
     showTab("sim");
@@ -1217,6 +1329,8 @@ async function simStart(body, label) {
 }
 
 const RACES = ["Human", "Elf", "Coyotle", "Orc", "Dwarf", "Shin'hare", "Vennen", "Necrotic"];
+// The race's starter panorama (campaign_rules/az0-<race>.json), e.g. Shin'hare -> az0-shinhare.
+const starterZone = (race) => `az0-${String(race).toLowerCase().replace(/[^a-z]/g, "")}`;
 
 function renderSim() {
   const body = document.getElementById("tab-sim");
@@ -1225,12 +1339,10 @@ function renderSim() {
   let html = `<p class="muted">Play the rules in <code>campaign_rules/${esc(zoneId)}.json</code> without the client. The map shows the derived layout; tick <b>Player view</b> for fog of war.</p>
     <div class="row"><select id="sim-race">${RACES.map((r) => `<option ${r === viewRace() ? "selected" : ""}>${esc(r)}</option>`).join("")}</select>
       <button type="button" id="sim-new" class="primary">New game</button>
-      ${isAdmin ? `<button type="button" id="sim-import">Import state...</button>
-      <input type="file" id="sim-import-file" accept=".json,application/json" hidden>` : ""}</div>`;
+      </div>`;
   html += autoPanel();
   if (campaigns.length) {
-    html += `<div class="row"><select id="sim-campaign">${campaigns.map((o) => `<option value="${esc(o.value)}">${esc(o.textContent)}</option>`).join("")}</select>
-      <button type="button" id="sim-live">${isAdmin ? "From live state" : "Load character state"}</button></div>`;
+    html += `<div class="row"><button type="button" id="sim-live" ${els.campaign.value ? "" : "disabled"}>${isAdmin ? "From live state" : "Load character state"}</button></div>`;
   }
   if (!rules || !rules.rules) html += `<p class="muted">No rules file for this zone yet (<code>campaign_rules/${esc(zoneId)}.json</code>).</p>`;
   if (sim && rules && rules.rules) {
@@ -1242,7 +1354,9 @@ function renderSim() {
     html += `<h3>${esc(sim.label)}</h3><dl class="kv"><dt>race</dt><dd>${esc(st.race || "—")} (${esc(st.faction || "—")})</dd>
       <dt>at</dt><dd><button class="link" data-node="${esc(st.current)}">${esc(st.current || "—")}</button></dd></dl>
       <div class="actions"><button type="button" id="sim-undo" ${sim.history.length ? "" : "disabled"}>Undo</button>
-      ${isAdmin ? `<button type="button" id="sim-export">Export state</button>` : ""}
+      ${isAdmin ? `<button type="button" id="sim-export">Export state</button>
+      <button type="button" id="sim-import">Import state...</button>
+      <input type="file" id="sim-import-file" accept=".json,application/json" hidden>` : ""}
       <button type="button" id="sim-exit">Exit simulator</button></div>`;
     if (sim.saveable && isAdmin) {
       html += `<div class="card"><div class="actions"><button type="button" class="primary" id="sim-save">Save to champion</button></div>
@@ -1451,7 +1565,15 @@ document.addEventListener("click", async (event) => {
   }
   if (id === "sim-new") {
     if (auto) auto.running = false;
+    // New Game is the only action that puts the character back to the default.
+    if (els.campaign.value) {
+      els.campaign.value = "";
+      els.campaign.dispatchEvent(new Event("change"));
+    }
     const race = document.getElementById("sim-race").value;
+    // A new game opens the zone chosen in the simulator's zone list (AZ0 is the race's starter panorama).
+    const target = autoOpts.home === "AZ0" ? starterZone(race) : autoOpts.home;
+    if (target && target !== zoneId) await loadZone(target);
     simStart({ race }, `New game · ${race}`);
     return;
   }
@@ -1471,7 +1593,8 @@ document.addEventListener("click", async (event) => {
     return;
   }
   if (id === "sim-live") {
-    const select = document.getElementById("sim-campaign");
+    // The champion is the one picked at the top of the editor.
+    const select = els.campaign;
     simStart({ campaign: Number(select.value) }, `From ${select.selectedOptions[0].textContent}`);
     return;
   }
@@ -1553,8 +1676,7 @@ document.addEventListener("drop", async (event) => {
   const nodeId = card.parentElement.dataset.offerNode;
   draggedOffer = null;
   if (moved === card.dataset.offerId) return;
-  const node = nodesById.get(nodeId);
-  const spec = node && nodeRules(node);
+  const spec = offerSpecOf(nodeId);
   if (!spec || !spec.entries) return;
   const order = spec.entries.map((entry) => entry.id).filter((id) => id !== moved);
   const targetIndex = order.indexOf(card.dataset.offerId);
@@ -1567,6 +1689,49 @@ document.addEventListener("drop", async (event) => {
     alert(`Could not save the offer order: ${error.message}`);
   }
 });
+
+// Right-click an offer for "Move to top" / "Move to bottom" (the same order
+// save as a drag, over the node's full offer list).
+let offerMenu = null;
+function hideOfferMenu() {
+  if (offerMenu) { offerMenu.remove(); offerMenu = null; }
+}
+async function moveOffer(nodeId, offerId, where) {
+  const spec = offerSpecOf(nodeId);
+  if (!spec || !spec.entries) return;
+  const order = spec.entries.map((entry) => entry.id).filter((id) => id !== offerId);
+  if (where === "top") order.unshift(offerId); else order.push(offerId);
+  try {
+    await postJSON("/api/edit/offer-order", { zone: zoneId, node: nodeId, order });
+    await refreshData();
+  } catch (error) {
+    alert(`Could not save the offer order: ${error.message}`);
+  }
+}
+document.addEventListener("contextmenu", (event) => {
+  const card = event.target.closest && event.target.closest("[data-offer-id]");
+  if (!card) { hideOfferMenu(); return; }
+  event.preventDefault();
+  hideOfferMenu();
+  const nodeId = card.parentElement.dataset.offerNode;
+  const offerId = card.dataset.offerId;
+  offerMenu = document.createElement("div");
+  offerMenu.className = "offer-menu";
+  offerMenu.style.left = `${event.clientX}px`;
+  offerMenu.style.top = `${event.clientY}px`;
+  for (const [label, where] of [["Move to top", "top"], ["Move to bottom", "bottom"]]) {
+    const item = document.createElement("button");
+    item.type = "button";
+    item.textContent = label;
+    item.addEventListener("click", () => { hideOfferMenu(); moveOffer(nodeId, offerId, where); });
+    offerMenu.append(item);
+  }
+  document.body.append(offerMenu);
+});
+document.addEventListener("click", (event) => {
+  if (offerMenu && !offerMenu.contains(event.target)) hideOfferMenu();
+});
+document.addEventListener("keydown", (event) => { if (event.key === "Escape") hideOfferMenu(); });
 
 // ---------------------------------------------------------------- race filter
 // The toolbar Race hides content a champion of that race never sees: rows
@@ -1627,13 +1792,13 @@ function hiddenNote(total, shown) {
 // Tag grammar: campaign_rules.parse_tag. Saved by /api/edit/* to
 // campaign_data/<template>.json (conversations) and campaign_rules/<zone>.json
 // (node states).
-const NODE_STATES = ["visible", "hidden", "blocked", "completed", "retryable", "marker", "impassable"];
+const NODE_STATES = ["visible", "completed", "retryable", "marker", "impassable"];
 // Panorama NPCs: what the client reads per NPC location
 // (UIPanoramaZoneViewModel.ProcessStateChange). A completed NPC is hidden.
-const NPC_STATES = ["visible", "hidden", "completed", "givequest", "turninquest", "autostart", "retryable"];
-const NPC_STATE_LABELS = { visible: "shown", hidden: "hidden", completed: "completed (hides it)",
+const NPC_STATES = ["visible", "completed", "givequest", "turninquest", "autostart", "retryable"];
+const NPC_STATE_LABELS = { visible: "shown", completed: "completed (hides it)",
   givequest: "quest giver !", turninquest: "turn-in ?", autostart: "auto-start", retryable: "repeatable" };
-const NPC_DEFAULTS = { visible: "never — an NPC has no paths; add tags", hidden: "never",
+const NPC_DEFAULTS = { visible: "never — an NPC has no paths; add tags",
   completed: "on finishing its conversation (unless repeatable)", givequest: "no", turninquest: "no",
   autostart: "no", retryable: "from play" };
 const isPanorama = () => Boolean(area && area.zone.kind === "panorama");
@@ -1641,7 +1806,7 @@ const stateKeys = () => (isPanorama() ? NPC_STATES : NODE_STATES);
 const stateLabel = (key) => (isPanorama() ? NPC_STATE_LABELS[key] : key);
 const stateDefault = (key) => (isPanorama() ? NPC_DEFAULTS : STATE_DEFAULTS)[key];
 const STATE_DEFAULTS = {
-  visible: "revealed by a visited neighbour", hidden: "never", blocked: "never",
+  visible: "revealed by a visited neighbour",
   completed: "on finishing the node's content", retryable: "from play (lost battle, repeatable content)",
   marker: "no quest marker",
   impassable: "never (red on the client map; the token stops there until completed)",
@@ -3555,6 +3720,8 @@ async function loadZone(id, { from = null, node = null } = {}) {
   els.zone.value = id;
   state = null; sim = null; selected = null; hovered = null;
   els.playerView.disabled = true;
+  // The chosen character stays selected if it has a campaign in this zone.
+  const keep = els.campaign.value;
   els.campaign.length = 1;
   els.campaign.value = "";
   try {
@@ -3606,6 +3773,10 @@ async function loadZone(id, { from = null, node = null } = {}) {
       els.campaign.append(option);
     }
   } catch (error) { /* database optional */ }
+  if (keep && [...els.campaign.options].some((o) => o.value === keep)) {
+    els.campaign.value = keep;
+    els.campaign.dispatchEvent(new Event("change"));
+  }
   renderSim();
   if (z.kind === "panorama") renderPanorama();
   else document.getElementById("tab-node").innerHTML = `<p class="muted">Select a node on the map.${area.nodes.some((n) => n.link) ? " Double-click a 🏰/👥 node to enter it." : ""}</p>`;
@@ -3991,11 +4162,52 @@ function placeNpcs() {
   }
 }
 
+// The rules entry whose offers a list shows: a map node, or an NPC of a panorama
+// (NPCs are not map nodes, but they are rules nodes of the same name).
+function offerSpecOf(nodeId) {
+  const node = nodesById.get(nodeId);
+  if (node) return nodeRules(node);
+  return (rules && rules.rules && rules.rules.nodes && rules.rules.nodes[nodeId]) || null;
+}
+
+// One row per conversation guid, the first kept.
+function uniqueByGuid(rows) {
+  const seen = new Set();
+  return rows.filter((row) => (seen.has(row.guid) ? false : seen.add(row.guid)));
+}
+
+// The conversations a rules node offers (its entries, and the endings of its battles).
+function offeredConversations(nodeId) {
+  const spec = rules && rules.rules && rules.rules.nodes && rules.rules.nodes[nodeId];
+  const found = new Map();
+  const add = (guid, label, tags, actions) => {
+    if (guid && !found.has(guid)) {
+      found.set(guid, { guid, name: label || guid,
+        trigger: { tags: tags || [], actions: actions && typeof actions === "object" ? actions : {} }, audience: {},
+        endings: [], hooks: { events: [], prerequisites: [] } });
+    }
+  };
+  // An entry's tags: the conversation's own tags, else the tags its offer names.
+  const tagsOf = (entry) => (Array.isArray(entry.tags) ? entry.tags
+    : Array.isArray(entry.when) ? entry.when : []);
+  for (const entry of (spec && spec.entries) || []) {
+    if (entry.kind === "conversation") add(entry.conversation, entry.label, tagsOf(entry), entry.actions);
+    for (const key of ["victory", "defeat", "pre"]) add(entry[key], entry.label, tagsOf(entry), null);
+    for (const r of entry.results || []) add(r.conversation, r.label, Array.isArray(r.when) ? r.when : [], r.actions);
+  }
+  return [...found.values()];
+}
+
 function npcCards(npc) {
   let html = "";
   for (const q of bySimMatch(npc.quest_links.filter((x) => rowAllowsRace(x)), npc.name)) html += questLinkCard(q, npc.name);
-  for (const c of bySimMatch(npc.conversations.filter((x) => rowAllowsRace(x)), npc.name)) html += conversationCard(c, npc.name);
-  const total = npc.quest_links.length + npc.conversations.length;
+  // Every conversation the NPC's rules node offers is listed here, not only
+  // those whose authored name mentions the NPC.
+  const listed = new Map();
+  for (const c of npc.conversations) if (!listed.has(c.guid)) listed.set(c.guid, c);
+  for (const c of offeredConversations(npc.name)) if (!listed.has(c.guid)) listed.set(c.guid, c);
+  for (const c of bySimMatch([...listed.values()].filter((x) => rowAllowsRace(x)), npc.name)) html += conversationCard(c, npc.name);
+  const total = npc.quest_links.length + listed.size;
   return html ? html + hiddenNote(total, html.split('class="card').length - 1)
     : (total ? hiddenNote(total, 0) : `<p class="muted">No conversations in the tables name this NPC.</p>`);
 }
@@ -4049,7 +4261,15 @@ async function renderPanorama() {
   renderPanoramaFrame();
 }
 
-els.zone.addEventListener("change", () => loadZone(els.zone.value));
+els.zone.addEventListener("change", () => {
+  if (els.zone.value !== "AZ0") return loadZone(els.zone.value);
+  if (!viewRace()) {
+    els.status.textContent = "Choose a race to open its starter panorama (AZ0).";
+    els.zone.value = zoneId;
+    return undefined;
+  }
+  return loadZone(starterZone(viewRace()));
+});
 
 async function start() {
   resize();
@@ -4062,6 +4282,13 @@ async function start() {
   for (const [kind, label] of Object.entries(groups)) {
     const group = document.createElement("optgroup");
     group.label = label;
+    if (kind === "intro") {
+      // AZ0 is the starter panorama of whichever race is selected (see the change handler).
+      const az0 = document.createElement("option");
+      az0.value = "AZ0";
+      az0.textContent = "AZ0 · starter panorama (selected race)";
+      group.append(az0);
+    }
     for (const z of zoneList.filter((x) => groupOf(x) === kind)) {
       const option = document.createElement("option");
       option.value = z.id;

@@ -101,7 +101,7 @@
   },
   "NodeG": {
    "completed": [
-    "conversation(Tranquil Dream - Sister Midnight 2 Success)"
+    "completedQuest(q_tranquil_dream,1)"
    ]
   }
  },
@@ -115,6 +115,27 @@
   ],
   "NodeA": [
    "completed"
+  ],
+  "NodeF": [
+   "completed"
+  ],
+  "NodeE": [
+   "completed"
+  ],
+  "NodeD": [
+   "completed"
+  ],
+  "NodeC": [
+   "completed"
+  ]
+ },
+ "offer_exclude": {
+  "NodeG": [
+   "tagged:109ddb5a:31894e83",
+   "tagged:109ddb5a:46a27ef6",
+   "tagged:109ddb5a:a5f847dd",
+   "tagged:109ddb5a:31673a21",
+   "tagged:109ddb5a:43750f88"
   ]
  },
  "offer_order": {
@@ -122,13 +143,42 @@
    "conv:1dc95e26",
    "tagged:436dd820",
    "tagged:8dfb849f"
+  ],
+  "NodeB": [
+   "conv:821dc89d",
+   "tagged:94c100f9",
+   "tagged:36d06127"
+  ],
+  "NodeF": [
+   "conv:f1a869ec",
+   "tagged:4137dff0",
+   "tagged:81f022ec"
+  ],
+  "NodeE": [
+   "conv:3bb41839",
+   "tagged:61b69da5",
+   "tagged:7ecd37a7"
+  ],
+  "NodeD": [
+   "conv:59e000f2",
+   "tagged:586f35af",
+   "tagged:6865d2c4"
+  ],
+  "NodeG": [
+   "tagged:d98d0933:31894e83",
+   "tagged:d98d0933:46a27ef6",
+   "tagged:d98d0933:a5f847dd",
+   "tagged:d98d0933:31673a21",
+   "tagged:d98d0933:43750f88",
+   "conv:d14cc045",
+   "tagged:109ddb5a",
+   "tagged:d98d0933"
   ]
  },
  "conversation_actions": {
   "1aa34077-f97a-4cdd-8bb7-3644befd8954": {
    "*": [
-    "clear_counter(answer_score)",
-    "complete_step(q_tranquil_dream,Step1)"
+    "clear_counter(answer_score)"
    ]
   }
  }

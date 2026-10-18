@@ -18,6 +18,42 @@ def _last(value):
     return str(value or "").rsplit(".", 1)[-1]
 
 
+def _live_list_variable(ctx, name):
+    """Evaluate a resolving ability's CountListAttr variable against its list.
+
+    C# ``AbilityVariableCondition`` reads the variable through the ability
+    instance, so a CountListAttr operand counts the instance list as it stands
+    when the effect is reached ("void a random ... troop.  If you do, exhaust
+    this." on Ravenous Zombies).  The resolver's ``ability_variables`` only
+    holds authored defaults (``0``) for these, so read the live list instead.
+    Returns ``None`` when ``name`` is not such a variable.
+    """
+    state = getattr(ctx, "bstate", {}) or {}
+    guid = str(state.get("resolving_ability") or "").lower()
+    if not guid or not name:
+        return None
+    try:
+        import json
+        from gamedata import DEFAULT_RECORD_STORE
+        from rules_port.fields import _as_dict
+        record = _as_dict(DEFAULT_RECORD_STORE.get("AbilityTemplate", guid))
+        variable = next((item for item in record.get("m_Variables", ()) or ()
+                         if isinstance(item, dict)
+                         and item.get("m_Name") == name), None)
+        if variable is None or _last(variable.get("_t")) != (
+                "CountListAttrAbilityVariable"):
+            return None
+        from .static_rules import _expression_value
+        session = getattr(ctx, "session", None)
+        return _expression_value(
+            ctx.db, int(getattr(session, "session_id", 0) or 0), state,
+            state.get("resolving_source_uid"),
+            state.get("resolving_owner_id", 0),
+            json.dumps({"m_Variables": [variable]}), name)
+    except Exception:
+        return None
+
+
 def _record_filter_zones(node):
     """Return explicit zone predicates from a Records card-filter tree."""
     if isinstance(node, dict):
@@ -711,6 +747,8 @@ def _native_condition(node, ctx):
         resolving_ability = str(state.get("resolving_ability") or "").lower()
         scoped_lists = ((state.get("list_attrs") or {}).get(
             resolving_ability) or {})
+        live_left = (None if lhs in scoped_lists
+                     else _live_list_variable(ctx, lhs))
         if lhs in scoped_lists:
             values = scoped_lists[lhs]
             if isinstance(values, (list, tuple, set)):
@@ -720,6 +758,8 @@ def _native_condition(node, ctx):
                     left_value = int(values)
                 except (TypeError, ValueError):
                     return False
+        elif live_left is not None:
+            left_value = int(live_left)
         else:
             if lhs not in variables:
                 return False

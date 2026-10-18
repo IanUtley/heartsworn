@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Generate a first draft of ``campaign/campaign_rules/AZ1.json`` (node state only).
 
-The rules file states when each node is visible / hidden / blocked /
+The rules file states when each node is visible / blocked /
 completed / retryable / quest-marked, plus the hooks and quest steps that set
 the flags and quest progress those gates read. What a node offers is table
 data (see ``offers.py``) and is not written here.
@@ -129,6 +129,18 @@ CODE_HOOK_GATES = {
                                    {"not": {"flag": "blockade_cleared"}}]}},
 }
 
+# A node is visible when its visibility gate holds, so a ``hidden`` condition is
+# written as the negated ``visible`` condition (ANDed with any visible gate the
+# node already has) and the ``hidden`` gate itself is dropped.
+for _node_spec in CODE_HOOK_GATES.values():
+    if "hidden" in _node_spec:
+        _shown = {"not": _node_spec.pop("hidden")}
+        _node_spec["visible"] = ({"all": [_node_spec["visible"], _shown]}
+                                 if "visible" in _node_spec else _shown)
+
+# Gates the editor no longer manages; they are not kept as edited states.
+EDITOR_RETIRED_STATES = ("hidden", "blocked")
+
 QUEST_STEP_EVENTS = {"encounter": "encounter_victory",
                      "dungeon": "encounter_victory",
                      "convo": "conversation_end",
@@ -203,18 +215,8 @@ def build(db: sqlite3.Connection) -> dict:
         e for encounters in data["encounters"].values() for e in encounters)
     for node_id, gates in CODE_HOOK_GATES.items():
         nodes.setdefault(node_id, {}).update(gates)
-    # Masked Army conversations are selected by their authored labels, as in
-    # campaign.py _az1_masked_army_variant.
-    for conversation in (data["node_conversations"].get("NodeR") or
-                         data["node_conversations"].get("Node00R") or []):
-        label = str(conversation["name"]).lower()
-        flag = ("masked_army_done" if "finished faction quest" in label else
-                "masked_army_met" if "step 1" in label else "")
-        if flag:
-            hooks.append({"id": flag,
-                          "on": {"event": "conversation_end",
-                                 "conversation": conversation["guid"]},
-                          "do": [{"set_flag": flag}]})
+    # Masked Army needs no flag hooks: its gates on Node00R read the node's
+    # outcome, not hook-set flags.
     # campaign.py _handle_sendevent "gaal_camp_accept": Milosh's reading sets
     # PublicState gaal_fortune (read by flag(gaal_fortune) conversation tags).
     hooks.append({"id": "gaal_fortune",
@@ -326,7 +328,9 @@ def keep_tagged_gates(rules, path: Path) -> None:
     if not path.exists():
         return
     previous = json.loads(path.read_text(encoding="utf-8"))
-    edited = previous.get("edited_states") or {}
+    edited = {node_id: [gate for gate in gates if gate not in EDITOR_RETIRED_STATES]
+              for node_id, gates in (previous.get("edited_states") or {}).items()}
+    edited = {node_id: gates for node_id, gates in edited.items() if gates}
     for node_id, gates in edited.items():
         spec = (previous.get("nodes") or {}).get(node_id) or {}
         for gate in gates:

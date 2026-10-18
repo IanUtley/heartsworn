@@ -1217,6 +1217,29 @@ def db_latest_champion_for_user(user_id, conn=None):
         "AND is_deleted=0 ORDER BY id DESC LIMIT 1", (int(user_id),)).fetchone()
 
 
+def db_last_played_champion_for_user(user_id, conn=None):
+    """Return the champion and deck most recently played by a profile.
+
+    Champions never played fall back to the newest created, so a fresh
+    account still resolves to a champion.
+    """
+    import db as _db_layer
+    return (conn or _db_layer._db).execute(
+        "SELECT id, last_deck_id FROM champions WHERE user_id=? "
+        "AND is_deleted=0 ORDER BY last_played_at IS NULL, "
+        "last_played_at DESC, id DESC LIMIT 1", (int(user_id),)).fetchone()
+
+
+def db_mark_champion_played(champion_id, conn=None):
+    """Stamp a champion as just played; see db_last_played_champion_for_user."""
+    import db as _db_layer
+    connection = conn or _db_layer._db
+    connection.execute(
+        "UPDATE champions SET last_played_at=datetime('now') WHERE id=?",
+        (int(champion_id),))
+    connection.commit()
+
+
 def db_latest_deck_for_user(user_id, conn=None):
     """Return the newest non-deleted saved deck ID for a profile."""
     import db as _db_layer

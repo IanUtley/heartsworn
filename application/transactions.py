@@ -375,10 +375,13 @@ class TransactionsMixin:
             # existing one-fewer-card mulligan rule.
             if not _hc.db_game_get_hand(session.session_id,
                                     self.user_profile["id"]):
-                _hc.db_game_draw_cards(session.session_id,
-                                   self.user_profile["id"],
-                                   self._starting_hand_size(session))
-                _hc.db_game_draw_cards(session.session_id, 0, 7)
+                # A champion with "can't draw cards" opens with no hand.
+                if not self._champion_cannot_draw(session, player=True):
+                    _hc.db_game_draw_cards(session.session_id,
+                                       self.user_profile["id"],
+                                       self._starting_hand_size(session))
+                if not self._champion_cannot_draw(session, player=False):
+                    _hc.db_game_draw_cards(session.session_id, 0, 7)
             player_hand = _hc.db_game_get_hand(session.session_id,
                                            self.user_profile["id"])
             ai_hand = _hc.db_game_get_hand(session.session_id, 0)
@@ -1073,16 +1076,16 @@ class TransactionsMixin:
         # PvP tournament: route concessions through the shared end-game
         # path so both players receive the GameEnded banner.
         if not handled and session and (session.session_name or "").startswith("tourney-"):
-            from services.tournament_game import (
-                pvp_concede, pvp_handle_transaction,
-            )
+            from services.tournament_game import pvp_concede
             try:
                 if is_quit or is_surr:
                     handled = pvp_concede(self, session)
                 else:
-                    handled = pvp_handle_transaction(
-                        self, session, inner_bytes,
-                        typed_payload=getattr(transaction, "typed_payload", None))
+                    # Gameplay is owned by the RulesPort host; with none attached
+                    # there is no legacy engine, so the request is refused.
+                    _hc.log_req("    PvP RulesPort boundary: no attached host, "
+                                "refusing legacy fallback")
+                    handled = True
             except Exception as _e:
                 # Never let a PvP transaction exception kill this thread
                 # (it would RST both clients).  Log, ack, and continue.
@@ -1134,10 +1137,10 @@ class TransactionsMixin:
                 crow = db_rules_port_card_projection(
                     session.session_id, int(played_card_uid))
                 if crow:
-                    played_card_type = crow[1]
-                    cur_grant = int(crow[4] or 0)
-                    max_grant = int(crow[5] or 0)
-                    if crow[1] == 'Resource':
+                    played_card_type = crow[4]
+                    cur_grant = int(crow[6] or 0)
+                    max_grant = int(crow[7] or 0)
+                    if crow[4] == 'Resource':
                         is_resource_play = True
                         # Validate the authored per-turn allowance before the
                         # compatibility projection moves the card out of the
@@ -1156,16 +1159,16 @@ class TransactionsMixin:
                             _hc.log_req(
                                 "    Rejected resource play: per-turn allowance used")
                             return True
-                        shard_color = crow[2].split()[0]
+                        shard_color = crow[3].split()[0]
                         # Shards of Fate ("Choose a Standard resource in
                         # your deck. Gain the thresholds it provides.")
                         # is data-driven: an ability chain targeting a
                         # Standard RESOURCE in the DECK.  It must NOT
                         # behave like a basic shard (+1 max/current
                         # resource, +1 charge, fixed threshold).
-                        if crow[3]:
+                        if crow[5]:
                             try:
-                                _pl_ags = json.loads(crow[3])
+                                _pl_ags = json.loads(crow[5])
                             except Exception:
                                 _pl_ags = []
                             shard_ability, shard_tpl = \
@@ -1175,7 +1178,7 @@ class TransactionsMixin:
                                     printed_resource_choice_ability)
                                 resource_choice_ability = \
                                     printed_resource_choice_ability(_pl_ags)
-                    elif _hc.game_engine.card_type_from_db(crow[1]) & (
+                    elif _hc.game_engine.card_type_from_db(crow[4]) & (
                             _hc.game_engine.ECardTypes.Troop |
                             _hc.game_engine.ECardTypes.Artifact |
                             _hc.game_engine.ECardTypes.Constant |
@@ -1185,7 +1188,7 @@ class TransactionsMixin:
                     # Remove this card from the hand by setting its position beyond the deck
                     from pvp_db import db_set_card_played_to_zone
                     db_set_card_played_to_zone(session.session_id, int(played_card_uid), 'PlayedResources')
-                    _hc.log_req(f"    Played {crow[2]} (uid={played_card_uid}), moving to resource zone")
+                    _hc.log_req(f"    Played {crow[3]} (uid={played_card_uid}), moving to resource zone")
 
             # Track resources in the DB battle state. Playing a basic
             # threshold gives: +1 total, +1 current, +1 threshold colour,
@@ -1390,7 +1393,7 @@ class TransactionsMixin:
                 cost_selection = self._card_play_cost_selections(
                     session, play_plan, tid, targets)
                 if cost_selection is None:
-                    _hc.log_req(f"    REJECTED play {crow[2]}: incomplete/illegal "
+                    _hc.log_req(f"    REJECTED play {crow[3]}: incomplete/illegal "
                             "card cost target")
                     g3 = _hc.game_engine.Game(session.session_id, pl_t, ai_t)
                     g3.push_player_updated(pl_t, champ_id=getattr(
@@ -1407,13 +1410,13 @@ class TransactionsMixin:
                 x_cost = max(0, int(x_cost or 0))
                 if play_plan.cost.variable:
                     if x_cost < play_plan.cost.variable_minimum:
-                        _hc.log_req(f"    REJECTED play {crow[2]}: X={x_cost} "
+                        _hc.log_req(f"    REJECTED play {crow[3]}: X={x_cost} "
                                 f"below minimum {play_plan.cost.variable_minimum}")
                         self._push_transaction_ack(session)
                         handled = True
                         return True
                 elif x_cost:
-                    _hc.log_req(f"    REJECTED play {crow[2]}: non-variable card "
+                    _hc.log_req(f"    REJECTED play {crow[3]}: non-variable card "
                             f"has X={x_cost}")
                     self._push_transaction_ack(session)
                     handled = True
@@ -1424,7 +1427,7 @@ class TransactionsMixin:
                     # normal gate, but a drag shouldn't be able to play
                     # an unaffordable card (e.g. an undiscounted Fury of
                     # the Mountain God) and push resources negative.
-                    _hc.log_req(f"    REJECTED play {crow[2]}: cost {cost}+{x_payment} > "
+                    _hc.log_req(f"    REJECTED play {crow[3]}: cost {cost}+{x_payment} > "
                             f"resources {bstate.get('player_resources', 0)}")
                     g3 = _hc.game_engine.Game(session.session_id, pl_t, ai_t)
                     g3.push_player_updated(pl_t, champ_id=getattr(
@@ -1443,7 +1446,7 @@ class TransactionsMixin:
                     session, play_plan, tid, activations,
                     owner_id=self.user_profile["id"], battle_state=bstate)
                 if ability_cost_selection is None:
-                    _hc.log_req(f"    REJECTED play {crow[2]}: invalid ability cost target")
+                    _hc.log_req(f"    REJECTED play {crow[3]}: invalid ability cost target")
                     self._push_transaction_ack(session)
                     handled = True
                     return True
@@ -1460,7 +1463,7 @@ class TransactionsMixin:
                     activations=activations,
                     cost_target_map=selected_cost_map)
                 if plan_errors:
-                    _hc.log_req(f"    REJECTED play {crow[2]}: "
+                    _hc.log_req(f"    REJECTED play {crow[3]}: "
                             f"activation validation: {'; '.join(plan_errors)}")
                     g3 = _hc.game_engine.Game(session.session_id, pl_t, ai_t)
                     g3.push_player_updated(pl_t, champ_id=getattr(
@@ -1471,7 +1474,7 @@ class TransactionsMixin:
                     return True
                 if not self._card_costs_valid(
                         session, cost_selections, self.user_profile["id"]):
-                    _hc.log_req(f"    REJECTED play {crow[2]}: invalid card cost")
+                    _hc.log_req(f"    REJECTED play {crow[3]}: invalid card cost")
                     self._push_transaction_ack(session)
                     handled = True
                     return True
@@ -1535,7 +1538,7 @@ class TransactionsMixin:
                         _hc.game_engine.ResourceId.from_str(
                             _hc.game_engine.PLAY_CARD_ABILITY_TEMPLATE_ID))
                     _be.save_state(session, bstate)
-                    _hc.log_req(f"    Troop {crow[2]} on the stack — "
+                    _hc.log_req(f"    Troop {crow[3]} on the stack — "
                             f"resolves on both-pass (AI auto-passes)")
                 else:
                     # BasicAction / QuickAction spell: cast and PUSH onto
@@ -1759,13 +1762,12 @@ class TransactionsMixin:
     def _handle_encounter_mod_dialog_transaction(self, session, transaction):
         """Route the class-55 conversation acknowledgement to its owner."""
         if (session.session_name or "").startswith("tourney-"):
-            from services.tournament_game import pvp_handle_transaction
-            handled = pvp_handle_transaction(self, session,
-                                              transaction.inner_bytes,
-                                              typed_payload=getattr(
-                                                  transaction, "typed_payload", None))
-            if not handled:
-                self._push_transaction_ack(session)
+            # Tournament dialogs resolve through the RulesPort encounter-mod
+            # resolver; with no attached host there is no legacy path.
+            import hconnect_server as _hc
+            _hc.log_req("    PvP RulesPort boundary: no attached host, "
+                        "refusing legacy fallback")
+            self._push_transaction_ack(session)
             return True
         return self._resolve_pending_conversation(session, transaction)
 
@@ -2269,21 +2271,15 @@ class TransactionsMixin:
         """Declare the player's blockers for the current combat."""
         import hconnect_server as _hc
         inner_bytes = transaction.inner_bytes
-        if authoritative_port is not None:
-            from rules_port.persistence import load_state, save_state
-            load_checkpoint = load_state
-            save_checkpoint = save_state
-        else:
-            import battle_engine as _be
-            load_checkpoint = _be.load_state
-            save_checkpoint = _be.save_state
+        from rules_port.persistence import load_state as load_checkpoint
+        from rules_port.persistence import save_state as save_checkpoint
         pl_t = _hc.game_engine.UID.make(244, int(self.client_reck_id))
         ai_t = _hc.game_engine.UID.make(_hc.game_engine.SERVICE_AI_UID_TYPE, 1000)
         bstate = load_checkpoint(session)
         self._current_bstate = bstate
         attackers = {int(k): int(v) for k, v in (bstate.get("ai_attackers") or {}).items()}
-        from pvp_db import db_warzone_card_uids, db_card_state_value as db_card_state_raw
-        player_troops = set(db_warzone_card_uids(session.session_id, self.user_profile["id"]))
+        from pvp_db import db_warzone_card_uids
+        player_troops = {int(row[0]) for row in db_warzone_card_uids(session.session_id, self.user_profile["id"])}
         all_uids = []
         if declarations is not None:
             for attacker, blockers in declarations:
@@ -2317,46 +2313,37 @@ class TransactionsMixin:
                 blockers_map.setdefault(cur_attacker, [])
             elif cur_attacker is not None and u in player_troops:
                 blockers_map[cur_attacker].append(u)
-        if authoritative_port is not None:
-            # RulesPort has already validated and staged blocker assignment
-            # against its shared Combat objects.  Project that accepted map
-            # directly; a second legacy can_block pass could discard a valid
-            # blocker when its SQLite-derived state lagged the port snapshot.
-            port_blockers = {}
-            port_attackers = {}
-            current_ai_attackers = {
-                int(value) for value in (bstate.get("ai_attackers") or {})
+        # RulesPort has already validated and staged blocker assignment
+        # against its shared Combat objects.  Project that accepted map
+        # directly; a second legacy can_block pass could discard a valid
+        # blocker when its SQLite-derived state lagged the port snapshot.
+        port_blockers = {}
+        port_attackers = {}
+        current_ai_attackers = {
+            int(value) for value in (bstate.get("ai_attackers") or {})
+        }
+        for combat in authoritative_port.combat_manager.combats:
+            attacker = combat.attacker
+            if attacker is None:
+                continue
+            attacker_id = int(getattr(
+                getattr(attacker, "session_card_id", attacker),
+                "uid64", getattr(attacker, "session_card_id", attacker)))
+            if current_ai_attackers and attacker_id not in current_ai_attackers:
+                continue
+            port_attackers[attacker_id] = combat
+            port_blockers[attacker_id] = []
+            for blocker in combat.blockers:
+                value = getattr(blocker, "session_card_id", blocker)
+                value = getattr(value, "uid64", value)
+                port_blockers[attacker_id].append(int(value))
+        if port_attackers:
+            attackers = {
+                uid: int((bstate.get("ai_attackers") or {}).get(
+                    str(uid), (bstate.get("ai_attackers") or {}).get(uid, 0)))
+                for uid in port_attackers
             }
-            for combat in authoritative_port.combat_manager.combats:
-                attacker = combat.attacker
-                if attacker is None:
-                    continue
-                attacker_id = int(getattr(
-                    getattr(attacker, "session_card_id", attacker),
-                    "uid64", getattr(attacker, "session_card_id", attacker)))
-                if current_ai_attackers and attacker_id not in current_ai_attackers:
-                    continue
-                port_attackers[attacker_id] = combat
-                port_blockers[attacker_id] = []
-                for blocker in combat.blockers:
-                    value = getattr(blocker, "session_card_id", blocker)
-                    value = getattr(value, "uid64", value)
-                    port_blockers[attacker_id].append(int(value))
-            if port_attackers:
-                attackers = {
-                    uid: int((bstate.get("ai_attackers") or {}).get(
-                        str(uid), (bstate.get("ai_attackers") or {}).get(uid, 0)))
-                    for uid in port_attackers
-                }
-                blockers_map = port_blockers
-        else:
-            # Legacy-only compatibility path: retain the metadata-driven
-            # blocker legality checks for unclassified requests.
-            from rules_port.combat_rules import can_block
-            for u in list(blockers_map):
-                blockers_map[u] = [b for b in blockers_map[u]
-                                   if can_block(_hc._db, session.session_id,
-                                                bstate, u, b)]
+            blockers_map = port_blockers
         bstate["ai_blockers"] = {str(k): [str(b) for b in v]
                                  for k, v in blockers_map.items()}
         block_uids = {b for v in blockers_map.values() for b in v}
@@ -2378,9 +2365,21 @@ class TransactionsMixin:
             cs.attacker = scid
             cs.blockers = blockers
             combats.append(cs)
-        self._dispatch_blocker_events(
-            game, session, bstate,
-            [(u, blockers_map.get(u, [])) for u in attackers])
+        # A repeated commit of the same blocks must not announce them again:
+        # each attacker/blocker pair's block triggers go on the chain once.
+        turn = int(bstate.get("turn_number", 0) or 0)
+        announced = set(bstate.get("blocker_events_announced") or [])
+        fresh = []
+        for u in attackers:
+            new_blockers = []
+            for blocker in blockers_map.get(u, []):
+                key = f"{turn}:{int(u)}:{int(blocker)}"
+                if key not in announced:
+                    announced.add(key)
+                    new_blockers.append(blocker)
+            fresh.append((u, new_blockers))
+        bstate["blocker_events_announced"] = sorted(announced)
+        self._dispatch_blocker_events(game, session, bstate, fresh)
         if combats:
             game.push_combat_listing(pl_t, combats)
         self._send_battle_events(session, game, pl_t)
@@ -2396,8 +2395,33 @@ class TransactionsMixin:
             # action into DeclareDefensePriorityWindow; re-entering the AI
             # turn loop here re-published DeclareDefense and left the client
             # submitting a second (often empty) defense transaction.
+            _hc.log_req(f"    PROBE commit before save: port={authoritative_port.current_turn_phase} "
+                        f"phase_idx={bstate.get('phase_idx')} stack={len(bstate.get('stack') or [])} "
+                        f"turn_phases={len(bstate.get('turn_phases') or [])}")
             save_checkpoint(session, bstate)
+            # The commit consumes the defender's DeclareDefense window.  A
+            # blocked trigger queued by this commit must not hold the port in
+            # that window: pass the defender's priority so the port moves on to
+            # DeclareDefensePriorityWindow, where the chain resolves.
+            if (authoritative_port.current_turn_phase ==
+                    _hc.game_engine.ETurnPhases.DeclareDefense and
+                    authoritative_port.action_stack.priority_player_id is not None):
+                authoritative_port.pass_player_priority(
+                    authoritative_port.action_stack.priority_player_id)
+                _hc.log_req("    PROBE commit passed defender window: "
+                            f"port={authoritative_port.current_turn_phase}")
             self._advance_to_priority(session, pl_t, ai_t, bstate)
+            # Tell the client the phase the port reached: the events built
+            # before the advance still name DeclareDefense.
+            phase_game = self._fresh_game(session, pl_t, ai_t, bstate)
+            priority_uid = authoritative_port.action_stack.priority_player_id
+            phase_game.push_turn_phase(
+                authoritative_port.current_turn_phase,
+                authoritative_port.active_player_id,
+                priority_uid if priority_uid is not None else pl_t)
+            self._send_battle_events(session, phase_game, pl_t)
+            _hc.log_req(f"    PROBE commit after advance: port={authoritative_port.current_turn_phase} "
+                        f"phase_idx={bstate.get('phase_idx')} stack={len(bstate.get('stack') or [])}")
             return True
         start_idx = bstate.get("ai_turn_phase_idx", 0)
         bstate.pop("ai_turn_phase_idx", None)
@@ -2411,17 +2435,9 @@ class TransactionsMixin:
         """Declare the player's attackers for the current combat."""
         import hconnect_server as _hc
         inner_bytes = transaction.inner_bytes
-        if authoritative_port is not None:
-            from rules_port.persistence import load_state, save_state
-            from rules_port.lifecycle import advance_checkpoint_phase
-            load_checkpoint = load_state
-            save_checkpoint = save_state
-            advance_checkpoint = advance_checkpoint_phase
-        else:
-            import battle_engine as _be
-            load_checkpoint = _be.load_state
-            save_checkpoint = _be.save_state
-            advance_checkpoint = _be.advance_phase
+        from rules_port.persistence import load_state as load_checkpoint
+        from rules_port.persistence import save_state as save_checkpoint
+        from rules_port.lifecycle import advance_checkpoint_phase as advance_checkpoint
         pl_t = _hc.game_engine.UID.make(244, int(self.client_reck_id))
         ai_t = _hc.game_engine.UID.make(_hc.game_engine.SERVICE_AI_UID_TYPE, 1000)
         bstate = load_checkpoint(session)
@@ -2448,36 +2464,14 @@ class TransactionsMixin:
         # that live path the host is only projecting the accepted decision;
         # re-running the old legality loop here used to silently discard
         # attackers when its legacy state view lagged the port view.
-        from pvp_db import db_warzone_card_uids, db_card_state_value as db_card_state_raw
-        from rules_port.static_rules import effective_attributes
-        wz_uids = set(db_warzone_card_uids(
-            session.session_id, self.user_profile["id"]))
         attackers = []
-        if authoritative_port is not None:
-            staged = {
-                int(getattr(combat.attacker, "session_card_id",
-                            getattr(combat.attacker, "uid", combat.attacker)))
-                for combat in authoritative_port.combat_manager.combats
-                if combat.attacker is not None
-            }
-            attackers = [uid for uid in attacker_uids if uid in staged]
-        else:
-            for uid in attacker_uids:
-                if uid not in wz_uids:
-                    continue
-                state = int(db_card_state_raw(session.session_id, int(uid)) or 0)
-                attrs = int(effective_attributes(
-                    _hc._db, session.session_id, bstate, int(uid)) or 0)
-                if (state & (_hc.game_engine.ECardStates.Tapped |
-                             _hc.game_engine.ECardStates.Attacking)):
-                    continue
-                if attrs & (_hc.game_engine.ECardAttributes.CantAttack |
-                            _hc.game_engine.ECardAttributes.Defensive):
-                    continue
-                if not ((state & _hc.game_engine.ECardStates.StartedATurnOnYourSide)
-                        or attrs & _hc.game_engine.ECardAttributes.Speed):
-                    continue
-                attackers.append(uid)
+        staged = {
+            int(getattr(combat.attacker, "session_card_id",
+                        getattr(combat.attacker, "uid", combat.attacker)))
+            for combat in authoritative_port.combat_manager.combats
+            if combat.attacker is not None
+        }
+        attackers = [uid for uid in attacker_uids if uid in staged]
         # Persist declared attackers in battle state (DB) so combat
         # resolution and a reconnect can reconstruct them.
         ai_champ_uid = getattr(self, "_ai_champ_scid", None)
@@ -2511,7 +2505,6 @@ class TransactionsMixin:
             combat_id = self._wire_combat_id_for_attacker(
                 session, pl_t, u, u & 0xFFFF)
             game.push_attack_declared(combat_id, pl_t, ai_champ_scid, cid)
-            from pvp_db import db_card_state_value as db_card_state_raw
             trow = _hc.db_card_template_attrs_joined(session.session_id, int(u))
             tpl_guid = trow[0] if trow else None
             # Effective attributes = template static + instance-granted
@@ -2671,7 +2664,10 @@ class TransactionsMixin:
                 # a loop.
                 port = getattr(session, "_rules_port_session", None)
                 if port is not None:
-                    port.action_stack.clear()
+                    # Drop only the consumed phase window: triggers raised by
+                    # the damage keep their chain actions (see
+                    # discard_phase_priority_windows).
+                    port.discard_phase_priority_windows()
                     port.advance_turn_phase()
                     phases = list(bstate.get("turn_phases") or ())
                     try:
@@ -2701,7 +2697,10 @@ class TransactionsMixin:
                     session, pl_t, ai_t, bstate, first_strike=True)
                 port = getattr(session, "_rules_port_session", None)
                 if port is not None:
-                    port.action_stack.clear()
+                    # Drop only the consumed phase window: triggers raised by
+                    # the damage keep their chain actions (see
+                    # discard_phase_priority_windows).
+                    port.discard_phase_priority_windows()
                     port.advance_turn_phase()
                     phases = list(bstate.get("turn_phases") or ())
                     try:

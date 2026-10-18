@@ -820,10 +820,16 @@ def summon_token(context, payload=None):
             context.handler._card_full_data(context.game, scid, created_guid)
         collection_value = card_collection_for_location(location)
         from pvp_db import db_card_state_value
+        extra = {}
+        if location == "choosing":
+            # Art-less Choice templates borrow RelatedCards[0]'s art.
+            from .choice_effects import choice_art_related_cards
+            extra["related_cards"] = choice_art_related_cards(
+                context.bstate.get("resolving_source_uid"), uid)
         context.game.push_card_updated(
             scid, recipient, collection_value, card_type,
             template_id=created_guid, card_name=name, cost=cost, attack=attack,
-            defense=defense, gems=gems, nulling=location == "deck",
+            defense=defense, gems=gems, nulling=location == "deck", **extra,
             # An exhausted summon must render tapped (CardUpdated defaults
             # to state None).
             state=int(db_card_state_value(

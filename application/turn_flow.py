@@ -890,8 +890,9 @@ class TurnFlowMixin:
         # Enlightened Seeker: "You can't play cards." — a continuous static
         # ability; no hand card is playable while the controller has one in play.
         from rules_port.static_rules import controller_flags
-        if "cant_play_cards" in controller_flags(
-                _hc._db, session.session_id, bstate, self.user_profile["id"]):
+        hand_flags = controller_flags(
+            _hc._db, session.session_id, bstate, self.user_profile["id"])
+        if {"cant_play_cards", "cant_play_cards_from_hand"} & hand_flags:
             rows = []
         for card_uid, cost, ct, thresh_json, abilities_json in rows:
             scid = _hc.game_engine.SessionCardId(_hc.game_engine.UID(card_uid))
@@ -1031,6 +1032,29 @@ class TurnFlowMixin:
                 state["champ_guid_map"] = guid_map
         from rules_port.static_rules import hand_size_unlimited
         return hand_size_unlimited(_hc._db, session.session_id, state)
+
+    def _champion_cannot_draw(self, session, player):
+        """Whether a side's champion has "can't draw cards" before the battle
+        state exists, so the opening hand is dealt from the handler's champion
+        identities (as ``_hand_size_unlimited`` does for its passive).
+        """
+        import hconnect_server as _hc
+        from rules_port.static_rules import controller_flags
+        if player:
+            owner = (int(self.user_profile.get("id", 0) or 0)
+                     if isinstance(self.user_profile, dict) else 0)
+            guid = getattr(self, "_player_champ_guid", None)
+            scid = getattr(self, "_player_champ_scid", None)
+        else:
+            owner = 0
+            guid = getattr(self, "_ai_champ_guid", None)
+            scid = getattr(self, "_ai_champ_scid", None)
+        if not guid or scid is None:
+            return False
+        state = {"champ_map": {str(owner): int(scid.uid.uid64)},
+                 "champ_guid_map": {str(owner): guid}}
+        return "cant_draw_cards" in controller_flags(
+            _hc._db, session.session_id, state, owner)
 
     def _next_resolve_counter(self, session):
         """Increment and return the resolve counter from battle state.
@@ -1197,12 +1221,51 @@ class TurnFlowMixin:
                          and uid not in in_hand]:
             sent.pop(card_uid, None)
 
+    def _ready_side_for_turn(self, session, game, bstate, side, owner_id):
+        """Run this turn's ready step for one controller, once per turn.
+
+        Mirrors C# ReadyState.OnEntry (ReadyAllCardsThatCanBeReadied +
+        ResetArmor) and projects each changed card as a CardUpdated.  It runs
+        at StartTurn before TurnStartedEvent is dispatched; Prep calls it too
+        and it is a no-op there when the side was already readied this turn.
+        Returns the change list, or None when skipped.
+        """
+        import hconnect_server as _hc
+        from rules_port.lifecycle import ready_step_for_turn
+        changes = ready_step_for_turn(
+            _hc._db, session.session_id, owner_id, bstate, side, handler=self)
+        if changes is None:
+            return None
+        recipient = game.player_uid if side == "player" else game.ai_uid
+        for uid, template_guid, _card_owner, _previous, new_state in changes:
+            scid = _hc.game_engine.SessionCardId(_hc.game_engine.UID(int(uid)))
+            _tpl, card_type, _name, _cost, _atk, _def, _gem = \
+                self._card_full_data(game, scid, template_guid)
+            game.push_card_updated(
+                scid, recipient, _hc.game_engine.ECardCollections.Warzone,
+                card_type, template_id=template_guid, state=int(new_state))
+        return changes
+
+    def _dispatch_card_readied_events(self, session, game, bstate, owner_id,
+                                      changes):
+        """Fire CardReadiedEvent for each card the ready step untapped."""
+        import hconnect_server as _hc
+        tapped = _hc.game_engine.ECardStates.Tapped
+        for uid, _tpl, _owner, previous_state, new_state in changes or ():
+            if int(previous_state) & tapped and not int(new_state) & tapped:
+                from rules_port.triggers import dispatch_native_trigger
+                dispatch_native_trigger(
+                    db=_hc._db, handler=self, game=game, session=session,
+                    player_uid=game.player_uid, ai_uid=game.ai_uid,
+                    battle_state=bstate, event_type="CardReadiedEvent",
+                    source_card_id=int(uid), source_player_id=owner_id,
+                    data={"event_previous_state": int(previous_state)})
+
     def _apply_rules_port_prep(self, session, projection_game, bstate):
         """Project the native Prep lifecycle for the active controller."""
         import hconnect_server as _hc
         from rules_port.lifecycle import (build_turn_phases,
-                                          clear_expired_temporary_attributes,
-                                          ready_cards_for_turn, reset_armor)
+                                          clear_expired_temporary_attributes)
         from rules_port.resources import project_resource_change
 
         pl_t, ai_t = projection_game.player_uid, projection_game.ai_uid
@@ -1218,28 +1281,12 @@ class TurnFlowMixin:
             project_resource_change(
                 projection_game, session, bstate, pl_t, ai_t, side,
                 "currentresource", refill)
-        clear_expired_temporary_attributes(
-            _hc._db, session.session_id, owner_id, "start_turn",
-            clear_stat_buffs=True, battle_state=bstate, handler=self)
-        reset_armor(_hc._db, session.session_id, bstate)
-        changes = ready_cards_for_turn(_hc._db, session.session_id, owner_id)
-        recipient = pl_t if is_player else ai_t
-        for uid, template_guid, card_owner, previous_state, new_state in changes:
-            scid = _hc.game_engine.SessionCardId(_hc.game_engine.UID(int(uid)))
-            _tpl, card_type, _name, _cost, _atk, _def, _gem = \
-                self._card_full_data(projection_game, scid, template_guid)
-            projection_game.push_card_updated(
-                scid, recipient, _hc.game_engine.ECardCollections.Warzone,
-                card_type, template_id=template_guid, state=int(new_state))
-            if (int(previous_state) & _hc.game_engine.ECardStates.Tapped and
-                    not (int(new_state) & _hc.game_engine.ECardStates.Tapped)):
-                from rules_port.triggers import dispatch_native_trigger
-                dispatch_native_trigger(
-                    db=_hc._db, handler=self, game=projection_game,
-                    session=session, player_uid=pl_t, ai_uid=ai_t,
-                    battle_state=bstate, event_type="CardReadiedEvent",
-                    source_card_id=int(uid), source_player_id=owner_id,
-                    data={"event_previous_state": int(previous_state)})
+        # The ready step normally ran at StartTurn, before TurnStartedEvent
+        # (C# ReadyState); this only readies a turn that began at Prep.
+        changes = self._ready_side_for_turn(
+            session, projection_game, bstate, side, owner_id) or []
+        self._dispatch_card_readied_events(
+            session, projection_game, bstate, owner_id, changes)
         from rules_port.cooldowns import decrement_and_project_ready_cooldowns
         decrement_and_project_ready_cooldowns(
             _hc._db, session, self, projection_game, owner_id, pl_t, ai_t, bstate)
@@ -1269,8 +1316,18 @@ class TurnFlowMixin:
     def _apply_rules_port_draw(self, session, projection_game, bstate):
         """Project the native Draw phase for whichever side is active."""
         from rules_port.lifecycle import should_draw_for_turn
+        from rules_port.static_rules import controller_flags
+        import hconnect_server as _hc
         side = "ai" if bstate.get("turn_player") == "ai" else "player"
         if not should_draw_for_turn(bstate, side):
+            return False
+        # A champion's "skip your draw phase" is a WhileCardInPlay static on
+        # its controller's champion; it removes the Draw step's draw.
+        controller = 0 if side == "ai" else (
+            self.user_profile.get("id", 0)
+            if isinstance(self.user_profile, dict) else 0)
+        if "skips_draw_phase" in controller_flags(
+                _hc._db, session.session_id, bstate, controller):
             return False
         if side == "ai":
             return self._ai_draw_card(
@@ -1321,6 +1378,15 @@ class TurnFlowMixin:
             _hc._db, projection_game, session, bstate, round_side,
             round_turn, pl_t, ai_t)
         changes = advance(context, active_owner)
+        # C# order: StartTurnState only enqueues TurnStartedEvent; ReadyState
+        # then readies the active player's cards, and the queued TurnStarted
+        # triggers drain in the Ready priority window afterwards.  Ready here,
+        # before dispatching them, so a trigger that exhausts its own card
+        # (Ravenous Zombies) leaves it exhausted; Prep skips the ready step.
+        ready_side = ("player" if bstate.get("turn_player") == _be.PLAYER
+                      else "ai")
+        ready_changes = self._ready_side_for_turn(
+            session, game, bstate, ready_side, active_owner) or []
         # Mark the lifecycle phase while TurnStarted triggers resolve so
         # temporary current-resource gains (e.g. Lithe Lyricist's +1) are
         # recorded as a start-turn bonus that Prep reapplies after its refill.
@@ -1343,6 +1409,10 @@ class TurnFlowMixin:
                 event_type="TurnStartedEvent",
                 source_card_id=active_champion_uid,
                 source_player_id=active_owner)
+        # ReadyAllCardsThatCanBeReadied enqueues CardReadiedEvent after
+        # StartTurnState's TurnStartedEvent, so these drain after it.
+        self._dispatch_card_readied_events(
+            session, game, bstate, active_owner, ready_changes)
         # CardCounterTemplate "Stealth": the client's built-in TurnStarted
         # trigger removes one stealth counter from the active champion.  Run
         # it after the authored TurnStarted triggers so an "if you are
@@ -1824,33 +1894,24 @@ class TurnFlowMixin:
                 else:
                     bstate["player_resources"] = bstate.get(
                         "player_total_resources", 0)
-                self._clear_expired_temporary_attributes(
-                    session, bstate, self.user_profile["id"], "start_turn",
-                    clear_stat_buffs=True)
+                if not native_prep:
+                    self._clear_expired_temporary_attributes(
+                        session, bstate, self.user_profile["id"], "start_turn",
+                        clear_stat_buffs=True)
                 # Clear summoning sickness from warzone troops: they now have
                 # StartedATurnOnYourSide (survived to this turn). Persist the
                 # state in game_cards.card_state (DB) so a reconnect and the
                 # combat-phase decision can reconstruct it.
                 if native_prep:
-                    from rules_port.lifecycle import (ready_cards_for_turn,
-                                                      reset_armor)
-                    reset_armor(_hc._db, session.session_id, bstate)
-                    ready_changes = ready_cards_for_turn(
-                        _hc._db, session.session_id, self.user_profile["id"])
-                    for uid, tpl_guid, owner_id, previous_state, pstate in ready_changes:
-                        scid = _hc.game_engine.SessionCardId(_hc.game_engine.UID(uid))
-                        self._card_full_data(game, scid, tpl_guid)
-                        tpl = self._template_by_guid(tpl_guid)
-                        ct = (_hc.game_engine.card_type_from_db(tpl[1]) if tpl
-                              else _hc.game_engine.ECardTypes.Troop)
-                        game.push_card_updated(
-                            scid, pl_t, _hc.game_engine.ECardCollections.Warzone,
-                            ct, template_id=tpl_guid, state=int(pstate))
-                        if (previous_state & _hc.game_engine.ECardStates.Tapped and
-                                not (pstate & _hc.game_engine.ECardStates.Tapped)):
-                            self._dispatch_native_trigger(
-                                game, session, pl_t, ai_t, bstate,
-                                "CardReadiedEvent", uid, owner_id)
+                    # The ready step normally ran at StartTurn (before
+                    # TurnStartedEvent); this readies only a turn that began
+                    # at Prep.
+                    ready_changes = self._ready_side_for_turn(
+                        session, game, bstate, "player",
+                        self.user_profile["id"]) or []
+                    self._dispatch_card_readied_events(
+                        session, game, bstate, self.user_profile["id"],
+                        ready_changes)
                     from rules_port.cooldowns import decrement_and_project_ready_cooldowns
                     decrement_and_project_ready_cooldowns(
                         _hc._db, session, self, game,

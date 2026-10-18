@@ -17,10 +17,14 @@
   "FeatherDrifting": {},
   "Gnathan": {},
   "GrinningFox": {},
-  "Gurtok": {},
+  "Gurtok": {
+   "visible": [
+    "completedQuest(q_seawitch)"
+   ]
+  },
   "Myaa": {
-   "hidden": [
-    "!questStarted(q_find_myaa)"
+   "visible": [
+    "questStarted(q_find_myaa)"
    ]
   },
   "Myaa@amblingmesa": {},
@@ -28,9 +32,31 @@
  },
  "hooks": [],
  "runtime": "rules",
+ "offer_order": {
+  "FeatherDrifting": [
+   "q_tranquil_dream:start:Ardent:Feather Drifting",
+   "q_tranquil_dream:not_complete:Ardent:Feather Drifting",
+   "q_tranquil_dream:complete:Ardent:Feather Drifting"
+  ],
+  "Sagebrush": [
+   "tagged:26ca000f",
+   "az01_q_usurper:not_complete:all:Sagebrush",
+   "az01_q_usurper:complete:all:Sagebrush",
+   "az01_q_usurper:start:Coyotle:Sagebrush",
+   "az01_q_usurper:start:Elf:Sagebrush",
+   "az01_q_usurper:start:Human:Sagebrush",
+   "az01_q_usurper:start:Orc:Sagebrush"
+  ],
+  "Gnathan": [
+   "tagged:28ceb369",
+   "q_gnomes_come_home:complete:Ardent:Vincent",
+   "q_gnomes_come_home:not_complete:Ardent:Vincent",
+   "q_gnomes_come_home:start:Ardent:Vincent"
+  ]
+ },
  "edited_states": {
-  "Myaa": [
-   "hidden"
+  "Gurtok": [
+   "visible"
   ]
  }
 }

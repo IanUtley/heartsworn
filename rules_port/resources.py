@@ -553,6 +553,38 @@ def pay_spell_points_for_player(state: MutableMapping, player_id,
                                "spellpoints")
 
 
+def record_start_turn_resource_gain(state: MutableMapping, bonus_key: str,
+                                    property_name: str, amount: int,
+                                    turn_number: int) -> None:
+    """Record a StartTurn resource gain as the Prep bonus it really is.
+
+    A current-resource gain is a bonus only beyond the total gained in the
+    same StartTurn: Prep refills current to total, so a current gain matched
+    by a total gain (Chained Goliath's [L1][R1]) is already granted.  Total
+    gains that arrive before their current gain are remembered per turn and
+    cancel it; stale markers from earlier turns are ignored.
+    """
+    marker_key = f"{bonus_key}_total_gain"
+    marker = state.get(marker_key)
+    pending = (int(marker.get("amount", 0) or 0)
+               if isinstance(marker, dict) and
+               int(marker.get("turn", -1) or -1) == int(turn_number) else 0)
+    bonus = int(state.get(bonus_key, 0) or 0)
+    if property_name == "currentresource":
+        offset = min(pending, amount)
+        if offset:
+            state[marker_key] = {"turn": int(turn_number),
+                                 "amount": pending - offset}
+        state[bonus_key] = bonus + amount - offset
+        return
+    offset = min(bonus, amount)
+    state[bonus_key] = bonus - offset
+    rest = amount - offset
+    if rest:
+        state[marker_key] = {"turn": int(turn_number),
+                             "amount": pending + rest}
+
+
 def begin_turn_resources_for_player(state: MutableMapping,
                                     player_id) -> ResourceChange:
     """Refill and reopen resource play for a raw tournament player ID."""

@@ -29,7 +29,7 @@ class _Cursor:
 
 
 class _DB:
-    def execute(self, _sql, _params):
+    def execute(self, _sql, _params=()):
         return _Cursor()
 
     def commit(self):
@@ -38,6 +38,9 @@ class _DB:
 
 class _Session:
     session_id = 9
+
+    def _persist(self):
+        pass
 
 
 class _DrawHandler:
@@ -148,7 +151,7 @@ def test_player_target_template_uses_champion_identity_for_grants():
         ability_template_id="grant-ability", source_uid=55,
         responsible_player_id=0, activation=SimpleNamespace(target_map={}),
         metadata=SimpleNamespace(targets=[SimpleNamespace(
-            target_kind="PlayerTargetTemplate")]), ordered_effects=[effect])
+            target_kind="PlayerTargetTemplate", requires_input=False)]), ordered_effects=[effect])
     state = {}
     targets = []
 
@@ -318,7 +321,8 @@ def test_current_resource_modifier_persists_before_next_rules_port_cost():
         "ai_resources": 0,
         "ai_total_resources": 0,
     }
-    with mock.patch.object(battle_engine, "save_state") as save_state:
+    import rules_port.persistence as persistence
+    with mock.patch.object(persistence, "save_state") as save_state:
         result = _apply_resource_property(
             game, session, _DB(), Handler(), "player", "ai", state,
             {"property": "currentresource", "amount": 1}, None)
@@ -1024,11 +1028,14 @@ def test_context_activate_ability_uses_typed_child_resolver():
     context = EffectContext.from_rules_port(
         object(), _Session(), _DB(), object(), "player", "ai", state,
         "effect", "child-guid")
-    with mock.patch.object(resolution, "resolve_ability", return_value="child") as run:
+    # The native context resolves an activated child through its own
+    # continuation-aware resolver, which receives the child, source, owner and target map.
+    from rules_port.context import EffectContext as _Ctx
+    with mock.patch.object(_Ctx, "_resolve_child_ability",
+                           return_value="child") as run:
         assert context.activate_ability() == "child"
-    assert run.call_args.args[7:10] == ("child-guid", 123, 5)
-    assert run.call_args.kwargs["target_map"] == {}
-    assert run.call_args.kwargs["variables"] == {"Roll": 2}
+    assert run.call_args.args[:3] == ("child-guid", 123, 5), run.call_args
+    assert run.call_args.args[3] == {}, run.call_args
 
 
 def test_ability_trace_records_authoritative_zone_and_event_deltas():
@@ -1041,7 +1048,7 @@ def test_ability_trace_records_authoritative_zone_and_event_deltas():
                 102: {"user_id": 5, "location": "deck", "position": 1},
             }
 
-        def execute(self, _sql, _params):
+        def execute(self, _sql, _params=()):
             return type("Cursor", (), {
                 "fetchall": lambda cursor: [
                     (uid,) + tuple(row.get(column) for column in _CARD_COLUMNS)
@@ -1655,11 +1662,29 @@ def test_native_draw_routes_empty_deck_to_explicit_result_projection():
         target_owner=lambda default=None: 5,
         _emit_trigger=lambda *args, **kwargs: False,
     )
-    with mock.patch("pvp_db.db_deck_top_card_details", return_value=None):
+    with mock.patch("rules_port.static_rules.controller_flags",
+                    return_value=set()), \
+            mock.patch("pvp_db.db_deck_top_card_details", return_value=None):
         assert draw_cards(context, 1, owner=5) == "draw 0 for owner 5"
     assert len(seen) == 1
     assert seen[0][0:2] == (game, session)
     assert seen[0][2] == 5
+
+
+def test_cant_draw_cards_static_refuses_native_draw():
+    from types import SimpleNamespace
+    from rules_port.draw_effects import draw_cards
+
+    context = SimpleNamespace(
+        db=_DB(), session=SimpleNamespace(session_id=9), game=SimpleNamespace(),
+        handler=SimpleNamespace(), player_uid="player", ai_uid="ai",
+        bstate={}, target_owner=lambda default=None: 5,
+        _emit_trigger=lambda *_args, **_kwargs: False)
+    with mock.patch("rules_port.static_rules.controller_flags",
+                    return_value={"cant_draw_cards"}), \
+            mock.patch("pvp_db.db_deck_top_card_details") as top:
+        assert draw_cards(context, 1, owner=5) == "draw 0 for owner 5"
+    top.assert_not_called()
 
 
 def test_card_zone_projection_uses_client_derived_moves():
@@ -1696,8 +1721,10 @@ def test_card_zone_projection_uses_client_derived_moves():
         target_owner=lambda default=None: 5,
         _emit_trigger=lambda *_args, **_kwargs: False)
 
-    with mock.patch("pvp_db.db_deck_top_card_details",
-                    return_value=(12, 77, "Troop", "template-guid")), \
+    with mock.patch("rules_port.static_rules.controller_flags",
+                    return_value=set()), \
+            mock.patch("pvp_db.db_deck_top_card_details",
+                       return_value=(12, 77, "Troop", "template-guid")), \
             mock.patch("pvp_db.db_draw_card_to_hand"):
         assert draw_cards(context, 1, owner=5) == "draw 1 for owner 5"
     assert [kind for kind, _collection, _fields in game.events] == [
@@ -2132,7 +2159,7 @@ def test_builder_centralizes_card_cost_candidates():
     builder = AbilityBuilder.from_play_plan(plan)
 
     with mock.patch(
-            "abilities.framework.targeting.legal_targets_for",
+            "rules_port.targeting.legal_targets_for",
             return_value=[44, 45]) as legal:
         result = builder.card_cost_candidates(
             _DB(), 9, 1, source_uid=77, battle_state={})

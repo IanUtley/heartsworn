@@ -466,6 +466,28 @@ def _additive_adjustment(context, target, dealer, combat, is_champion):
     return delta
 
 
+def _damage_received_multiplier(context, target, combat, is_champion):
+    """C# ``(Non)CombatDamageReceivedMultiplier`` x ``DamageReceivedMultiplier``.
+
+    The champion built-in Vulnerable ability (``79c61378``) is an
+    IntAttrModifier that *Sets* ``DamageReceivedMultiplier`` to 2 on the
+    controller's Vulnerable champion or troops, so it replaces rather than
+    stacks with an authored value.
+    """
+    def value(name):
+        found = _int_attr_optional(context, target, name)
+        return 1 if found is None else max(0, int(found))
+
+    factor = value("NonCombatDamageReceivedMultiplier" if not combat
+                   else "CombatDamageReceivedMultiplier")
+    received = value("DamageReceivedMultiplier")
+    from .builtin_rules import vulnerable_damage_factor
+    vulnerable = vulnerable_damage_factor(context, target, is_champion)
+    if vulnerable != 1:
+        received = vulnerable
+    return factor * received
+
+
 def _source_is_artifact_or_dwarf(context, dealer):
     from pvp_db import db_condition_card_row
     try:
@@ -595,6 +617,11 @@ def deal_damage(context, target, amount, *, outcome=None, only_minimum=False):
         amount *= _damage_multiplier(context, dealer, combat)
         if is_champion and dealer is not None:
             amount *= _champion_damage_multiplier(context, dealer)
+    # Session.DamageCard / DamageChampion then apply the TARGET's received
+    # multipliers for combat and non-combat damage alike.
+    amount *= _damage_received_multiplier(context, target, combat, is_champion)
+    if amount <= 0:
+        return "damage: multiplied to zero"
     before_shields = amount
     amount = _consume_shields(context, target, dealer, amount, combat)
     prevented = before_shields - amount

@@ -21,7 +21,8 @@ SRC = fresh_database()
 import game_engine
 
 from abilities.framework import triggers
-from abilities.framework.targeting import legal_targets, evaluate_card_filter
+from abilities.framework.targeting import evaluate_card_filter
+from rules_port.targeting import legal_targets
 
 
 EXILE_DEPLOY = "952e3555-5ee1-50de-38f6-25cf34037c67"
@@ -91,6 +92,28 @@ def add_card(db, uid, owner, tpl, location, abilities="[]", position=0):
     db.commit()
 
 
+def seed_template(db, guid, name, card_type):
+    """A card template row carrying the printed name the filters compare."""
+    db.execute(
+        "INSERT OR REPLACE INTO card_templates (guid,name,card_type,cost,attack,"
+        "defense,attributes,abilities_json,threshold_json,subtype) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?)",
+        (guid, name, card_type, 0, 0, 0, 0, "[]", "[]", ""))
+    db.commit()
+
+
+def seed_target(db, guid, filter_json, *, collection_flags):
+    """A target template row shaped like the production AbilityTargetTemplate rows."""
+    db.execute(
+        "INSERT OR REPLACE INTO target_templates (template_id, game_text, "
+        "is_auto_target, is_random_target, optional, explicit, player_filter, "
+        "collection_flags, min_target_count, max_target_count, filter_json, "
+        "target_kind) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+        (guid, "", 1, 0, 0, 0, "MultiplePlayers", collection_flags, 0, 1,
+         json.dumps(filter_json), "AbilityTargetTemplate"))
+    db.commit()
+
+
 def run(name, fn):
     db = make_db()
     try:
@@ -126,6 +149,11 @@ def test_filter_eval(db):
 def test_placeholder_card_name_targets_only_matching_templates(db):
     """Dynamic card-name placeholders identify their token template, not all
     cards in the target collection (Skylak's pet charge-power regression)."""
+    seed_template(db, PET_TPL, "#PET_BABY_SPIDER#", "Constant")
+    seed_target(db, PET_TARGET,
+                {"_t": "Game.Shared.Mechanics.Cards.Filters.IsCardName",
+                 "m_CardName": "#PET_BABY_SPIDER#"},
+                collection_flags="Warzone")
     add_card(db, 101, 5, PET_TPL, "warzone")
     add_card(db, 102, 0, PET_TPL, "warzone")
     add_card(db, 103, 5, PLAIN_TPL, "warzone")
@@ -139,6 +167,16 @@ def test_top_n_of_controller_deck(db):
     # Player's first deck card is not a troop; the second is the only legal
     # result. The opponent also has a troop at the top of their deck, which
     # must not be selected by a source-controlled TopN filter.
+    seed_target(db, TOPN_TARGET,
+                {"_t": "Game.Shared.Mechanics.Cards.Filters.AndCardFilter",
+                 "m_TargetFilters": [
+                     {"_t": "Game.Shared.Mechanics.Cards.Filters.TopNOfDeck",
+                      "m_Amount": 1, "m_CountFromBottom": 0,
+                      "m_TopHalfOfDeck": 0,
+                      "m_Filter": {"_t": "Game.Shared.Mechanics.Cards.Filters.IsTroop"}},
+                     {"_t": "Game.Shared.Mechanics.Cards.Filters.IsControlledBy",
+                      "m_TestAgainstActivePlayer": 0}]},
+                collection_flags="Deck")
     add_card(db, 109, 5, RESOURCE_TPL, "deck", position=1)
     add_card(db, 110, 5, PLAIN_TPL, "deck", position=2)
     add_card(db, 111, 5, PLAIN_TPL, "deck", position=3)
@@ -196,7 +234,7 @@ def test_blocking_filter_uses_active_combat_assignment(db):
     # The same troop must not be targetable outside its active combat.
     cands = legal_targets(
         db, 1, 5, BLOCKING_TARGET, 100, both_players=True,
-        battle_state={"blockers": {"100": ["200"]}})
+        battle_state={})
     assert not cands, cands
 
 

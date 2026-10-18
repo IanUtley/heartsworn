@@ -74,6 +74,20 @@ class AbilityGraph:
     source: AbilityTemplate
     serialized_tac: str = ""
 
+    @property
+    def untargeted_trigger(self) -> bool:
+        """Client ``AbilityTemplate.UntargetedTrigger``: a trigger whose target
+        templates are none explicit."""
+        return bool(self.trigger_event_type) and not any(
+            spec.explicit for spec in self.targets)
+
+    @property
+    def client_ignores_chain(self) -> bool:
+        """Client ``AbilityInstance.IgnoresChain``: the authored flag, or an
+        untargeted trigger.  Such items stay on the stack but get no priority
+        window, and the client flashes their source instead of listing them."""
+        return bool(self.ignores_chain or self.untargeted_trigger)
+
     def as_dict(self) -> dict[str, Any]:
         return {
             "guid": self.guid,

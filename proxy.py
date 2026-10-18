@@ -79,22 +79,44 @@ def news_feed(base_url):
                 "DetailTitleText": "Release Notes",
                 "DetailSubTitleText": "Hex TCG Private Server",
                 "DetailContentText": (
-                    "Frost Ring Arena now supports twenty-fight tiered runs, "
-                    "unique opponent rosters, elite encounters, boss retries, "
-                    "challenge modifiers, treasure chests, and 100-gold rewards "
-                    "for each earned gold sack. Completed rosters are revealed "
-                    "when a run is cashed out.\n\n"
-                    "Campaign progress is now server-driven across maps, nodes, "
-                    "conversations, encounters, champion XP, and authored rewards, "
-                    "with progress persisted between sessions.\n\n"
-                    "Merry Melee Corinth is available as a persistent asynchronous "
-                    "event. Enter a run, build from the Corinth shard pool, and "
-                    "match against another entrant; finish with five wins or three "
-                    "losses to receive the run result.\n\n"
-                    "Card abilities and AI behavior continue to move toward the "
-                    "original gamedata definitions, with ongoing PvP and priority "
-                    "improvements. Mail, replay, Docker, and GHCR support are also "
-                    "available in the private server build."
+                    "• Campaign progress is server-driven across maps, nodes, "
+                    "conversations, encounters, champion XP, and authored "
+                    "rewards, and is saved between sessions\n"
+                    "• Merry Melee Corinth: a persistent asynchronous event. "
+                    "Build from the Corinth shard pool and match another entrant; "
+                    "five wins or three losses finish the run\n"
+                    "• Triggers with no chosen target, such as Voracious Vultures' "
+                    "cost reduction, flash their source card instead of joining "
+                    "the chain\n"
+                    "• Campaign editor Play uses your most recently played "
+                    "champion\n"
+                ),
+                "ResizeContentFrame": True,
+            },
+            {
+                "ImageUrl": img("campaign_editor.png"),
+                "ImageUrlHD": img("campaign_editor.png"),
+                "ImageUrlHDWide": img("campaign_editor.png"),
+                "TitleText": "Campaign Editor",
+                "ContentText": "Explore and simulate the campaign maps.",
+                "LinkUrl": "",
+                "ShowDuration": 8,
+                "UseDetailText": True,
+                "DetailTitleText": "Campaign Editor",
+                "DetailSubTitleText": "Maps, quests and simulation",
+                "DetailContentText": (
+                    "• Overworlds for AZ1 Howling Plains and AZ2 Alachian Sea, "
+                    "with dungeons and panoramas, laid out as in the client\n"
+                    "• Node, Simulate, Quests and Issues panels for each node's "
+                    "conversations, encounters and rewards\n"
+                    "• Simulate a run from the shared campaign or from a "
+                    "champion's live progress\n"
+                    "• Player view shows only what that champion's client shows\n"
+                    "• Save simulator progress back to a champion\n"
+                    "• Admins can edit the shared campaign, and export or import "
+                    "it as one JSON file\n"
+                    "• Background, label and effect toggles, plus zone and race "
+                    "filters"
                 ),
                 "ResizeContentFrame": True,
             },

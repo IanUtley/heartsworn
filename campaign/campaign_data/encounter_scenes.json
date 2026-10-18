@@ -611,11 +611,7 @@
     "ai_deck_guid": "",
     "ai_champion_guid": "",
     "mods_json": [],
-    "rewards_json": {
-     "gold": 100,
-     "one_time": false,
-     "xp": 100
-    },
+    "rewards_json": {},
     "ai_deck_personality": ""
    },
    {
@@ -1104,8 +1100,7 @@
        "one_time": true,
        "card_guid": "6d9f102a-538a-401b-b9ab-1d059f851232",
        "when": [
-        "flag(tamed:a9e9e040)",
-        "!flag(tamed:1d67638c)"
+        "flag(tamed:a9e9e040)"
        ]
       }
      ]
@@ -1161,43 +1156,12 @@
     "gameboard": "Coastline",
     "ai_deck_guid": "",
     "ai_champion_guid": "",
-    "mods_json": [
-     {
-      "description": "",
-      "mods": [
-       {
-        "guid": "db6f85e3-3d6c-4a66-9fb0-2962ca3e88ff"
-       },
-       {
-        "guid": "a71a750d-b3bf-4ded-bf19-a21695ba7db5"
-       }
-      ],
-      "title": ""
-     }
-    ],
+    "mods_json": [],
     "rewards_json": {
-     "end_of_game_rewards": [
-      {
-       "gold": 100,
-       "xp": 100,
-       "one_time": false
-      },
-      {
-       "one_time": true,
-       "card_guid": "6d9f102a-538a-401b-b9ab-1d059f851232",
-       "when": [
-        "flag(tamed:1d67638c)",
-        "!flag(tamed:a9e9e040)"
-       ]
-      }
-     ]
+     "end_of_game_rewards": []
     },
     "ai_deck_personality": "",
-    "actions_json": {
-     "victory": [
-      "check_tamed()"
-     ]
-    }
+    "actions_json": {}
    },
    {
     "guid": "11e30dc4-542e-45a9-8b9d-2fddc48700b9",
@@ -1529,11 +1493,7 @@
     "ai_deck_guid": "",
     "ai_champion_guid": "",
     "mods_json": [],
-    "rewards_json": {
-     "gold": 100,
-     "one_time": false,
-     "xp": 100
-    },
+    "rewards_json": {},
     "ai_deck_personality": ""
    },
    {
@@ -4067,10 +4027,7 @@
      "end_of_game_rewards": [
       {
        "one_time": true,
-       "chest_guid": "1d54da38-e03e-449c-aa2d-c9a7c0ad2cb1",
-       "when": [
-        "flag(completed_devonshire_keep)"
-       ]
+       "chest_guid": "1d54da38-e03e-449c-aa2d-c9a7c0ad2cb1"
       },
       {
        "gold": 1000,
@@ -5323,7 +5280,17 @@
       "title": "Aid from the Coalition"
      }
     ],
-    "rewards_json": {},
+    "rewards_json": {
+     "end_of_game_rewards": [
+      {
+       "one_time": true
+      },
+      {
+       "one_time": true,
+       "chest_guid": "56e231a3-f752-4e87-b04a-51c508c87c2d"
+      }
+     ]
+    },
     "ai_deck_personality": "Default"
    },
    {
@@ -5680,7 +5647,6 @@
     },
     "ai_deck_personality": "BigThreats",
     "scene_tags": [
-     "counter(answer_score,5)",
      "completed(NodeB)",
      "completed(NodeC)",
      "completed(NodeD)",
@@ -6010,10 +5976,7 @@
       },
       {
        "one_time": true,
-       "chest_guid": "eda1cb9f-9900-4218-a8d1-6564573a9cf2",
-       "when": [
-        "flag(completed_usurper)"
-       ]
+       "chest_guid": "eda1cb9f-9900-4218-a8d1-6564573a9cf2"
       }
      ]
     },

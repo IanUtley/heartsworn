@@ -561,6 +561,29 @@ def handle_readyforgameevents_22029(handler, target, instance, data_type, reqid,
 
 
 # ServiceLoadBalancer — ReadyForGameSetup (22027)
+# Armies of Myth (AZ1 Node 66): the AI starts with the campaign's army level,
+# the counter the conversation sets from the difficulty picked (0-6).
+ARMY_OF_MYTH_SCENE = "0b1d5244-e9f6-46ec-bb06-73c36801f5ef"
+ARMY_LEVEL_COUNTER = "fight_army_at_level"
+
+
+def _army_of_myth_ai_resources(session):
+    """The AI's starting resources for the Army of Myth battle, else None."""
+    import hconnect_server as _hc
+    from campaign_runtime import progress
+    session_name = str(session.session_name or "")
+    scene = _hc.campaign._last_encounter_scene.get(session_name)
+    if str(scene or "").lower() != ARMY_OF_MYTH_SCENE:
+        return None
+    identity = _hc.db_campaign_identity_state(
+        int(session_name.split("_")[-1] or 0), conn=_hc._db)
+    if not identity:
+        return 0
+    loaded = progress.load(_hc._db, int(identity[0]))
+    counters = (loaded[0] if loaded else {}).get("counters") or {}
+    return int(counters.get(ARMY_LEVEL_COUNTER, 0) or 0)
+
+
 def handle_readyforgamesetup_22027(handler, target, instance, data_type, reqid, comp, session_id,
                                    conh, inner_obj, inner_bytes, raw_data_wrapper_bytes):
     import hconnect_server as _hc
@@ -1954,6 +1977,9 @@ def handle_readytostartgame_22031(handler, target, instance, data_type, reqid, c
             source_player_id=owner,
             data={"zones": ("deck",)})
         _drain_setup_stack(pregame_bstate)
+    army_resources = _army_of_myth_ai_resources(session)
+    if army_resources is not None:
+        pregame_bstate["ai_resources"] = army_resources
     game.player_health = int(pregame_bstate.get(
         "player_health", game.player_health))
     game.ai_health = int(pregame_bstate.get(

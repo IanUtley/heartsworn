@@ -432,6 +432,9 @@
    "retryable": [],
    "completed": [
     "flag(tamed:150b0ed9)"
+   ],
+   "marker": [
+    "!completedQuest(az01_tamed,1)"
    ]
   },
   "Node005": {
@@ -450,12 +453,15 @@
     "visited(Node006)"
    ]
   },
+  "Node007": {
+   "completed": [
+    "!visited(Node007)"
+   ]
+  },
   "Node008": {
    "visible": [
-    "questStarted(az01_q_usurper)"
-   ],
-   "hidden": [
-    "faction(Underworld)"
+    "questStarted(az01_q_usurper)",
+    "faction(Ardent)"
    ],
    "marker": [
     "questActive(az01_q_usurper)"
@@ -466,68 +472,15 @@
     "flag": "tamed:ddf8a2da"
    }
   },
-  "Node00R": {
-   "completed": {
-    "any": [
-     {
-      "all": [
-       {
-        "flag": "masked_army_met"
-       },
-       {
-        "not": {
-         "any": [
-          {
-           "quest": "az01_q_fort_romor",
-           "is": "started"
-          },
-          {
-           "quest": "az01_q_usurper",
-           "is": "started"
-          }
-         ]
-        }
-       }
-      ]
-     },
-     {
-      "flag": "masked_army_done"
-     }
-    ]
-   },
-   "retryable": {
-    "all": [
-     {
-      "any": [
-       {
-        "quest": "az01_q_fort_romor",
-        "is": "started"
-       },
-       {
-        "quest": "az01_q_usurper",
-        "is": "started"
-       }
-      ]
-     },
-     {
-      "not": {
-       "flag": "masked_army_done"
-      }
-     }
-    ]
-   }
-  },
   "Node00Y": {
    "visible": [
     "questActive(q_go_to_az2)"
    ]
   },
   "Node011": {
-   "hidden": [
-    "faction(Ardent)"
-   ],
    "visible": [
-    "questStarted(az01_q_fort_romor)"
+    "questStarted(az01_q_fort_romor)",
+    "faction(Underworld)"
    ],
    "marker": [
     "questActive(az01_q_fort_romor)"
@@ -559,44 +512,54 @@
     "quest": "az01_q_cross_the_river",
     "is": "active",
     "step_below": 1
-   },
-   "retryable": []
+   }
   },
   "Node015": {
-   "hidden": [
-    "!completedQuest(az01_q_cross_the_river,2)"
-   ],
-   "visible": [
-    [
-     "completedQuest(az01_q_cross_the_river,2)"
-    ],
-    [
-     "visited(Node016)"
+   "visible": {
+    "all": [
+     [
+      [
+       "completedQuest(az01_q_cross_the_river,2)"
+      ],
+      [
+       "visited(Node016)"
+      ]
+     ],
+     [
+      "completedQuest(az01_q_cross_the_river,2)"
+     ]
     ]
-   ],
+   },
    "completed": [
     "completedQuest(az01_q_cross_the_river)"
    ]
   },
+  "Node016": {
+   "completed": [
+    "!visited(Node016)"
+   ]
+  },
   "Node017": {
    "visible": [
-    "questStarted(az01_uw_find_cave_in)"
+    "questStarted(az01_uw_find_cave_in)",
+    "faction(Underworld)"
    ],
    "marker": {
     "quest": "az01_uw_find_cave_in",
     "is": "active"
-   },
-   "hidden": [
-    "faction(Ardent)"
-   ]
+   }
   },
   "Node018": {
-   "hidden": [
-    "!questStarted(az01_q_cross_the_river_part2)"
-   ],
    "visible": {
-    "quest": "az01_q_cross_the_river_part2",
-    "is": "active"
+    "all": [
+     {
+      "quest": "az01_q_cross_the_river_part2",
+      "is": "active"
+     },
+     [
+      "questStarted(az01_q_cross_the_river_part2)"
+     ]
+    ]
    },
    "marker": {
     "quest": "az01_q_cross_the_river_part2",
@@ -606,7 +569,6 @@
   },
   "Node019": {
    "impassable": [
-    "visited(Node019)",
     "!flag(blockade_cleared)"
    ],
    "completed": [
@@ -616,6 +578,9 @@
   "Node020": {
    "completed": [
     "completedQuest(az01_three_braves)"
+   ],
+   "visible": [
+    "questStarted(az01_three_braves)"
    ]
   },
   "Node021": {
@@ -624,8 +589,8 @@
    ]
   },
   "Node022": {
-   "hidden": [
-    "!flag(reveal_lake)"
+   "visible": [
+    "flag(reveal_lake)"
    ]
   },
   "Node023": {
@@ -670,21 +635,13 @@
      }
     ]
    },
-   "visible": {
-    "any": [
-     {
-      "quest": "az01_q_fort_romor",
-      "is": "started"
-     },
-     {
-      "quest": "az01_q_usurper",
-      "is": "started"
-     }
+   "visible": [
+    [
+     "questStarted(az01_q_fort_romor)"
+    ],
+    [
+     "questStarted(az01_q_usurper)"
     ]
-   },
-   "hidden": [
-    "!questStarted(az01_q_fort_romor)",
-    "!questStarted(az01_q_usurper)"
    ]
   },
   "Node030": {
@@ -705,22 +662,15 @@
     "flag": "tamed:f6f3074b"
    }
   },
-  "Node033": {
-   "completed": [
-    "flag(tamed:1d67638c)"
-   ]
-  },
   "Node034": {
    "visible": [
-    "questStarted(az01_ar_find_ambling_mesa)"
+    "questStarted(az01_ar_find_ambling_mesa)",
+    "!faction(Underworld)"
    ],
    "marker": {
     "quest": "az01_ar_find_ambling_mesa",
     "is": "active"
-   },
-   "hidden": [
-    "faction(Underworld)"
-   ]
+   }
   },
   "Node037": {
    "blocked": [
@@ -729,8 +679,12 @@
   },
   "Node038": {
    "visible": [
-    "completedQuest(az01_q_cross_the_river_part2,2)",
-    "visited(Node033)"
+    [
+     "completedQuest(az01_q_cross_the_river_part2,2)"
+    ],
+    [
+     "visited(Node033)"
+    ]
    ],
    "completed": [
     "completedQuest(az01_q_cross_the_river_part2)"
@@ -742,6 +696,9 @@
   "Node040": {
    "marker": [
     "questActive(q_tranquil_dream)"
+   ],
+   "visible": [
+    "questStarted(q_tranquil_dream)"
    ]
   },
   "Node044": {
@@ -755,8 +712,8 @@
    ]
   },
   "Node049": {
-   "hidden": [
-    "!ChampionIsRace(Coyotle)"
+   "visible": [
+    "ChampionIsRace(Coyotle)"
    ]
   },
   "Node052": {
@@ -810,14 +767,18 @@
    ]
   },
   "Node066": {
-   "hidden": [
-    "!completedQuest(q_find_myaa)"
-   ],
-   "visible": [
-    [
-     "completedQuest(q_find_myaa)"
+   "visible": {
+    "all": [
+     [
+      [
+       "completedQuest(q_find_myaa)"
+      ]
+     ],
+     [
+      "completedQuest(q_find_myaa)"
+     ]
     ]
-   ],
+   },
    "completed": [
     "flag(battle:0b1d5244:Diff_6)"
    ]
@@ -826,16 +787,16 @@
    "retryable": []
   },
   "Node068": {
-   "hidden": [
-    "!questStarted(q_devonshire_keep)"
-   ],
    "marker": [
     "questActive(q_blood_beneath)"
+   ],
+   "visible": [
+    "questStarted(q_devonshire_keep)"
    ]
   },
   "Node069": {
-   "hidden": [
-    "!completedQuest(q_go_to_az2)"
+   "visible": [
+    "completedQuest(q_go_to_az2)"
    ]
   },
   "Node073": {
@@ -848,12 +809,7 @@
   },
   "Node077": {
    "visible": [
-    [
-     "flag(blockade_passed)"
-    ],
-    [
-     "faction(blockade_cleared)"
-    ]
+    "flag(blockade_passed)"
    ]
   },
   "Node078": {
@@ -888,30 +844,6 @@
    "do": [
     {
      "set_flag": "battle:0b1d5244:Diff_0"
-    }
-   ]
-  },
-  {
-   "id": "masked_army_done",
-   "on": {
-    "event": "conversation_end",
-    "conversation": "617819c9-bc9b-4788-a469-8117af28a613"
-   },
-   "do": [
-    {
-     "set_flag": "masked_army_done"
-    }
-   ]
-  },
-  {
-   "id": "masked_army_met",
-   "on": {
-    "event": "conversation_end",
-    "conversation": "b00ba245-aa98-4765-b171-c33610e456d1"
-   },
-   "do": [
-    {
-     "set_flag": "masked_army_met"
     }
    ]
   },
@@ -966,46 +898,29 @@
  "edited_states": {
   "Node038": [
    "visible",
-   "hidden",
-   "blocked",
    "completed"
   ],
   "Node005": [
-   "visible",
-   "blocked"
+   "visible"
   ],
   "Node015": [
    "visible",
-   "hidden",
    "completed"
   ],
-  "Node018": [
-   "hidden"
-  ],
-  "Node025": [
-   "blocked",
-   "hidden"
-  ],
   "Node023": [
-   "hidden",
-   "blocked",
    "visible"
   ],
   "Node034": [
-   "hidden",
    "visible"
   ],
   "Node017": [
-   "visible",
-   "hidden"
+   "visible"
   ],
   "Node008": [
    "visible",
-   "hidden",
    "marker"
   ],
   "Node011": [
-   "hidden",
    "visible",
    "marker"
   ],
@@ -1014,29 +929,16 @@
    "completed"
   ],
   "Node021": [
-   "blocked",
-   "hidden",
    "visible"
   ],
   "Node077": [
-   "blocked",
-   "hidden",
    "visible"
   ],
   "Node040": [
-   "marker"
-  ],
-  "Node037": [
-   "blocked"
-  ],
-  "Node073": [
-   "blocked"
-  ],
-  "Node013": [
-   "blocked"
+   "marker",
+   "visible"
   ],
   "Node031": [
-   "blocked",
    "visible",
    "completed"
   ],
@@ -1044,7 +946,6 @@
    "visible"
   ],
   "Node033": [
-   "blocked",
    "completed"
   ],
   "Node030": [
@@ -1058,7 +959,8 @@
    "completed"
   ],
   "Node020": [
-   "completed"
+   "completed",
+   "visible"
   ],
   "Node066": [
    "completed"
@@ -1079,7 +981,6 @@
    "retryable"
   ],
   "Node063": [
-   "blocked",
    "completed"
   ],
   "Node060": [
@@ -1095,31 +996,41 @@
    "completed"
   ],
   "Node062": [
-   "blocked",
    "completed"
   ],
   "Node061": [
-   "blocked",
    "completed"
-  ],
-  "Node053": [
-   "blocked"
-  ],
-  "Node049": [
-   "hidden"
-  ],
-  "Node069": [
-   "hidden"
   ],
   "Node044": [
    "completed",
    "retryable"
   ],
-  "Node022": [
-   "hidden"
-  ],
   "Node003": [
+   "completed",
+   "marker"
+  ],
+  "Node007": [
+   "retryable",
    "completed"
+  ],
+  "Node016": [
+   "retryable",
+   "completed"
+  ],
+  "Node00R": [
+   "completed",
+   "retryable"
+  ],
+  "Node025": [
+   "visible"
+  ],
+  "Node014": [
+   "retryable"
+  ],
+  "Node002": [
+   "retryable",
+   "completed",
+   "visible"
   ]
  },
  "runtime": "rules",
@@ -1136,11 +1047,11 @@
   ],
   "Node046": [
    "tagged:df027d65",
-   "tagged:5189c18e",
    "tagged:0c7ed28b",
-   "conv:6eec3154",
+   "tagged:5189c18e",
+   "tagged:6eec3154",
    "tagged:437e23f2",
-   "conv:0f01d5bb"
+   "tagged:0f01d5bb"
   ],
   "Node026": [
    "battle:2de5b786:Underworld",
@@ -1148,6 +1059,24 @@
    "tagged:d0d800e5",
    "battle:2de5b786:Ardent",
    "battle:fcf51a17"
+  ],
+  "Node020": [
+   "tagged:937094ba",
+   "tagged:bfaf26c8",
+   "tagged:f5a00ece",
+   "tagged:f1b4859a",
+   "tagged:41838c84",
+   "conv:984c5f34"
+  ],
+  "Node00R": [
+   "conv:b00ba245",
+   "tagged:8433f72e",
+   "tagged:617819c9"
+  ],
+  "Node015": [
+   "tagged:04fc8981",
+   "tagged:5e5ec1cd",
+   "tagged:36207cdd"
   ]
  }
 }

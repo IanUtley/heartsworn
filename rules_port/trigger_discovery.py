@@ -170,7 +170,13 @@ class RecordsTriggerDiscovery:
                 configured = (getattr(self.handler, "_ai_champ_ability_guids", [])
                               if owner == 0 else
                               getattr(self.handler, "_player_champ_abilities", []))
-            abilities = []
+            # Session.AddGameRulesAbilitiesToCardTemplate appends the
+            # BuiltInResources keyword abilities (Burning, Dazed/Vulnerable
+            # removal, SoulCursed) to every champion card template.
+            from .builtin_rules import champion_trigger_abilities
+            abilities = champion_trigger_abilities(
+                self.db, self.session.session_id, self.battle_state,
+                owner, champion_uid, event_type)
             if guid:
                 abilities.extend(str(row[0]).lower() for row in
                                  db_champion_trigger_ability_guids(

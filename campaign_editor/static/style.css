@@ -76,6 +76,16 @@ canvas.dragging { cursor: grabbing; }
 .tabs button.active { color: var(--text); border-bottom-color: var(--accent); }
 .tab-body { overflow: auto; padding: 14px 16px 24px; flex: 1; }
 .muted { color: var(--muted); }
+.offer-menu { position: fixed; z-index: 1000; display: flex; flex-direction: column;
+  background: var(--panel-2); border: 1px solid var(--line); border-radius: 4px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35); min-width: 140px; }
+.offer-menu button { background: none; border: 0; color: var(--text); padding: 6px 10px;
+  text-align: left; cursor: pointer; }
+.offer-menu button:hover { background: var(--line); }
+.offer-order-flag { font-weight: 400; font-size: 12px; opacity: 0.9; font-style: italic; }
+/* The node's offers stand out: white on dark orange, in both themes. */
+.offers-head { margin-top: 8px; padding: 4px 8px; border-radius: 4px;
+  background: #b5560f; color: #ffffff; font-weight: 600; }
 h2 { font-size: 18px; margin: 0 0 2px; }
 h3 {
   font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted);
@@ -278,3 +288,53 @@ button.play { border-color: var(--encounter); color: var(--encounter); }
 .play-command input { flex: 1; min-width: 0; font-family: ui-monospace, monospace; font-size: 14px; }
 .chip.tag.tag-blocked { border-color: var(--blocked); color: var(--blocked); font-weight: 600; }
 .cond.blocked-by { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+
+/* ---- Opponent deck dialog: stacked, cost-sorted strips; the full card on hover ---- */
+.deck-icon { background: none; border: 0; padding: 0 2px; cursor: pointer; font-size: 1.05em; color: var(--accent); vertical-align: baseline; }
+.deck-icon:hover { filter: brightness(1.25); }
+#deck { width: min(1400px, 96vw); height: min(840px, 90vh); max-height: 90vh; padding: 0; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--text); }
+#deck::backdrop { background: rgba(0, 0, 0, .55); }
+#deck-body { padding: 10px 14px; height: 100%; box-sizing: border-box; display: flex; flex-direction: column; }
+.deck-head { display: flex; align-items: baseline; gap: 12px; margin-bottom: 8px; }
+.deck-head h2 { margin: 0; font-size: 1.05em; flex: 1; }
+.deck-close { margin-left: auto; }
+.deck-layout { flex: 1; min-height: 0; display: flex; }
+.deck-columns { display: flex; gap: 8px; overflow: auto; align-items: flex-start; width: 100%; padding-bottom: 6px; }
+.deck-column { flex: 0 0 158px; width: 158px; display: flex; flex-direction: column; }
+/* Copies overlap like a pile: each card shows only its title row, and the
+   card later in the column covers the rest. The bottom card shows in full. */
+.deck-slot { position: relative; display: flex; align-items: flex-start; gap: 4px; height: 262px; margin-top: -236px; flex-shrink: 0; }
+.deck-column > .deck-slot:first-child { margin-top: 0; }
+.deck-slot:hover { z-index: 10; }
+/* A hovered card grows to show all of its text, overlaying the cards below it
+   without moving them. */
+.deck-slot:hover .deck-strip, .deck-slot:focus-within .deck-strip { height: auto; min-height: 262px; overflow: visible; }
+.deck-thresh { display: flex; flex-direction: column; gap: 3px; width: 22px; padding-top: 28px; flex-shrink: 0; }
+.deck-strip { position: relative; width: 132px; height: 262px; border: 1px solid var(--line); border-radius: 4px; background: var(--panel-2); box-shadow: 0 1px 2px rgba(0, 0, 0, .35); overflow: hidden; flex-shrink: 0; }
+.deck-strip:hover, .deck-strip:focus { border-color: var(--accent); outline: none; }
+.deck-row { display: flex; align-items: center; gap: 4px; height: 26px; padding: 0 5px; }
+.deck-badge { flex-shrink: 0; min-width: 18px; height: 18px; line-height: 18px; text-align: center; border-radius: 9px; background: var(--line); font-weight: 600; font-size: .8em; }
+.deck-title { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: .85em; }
+.deck-qty { color: var(--muted); font-size: .78em; }
+.deck-chips { display: none; }
+.deck-face { padding: 4px; border-top: 1px solid var(--line); }
+.deck-face img { width: 100%; height: 180px; object-fit: cover; display: block; border-radius: 3px; }
+.deck-face-meta { font-size: .75em; color: var(--muted); margin-top: 3px; }
+.deck-stats { font-weight: 600; color: var(--text); }
+.deck-text { margin: 3px 0 0; font-size: .72em; line-height: 1.3; }
+.deck-shard { display: block; width: 22px; height: 18px; line-height: 18px; text-align: center; font-size: .75em; font-weight: 700; border-radius: 4px; color: #fff; border: 1px solid rgba(0, 0, 0, .4); }
+.deck-shard.shard-blood { background: #8e2a2a; }
+.deck-shard.shard-ruby { background: #b8324a; }
+.deck-shard.shard-sapphire { background: #2c6fb3; }
+.deck-shard.shard-wild { background: #3f8f3f; }
+.deck-shard.shard-diamond { background: #a6b8c4; color: #111; }
+
+/* ---- Opponent powers: hover popover ---- */
+.ability-icon { cursor: help; color: var(--conversation); font-size: 1.05em; vertical-align: baseline; }
+.ability-icon:hover { filter: brightness(1.25); }
+.ability-popover { position: fixed; z-index: 2000; width: 360px; max-height: 60vh; overflow: auto; padding: 10px 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); color: var(--text); box-shadow: 0 6px 20px rgba(0, 0, 0, .45); font-size: .9em; pointer-events: none; }
+.ability-popover[hidden] { display: none; }
+.ability-head { font-weight: 600; margin-bottom: 6px; }
+.ability { margin-top: 8px; }
+.ability-title { font-weight: 600; color: var(--accent); }
+.ability-text { margin-top: 2px; line-height: 1.35; }

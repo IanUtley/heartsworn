@@ -23,8 +23,13 @@ CARD_TRANSACTION_KINDS = frozenset({
 
 
 def automatic_instance_ability_guids(db, session_id, card_uid,
-                                     ability_guids=()):
+                                     ability_guids=(), *, in_play=True):
     """Include automatic abilities currently granted to this card instance.
+
+    ``in_play`` is True for a card that stays on the battlefield (a troop),
+    where a permanent CardModifier with a card filter is a continuous aura
+    and is not resolved on play.  A spell (``in_play=False``) resolves its
+    permanent CardModifier once, as its cast effect, then goes to the crypt.
 
     The static Records card graph does not contain runtime-granted keywords
     such as Runic. C# ``CastSpell`` calls ``CreateAutomaticAbilities`` on the
@@ -41,9 +46,9 @@ def automatic_instance_ability_guids(db, session_id, card_uid,
             int(session_id), int(card_uid), conn=db)
         values = json.loads(payload or "[]")
     except (TypeError, ValueError, json.JSONDecodeError):
-        return result
+        return _without_continuous_auras(result) if in_play else result
     if not isinstance(values, list):
-        return result
+        return _without_continuous_auras(result) if in_play else result
 
     for value in values:
         if isinstance(value, Mapping):
@@ -64,7 +69,33 @@ def automatic_instance_ability_guids(db, session_id, card_uid,
             continue
         result.append(guid)
         seen.add(guid)
-    return result
+    return _without_continuous_auras(result) if in_play else result
+
+
+def _without_continuous_auras(guids):
+    """Drop continuous card auras from a play-time automatic list.
+
+    A permanent, untriggered CardModifier with a card-filter target is a
+    continuous static (its stat effect is computed from the board).  Resolving
+    it once on play would store the same buff on the targets a second time.
+
+    An ability with an explicit (player-chosen) target is a one-shot cast
+    effect, never a board aura: Time Ripple's permanent "cost +2" rider on
+    its chosen card must resolve with the play."""
+    from gamedata import DEFAULT_RECORD_STORE, ability_graph
+    kept = []
+    for guid in guids:
+        graph = ability_graph(DEFAULT_RECORD_STORE, guid)
+        if graph is not None and not graph.trigger_event_type and any(
+                effect.concrete_type == "CardModifierAbilityEffectTemplate" and
+                str(effect.duration).lower() in ("permanent", "whilecardinplay")
+                for effect in graph.effects) and any(
+                target.card_filter for target in graph.targets) and not any(
+                target.explicit and not target.is_random
+                for target in graph.targets):
+            continue
+        kept.append(guid)
+    return kept
 
 
 @dataclass(frozen=True)

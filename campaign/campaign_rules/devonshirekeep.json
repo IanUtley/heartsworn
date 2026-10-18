@@ -6,7 +6,10 @@
   "node": "Node001",
   "node_completed": true,
   "flags": [],
-  "counters": {"lives": 3, "run_streak": 0}
+  "counters": {
+   "lives": 3,
+   "run_streak": 0
+  }
  },
  "map": {
   "paths": [
@@ -91,10 +94,5 @@
   }
  },
  "hooks": [],
- "edited_states": {
-  "NodeB": [
-   "blocked"
-  ]
- },
  "runtime": "rules"
 }

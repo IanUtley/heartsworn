@@ -4574,6 +4574,42 @@ def test_projected_chain_resolves_ignores_chain_ability_without_a_window():
     assert not projected_ability_ignores_chain(None)
 
 
+def test_combat_damage_trigger_keeps_chain_across_host_phase_advance():
+    """A trigger raised by combat damage must not run the next turns.
+
+    The Practice AssignDamage host resolves damage then advances the phase
+    itself.  It used to clear the whole action stack, orphaning an AI-owned
+    ignores-chain trigger ("when you gain health, gain a charge"); every later
+    phase window then completed at once and one request ran the AI's turn and
+    the player's next turn (readying the player's attackers).
+    """
+    player = game_engine.UID.make(PLAYER_UID_TYPE, 44)
+    ai = game_engine.UID.make(AI_UID_TYPE, 1000)
+    session = AuthoritativeSession(144, (player, ai), seed_z=1, seed_w=2)
+    session.current_turn_phase = game_engine.ETurnPhases.AssignDamage
+    session.active_player_id = player
+    window = PriorityWindowAction(TurnPhasePlayers.ACTIVE)
+    window._rules_port_phase = "AssignDamage"
+    session.push_game_action(window)
+    resolved = []
+    session.set_ability_resolver(
+        lambda item: resolved.append(item.instance_id) or
+        AbilityResolutionState.COMPLETED)
+    session.queue_projected_chain(
+        {"kind": "trigger", "source_uid": 513, "instance_id": 32,
+         "ability_guid": "", "ignores_chain": True}, ai)
+
+    session.discard_phase_priority_windows()
+    session.advance_turn_phase()
+    session.drive_until_input(max_steps=64)
+
+    assert resolved == [32]
+    assert session.chain.is_empty
+    assert session.current_turn_phase == game_engine.ETurnPhases.SecondMainPhase
+    assert session.active_player_id == player
+    assert session.action_stack.priority_player_id == player
+
+
 def test_projected_chain_keeps_rehydrated_response_window_by_instance_id():
     """A reload must not reset an in-progress response window to its opener."""
     from rules_port.session import ProjectedChainAbility

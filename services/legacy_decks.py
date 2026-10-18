@@ -175,7 +175,7 @@ def handle_addnewdeck_2089(handler, target, instance, data_type, reqid, comp, se
         err_inner = _hc.encode_objfmt_response(
             ["Game.Client.Network.Profile.AddNewDeckResponse",
              "Game.Shared.Network.Profile.EAddNewDeckError", "System.String"],
-            [("Error", "enum", "Game.Shared.Network.Profile.EAddNewDeckError", 1),
+            [("Error", "enum", ("Game.Shared.Network.Profile.EAddNewDeckError", "InternalServerError")),
              ("ErrorMessage", "string", "Not authenticated")]
         )
         err_body = _hc.compress_gzip(err_inner) if comp else err_inner

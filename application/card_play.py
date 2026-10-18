@@ -949,7 +949,17 @@ class CardPlayMixin:
             gem_type = int(persisted_gem or 0) if has_persisted_gem else 0
         except (TypeError, ValueError):
             gem_type = 0
-        if instance_id is not None:
+        # The active-gem map belongs to the viewing player's deck.  An AI
+        # card's instance id is not a key in that map, so consulting it
+        # would overwrite the AI's persisted socket with 0.
+        owner_is_player = True
+        if scid is not None:
+            controller = _hc.db_card_owner_id(
+                game.session_id.uid64, scid.uid.uid64, conn=_hc._db)
+            owner_is_player = (
+                controller is None or
+                int(controller) == int(self.user_profile["id"]))
+        if instance_id is not None and owner_is_player:
             try:
                 # This is a display lookup.  Do not initialize arena_state
                 # from inside card encoding: that adds a write/commit to a
@@ -973,7 +983,8 @@ class CardPlayMixin:
                 # card's persisted game_cards gem (the fallback below) rather
                 # than aborting the entire turn transition.
                 gem_type = 0
-        if (not gem_type and not has_persisted_gem and scid is not None):
+        if (not gem_type and scid is not None and
+                (not has_persisted_gem or not owner_is_player)):
             try:
                 persisted_gem = _hc.db_card_gem_type(
                     game.session_id.uid64, scid.uid.uid64, conn=_hc._db)
@@ -1607,7 +1618,8 @@ class CardPlayMixin:
             ability_guids = automatic_instance_ability_guids(
                 _hc._db, session.session_id, card_uid,
                 [ability.ability_guid
-                 for ability in play_plan.cast_abilities])
+                 for ability in play_plan.cast_abilities],
+                in_play=False)
             chain_descriptor = {
                 "kind": "spell", "source_uid": card_uid,
                 "ability_guids": ability_guids,

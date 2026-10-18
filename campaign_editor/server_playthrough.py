@@ -112,6 +112,7 @@ def run(race: str, zones: set[str], verbose: bool = False,
 
         state = call(campaign._handle_getcampstate, {})
         reqs = 0
+        won_nodes: set = set()     # a won battle may leave its node retryable
         for _ in range(MAX_STEPS):
             reqs += 1
             for env in [p for p in pushes if p.get("RequestType") == "cmpupdate"
@@ -169,13 +170,15 @@ def run(race: str, zones: set[str], verbose: bool = False,
                     route.append(f"{zone}:{aloc} battle {loc['encounter'][:8]} "
                                  f"{'won' if won else 'LOST'}"
                                  + (f" with {pick[:8]}" if pick else ""))
+                    if won:
+                        won_nodes.add(aloc)
                     continue
             # Explore: the next open location the player would select.
             target = next((n for n, d in locs.items()
                            if d.get("visible") and d.get("enabled", True)
                            and d.get("type") != "Empty"
                            and (not d.get("completed") or d.get("repeatable"))
-                           and n != aloc), None)
+                           and n != aloc and n not in won_nodes), None)
             if not target:
                 route.append(f"STUCK in {zone}: nothing to select (ALoc={aloc!r})")
                 return False, route

@@ -89,7 +89,13 @@ def _records_signature() -> str:
     root = configured_records_path()
     if not root.is_dir():
         return ""
+    from AssetExtraction import gamedata_seed
     digest = hashlib.sha256()
+    # The rows are derived by the extractor too: a change to its code or
+    # cache version must force the full comparison, not a no-op.
+    seed_info = os.stat(gamedata_seed.__file__)
+    digest.update(f"extractor:{gamedata_seed._EXTRACT_CACHE_VERSION}:"
+                  f"{seed_info.st_size}:{seed_info.st_mtime_ns}\n".encode())
     for path in sorted(root.glob("*.jsonl")):
         info = path.stat()
         digest.update(f"{path.name}:{info.st_size}:{info.st_mtime_ns}\n".encode())
@@ -954,6 +960,7 @@ DDL = [
         xp INTEGER DEFAULT 0,
         last_campaign_id INTEGER DEFAULT 0,
         last_deck_id INTEGER DEFAULT 0,
+        last_played_at TEXT DEFAULT NULL,
         pet_name TEXT DEFAULT '',
         is_deleted INTEGER DEFAULT 0,
         talents TEXT,
@@ -2190,6 +2197,7 @@ def ensure_schema(db):
                 tamed_scene_guids.add(str(objective["encounter"]).lower())
 
         _ensure_column(db, "encounter_scenes", "ai_champion_guid", "TEXT")
+        _ensure_column(db, "champions", "last_played_at", "TEXT DEFAULT NULL")
         _ensure_column(db, "encounter_scenes", "ai_deck_personality",
                        "TEXT DEFAULT NULL")
         _ensure_column(db, "encounter_scenes", "mods_json",

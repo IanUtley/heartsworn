@@ -865,7 +865,11 @@ class NativeEffectBackend:
                     if target_spec is not None:
                         kind = str(target_spec.target_kind or "")
                         if kind == "AbilitySourceCardTargetTemplate":
-                            target_values = (ability.source_uid,)
+                            from .targeting import ability_source_target_uid
+                            target_values = (ability_source_target_uid(
+                                db, session.session_id,
+                                ability.source_uid, target_spec.guid,
+                                ability.responsible_player_id),)
                         elif kind.endswith("PlayerTargetTemplate"):
                             # A PlayerTargetTemplate identifies a champion in
                             # the client session, not the controller's raw
@@ -1423,6 +1427,9 @@ class NativeEffectBackend:
                     battle_state["applied_effects"] = previous_applied
 
 
+_EVENT_INSTANCE_STATS = frozenset({"DamageDealt"})
+
+
 class PortAbilityResolver:
     """Resolve one port-owned ability and persist its UI continuation."""
 
@@ -1438,7 +1445,17 @@ class PortAbilityResolver:
         self.battle_state = battle_state
         self.effect_groups = effect_groups
         self.event_tac = {}
+        # Named instance IntAttrs the triggering event hands to the ability
+        # instance (CardDealtDamageEvent's ``DamageDealt``).  The hashed TAC
+        # map above keeps only integer keys, so carry these separately.
+        self.event_instance_stats = {}
         for key, value in (event_tac or {}).items():
+            if key in _EVENT_INSTANCE_STATS:
+                try:
+                    self.event_instance_stats[key] = int(value or 0)
+                except (TypeError, ValueError):
+                    pass
+                continue
             try:
                 self.event_tac[int(key)] = value
             except (TypeError, ValueError):
@@ -1480,6 +1497,14 @@ class PortAbilityResolver:
         # parent ability merely because its target map is empty.
         if resume_order is not None:
             self.battle_state.pop("resolution_paused", None)
+        elif self.event_instance_stats:
+            # C# IntAttrAbilityVariable reads the AbilityInstance TAC; a
+            # triggered instance starts with its event's values there, so
+            # Inferno Goliath's "a burning counter for each damage dealt"
+            # reads the event's damage rather than its own (zero) damage.
+            from .statistics import seed_ability_stats
+            seed_ability_stats(self.battle_state, self.event_instance_stats,
+                               instance_id=getattr(ability, "instance_id", 0))
         try:
             self.effect_backend(
                 handler=self.handler, game=self.game, session=self.game_session,

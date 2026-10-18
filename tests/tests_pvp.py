@@ -22,6 +22,16 @@ import db as dbmod
 import services.tournament_game as tournament_game
 
 
+@__import__("pytest").fixture(autouse=True)
+def _restore_db_bindings():
+    """These tests rebind ``ai._db``, ``db._db`` and ``tournament_game._db`` to
+    their own in-memory databases and never restore them, so a later file in
+    the same process would read this file's database.  Restore after each."""
+    previous = (ai._db, dbmod._db, tournament_game._db)
+    yield
+    ai._db, dbmod._db, tournament_game._db = previous
+
+
 TPL_ATT = "11111111-1111-1111-1111-111111111111"
 TPL_BLK = "22222222-2222-2222-2222-222222222222"
 

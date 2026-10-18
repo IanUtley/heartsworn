@@ -123,6 +123,119 @@ def _requires_transform_revert(old_type, new_type):
         bool(new_type & action_or_resource))
 
 
+def _refresh_champion_portrait(context, card_uid, template_guid,
+                               before_announce=None):
+    """Re-send ChampionCardPlayed for a transformed champion.
+
+    ``before_announce(champion_scid, is_ai)`` runs after the handler's
+    champion identity is retargeted and before ChampionCardPlayed, so a
+    caller can refresh the client's cached champion CardRepresentation that
+    OnChampionCardPlayed reads its template, name and health from.
+
+    The client sets the HUD portrait, name and sleeves only in
+    OnChampionCardPlayed; CardTransformed and CardUpdated refresh the card
+    view alone.  Re-announce the champion with its new template so the
+    portrait follows the transform.  The board tuple keeps the template
+    GUID for later re-announcements.
+    """
+    handler = context.handler
+    # Statics read the champion's authored abilities from champ_guid_map, so
+    # a transformed champion must carry its new template there. Otherwise the
+    # old champion's "can't draw cards" keeps applying (Chained Goliath ->
+    # Inferno Goliath still failed to draw).
+    guid_map = context.bstate.get("champ_guid_map")
+    champ_map = context.bstate.get("champ_map") or {}
+    if isinstance(guid_map, dict):
+        for owner_key, uid in champ_map.items():
+            try:
+                if int(uid) == int(card_uid):
+                    guid_map[str(owner_key)] = template_guid
+            except (TypeError, ValueError):
+                continue
+    for attr, board_attr, guid_attr, is_ai in (
+            ("_player_champ_scid", "_player_champ_board",
+             "_player_champ_guid", False),
+            ("_ai_champ_scid", "_ai_champ_board", "_ai_champ_guid", True)):
+        champion = getattr(handler, attr, None)
+        if champion is None or int(champion.uid.uid64) != int(card_uid):
+            continue
+        setattr(handler, guid_attr, template_guid)
+        # The champion CardDef's abilities come from these lists, and the client
+        # shows the charge-power button only when one of them is a charge
+        # power (GoHUDPlayer.SetupAbilityButtons). Refresh them so Inferno
+        # Goliath's charge power appears after the transform.
+        from pvp_db import db_get_champion_ability_guids
+        ability_guids = db_get_champion_ability_guids(
+            template_guid, conn=context.db)
+        if is_ai:
+            handler._ai_champ_ability_guids = list(ability_guids)
+        else:
+            handler._player_champ_abilities = [
+                game_engine.ResourceId.from_str(guid)
+                for guid in ability_guids]
+        board = getattr(handler, board_attr, None)
+        name = board[2] if board else ""
+        if board:
+            setattr(handler, board_attr,
+                    (board[0], board[1], board[2], template_guid))
+        if callable(before_announce):
+            before_announce(champion, is_ai)
+        owner = context.ai_uid if is_ai else context.player_uid
+        context.game.push_champion_card_played(owner, is_ai, name, champion)
+        return True
+    return False
+
+
+def _transform_champion_without_row(context, card_uid, owner_id,
+                                    new_template_guid, event_gems=None):
+    """Transform a live champion that has no ``game_cards`` row.
+
+    PvE champions are synthetic SessionCardIds held on the handler
+    (``_player_champ_scid`` / ``_ai_champ_scid``); their template identity
+    lives in ``_*_champ_guid``, ``champ_guid_map`` and the champion ability
+    lists rather than in ``game_cards``.  Chained Goliath's "you transform
+    into Inferno Goliath" targets the AI champion this way, so the
+    row-backed path below returned "target not found" and the champion
+    never changed.
+    """
+    from pvp_db import db_copy_template_payload
+    from .runtime_helpers import owner_uid
+    from .triggers import dispatch_trigger
+    if not db_copy_template_payload(new_template_guid, conn=context.db):
+        return "transform: template not found"
+    dispatch_trigger(context, "CardTransformsEvent", int(card_uid), owner_id)
+    recipient = owner_uid(owner_id, context.player_uid, context.ai_uid,
+                          context.bstate)
+
+    def refresh_cached_champion(champion, is_ai):
+        # Champions are public: the transform is visible to every viewer.
+        context.game.push_card_transformed(
+            champion, new_template_guid, gems=event_gems)
+        # Re-register both champion CardDefs from the retargeted ability
+        # lists, then refresh the cached champion representation (template,
+        # abilities, health) before ChampionCardPlayed re-reads it.  Keep
+        # collection None: a Champions collection is suppressed for champions.
+        warm = getattr(context.handler, "_push_champions_warm", None)
+        if callable(warm) and not context.bstate.get("pvp"):
+            warm(context.session, context.player_uid, context.ai_uid,
+                 context.bstate, context.game)
+        health_key = "ai_health" if is_ai else "player_health"
+        kwargs = {"template_id": new_template_guid}
+        health = context.bstate.get(health_key)
+        if health is not None:
+            kwargs["defense"] = int(health)
+        context.game.push_card_updated(
+            champion, recipient, game_engine.ECardCollections.None_,
+            game_engine.ECardTypes.Champion, **kwargs)
+
+    if not _refresh_champion_portrait(
+            context, int(card_uid), new_template_guid,
+            before_announce=refresh_cached_champion):
+        return "transform: target not found"
+    dispatch_trigger(context, "CardTransformedEvent", int(card_uid), owner_id)
+    return int(card_uid)
+
+
 def transform_instance(context, card_uid, new_template_guid, *, keep_zone=True,
                        reverted=False, copy_from_uid=None, is_replica=False,
                        event_gems=None, trigger_already_dispatched=False):
@@ -138,7 +251,15 @@ def transform_instance(context, card_uid, new_template_guid, *, keep_zone=True,
     row = db_card_owner_location_position(
         context.session.session_id, int(card_uid), conn=context.db)
     if not row:
-        return "transform: target not found"
+        from .runtime_helpers import champion_owner_id
+        champion_owner = (None if reverted or copy_from_uid is not None else
+                          champion_owner_id(context.handler, context.bstate,
+                                            int(card_uid)))
+        if champion_owner is None:
+            return "transform: target not found"
+        return _transform_champion_without_row(
+            context, int(card_uid), int(champion_owner), new_template_guid,
+            event_gems=event_gems)
     owner_id, old_zone, old_position = int(row[0] or 0), row[1], int(row[2] or 0)
     state_row = db_card_owner_zone_state(
         context.session.session_id, int(card_uid), conn=context.db)
@@ -266,6 +387,8 @@ def transform_instance(context, card_uid, new_template_guid, *, keep_zone=True,
         defense=defense, cost=cost, template_id=new_template_guid,
         gems=rendered_gems,
         state=old_state, attributes=attrs)
+    if not reverted:
+        _refresh_champion_portrait(context, int(card_uid), new_template_guid)
     # The C# cache derives class 50 only when collection/controller changes.
     # OnCardUpdated already returns the view home for same-collection updates;
     # the source client has no separate class-50 producer for reordering.

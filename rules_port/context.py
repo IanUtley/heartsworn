@@ -1766,8 +1766,10 @@ class EffectContext:
                     return "transform: no portal template"
             else:
                 new_template = str(template)
-            transform_instance(self, int(target), new_template,
-                               keep_zone=True, event_gems=event_gems)
+            result = transform_instance(self, int(target), new_template,
+                                        keep_zone=True, event_gems=event_gems)
+            if isinstance(result, str):
+                return result
             return f"transformed {hex(int(target))} -> {new_template[:8]}"
         from abilities.framework.bom import _transform_card_legacy
 
@@ -3917,10 +3919,13 @@ class EffectContext:
                 self.handler._card_full_data(self.game, scid, guid)
             recipient = owner_uid(
                 opponent, self.player_uid, self.ai_uid, self.bstate)
+            from .choice_effects import choice_art_related_cards
             self.game.push_card_updated(
                 scid, recipient, game_engine.ECardCollections.Choosing,
                 ctype, template_id=guid, cost=cost, attack=atk,
-                defense=dfn, gems=gems)
+                defense=dfn, gems=gems,
+                related_cards=choice_art_related_cards(
+                    self.bstate.get("resolving_source_uid"), uid))
             # ClientStateCache creates the UI CardMoved from None -> Choosing
             # while applying CardUpdated; do not send a duplicate class 50.
         source_uid = self.bstate.get("resolving_source_uid")

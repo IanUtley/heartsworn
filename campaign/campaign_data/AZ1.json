@@ -11,12 +11,10 @@
      "source": "conversation_name",
      "tags": [
       [
-       "completedQuest(az01_q_fort_romor)",
-       "faction(Underworld)"
+       "completedQuest(az01_q_fort_romor,1)"
       ],
       [
-       "completedQuest(az01_q_usurper)",
-       "faction(Ardent)"
+       "completedQuest(az01_q_usurper,1)"
       ]
      ]
     }
@@ -29,12 +27,10 @@
      "source": "conversation_name",
      "tags": [
       [
-       "questActive(az01_q_fort_romor)",
-       "faction(Underworld)"
+       "questActive(az01_q_fort_romor)"
       ],
       [
-       "questActive(az01_q_usurper)",
-       "faction(Ardent)"
+       "questActive(az01_q_usurper)"
       ]
      ]
     }
@@ -117,7 +113,12 @@
      "tags": [
       "outcome:success",
       "!flag(saved_daphne)"
-     ]
+     ],
+     "actions": {
+      "*": [
+       "complete_step(q_seawitch,Step2)"
+      ]
+     }
     },
     "priority": 4000
    },
@@ -258,8 +259,8 @@
      "label": "Milosh the gaal - First encounter - Player already has fortune",
      "source": "conversation_name",
      "tags": [
-      "flag(gaal_fortune)",
-      "!talkedAt(Node012)"
+      "!flag(gaal_fortune)",
+      "questActive(q_go_to_az2)"
      ]
     },
     "priority": 101
@@ -281,7 +282,10 @@
     "conversation_guid": "a2a80e51-9163-4759-a335-0e8c51fc58fd",
     "trigger_json": {
      "label": "Winston - Step 4",
-     "source": "conversation_name"
+     "source": "conversation_name",
+     "tags": [
+      "completedQuest(az01_q_cross_the_river,2)"
+     ]
     },
     "priority": 4003
    },
@@ -292,7 +296,8 @@
      "label": "Winston - Step 2 player has not beaten Savage Lord",
      "source": "conversation_name",
      "tags": [
-      "!conversation(AZ1 - Node 14 - Savage Lord Success)"
+      "!conversation(AZ1 - Node 14 - Savage Lord Success)",
+      "questStarted(az01_q_cross_the_river)"
      ]
     },
     "priority": 4004
@@ -304,7 +309,8 @@
      "label": "Savage Lord Success",
      "source": "conversation_name",
      "tags": [
-      "outcome:success"
+      "outcome:success",
+      "!completedQuest(az01_q_cross_the_river,1)"
      ],
      "actions": {
       "*": [
@@ -413,7 +419,8 @@
      "label": "Dryad Success",
      "source": "conversation_name",
      "tags": [
-      "outcome:success"
+      "outcome:success",
+      "completedQuest(az01_q_cross_the_river_part2,1)"
      ]
     },
     "priority": 4001
@@ -423,12 +430,7 @@
     "conversation_guid": "c436f2d4-7d88-411b-8fca-3e689101713a",
     "trigger_json": {
      "label": "Dryad",
-     "source": "conversation_name",
-     "actions": {
-      "*": [
-       "complete_step(az01_q_cross_the_river_part2,Step1)"
-      ]
-     }
+     "source": "conversation_name"
     },
     "priority": 4002
    },
@@ -478,8 +480,15 @@
      "label": "Blockade - Step 2 (if fight) Success",
      "source": "conversation_name",
      "tags": [
-      "outcome:success"
-     ]
+      "outcome:success",
+      "questStarted(q_smoldering_dead)"
+     ],
+     "actions": {
+      "*": [
+       "set_flag(blockade_cleared)",
+       "set_flag(blockade_passed)"
+      ]
+     }
     },
     "priority": 4002
    },
@@ -490,7 +499,8 @@
      "label": "Blockade - Step 2 (if fight) Fail",
      "source": "conversation_name",
      "tags": [
-      "outcome:fail"
+      "outcome:fail",
+      "questStarted(q_smoldering_dead)"
      ]
     },
     "priority": 4003
@@ -645,7 +655,8 @@
       ]
      },
      "tags": [
-      "completedQuest(az01_three_braves,7)"
+      "completedQuest(az01_three_braves,7)",
+      "conversation(AZ1 - Node 46 - Robot - Step 3 - Install Ruby Mainline)"
      ]
     },
     "priority": 4001
@@ -672,7 +683,7 @@
      "source": "conversation_name",
      "tags": [
       "talkedAt(Node046)",
-      "!completedQuest(az01_three_braves,1)"
+      "!completedQuest(az01_three_braves,4)"
      ]
     }
    },
@@ -689,7 +700,8 @@
       ]
      },
      "tags": [
-      "!completedQuest(az01_three_braves,6)"
+      "!completedQuest(az01_three_braves,6)",
+      "conversation(AZ1 - Node 46 - Robot - Step 2 - Install Sapphire Conduit)"
      ]
     },
     "priority": 4004
@@ -701,7 +713,7 @@
      "label": "Robot - Step 1",
      "source": "conversation_name",
      "tags": [
-      "!talkedAt(Node046,2)"
+      "!questStarted(az01_three_braves)"
      ],
      "actions": {
       "A1": [
@@ -890,7 +902,12 @@
      "source": "conversation_name",
      "tags": [
       "!flag(battle:0b1d5244:Diff_0)"
-     ]
+     ],
+     "actions": {
+      "*": [
+       "set_counter(fight_army,0)"
+      ]
+     }
     },
     "priority": 2
    },
@@ -903,7 +920,30 @@
      "tags": [
       "flag(battle:0b1d5244:Diff_0)"
      ],
-     "visit": "repeat"
+     "visit": "repeat",
+     "actions": {
+      "Diff_0": [
+       "set_counter(fight_army_at_level,0)"
+      ],
+      "Diff_1": [
+       "set_counter(fight_army_at_level,1)"
+      ],
+      "Diff_2": [
+       "set_counter(fight_army_at_level,2)"
+      ],
+      "Diff_3": [
+       "set_counter(fight_army_at_level,3)"
+      ],
+      "Diff_4": [
+       "set_counter(fight_army_at_level,4)"
+      ],
+      "Diff_5": [
+       "set_counter(fight_army_at_level,5)"
+      ],
+      "Diff_6": [
+       "set_counter(fight_army_at_level,6)"
+      ]
+     }
     },
     "priority": 303
    },
@@ -1076,13 +1116,7 @@
      "label": "Ennis - Quest Completed Repeating",
      "source": "conversation_name",
      "tags": [
-      [
-       "faction(Ardent)",
-       "!talkedAt(Node017)"
-      ],
-      [
-       "talkedAt(Node017)"
-      ]
+      "completedQuest(q_seawitch)"
      ]
     },
     "priority": 301,
@@ -1204,7 +1238,7 @@
      "label": "Takumi - Quest Completed Repeating",
      "source": "conversation_name",
      "tags": [
-      "talkedAt(Node017)"
+      "completedQuest(az01_tamed)"
      ]
     },
     "priority": 310,
@@ -1887,7 +1921,6 @@
      "source": "conversation_name",
      "tags": [
       "faction(Ardent)",
-      "completedQuest(az01_q_usurper)",
       "!questStarted(q_go_to_az2)"
      ],
      "actions": {
@@ -1973,7 +2006,7 @@
      "label": "Belarius - Quest Completed Repeating",
      "source": "conversation_name",
      "tags": [
-      "talkedAt(Node034)"
+      "completedQuest(az01_tamed)"
      ]
     },
     "priority": 311,
@@ -2460,9 +2493,12 @@
      "source": "conversation_name",
      "actions": {
       "*": [
-       "complete_step(az01_three_braves,Step6)"
+       "complete_quest(az01_three_braves)"
       ]
-     }
+     },
+     "tags": [
+      "conversation(AZ1 - Node 46 - Robot - Step 4 - Install Regulator,A16)"
+     ]
     }
    },
    {
@@ -2629,11 +2665,9 @@
     "trigger_json": {
      "label": "Bluejay - Step 2",
      "source": "conversation_name",
-     "actions": {
-      "A5": [
-       "complete_quest(az01_three_braves)"
-      ]
-     }
+     "tags": [
+      "questStarted(az01_three_braves)"
+     ]
     }
    },
    {
@@ -2682,6 +2716,44 @@
       ]
      }
     }
+   },
+   {
+    "campaign_template": "AZ1",
+    "conversation_guid": "f1b4859a-1fc2-4102-b3da-61f6ad6af48a",
+    "trigger_json": {
+     "label": "Bluejay - Step 3",
+     "source": "conversation_name",
+     "tags": [
+      "completedQuest(az01_three_braves,4)"
+     ]
+    }
+   },
+   {
+    "campaign_template": "AZ1",
+    "conversation_guid": "bfaf26c8-fbfd-4c77-b09d-c18437a7661c",
+    "trigger_json": {
+     "label": "Bluejay - Step 4b - Player did NOT install regulator",
+     "source": "conversation_name",
+     "tags": [
+      "conversation(AZ1 - Node 46 - Robot - Step 4 - Install Regulator,A12)"
+     ],
+     "actions": {
+      "*": [
+       "complete_quest(az01_three_braves)"
+      ]
+     }
+    }
+   },
+   {
+    "campaign_template": "AZ1",
+    "conversation_guid": "937094ba-a67f-4f7e-82b6-f055983138f3",
+    "trigger_json": {
+     "label": "Bluejay - Step 5",
+     "source": "conversation_name",
+     "tags": [
+      "completedQuest(az01_three_braves)"
+     ]
+    }
    }
   ],
   "quest_conversations": [
@@ -2694,7 +2766,13 @@
      "tags": [
       "!questStarted(az01_ar_find_ambling_mesa)",
       "faction(Ardent)"
-     ]
+     ],
+     "actions": {
+      "*": [
+       "start_quest(az01_ar_find_ambling_mesa)",
+       "start_quest(az01_tamed)"
+      ]
+     }
     },
     "node_id": "Node002",
     "npc": "Belarius",
@@ -3023,7 +3101,13 @@
      "tags": [
       "!questStarted(az01_tamed)",
       "faction(Underworld)"
-     ]
+     ],
+     "actions": {
+      "*": [
+       "start_quest(az01_tamed)",
+       "start_quest(az01_uw_find_cave_in)"
+      ]
+     }
     },
     "node_id": "Node002",
     "npc": "Takumi",
@@ -3063,7 +3147,11 @@
      "tags": [
       "questActive(az01_tamed)",
       "completedQuest(az01_tamed,5)",
-      "faction(Ardent)"
+      "faction(Ardent)",
+      "completedQuest(az01_tamed,4)",
+      "completedQuest(az01_tamed,3)",
+      "completedQuest(az01_tamed,2)",
+      "completedQuest(az01_tamed,1)"
      ]
     },
     "node_id": "Belarius",
@@ -3084,7 +3172,11 @@
      "tags": [
       "questActive(az01_tamed)",
       "completedQuest(az01_tamed,5)",
-      "faction(Underworld)"
+      "faction(Underworld)",
+      "completedQuest(az01_tamed,4)",
+      "completedQuest(az01_tamed,3)",
+      "completedQuest(az01_tamed,2)",
+      "completedQuest(az01_tamed,1)"
      ]
     },
     "node_id": "Takumi",
@@ -3103,9 +3195,21 @@
     "conditions_json": {
      "faction": "Ardent",
      "tags": [
-      "questActive(az01_tamed)",
-      "faction(Ardent)",
-      "!completedQuest(az01_tamed,5)"
+      [
+       "!completedQuest(az01_tamed,1)"
+      ],
+      [
+       "!completedQuest(az01_tamed,2)"
+      ],
+      [
+       "!completedQuest(az01_tamed,3)"
+      ],
+      [
+       "!completedQuest(az01_tamed,4)"
+      ],
+      [
+       "!completedQuest(az01_tamed,5)"
+      ]
      ]
     },
     "node_id": "Belarius",
@@ -3360,7 +3464,7 @@
     "conditions_json": {
      "tags": [
       "!questStarted(q_blood_beneath)",
-      "completedQuest(az01_tamed)"
+      "completedQuest(q_seawitch)"
      ],
      "actions": {
       "*": [
@@ -3385,7 +3489,7 @@
     "conditions_json": {
      "tags": [
       "!questStarted(q_blood_beneath)",
-      "completedQuest(az01_tamed)"
+      "completedQuest(q_seawitch)"
      ],
      "actions": {
       "*": [
@@ -3977,7 +4081,13 @@
       "questActive(q_tranquil_dream)",
       "completedQuest(q_tranquil_dream,1)",
       "faction(Underworld)"
-     ]
+     ],
+     "actions": {
+      "*": [
+       "complete_quest(q_tranquil_dream)",
+       "start_quest(q_find_myaa)"
+      ]
+     }
     },
     "node_id": "Fahrny",
     "npc": "Fahrny",

@@ -670,6 +670,19 @@ class ChainMixin:
         chain = getattr(port, "chain", None)
         if chain is None or chain.is_empty:
             return None
+        # A pending choice, trigger target, deck search, discard or conversation
+        # already owns the client's UI.  Restoring chain priority now replaces
+        # it: the client leaves the picker (e.g. the Infusion Device's threshold
+        # choice closed at once).  The answering transaction re-syncs instead.
+        pending_checkpoint = self._checkpoint_engine(session).load_state(session)
+        pending_input = [key for key in (
+            "pending_choice", "pending_trigger", "pending_deck_search",
+            "pending_conversation", "pending_discard_ability")
+            if (pending_checkpoint or {}).get(key)]
+        if pending_input:
+            _hc.log_req("    RequestPrioritySync: held for pending client input: "
+                        + ",".join(pending_input))
+            return True
 
         priority = getattr(
             getattr(port, "action_stack", None), "priority_player_id", None)

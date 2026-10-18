@@ -838,8 +838,10 @@ class PvpRuntimeFacts:
         declared: dict[int, int] = {}
         for attacker_id, blocker_ids in declarations:
             attacker = session.get_card(attacker_id)
-            if attacker is None or not session.combat_manager.combats_with_attacker(attacker):
-                return False
+            if attacker is None:
+                return _block_reject("attacker-not-found", attacker_id, None)
+            if not session.combat_manager.combats_with_attacker(attacker):
+                return _block_reject("no-combat-for-attacker", attacker_id, None)
             try:
                 attacker_key = int(getattr(attacker_id, "uid64", attacker_id))
             except (TypeError, ValueError):
@@ -852,22 +854,28 @@ class PvpRuntimeFacts:
                 except (TypeError, ValueError):
                     return False
                 blocker = session.get_card(blocker_id)
-                if (blocker is None or blocker_key in seen or
-                        blocker.owner_id == attacker.owner_id or
-                        not blocker.in_warzone or not blocker.is_troop or
-                        blocker.is_tapped() or
-                        bool(blocker.attributes & ECardAttributes.CantBlock)):
-                    return False
+                if blocker is None:
+                    return _block_reject("blocker-not-found", attacker_key, blocker_key)
+                if blocker_key in seen:
+                    return _block_reject("blocker-used-twice", attacker_key, blocker_key)
+                if blocker.owner_id == attacker.owner_id:
+                    return _block_reject("blocker-same-owner", attacker_key, blocker_key)
+                if not blocker.in_warzone or not blocker.is_troop:
+                    return _block_reject("blocker-not-troop-in-warzone", attacker_key, blocker_key)
+                if blocker.is_tapped():
+                    return _block_reject("blocker-tapped", attacker_key, blocker_key)
+                if bool(blocker.attributes & ECardAttributes.CantBlock):
+                    return _block_reject("blocker-cant-block", attacker_key, blocker_key)
                 if not can_block(None, self.session_id, state,
                                  attacker_key, blocker_key):
-                    return False
+                    return _block_reject("can-block-rule", attacker_key, blocker_key)
                 seen.add(blocker_key)
         # C# Feral (IntAttrs): an attacker can only be blocked by 2+ troops.
         for attacker_key, count in declared.items():
             if 0 < count < 2 and card_int_attr(
                     None, self.session_id, attacker_key, "Feral",
                     battle_state=state) > 0:
-                return False
+                return _block_reject("feral-needs-two", attacker_key, None)
         return True
 
     def validate_x_cost(self, player_id, activation_data) -> bool:
@@ -889,3 +897,10 @@ def attach_pvp_runtime_facts(port_session, game_session, battle_state, *,
                             player_uid=player_uid, ai_uid=ai_uid, **validators)
     port_session.set_runtime_facts(facts)
     return facts
+
+
+def _block_reject(reason, attacker, blocker):
+    """Log why a declared block set was refused (diagnostic)."""
+    import hconnect_server as _hc
+    _hc.log_req(f"    PROBE block reject: {reason} attacker={attacker} blocker={blocker}")
+    return False

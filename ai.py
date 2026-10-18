@@ -856,6 +856,17 @@ def _aieval_attack_set_value(ev, attackers, blockers):
         if best_index is not None:
             assigned.add(best_index)
             total += best_delta
+    # A defender may stack blockers on one attacker (AICombat.SolveBlock): the
+    # attacker then dies for its loss value and deals no face damage.  Charge
+    # each such attacker, taken from the same solver the attack uses.
+    from ai_combat import Hint, solve_block
+    attack_hints = {int(c.card_uid): Hint(c, ev) for c in attackers}
+    solved = solve_block(list(attack_hints.values()),
+                         [Hint(b, ev) for b in blockers],
+                         int(ev.player_health), ev)
+    for uid, blocked_by in solved.items():
+        if len(blocked_by) >= 2 and uid in attack_hints:
+            total -= attack_hints[uid].loss_value
     return total
 
 
@@ -1324,35 +1335,24 @@ def run_ai_turn(handler, session, pl_t, ai_t, battle_state, start_idx=0):
             from rules_port.resources import begin_turn_resources
             begin_turn_resources(battle_state, "ai")
             from rules_port.lifecycle import clear_expired_temporary_attributes
-            clear_expired_temporary_attributes(
-                _db, session.session_id, 0, "start_turn",
-                clear_stat_buffs=True)
             # RulesPort owns the readiness transition.  The compatibility
             # loop below is retained only for sessions without the port; an
             # attached session receives the same card projection and trigger
             # ordering from this native result.
             native_lifecycle = (battle_state.get("_rules_port_attached") or
                                 getattr(session, "_rules_port_session", None) is not None)
+            if not native_lifecycle:
+                clear_expired_temporary_attributes(
+                    _db, session.session_id, 0, "start_turn",
+                    clear_stat_buffs=True)
             if native_lifecycle:
-                from rules_port.lifecycle import ready_cards_for_turn
-                ready_changes = ready_cards_for_turn(
-                    _db, session.session_id, 0)
-                for uid, tpl_guid, owner_id, previous_state, current_state in ready_changes:
-                    scid = game_engine.SessionCardId(game_engine.UID(uid))
-                    handler._card_full_data(game, scid, tpl_guid)
-                    tpl = handler._template_by_guid(tpl_guid)
-                    ct = (game_engine.card_type_from_db(tpl[1]) if tpl
-                          else game_engine.ECardTypes.Troop)
-                    game.push_card_updated(
-                        scid, ai_t, game_engine.ECardCollections.Warzone, ct,
-                        template_id=tpl_guid, state=int(current_state))
-                    if (previous_state & game_engine.ECardStates.Tapped and
-                            not (current_state & game_engine.ECardStates.Tapped)):
-                        _dispatch_triggers(
-                            _db, handler, game, session, pl_t, ai_t,
-                            battle_state, "CardReadiedEvent", uid,
-                            source_owner_uid=0,
-                            event_previous_state=previous_state)
+                # The ready step normally ran at StartTurn, before
+                # TurnStartedEvent (C# ReadyState); this readies only a turn
+                # that began at Prep.
+                ready_changes = handler._ready_side_for_turn(
+                    session, game, battle_state, "ai", 0) or []
+                handler._dispatch_card_readied_events(
+                    session, game, battle_state, 0, ready_changes)
                 from rules_port.cooldowns import decrement_and_project_ready_cooldowns
                 decrement_and_project_ready_cooldowns(
                     _db, session, handler, game, 0, ai_t, pl_t,
@@ -1680,6 +1680,23 @@ def run_ai_turn(handler, session, pl_t, ai_t, battle_state, start_idx=0):
                         isinstance(_chain_action, PriorityWindowAction)
                         and _chain_action.priority_player_id == native_ai_id):
                     _chain_port.pass_player_priority(native_ai_id)
+                    # Let RulesPort settle the chain before handing over.
+                    # An ignores-chain item (an untargeted trigger such as
+                    # Inferno Goliath's burning counters) completes without a
+                    # priority window, and the AI's pass can resolve the
+                    # top.  Either way the chain may now be empty with the
+                    # phase window back on the AI; a ResolveTopOfChain
+                    # GreenLight then strands the human, whose pass the port
+                    # rejects (PlayerHasPriorityRequirement).
+                    _chain_port.drive_until_input(max_steps=64)
+                    _after = _chain_port.action_stack.peek()
+                    # Still on the AI (a fresh window over a new item): the
+                    # native pass below handles it like any AI window.
+                    on_chain = (
+                        not _chain_port.chain.is_empty and
+                        not (isinstance(_after, PriorityWindowAction) and
+                             _after.priority_player_id == native_ai_id))
+        if on_chain:
             battle_state["ai_turn_phase_idx"] = idx + 1
             be.save_state(session, battle_state)
             handler._push_phase_options_empty(session, pl_t, ai_t)
@@ -2119,6 +2136,42 @@ def ai_play_troop(handler, game, session, ai_t, battle_state):
                 return
 
 
+def _ai_pay_card_sacrifice(handler, game, session, ai_t, battle_state, card,
+                          exclude=()):
+    """Pay a card's own sacrifice cost (``sacrifice_target``) before it is played.
+
+    The AI sacrifices its weakest legal troop that is not one of the card's
+    effect targets, as its champion powers do.  Returns False when no troop
+    can be sacrificed, and the card is then not played."""
+    row = _db.execute("SELECT sacrifice_target FROM card_templates WHERE guid=?",
+                      (card.template_guid,)).fetchone()
+    template = str(row[0] or "") if row else ""
+    if not template:
+        return True
+    if getattr(session, "_rules_port_session", None) is not None:
+        from rules_port.targeting import legal_targets
+    else:
+        from abilities.framework.targeting import legal_targets
+    owner = db_card_owner_id(session.session_id, int(card.card_uid), conn=_db)
+    legal = {int(uid) for uid in legal_targets(
+        _db, session.session_id, owner, template, int(card.card_uid),
+        both_players=False, champions=[], battle_state=battle_state)}
+    candidates = {uid for uid in legal
+                  if uid not in {int(u) for u in exclude if u} and
+                  db_card_owner_id(session.session_id, uid, conn=_db) == owner}
+    if not candidates:
+        log_req(f"    AI skipped {card.name}: no troop to sacrifice")
+        return False
+    rows = [row for row in db_warzone_card_stats(
+        session.session_id, owner, conn=_db) if int(row[0]) in candidates]
+    rows.sort(key=lambda row: (int(row[1] or 0), int(row[2] or 0),
+                               int(row[6] or 0)))
+    victim = int(rows[0][0]) if rows else min(candidates)
+    handler._sacrifice_troop(game, session, game.player_uid, ai_t, victim)
+    log_req(f"    AI sacrificed {victim:#x} to play {card.name}")
+    return True
+
+
 def ai_play_hand_card(handler, game, session, ai_t, battle_state, card,
                       evaluator=None, x_cost=None, target_uid=None,
                       target_uids=None):
@@ -2176,6 +2229,9 @@ def ai_play_hand_card(handler, game, session, ai_t, battle_state, card,
     if total > resources:
         log_req(f"    AI cannot afford {card.name} ({total}>{resources})")
         return False
+    if not _ai_pay_card_sacrifice(handler, game, session, ai_t, battle_state,
+                                  card, exclude=target_uids):
+        return False
     scid = game_engine.SessionCardId(game_engine.UID(tid))
     source_location = db_card_location(
         session.session_id, tid, conn=_db) or "hand"
@@ -2232,7 +2288,8 @@ def ai_play_hand_card(handler, game, session, ai_t, battle_state, card,
                         f"{exc!r}")
         from rules_port.card_transactions import automatic_instance_ability_guids
         ability_guids = automatic_instance_ability_guids(
-            _db, session.session_id, tid, card.ability_guids)
+            _db, session.session_id, tid, card.ability_guids,
+            in_play=False)
         _queue_stack_item(session, battle_state, {
             "kind": "spell", "source_uid": tid,
             "ability_guids": ability_guids,
@@ -2512,10 +2569,6 @@ def ai_choose_attackers(handler, evaluator, eligible, blockers, *,
     if eligible and evaluator.alpha_strike_wins(
             evaluator.player_health, eligible, blockers):
         return [int(card.card_uid) for card in eligible], "alpha_strike_lethal"
-    if (eligible and alpha_strike and
-            _aieval_attack_set_value(evaluator, eligible, blockers) > 0):
-        return [int(card.card_uid) for card in eligible], "profitable_group_attack"
-
     # A favorable face race is a group decision: compare all eligible
     # attackers' no-block damage with the opponent's currently legal
     # counterattack. This lets a 2-power troop and a 1-power troop commit
@@ -2667,6 +2720,32 @@ def _ai_effect_amount(session, battle_state, ability_guid, source_uid,
         return int(value or 0) if value is not None else amount
     except Exception:
         return amount
+
+
+def _charge_power_effect_params(ability_guid, *, depth=0):
+    """Ordered ``(effect_type, params)`` of an ability, following activations.
+
+    A champion power can wrap its real effects in an ActivateAbility leaf
+    (Ancient Thorn Knight's power activates a nested ability that holds the
+    draw and token summons). The AI classifier only inspects top-level
+    effects, so the nested effects are inlined here, up to a small depth.
+    """
+    import json as _j
+    from pvp_db import db_ability_effect_rows
+    rows = db_ability_effect_rows(str(ability_guid).lower(), conn=_db)
+    params = []
+    for _effect_guid, etype, raw in rows:
+        if etype == "ActivateAbilityEffectTemplate" and depth < 3:
+            nested = str(raw or "").strip().strip('"').lower()
+            if nested:
+                params.extend(_charge_power_effect_params(
+                    nested, depth=depth + 1))
+            continue
+        try:
+            params.append((etype, _j.loads(raw) if raw else {}))
+        except Exception:
+            params.append((etype, {}))
+    return params
 
 
 def _ai_csharp_manual_ability_decision(
@@ -3143,6 +3222,37 @@ def _ai_csharp_manual_ability_decision(
     return bool(useful), (int(target) if target is not None else None)
 
 
+def _summon_token_meets_board_value(handler, session, battle_state, ai_t,
+                                    pl_t, summons):
+    """True when a summoned token is worth at least the average opposing troop.
+
+    Uses the evaluator's template value (AICardEvaluator.CalculateTemplateValue)
+    for each token in the ability's summon effects, compared with the value of
+    the player's Warzone troops.  No opposing troops means any token is worth it.
+    """
+    import ai_eval as _aieval
+    token_guids = [str(pm.get("token_guid") or "").lower()
+                   for pm in summons if pm.get("token_guid")]
+    if not token_guids:
+        return False
+    evaluator = _aieval.build_evaluator(handler, session, battle_state, ai_t, pl_t)
+    opposing = list(evaluator.player_warzone)
+    if not opposing:
+        return True
+    token_values = []
+    for guid in token_guids:
+        row = _db.execute(
+            "SELECT guid, name, card_type, cost, attack, defense, attributes, "
+            "subtype, rarity, socket_count, threshold_json FROM card_templates "
+            "WHERE guid=?", (guid,)).fetchone()
+        if row is not None:
+            token_values.append(evaluator._template_value_from_catalog_row(row))
+    if not token_values:
+        return False
+    average = sum(evaluator.get_card_value(card) for card in opposing) / len(opposing)
+    return max(token_values) >= average
+
+
 def ai_use_champion_ability(handler, game, session, ai_t, pl_t, battle_state,
                             *, decision_only=False, ai_owner_id=0,
                             player_owner_id=None):
@@ -3170,10 +3280,12 @@ def ai_use_champion_ability(handler, game, session, ai_t, pl_t, battle_state,
     )
 
     ai_owner_id = int(ai_owner_id)
-    # RulesPort callers may pass the player UID as a raw uint64, while older
-    # callers pass the game_engine.UID wrapper. Keep target ownership lookup
-    # valid for both forms.
-    player_instance_id = int(getattr(pl_t, "uid64", pl_t)) >> 8
+    # The player's cards are owned by the profile id (the evaluator's
+    # player_db_id); the raw UID's shifted value is not that owner id, so
+    # counting the player's troops through it finds none.
+    player_instance_id = int((getattr(handler, "user_profile", None) or {})
+                             .get("id", 0) or 0) or (
+        int(getattr(pl_t, "uid64", pl_t)) >> 8)
     player_owner_id = (player_instance_id if player_owner_id is None else
                        int(player_owner_id))
 
@@ -3238,7 +3350,8 @@ def ai_use_champion_ability(handler, game, session, ai_t, pl_t, battle_state,
             card = cards.get(int(uid))
             if card is not None:
                 try:
-                    values[int(uid)] = target_value_evaluator.get_card_value(card)
+                    values[int(uid)] = target_value_evaluator.hints_for(
+                        card).base_value
                 except Exception:
                     pass
         return values
@@ -3312,13 +3425,11 @@ def ai_use_champion_ability(handler, game, session, ai_t, pl_t, battle_state,
             handler._resolving_ai_champion = False
         if not met:
             continue
-        effects = db_ability_effect_type_params(ag, conn=_db)
-        params = []
-        for etype, pm in effects:
-            try:
-                params.append((etype, _j.loads(pm) if pm else {}))
-            except Exception:
-                params.append((etype, {}))
+        if not _ai_activation_condition_met(
+                session, battle_state, ag,
+                int(ai_champ_scid.uid.uid64), ai_owner_id):
+            continue
+        params = _charge_power_effect_params(ag)
         # ---- classify the ability from its BOM ----------------------------
         summons = [pm for t, pm in params
                    if t == "SummonTokenTroopAbilityEffectTemplate"]
@@ -3410,6 +3521,13 @@ def ai_use_champion_ability(handler, game, session, ai_t, pl_t, battle_state,
                 session.session_id, player_owner_id,
                 "warzone", "Troop", conn=_db)
             worth = ai_troops <= pl_troops + 1 or ai_health <= 8
+            if not worth:
+                # Ahead on board, a token is still worth its charge when it is
+                # at least as valuable as the average opposing troop: the
+                # evaluator values the token from its typed template, the same
+                # way it values hand cards.
+                worth = _summon_token_meets_board_value(
+                    handler, session, battle_state, ai_t, pl_t, summons)
         if heals and ai_health <= 14:
             worth = True
         if draws and db_hand_count(
@@ -3488,6 +3606,14 @@ def ai_use_champion_ability(handler, game, session, ai_t, pl_t, battle_state,
         if damages:
             # Direct-damage power: burn for lethal or kill a threat.
             amount = 0
+            # Random-range damage (e.g. "Deal 10 to 20 damage at random")
+            # is authored as a RandomizeVariable leaf plus a -1 amount that
+            # reads the variable.  Judge it by the authored maximum so a
+            # lethal or worthwhile burn is not rejected as 0 damage.
+            random_ranges = {
+                str(rpm.get("variable") or ""): rpm
+                for rt, rpm in params
+                if rt == "RandomizeVariableEffectTemplate"}
             for pm in damages:
                 amount = _ai_effect_amount(
                     session, battle_state, ag,
@@ -3496,6 +3622,10 @@ def ai_use_champion_ability(handler, game, session, ai_t, pl_t, battle_state,
                 m = __import__("re").search(r'deal\s+(\d+)\s+damage', text)
                 if m:
                     amount = int(m.group(1))
+                rng = random_ranges.get(
+                    str(pm.get("input_variable") or ""))
+                if amount < 0 and rng is not None:
+                    amount = int(rng.get("max", 0) or 0)
             legal_uids, has_target_templates = _legal_ability_targets(ag)
             opponent_id = player_instance_id
             opposing_champions = []
@@ -3597,8 +3727,18 @@ def ai_use_champion_ability(handler, game, session, ai_t, pl_t, battle_state,
             if case_worth:
                 worth = True
                 target_uid = case_target
-        if ag == "6249cb76-e4ce-45f2-c9fd-5bbe87159112":
-            log_req("    debug final worth=%s target=%s" % (worth, target_uid))
+        if not worth:
+            # Every authored charge power is beneficial: once it is
+            # affordable and its thresholds are met, use it at the first
+            # opportunity. A power that needs a target only fires when a
+            # legal one exists (the best-ranked one), so charges are not
+            # spent on a resolution with no target.
+            candidate_uids, has_target_templates = _legal_ability_targets(ag)
+            if not has_target_templates:
+                worth = True
+            elif candidate_uids:
+                worth = True
+                target_uid = _rank_target_uids(candidate_uids)[0]
         if not worth:
             continue
         # Champion powers can have card-payment costs in addition to charge
@@ -3814,6 +3954,32 @@ def _ai_select_ability_costs(handler, session, battle_state, ability_guid,
     return selections, cost_target_map
 
 
+def _ai_activation_condition_met(session, battle_state, ability_guid,
+                                 source_uid, owner_id):
+    """Evaluate an ability's authored activation condition for the AI.
+
+    Mirrors the player path (application/card_state.py): the client's
+    CanActivateAbility checks TriggerCondition.IsValid, e.g. Tome of
+    Knowledge's "While you have seven or more cards in your hand".
+    """
+    from gamedata import DEFAULT_RECORD_STORE, ability_graph
+    graph = ability_graph(DEFAULT_RECORD_STORE, str(ability_guid).lower())
+    if not (graph.ability_condition or graph.trigger_condition):
+        return True
+    if (getattr(session, "_rules_port_session", None) is not None or
+            (battle_state or {}).get("_rules_port_attached")):
+        from rules_port.condition_context import ConditionContext
+        from rules_port.conditions import trigger_condition_met
+    else:
+        from abilities.framework.condition_engine import (
+            ConditionContext, trigger_condition_met)
+    cond_ctx = ConditionContext(
+        _db, session, battle_state,
+        ability_source_uid=int(source_uid),
+        ability_source_owner_id=int(owner_id))
+    return bool(trigger_condition_met(graph.source.to_dict(), cond_ctx))
+
+
 def ai_use_warzone_ability(handler, game, session, ai_t, pl_t, battle_state,
                             include_non_troops=False, resource_sink=False,
                             *, decision_only=False, ai_owner_id=0,
@@ -3870,6 +4036,11 @@ def ai_use_warzone_ability(handler, game, session, ai_t, pl_t, battle_state,
                 raw_meta = {}
             trigger_flags = raw_meta.get("m_TriggerCollectionFlags", "")
             if not trigger_collection_allows(trigger_flags, "warzone"):
+                continue
+            # The client only offers the activation when the authored
+            # condition holds (e.g. a hand-size requirement).
+            if not _ai_activation_condition_met(
+                    session, battle_state, ag, uid, ai_owner_id):
                 continue
             cost = int(meta[0] or 0)
             exh = int(meta[3] or 0)
@@ -4080,9 +4251,14 @@ def ai_use_warzone_ability(handler, game, session, ai_t, pl_t, battle_state,
             # Pay + resolve via the player path with AI-side state.
             bstate = battle_state
             game2 = handler._fresh_game(session, pl_t, ai_t, bstate)
-            if cost_selections and not handler._apply_card_play_costs(
+            # ``_apply_card_play_costs`` returns False on rejection and a
+            # (possibly empty) tuple of voided uids on success.  An empty
+            # tuple after a sacrifice cost is a paid cost, not a failure:
+            # treating it as falsy re-sacrificed a troop at every decision
+            # point without resolving or consuming the ability.
+            if cost_selections and handler._apply_card_play_costs(
                     game2, session, bstate, pl_t, ai_t, cost_selections,
-                    source_uid=int(uid), expected_owner_id=ai_owner_id):
+                    source_uid=int(uid), expected_owner_id=ai_owner_id) is False:
                 continue
             from rules_port.resources import pay_resource
             resource_change = pay_resource(
@@ -4330,6 +4506,19 @@ def ai_choose_combat_trick(handler, session, battle_state, ai_t, pl_t, *,
                     for k, v in (battle_state.get("ai_attackers") or {}).items()}
     my_blocks = {int(k): [int(b) for b in (v or [])]
                  for k, v in (battle_state.get("ai_blockers") or {}).items()}
+    # Our attack is declared but blocks are not: bounce the one potential
+    # blocker whose removal lets the attack deal lethal damage.
+    if (my_attackers and not any(my_blocks.values())
+            and phase == game_engine.ETurnPhases.DeclareAttackPriorityWindow
+            and _ai_owns_current_turn(ev, session, battle_state)):
+        attacking = [card for card in ev.ai_warzone
+                     if int(card.card_uid) in my_attackers]
+        bounce = ev.choose_bounce(
+            lethal_blockers=ev.lethal_blocker_uids(attacking))
+        if bounce is not None:
+            card, target_uid, reason = bounce
+            return {"card": card, "target_uid": target_uid,
+                    "reason": reason, "combat": None}
     combats = []  # (my_uid, their_uid)
     for a_uid, blockers in my_blocks.items():
         if int(a_uid) in my_attackers:
@@ -4354,24 +4543,10 @@ def ai_choose_combat_trick(handler, session, battle_state, ai_t, pl_t, *,
         losing = my_atk < th_def or my_def <= th_atk
         for trick in ev.hand:
             h = ev.hints_for(trick)
-            if (trick.is_quick_action()
-                    and ev.is_playable(trick) == "True"
-                    and h.removal is not None
-                    and int(their_uid) in their_cards
-                    and ev.choose_action_target(
-                        trick, preferred_target=int(their_uid))
-                    == int(their_uid)):
-                damage = int(h.removal.threshold or 0)
-                kills_blocker = (h.removal.hard
-                                 or (damage > 0 and
-                                     damage + my_atk >= th_def))
-                if kills_blocker:
-                    return {
-                        "card": trick,
-                        "target_uid": int(their_uid),
-                        "reason": "combat_removal",
-                        "combat": (mine.name, theirs.name),
-                    }
+            # Removal is not a combat trick: the client's post-block window
+            # (AIHandleAttackDefensePriorityWindow -> GetCardToPlayInCombat)
+            # only plays buff hints.  Removal is chosen before blocks in
+            # AttemptToRemove and in pre-combat BuildBoard instead.
             if not losing:
                 continue
             if (h.buff is None or not trick.is_quick_action()
@@ -4437,7 +4612,7 @@ def ai_play_combat_trick(handler, game, session, ai_t, pl_t, battle_state):
             target_uid=decision.get("target_uid"),
             target_uids=decision.get("target_uids")):
         return False
-    if decision["reason"] in ("combat_trick", "combat_removal"):
+    if decision["reason"] == "combat_trick":
         mine, theirs = decision["combat"]
         log_req(f"    AI {decision['reason']}: {card.name} -> "
                 f"{mine} vs {theirs}")
@@ -4445,6 +4620,9 @@ def ai_play_combat_trick(handler, game, session, ai_t, pl_t, battle_state):
             "needed_blocker_troop_summon",
             "opponent_end_step_troop_summon"):
         log_req(f"    AI {decision['reason']}: {card.name}")
+    elif decision["reason"] == "bounce_lethal_blocker":
+        log_req(f"    AI {decision['reason']}: {card.name} -> "
+                f"{hex(int(decision['target_uid']))}")
     else:
         log_req(f"    AI lifegain dump: {card.name}")
     return True
@@ -4485,6 +4663,29 @@ def ai_respond_to_priority(handler, game, session, ai_t, pl_t, battle_state):
     if phase in priority_action_phases and ai_play_combat_trick(
             handler, game, session, ai_t, pl_t, battle_state):
         return True
+
+    # Quick bounce ("put target card into its controller's hand"): answer an
+    # attack, then fizzle an opponent's chain item by bouncing its target,
+    # and otherwise spend it at the opponent's end step on the best opposing
+    # card. Targets come from the action's authored target template.
+    opponent_turn = not _ai_owns_current_turn(evaluator, session, battle_state)
+    if opponent_turn:
+        attackers = ()
+        if phase in combat_phases:
+            attackers = [int(uid) for uid in
+                         (battle_state.get("player_attackers") or {})]
+        bounce = evaluator.choose_bounce(
+            attackers=attackers,
+            chain_targets=evaluator.opponent_chain_target_uids(),
+            fallback=phase == game_engine.ETurnPhases.EndPhase)
+        if bounce is not None:
+            card, target_uid, reason = bounce
+            if ai_play_hand_card(
+                    handler, game, session, ai_t, battle_state, card,
+                    evaluator=evaluator, target_uid=target_uid):
+                log_req(f"    AI response: {reason} {card.name} -> "
+                        f"{hex(int(target_uid))}")
+                return True
 
     # Mirrors AITactical.BuildBoard(..., MyTurn=false): removal is considered
     # only when the card is quick-speed, and only against an authored useful
@@ -4662,7 +4863,7 @@ def ai_play_spell(handler, game, session, ai_t, battle_state):
             ability_guids = []
         from rules_port.card_transactions import automatic_instance_ability_guids
         ability_guids = automatic_instance_ability_guids(
-            _db, session.session_id, tid, ability_guids)
+            _db, session.session_id, tid, ability_guids, in_play=False)
         tpl_g, ct_n, nm, cost2, atk2, def2, gem2 = handler._card_full_data(
             game, scid, row[2], row[0])
         game.push_card_updated(

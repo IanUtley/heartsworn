@@ -95,7 +95,7 @@ def test_typed_payload_normalizes_csharp_activation_member_names():
     assert payload["activation_data"] == ({
         "ability_instance_id": 4,
         "opted": True,
-        "target_map": {"0": [77]},
+        "target_map": {0: [77]},
         "x_cost_data": {"x_cost": 2},
         "x_cost": 2,
     },)

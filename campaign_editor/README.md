@@ -322,56 +322,6 @@ Panorama renderers are drawn in Unity's order: sorting order, then far to
 near. Particle shaders on plain meshes (glow cards, god rays) are drawn too,
 and additive shaders now composite additively.
 
-## Implicit selectors converted to tags
-
-`convert_conversation_tags.py` replaced the seed's hard-coded conversation
-keys and name rules with editable tags (in `campaign/campaign_data/AZ1.json` /
-`AZ2.json`), reproducing `_az1_node_conversation`'s order through row
-priority:
-
-| was | now |
-| --- | --- |
-| `visit: first` (or a "Step 1" name) | `!talkedAt(Node,2)` |
-| `visit: repeat` | `talkedAt(Node)` |
-| `state: fortune` (+ visit) | `flag(gaal_fortune)` (+ `!talkedAt` / `talkedAt`) |
-| `outcome: success/fail` | `outcome:success` / `outcome:fail` |
-| "Ardent"/"Aria"/"Underworld" in the name | `faction(...)` (only where the node has rows for the other faction) |
-| trailing race in the name | `ChampionIsRace(...)` |
-
-`talkedAt(Node[,N])` counts conversations finished at the node (the
-server's `conversation_visits`). `flag(X)` reads the area's boolean markers
-on the server and the same names in the simulator; `gaal_fortune` is set by
-Milosh's `gaal_camp_accept` and cleared by the next battle (AZ1 rules hooks,
-as campaign.py `consume_fortune`). A node was converted only when the
-server's selectors chose the same conversations before and after for every
-tested state (first/repeat visits, fortune, both factions, win/loss); the
-rest keep the old rules. Run it against a database copy:
-`HEX_DB_PATH=/tmp/copy.db python3 campaign_editor/convert_conversation_tags.py [--write]`.
-
-### Converted selectors (summary)
-
-* **Node conversations** (`campaign_node_conversations.trigger_json.tags`):
-  all AZ1/AZ2 nodes except Node048. Where campaign.py fell back to a node's
-  first row, that row keeps the fallback role through its tags/priority
-  (e.g. `[[!talkedAt(N)], [talkedAt(N)]]` for a fallback that is also the
-  repeat conversation). Node048 is left on the old rules: its pre-battle
-  selector shows "Player already has fortune" without a fortune.
-* **Quest conversations** (`quest_conversations.conditions_json.tags`), all
-  103 rows: `start` -> `!questStarted(Q)` (+ `completedQuest(P)` for
-  `_AZ1_QUEST_START_PREREQUISITES`), `not_complete` -> `questActive(Q)`,
-  `complete` -> `questActive(Q)`, `completedQuest(Q,last)`, plus
-  `faction(...)`. The panorama NPC selector and map quest markers read the
-  tags (ranking by role and priority, the current-objective rank and the
-  start-hook requirement are unchanged). One intended change: the map no
-  longer shows a quest-giver "!" for a start whose prerequisite quest is
-  unfinished (the panorama would not offer it).
-* `convert_conversation_tags.py --quests [--write]` regenerates the quest
-  tags with the same before/after check over quest-state combinations.
-
-Still in code: Vale of Oberon's node *state* (completed / repeatable /
-terminal, `_az1_masked_army_variant`) and the other quest-start hooks, which
-are node-state rules the server does not read from `campaign/campaign_rules/` yet.
-
 ## Dungeon content by name
 
 Most dungeon SceneData templates leave their nodes' visit events empty or

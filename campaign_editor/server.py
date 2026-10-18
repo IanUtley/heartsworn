@@ -284,6 +284,18 @@ class EditorHandler(BaseHTTPRequestHandler):
                 self._json(campaign_playtest.status(self.session["user_id"]))
             elif path == "/api/rewards-catalog":
                 self._json(self._with_db(lambda db: catalog.rewards_catalog(db)))
+            elif path == "/api/encounter-abilities":
+                scene = query.get("scene", [""])[0]
+                try:
+                    self._json(self._with_db(lambda db: catalog.encounter_champion_abilities(db, scene)))
+                except LookupError as exc:
+                    self._json({"error": str(exc)}, status=404)
+            elif path == "/api/encounter-deck":
+                scene = query.get("scene", [""])[0]
+                try:
+                    self._json(self._with_db(lambda db: catalog.encounter_deck(db, scene)))
+                except LookupError as exc:
+                    self._json({"error": str(exc)}, status=404)
             elif path == "/api/rules":
                 loaded, problems = self._with_db(
                     lambda db: catalog.rules(db, zone_id))

@@ -130,7 +130,12 @@ class AbilityInstance:
     @property
     def ignores_chain(self) -> bool:
         graph = self.metadata.graph
-        return bool(graph and getattr(graph, "ignores_chain", False))
+        return bool(graph and getattr(graph, "client_ignores_chain", False))
+
+    @property
+    def untargeted_trigger(self) -> bool:
+        graph = self.metadata.graph
+        return bool(graph and getattr(graph, "untargeted_trigger", False))
 
     @property
     def is_triggered(self) -> bool:

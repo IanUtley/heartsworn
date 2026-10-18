@@ -224,7 +224,7 @@ def handle_playertransaction_3029(handler, target, instance, data_type, reqid, c
     if (session and
             (session.session_name or "").startswith("tourney-")):
         from services.tournament_game import (
-            pvp_concede, pvp_handle_transaction, route_pvp_pass)
+            pvp_concede, route_pvp_pass)
         try:
             # Setup requests use the dedicated PvP protocol handlers.
             # For gameplay, create the PvP-aware generic host first;
@@ -268,10 +268,12 @@ def handle_playertransaction_3029(handler, target, instance, data_type, reqid, c
             elif is_pass_priority:
                 handled = bool(route_pvp_pass(handler, session))
             else:
-                handled = bool(pvp_handle_transaction(
-                    handler, session, transaction.inner_bytes,
-                    typed_payload=getattr(
-                        transaction, "typed_payload", None)))
+                # Gameplay belongs to the RulesPort host.  With no attached
+                # host there is no legacy engine to fall back to, so the
+                # request is refused and acknowledged.
+                _hc.log_req("    PvP RulesPort boundary: no attached host, "
+                            "refusing legacy fallback")
+                handled = True
         except Exception as _pvp_error:
             import traceback
             _hc.log_req(f"    PvP RulesPort adapter exception: {_pvp_error}")

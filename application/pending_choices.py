@@ -415,8 +415,11 @@ class PendingChoicesMixin:
         pending_state.pop("resolution_paused", None)
         game = self._fresh_game(session, pl_t, ai_t, pending_state)
         from rules_port.resolution import resolve_port_ability
-        ability_owner_id = int(pending.get(
-            "ability_owner_id", owner_id) or owner_id)
+        # Player 0 is the AI, so test for a missing key rather than falsiness:
+        # an AI-owned encounter ability must resume as the AI.
+        stored_owner = pending.get("ability_owner_id")
+        ability_owner_id = int(owner_id if stored_owner is None
+                               else stored_owner)
         resolve_port_ability(
             self, game, session, _hc._db, pl_t, ai_t, pending_state,
             pending.get("ability_guid", ""), pending.get("source_uid"),
@@ -591,7 +594,11 @@ class PendingChoicesMixin:
         import hconnect_server as _hc
         _be = self._checkpoint_engine(session)
         from abilities.framework.effects.choices import (
-            CHOICE_COPY_ABILITY, CHOICE_TARGET_TEMPLATE)
+            CHOICE_TARGET_TEMPLATE, choice_prompt_ability)
+        # The client titles the picker from the advertised ability's text, so
+        # advertise the ability being resolved (not a fixed copy ability).
+        prompt_ability = choice_prompt_ability(pending)
+        pending["prompt_ability_guid"] = prompt_ability
         _hc.log_req("    PvP choice prompt DEBUG: "
                 f"kind={pending.get('kind')} "
                 f"source={pending.get('source_uid')} "
@@ -613,7 +620,7 @@ class PendingChoicesMixin:
             inst = target_game._make_event(
                 _hc.game_engine.OptionInstanceSessionEventArgs)
             inst.opt_id = _hc.game_engine.ResourceId.from_str(
-                CHOICE_COPY_ABILITY)
+                prompt_ability)
             inst.target_ids.append(_hc.game_engine.ResourceId.from_str(
                 CHOICE_TARGET_TEMPLATE))
             inst.min_target_counts = [1]
@@ -642,7 +649,7 @@ class PendingChoicesMixin:
             req.source_card_id = _hc.game_engine.SessionCardId(
                 _hc.game_engine.UID(int(pending["source_uid"])))
             req.ability_template_id = _hc.game_engine.ResourceId.from_str(
-                CHOICE_COPY_ABILITY)
+                prompt_ability)
             req.effect_group_id = 1
             # ChooseAndPlay has one explicit target effect (the generated
             # card in Choosing).  The client uses this effect-instance list
@@ -725,7 +732,8 @@ class PendingChoicesMixin:
         if not pending:
             return False
         if (ability_guid and str(ability_guid).lower() not in (
-                CHOOSE_AND_PLAY_ABILITY, CHOICE_COPY_ABILITY)):
+                CHOOSE_AND_PLAY_ABILITY, CHOICE_COPY_ABILITY,
+                str(pending.get("prompt_ability_guid") or "").lower())):
             return False
         selected = extract_card_uids(inner_bytes)
         if not selected and isinstance(typed_payload, dict):

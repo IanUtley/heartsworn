@@ -185,6 +185,13 @@ def test_mercenary_party_member_fights_the_battle():
         "ChampionID": 4,
         "Members": [{"Mercenary": {"m_Guid": BEBO_ITEM},
                      "DeckTemplate": template_id, "Upgrade": 0}]})
+    # The mercenary champion's authored row (B.E.B.O., starting health 22); the
+    # disposable baseline does not carry the extended champion table.
+    db._db.execute(
+        "INSERT OR IGNORE INTO champion_templates_extended "
+        "(guid, name, race, champion_class, gender, is_selectable, starting_health, faction) "
+        "VALUES (?,?,?,?,?,?,?,?)",
+        (BEBO_TEMPLATE, "B.E.B.O.", "None", "None", "None", 1, 22, "None"))
     db._db.commit()
     handler = hconnect_server.HCPHandler.__new__(hconnect_server.HCPHandler)
     handler.user_profile = {"id": user_id}

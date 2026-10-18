@@ -3631,9 +3631,58 @@ def test_taming_sphere_chance_either_captures_or_leaves_the_toad(db):
     assert outcomes == {"void", "warzone"}, outcomes
 
 
+def test_ai_paid_sacrifice_cost_resolves_and_consumes_the_one_shot(db):
+    """Voracious Zombie: "[ONE-SHOT]: Sacrifice another troop -> ...".
+
+    ``_apply_card_play_costs`` returns an empty tuple after paying a
+    sacrifice (no voided cards).  The AI treated that falsy success as a
+    rejection, so every AI decision point sacrificed another troop without
+    resolving or consuming the ONE-SHOT (session 263414 lost its board).
+    """
+    from unittest import mock
+    import ai
+    tpl_voracious = "3f062f67-80bb-423e-b67b-83d7c6946437"
+    ag_oneshot = "e7263e6d-3d3f-10bd-7d7d-86c11fc93bc7"
+    _copy_card(db, tpl_voracious)
+    _copy_ability(db, ag_oneshot)
+    add_card(db, 701, 0, tpl_voracious, loc="warzone")
+    add_card(db, 702, 0, TPL_GLADIATOR, loc="warzone")
+    ai._db = db
+    pl_t, ai_t = _pl_ai()
+    game = game_engine.Game(1, pl_t, ai_t)
+    bstate = {"ai_resources": 0, "ai_health": 20, "player_health": 20,
+              "turn_number": 3, "stack": [], "_rules_port_attached": True}
+    handler = HandlerStub(db)
+    handler._current_bstate = bstate
+    uses = {}
+    paid = []
+    handler._ability_x_cost_metadata = lambda guid: (0, 0)
+    handler._card_uses = lambda session, uid: uses.get(int(uid), {})
+    handler._bump_card_use = lambda session, uid, guid: uses.setdefault(
+        int(uid), {}).__setitem__(guid, uses.get(int(uid), {}).get(guid, 0) + 1)
+    handler._ability_requires_discard = lambda guid: False
+    handler._remove_one_shot_ability = lambda *a, **k: False
+    handler._send_battle_events = lambda *a, **k: None
+    handler._apply_card_play_costs = (
+        lambda *a, **k: paid.append(a[5]) or ())
+    spec = {"kind": "sacrifice"}
+    with mock.patch.object(ai, "_ai_select_ability_costs",
+                           return_value=([(spec, (702,))], {})), \
+            mock.patch("rules_port.resolution.resolve_port_ability") as resolve, \
+            mock.patch("rules_port.death_effects.state_based_deaths"):
+        assert ai.ai_use_warzone_ability(
+            handler, game, SessionStub(), ai_t, pl_t, bstate) is True
+        assert resolve.call_count == 1
+        assert uses[701][ag_oneshot] == 1
+        # The ONE-SHOT is spent: no second sacrifice is paid.
+        assert ai.ai_use_warzone_ability(
+            handler, game, SessionStub(), ai_t, pl_t, bstate) is False
+    assert len(paid) == 1, paid
+
 
 def _main():
     tests = (test_untamed_aura_makes_the_toad_a_taming_target,
+             test_ai_paid_sacrifice_cost_resolves_and_consumes_the_one_shot,
              test_taming_sphere_captures_the_toad,
              test_taming_sphere_chance_either_captures_or_leaves_the_toad,
              test_construction_plans_count_the_exhausted_troops,
@@ -3723,3 +3772,362 @@ def _main():
 
 if __name__ == "__main__":
     _main()
+
+
+def test_untargeted_trigger_is_flashed_not_chained():
+    """Client ``AbilityTemplate.UntargetedTrigger``: a trigger with no
+    explicit target template is ``IgnoresChain`` (Voracious Vultures' "this
+    gets cost -1" on a Zombie entering play): no priority window, source flash.
+    """
+    from types import SimpleNamespace
+    from gamedata.semantics import AbilityGraph
+
+    class Graph(SimpleNamespace):
+        untargeted_trigger = property(AbilityGraph.untargeted_trigger.fget)
+
+    def graph(event, *explicit, ignores=False):
+        targets = tuple(SimpleNamespace(explicit=flag) for flag in explicit)
+        return Graph(trigger_event_type=event, targets=targets,
+                     ignores_chain=ignores)
+
+    untargeted = AbilityGraph.untargeted_trigger.fget
+    client = AbilityGraph.client_ignores_chain.fget
+    assert untargeted(graph("CardEnteredZoneEvent", False))
+    assert not untargeted(graph("CardEnteredZoneEvent", True))
+    assert not untargeted(graph("", False))
+    assert client(graph("", False, ignores=True))
+    assert not client(graph("CardEnteredZoneEvent", True))
+
+
+def test_pregame_champion_ability_fires_once_per_champion():
+    """PreGameEvent is dispatched once per participant during setup, but a
+    champion's own PreGame ability belongs to its controller's pass only.
+    Chained Goliath's "Before the start of the game, gain [BLOOD][BLOOD]
+    [RUBY][RUBY]" must give 2 Blood and 2 Ruby, not 4 and 4.
+    """
+    from rules_port.triggers import dispatch_native_trigger
+    goliath = "307bf463-0726-43bf-9890-648938314ae1"
+    pure_hatred = "b0e73be4-8543-b70f-a977-12a4441d9a56"
+    db = make_db()
+    db.execute(
+        "INSERT OR IGNORE INTO champion_abilities (champion_guid, "
+        "champion_name, ability_guid) VALUES (?,?,?)",
+        (goliath, "Chained Goliath", pure_hatred))
+    db.execute(
+        "INSERT OR REPLACE INTO card_abilities_meta (ability_guid, "
+        "trigger_event_type) VALUES (?,?)",
+        (pure_hatred, "Game.Shared.Mechanics.PreGameEvent"))
+    add_card(db, 9001, 1001, goliath, loc="champion")
+    db.execute("UPDATE game_cards SET is_champion=1 WHERE card_uid=9001")
+    db.commit()
+    handler = HandlerStub(db)
+    handler.user_profile = {"id": 1001}
+    pl_t = game_engine.UID.make(244, 1001)
+    ai_t = game_engine.UID.make(244, 1002)
+    game = game_engine.Game(1, pl_t, ai_t)
+    bstate = {"pvp": True, "pids": [1001, 1002],
+              "champ_map": {"1001": 9001, "1002": 9002},
+              "stack": [], "turn_pid": 1001}
+    # Mirrors services/legacy_loadbalancer: one dispatch per owner.
+    for owner in (1001, 0):
+        dispatch_native_trigger(
+            db=db, handler=handler, game=game, session=SessionStub(),
+            player_uid=pl_t, ai_uid=ai_t, battle_state=bstate,
+            event_type="PreGameEvent", source_card_id=None,
+            source_player_id=owner, data={"zones": ("deck",)})
+    assert bstate.get("player_threshold") == {4: 2, 8: 2}, bstate
+
+
+def test_pve_ai_champion_without_card_row_transforms():
+    """A PvE champion is a synthetic SessionCardId with no ``game_cards``
+    row.  Chained Goliath's "you transform into Inferno Goliath" targets the
+    AI champion that way; the transform must retarget the handler's champion
+    identity (template, abilities, champ_guid_map) and re-announce it instead
+    of returning "transform: target not found".
+    """
+    from rules_port.context import EffectContext
+    from rules_port.transform_effects import transform_instance
+    chained = "307bf463-0726-43bf-9890-648938314ae1"
+    inferno = "9c0ee4a8-5ec8-44ff-8e2d-1ef4eb3da0d0"
+    db = make_db()
+    handler = HandlerStub(db)
+    ai_uid = int(handler._ai_champ_scid.uid.uid64)
+    handler._ai_champ_guid = chained
+    handler._ai_champ_ability_guids = ["27a22f37-42be-aec5-1304-c8ed7dd7f3ae"]
+    handler._ai_champ_board = (None, None, "Chained Goliath", chained)
+    pl_t = game_engine.UID.make(244, 5)
+    ai_t = game_engine.UID.make(244, 6)
+    game = game_engine.Game(1, pl_t, ai_t)
+    bstate = {"champ_map": {"5": int(handler._player_champ_scid.uid.uid64),
+                            "0": ai_uid},
+              "champ_guid_map": {"0": chained}, "ai_health": 20}
+    context = EffectContext.from_rules_port(
+        game, SessionStub(), db, handler, pl_t, ai_t, bstate, "")
+    assert db.execute("SELECT 1 FROM game_cards WHERE card_uid=?",
+                      (ai_uid,)).fetchone() is None
+    assert transform_instance(context, ai_uid, inferno) == ai_uid
+    assert handler._ai_champ_guid == inferno
+    assert bstate["champ_guid_map"]["0"] == inferno
+    assert "1f1c4b9d-e588-e7df-87fb-14c75d02d572" in \
+        handler._ai_champ_ability_guids
+    kinds = [type(event).__name__ for event in game.events]
+    assert "CardTransformedSessionEventArgs" in kinds, kinds
+    # The client reads the champion's template from its cached card in
+    # OnChampionCardPlayed, so the CardUpdated must precede the re-announce.
+    assert kinds.index("CardUpdatedSessionEventArgs") < \
+        kinds.index("ChampionCardPlayedSessionEventArgs"), kinds
+
+
+def test_start_turn_current_gain_matched_by_total_is_not_a_bonus():
+    """Prep refills current to total, so a StartTurn current gain that came
+    with a matching total gain (Chained Goliath's [L1][R1]) is no bonus, in
+    either effect order.  A current gain with no total gain (Lithe
+    Lyricist's +1) stays a bonus.
+    """
+    from rules_port.resources import record_start_turn_resource_gain
+    key = "start_turn_resource_bonus_1001"
+
+    state = {}
+    record_start_turn_resource_gain(state, key, "currentresource", 1, 2)
+    record_start_turn_resource_gain(state, key, "totalresource", 1, 2)
+    assert state[key] == 0
+
+    state = {}
+    record_start_turn_resource_gain(state, key, "totalresource", 1, 2)
+    record_start_turn_resource_gain(state, key, "currentresource", 1, 2)
+    assert state[key] == 0
+
+    state = {}
+    record_start_turn_resource_gain(state, key, "currentresource", 1, 2)
+    assert state[key] == 1
+
+    # A stale total credit from an earlier turn must not cancel this one.
+    state = {}
+    record_start_turn_resource_gain(state, key, "totalresource", 1, 1)
+    record_start_turn_resource_gain(state, key, "currentresource", 1, 2)
+    assert state[key] == 1
+
+
+def test_inferno_goliath_burning_counters_read_event_damage(db):
+    """Inferno Goliath: "When you or a card you control deals damage to an
+    opposing champion, add a burning counter to that champion for each damage
+    dealt."  The counter amount is an IntAttr ``DamageDealt`` read from the
+    AbilityInstance TAC, which a triggered instance takes from its
+    CardDealtDamageEvent.  It used to read the trigger's own (zero) damage,
+    so an AI troop hitting the player added no counters.
+    """
+    from rules_port.resolution import resolve_port_trigger
+    from rules_port.triggers import dispatch_native_trigger
+    inferno = "9c0ee4a8-5ec8-44ff-8e2d-1ef4eb3da0d0"
+    ag_burning = "c53d4fbf-ccd4-dda2-9d6e-f84fa14ebb5c"
+    burning = "3932ad3a-9807-de2a-e1b9-a8b50e81def9"
+    add_card(db, 101, 0, TPL_GLADIATOR, loc="warzone")
+    db.commit()
+    pl_t, ai_t = _pl_ai()
+    game = game_engine.Game(1, pl_t, ai_t)
+    handler = HandlerStub(db)
+    # The PvE AI champion is synthetic (no game_cards row).
+    handler._ai_champ_guid = inferno
+    handler._ai_champ_ability_guids = [ag_burning]
+    ai_champ = int(handler._ai_champ_scid.uid.uid64)
+    player_champ = int(handler._player_champ_scid.uid.uid64)
+    bstate = {"player_health": 20, "ai_health": 20, "turn_number": 1,
+              "stack": [], "_rules_port_attached": True,
+              "champ_map": {"0": ai_champ, "5": player_champ}}
+    handler._current_bstate = bstate
+    result = dispatch_native_trigger(
+        db=db, handler=handler, game=game, session=SessionStub(),
+        player_uid=pl_t, ai_uid=ai_t, battle_state=bstate,
+        event_type="CardDealtDamageEvent", source_card_id=101,
+        source_player_id=0, target_card_id=player_champ, target_player_id=5,
+        data={"event_tac": {"damage": 3, "DamageDealt": 3,
+                            "is_combat_damage": 1}})
+    assert ag_burning[:8] in result, result
+    for item in list(bstate.get("stack") or []):
+        bstate["stack"].remove(item)
+        resolve_port_trigger(
+            handler, game, SessionStub(), db, pl_t, ai_t, bstate, item)
+    counters = (bstate.get("champion_counters") or {}).get(str(player_champ))
+    assert counters == {burning: 3}, (result, bstate.get("champion_counters"))
+
+
+def test_ravenous_zombies_exhausts_itself_after_voiding_a_crypt_troop(db):
+    """Ravenous Zombies: "At the start of your turn, void a random non-Zombie
+    troop in a crypt.  If you do, exhaust this."  The exhaust's condition is
+    ``VoidedCards >= 1`` over a CountListAttr variable; it read the authored
+    default (0) instead of the ability's live list, so the zombie voided but
+    never exhausted.
+    """
+    from rules_port.triggers import dispatch_native_trigger
+    tpl_zombies = "2e1cdfac-a334-4fb5-9860-f5946206da9c"
+    ag_zombies = "460e8a22-ce4a-df26-a65c-82d60716272c"
+    _copy_card(db, tpl_zombies)
+    _copy_card(db, TPL_GLADIATOR)
+    tapped = int(game_engine.ECardStates.Tapped)
+    add_card(db, 101, 0, tpl_zombies, loc="warzone")
+    add_card(db, 201, 0, TPL_GLADIATOR, loc="discard")
+    # Exhausted last turn (it attacked).
+    db.execute("UPDATE game_cards SET card_state=? WHERE session_id=1 AND "
+               "card_uid=101", (tapped,))
+    db.commit()
+    pl_t, ai_t = _pl_ai()
+    game = game_engine.Game(1, pl_t, ai_t)
+    handler = HandlerStub(db)
+    bstate = {"player_health": 20, "ai_health": 20, "turn_number": 2}
+    handler._current_bstate = bstate
+
+    def zombie_state():
+        return int(db.execute(
+            "SELECT card_state FROM game_cards WHERE session_id=1 AND "
+            "card_uid=101").fetchone()[0])
+
+    # C# order: ReadyState readies the active player's cards before the
+    # Ready window drains the queued TurnStartedEvent.
+    from rules_port.lifecycle import ready_step_for_turn
+    assert ready_step_for_turn(db, 1, 0, bstate, "ai") is not None
+    assert not zombie_state() & tapped
+    result = dispatch_native_trigger(
+        db=db, handler=handler, game=game, session=SessionStub(),
+        player_uid=pl_t, ai_uid=ai_t, battle_state=bstate,
+        event_type="TurnStartedEvent", source_card_id=None,
+        source_player_id=0)
+    assert ag_zombies[:8] in result, result
+    rows = dict(db.execute(
+        "SELECT card_uid, location || ':' || card_state FROM game_cards "
+        "WHERE session_id=1 AND card_uid IN (101, 201)").fetchall())
+    assert rows[201].startswith("void:"), rows
+    assert zombie_state() & tapped, rows
+    # Prep skips the ready step this side already took this turn ...
+    assert ready_step_for_turn(db, 1, 0, bstate, "ai") is None
+    assert zombie_state() & tapped
+    # ... but the side's next turn readies again.
+    bstate["turn_number"] = 3
+    assert ready_step_for_turn(db, 1, 0, bstate, "ai") is not None
+    assert not zombie_state() & tapped
+
+
+
+TPL_TIME_RIPPLE = "222eb50a-09d1-4b22-b3d1-341be464c806"
+
+
+def test_ai_quick_bounce_uses_typed_destination_and_target_policy(db):
+    """Time Ripple's MoveCardToZone keeps its Hand destination only in the
+    typed effect template (the BOM param is empty).  The AI must classify it
+    as hard bounce removal and pick: an attacker first, else the largest
+    opposing troop at its fallback window."""
+    import ai_eval
+
+    _copy_card(db, TPL_TIME_RIPPLE)
+    _copy_card(db, TPL_GLADIATOR)
+    add_card(db, 101, 0, TPL_TIME_RIPPLE, loc="hand")
+    db.execute(
+        "UPDATE game_cards SET card_type='QuickAction' WHERE card_uid=101")
+    db.commit()
+    add_card(db, 201, 5, "11111111-1111-1111-1111-111111111111")
+    add_card(db, 202, 5, TPL_GLADIATOR)
+    pl_t, ai_t = _pl_ai()
+    bstate = {"ai_resources": 2, "ai_threshold": {16: 1}, "turn_number": 3}
+    ev = ai_eval.CardEvaluator(HandlerStub(db), SessionStub(), bstate,
+                               ai_t, pl_t)
+    ripple = next(card for card in ev.hand if card.card_uid == 101)
+    assert ev.hints_for(ripple).removal.hard
+    assert ev.is_bounce_action(ripple)
+    card, target, reason = ev.choose_bounce(attackers=[201], fallback=True)
+    assert (card.card_uid, target, reason) == (101, 201, "bounce_attacker")
+    card, target, reason = ev.choose_bounce(fallback=True)
+    assert (card.card_uid, target, reason) == (101, 202, "bounce_best_target")
+    assert ev.choose_bounce() is None
+
+
+def test_ai_time_ripple_returns_player_troop_with_cost_increase(db):
+    """An AI-cast quick bounce resolves against the player's warzone troop:
+    the troop goes to its controller's hand and costs +2 there."""
+    import ai as ai_mod
+    from ai_eval import CardInfo
+    from rules_port.chain_items import resolve_card_item
+
+    _copy_card(db, TPL_TIME_RIPPLE)
+    _copy_card(db, TPL_GLADIATOR)
+    add_card(db, 101, 0, TPL_TIME_RIPPLE, loc="hand")
+    db.execute(
+        "UPDATE game_cards SET card_type='QuickAction' WHERE card_uid=101")
+    add_card(db, 202, 5, TPL_GLADIATOR)
+    db.commit()
+    abilities = db.execute(
+        "SELECT card_abilities FROM game_cards WHERE card_uid=101"
+    ).fetchone()[0]
+    card = CardInfo((
+        101, TPL_TIME_RIPPLE, "hand", "QuickAction", "Time Ripple", "Common",
+        2, 0, 0, "[]", abilities, 0, "", 0, 0, 0, 0, 0, "{}", "{}", 0))
+    pl_t, ai_t = _pl_ai()
+    game = game_engine.Game(1, pl_t, ai_t)
+    handler = HandlerStub(db)
+    session = SessionStub()
+    bstate = {"ai_resources": 2, "ai_threshold": {16: 1}, "turn_number": 3,
+              "player_health": 20, "ai_health": 20, "_next_instance_id": 4}
+    old_ai_db = ai_mod._db
+    ai_mod._db = db
+    try:
+        assert ai_mod.ai_play_hand_card(
+            handler, game, session, ai_t, bstate, card, target_uid=202)
+    finally:
+        ai_mod._db = old_ai_db
+    item = bstate["stack"].pop()
+    resolve_card_item(handler, session, db, game, bstate, item, pl_t, ai_t)
+    loc, cost_mod = db.execute(
+        "SELECT location, card_cost_mod FROM game_cards "
+        "WHERE card_uid=202").fetchone()
+    assert loc == "hand", loc
+    assert cost_mod == 2, cost_mod
+
+
+def test_choosing_summon_links_choice_card_to_its_source_for_art(db):
+    """Art-less Choice cards borrow the creating card's art client-side.
+
+    GoCardBuilder.UpdateArtOverride uses RelatedCards[0]'s template when a
+    Choice template has no m_CardImagePath (Ancient Thorn Knight's "Lose a
+    Permanent Resource"); with no link the client renders ERROR.
+    """
+    from rules_port.context import EffectContext
+    from rules_port.token_effects import summon_token
+
+    lose_resource = "90ef6802-58d1-4f27-aac2-bbd86de62b3c"
+    _copy_card(db, lose_resource)
+    db.commit()
+    pl_t, ai_t = _pl_ai()
+    game = game_engine.Game(1, pl_t, ai_t)
+    bstate = {"player_health": 20, "ai_health": 20,
+              "resolving_owner_id": 5, "resolving_source_uid": 0x201}
+    context = EffectContext.from_rules_port(
+        game, SessionStub(), db, HandlerStub(db), pl_t, ai_t, bstate,
+        "effect", ability=None)
+    summon_token(context, {"token_guid": lose_resource, "amount": 1,
+                           "collection": "Choosing"})
+    uid = bstate["created_token_uids"][0]
+    updates = [ev for ev in game.events
+               if ev.__class__.__name__ == "CardUpdatedSessionEventArgs" and
+               int(ev.session_card_id.uid.uid64) == uid]
+    assert updates, game.events
+    assert [int(r.uid.uid64) for r in updates[-1].related_cards] == [0x201]
+
+
+def test_choice_picker_advertises_the_authored_child_ability():
+    """The picker title comes from the advertised ability's game text.
+
+    Trial of the Thorn's child is ChooseAndPlay ("Play a card in the choice
+    zone for free"); advertising Iconoclast's copy ability made the client
+    title it "Create a copy of a card in the choice zone ...".
+    """
+    from abilities.framework.effects.choices import (
+        CHOICE_COPY_ABILITY, CHOOSE_AND_PLAY_ABILITY, choice_prompt_ability)
+
+    child = {"kind": "choice_zone_target",
+             "continuation": {"ability_guid": CHOOSE_AND_PLAY_ABILITY}}
+    assert choice_prompt_ability(child) == CHOOSE_AND_PLAY_ABILITY
+    copy = {"kind": "choice_zone_target",
+            "continuation": {"ability_guid": CHOICE_COPY_ABILITY}}
+    assert choice_prompt_ability(copy) == CHOICE_COPY_ABILITY
+    # DoubleChoice activates the built-in ChooseAndPlay, as the C# effect does.
+    assert choice_prompt_ability({"kind": "double_choice",
+                                  "ability_guid": "parent"}) == \
+        CHOOSE_AND_PLAY_ABILITY

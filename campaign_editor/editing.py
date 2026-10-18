@@ -393,7 +393,7 @@ def save_node_state(zone_id: str, node_id: str, state: str,
                     tags: Any) -> list[str] | None:
     """Set (tags list) or remove (``None``) one node state's tags."""
     engine = catalog._rules_module()
-    if state not in engine.GATES:
+    if state not in engine.GATES or state in catalog.EDITOR_HIDDEN_STATES:
         raise ValueError(f"unknown node state {state!r}")
     tags = None if tags is None else clean_tags(tags)
     # A cleared tag list means "no tags", not an always-true gate: remove it.

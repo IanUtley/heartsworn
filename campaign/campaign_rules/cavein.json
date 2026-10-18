@@ -15,12 +15,16 @@
   "Ennis": {},
   "Fahrny": {},
   "Myaa": {
-   "hidden": [
-    "!questStarted(q_find_myaa)"
+   "visible": [
+    "questStarted(q_find_myaa)"
    ]
   },
   "Myaa@cavein": {},
-  "Rizzix": {},
+  "Rizzix": {
+   "visible": [
+    "completedQuest(q_seawitch)"
+   ]
+  },
   "Takumi": {},
   "VB25351": {},
   "Vincent": {},
@@ -29,8 +33,8 @@
  "hooks": [],
  "runtime": "rules",
  "edited_states": {
-  "Myaa": [
-   "hidden"
+  "Rizzix": [
+   "visible"
   ]
  }
 }

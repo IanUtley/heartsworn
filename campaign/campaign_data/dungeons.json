@@ -1389,7 +1389,7 @@
      "label": "Sister Midnight - 2",
      "source": "import_dungeons.py",
      "tags": [
-      "conversation(Tranquil Dream - Sister Midnight 2)"
+      "conversation(Tranquil Dream - Sister Midnight)"
      ]
     }
    },
@@ -1433,7 +1433,20 @@
     "node_id": "NodeG",
     "conversation_name": "Tranquil Dream - Sister Midnight 2 Success",
     "priority": 5,
-    "enabled": true
+    "enabled": true,
+    "trigger_json": {
+     "actions": {
+      "*": [
+       "teleport(AZ1,Node040)",
+       "complete_step(q_tranquil_dream,Step1)"
+      ]
+     },
+     "label": "Sister Midnight - 2 success",
+     "source": "import_dungeons.py",
+     "tags": [
+      "outcome:success"
+     ]
+    }
    },
    {
     "campaign_template": "The Tranquil Dream",

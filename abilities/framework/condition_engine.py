@@ -439,6 +439,15 @@ class ConditionContext:
             return 0
 
 
+def _with_source_owner(source, ctx):
+    """The ability source card with its controller spelled out, which the
+    ownership filters need (a card read from the context has no owner key)."""
+    owner = source.get("user_id")
+    if owner is None:
+        owner = ctx.ability_source_owner_id
+    return {**source, "user_id": owner}
+
+
 def evaluate_condition(node, ctx):
     """Evaluate one condition tree node (dict from gamedata JSON)."""
     if not isinstance(node, dict):
@@ -811,14 +820,15 @@ def evaluate_condition(node, ctx):
         source = ctx.card(ctx.ability_source_uid)
         return (evaluate_card_filter(
                     source, fjson, ctx.ability_source_uid,
-                    source_card=source)
+                    source_card=_with_source_owner(source, ctx))
                 if source is not None else True)
     if t == "RequiresSourcePassesFilterCondition":
         card = ctx.card(ctx.ability_source_uid)
         if card is None:
             return True
         return evaluate_card_filter(card, node.get("m_Filter") or {},
-                                    ctx.ability_source_uid)
+                                    ctx.ability_source_uid,
+                                    source_card=_with_source_owner(card, ctx))
     if t == "RequiresChampionHealth":
         source_owner = ctx.ability_source_owner_id
         player_filter = (node.get("m_PlayerFilter") or "Self")

@@ -40,31 +40,6 @@
  },
  "quests": {},
  "nodes": {
-  "CastleGate": {
-   "blocked": [
-    "!completed(Drawbridge)"
-   ]
-  },
-  "Drawbridge": {
-   "blocked": [
-    "!completed(WatchTower)"
-   ]
-  },
-  "InnerBailey": {
-   "blocked": [
-    "!completed(CastleGate)"
-   ]
-  },
-  "PenworthTower": {
-   "blocked": [
-    "!completed(TowerGate)"
-   ]
-  },
-  "TowerGate": {
-   "blocked": [
-    "!completed(InnerBailey)"
-   ]
-  },
   "WatchTower": {
    "autostart": [
     "!completed(WatchTower)"

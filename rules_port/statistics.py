@@ -44,6 +44,18 @@ def _number(value):
         return 0
 
 
+def seed_ability_stats(state, values, *, instance_id):
+    """Seed a fresh ability instance's IntAttrs without overwriting any value
+    the instance already holds (a resumed or re-entered resolution)."""
+    if not isinstance(state, dict) or not values:
+        return
+    with _STATS_LOCK:
+        current = state.setdefault("ability_runtime_state", {}).setdefault(
+            str(int(instance_id or 0)), {})
+        for name, amount in values.items():
+            current.setdefault(str(name), _number(amount))
+
+
 def add_ability_stat(state, name, amount, *, instance_id=None):
     """Apply ``AbilityInstance.Add(IntAttrs, amount)`` to a live instance."""
     if not isinstance(state, dict) or not name or not amount:
