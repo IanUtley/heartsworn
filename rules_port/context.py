@@ -779,8 +779,9 @@ class EffectContext:
             template_id=tpl_guid, attack=atk, defense=defense,
             cost=cost, gems=gem)
         # C# AuthoritativeSessionBase.VoidCard moves the card with
-        # MoveCardWithDispatch (exit, enter, hidden enter). Unlike the base
-        # Session.VoidCard it does not enqueue a CardVoidedEvent trigger.
+        # MoveCardWithDispatch (exit, enter, hidden enter), then sends the
+        # client a CardVoided session event for the voiding player. Unlike the
+        # base Session.VoidCard it does not enqueue a CardVoidedEvent trigger.
         self._emit_trigger("CardExitedZoneEvent", target, card_owner,
                            event_source_collection=source_zone,
                            event_destination_collection="void")
@@ -800,6 +801,10 @@ class EffectContext:
         # operand resolved to 0 and the ability healed nothing.
         from rules_port.statistics import record_ability_card_list
         record_ability_card_list(self.bstate, "VoidedCards", target)
+        voiding_owner = self.bstate.get("resolving_owner_id", card_owner)
+        self.game.push_card_voided(
+            scid, owner_uid(voiding_owner, self.player_uid, self.ai_uid,
+                            self.bstate))
 
         source = self.bstate.get("resolving_source_uid")
         if source is not None:

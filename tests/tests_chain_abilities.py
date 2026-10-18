@@ -1805,6 +1805,10 @@ def test_void_leaf_publishes_the_voided_troops_stats(db):
     location = db.execute(
         "SELECT location FROM game_cards WHERE card_uid=901").fetchone()[0]
     assert location == "void", location
+    # AuthoritativeSessionBase.VoidCard tells the client which card was voided.
+    voided = [event for event in game.events if isinstance(
+        event, game_engine.CardVoidedSessionEventArgs)]
+    assert [int(event.session_card_id.uid.uid64) for event in voided] == [901]
     # The heal equals the voided troop's defense (0/1 -> +1), and the list attr
     # does not leak into the next ability resolution.
     assert bstate["ai_health"] == 16, bstate
