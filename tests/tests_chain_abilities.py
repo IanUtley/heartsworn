@@ -1539,7 +1539,7 @@ def test_worker_bot_creation_replacement_is_authored(db):
         context = EffectContext.from_rules_port(
             game, SessionStub(), db, HandlerStub(db), pl_t, ai_t, bstate,
             "effect", ability=None)
-        with mock.patch("rules_port.token_effects.random.choice",
+        with mock.patch("rules_port.token_effects.rng_choice",
                         return_value=robot):
             summon_token(context, {"token_guid": token_guid, "amount": 1,
                                    "collection": "Warzone"})
