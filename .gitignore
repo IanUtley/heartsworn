@@ -27,3 +27,4 @@ share/
 .env.*
 .venv-pyright/
 .mcp.json
+/web_client/generated/
