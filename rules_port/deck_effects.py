@@ -52,7 +52,10 @@ def load_player_deck(context):
     deck = _deck_templates().get(str(guid).lower())
     if not deck:
         return "load player deck: template not found"
-    owner = int(context.bstate.get("resolving_owner_id", 0) or 0)
+    # C# uses targetCard.m_ControllingPlayer: the deck belongs to the resolved
+    # target's controller, not necessarily the ability's resolving owner.
+    owner = int(context.target_owner(
+        default=context.bstate.get("resolving_owner_id", 0)) or 0)
     position = db_deck_next_position(context.session.session_id, owner, conn=context.db)
     created = 0
     for entry in deck.get("m_DeckResources") or ():
@@ -78,6 +81,12 @@ def load_player_deck(context):
                 owner_user_id=owner, original_template_guid=card_guid)
             position += 1
             created += 1
+    if created:
+        # C# LoadPlayerDeck ends with m_Deck.Shuffle(session RNG, 0 ordered).
+        from pvp_db import db_game_shuffle_deck
+        db_game_shuffle_deck(
+            context.session.session_id, owner, conn=context.db,
+            rng=context.bstate.get("_rules_rng"))
     context.db.commit()
     return f"loaded {created} card(s) into player deck"
 

@@ -1427,8 +1427,16 @@ class EffectContext:
                if details else None)
         if not row:
             return f"discard: target {hex(int(target))} not found"
-        if str(row[3]).lower() not in ("hand", "choosing"):
-            return f"discard: target {hex(int(target))} is in {row[3]}"
+        source_location = str(row[3]).lower()
+        # C# Session.DiscardCard is a MoveCardWithDispatch to Discard from any
+        # collection; only a card already in the crypt is a no-op.
+        if source_location == "discard":
+            return f"discard: target {hex(int(target))} is already in discard"
+        if source_location == "warzone":
+            # Leaving play drops the troop from combat, as C# DeactivateCard
+            # does for any warzone exit.
+            from rules_port.combat import remove_troop_from_combat
+            remove_troop_from_combat(self.bstate, int(target))
 
         from db import db_discard_card
         from rules_port.runtime_helpers import owner_uid
@@ -2435,6 +2443,14 @@ class EffectContext:
             return f"{label}: card not found"
         old_location, old_state = str(old[1] or "").lower(), int(old[2] or 0)
         position = 100 if destination == "hand" else 0
+        # C# MoveCardToZone.InternalApply reads the destination deck's
+        # CardCount before the card moves (TopHalfOfDeck draws against it).
+        deck_count_before = 0
+        if destination == "deck" and bool(self.template_value(
+                "m_TopHalfOfDeck", False)):
+            from pvp_db import db_deck_card_count
+            deck_count_before = db_deck_card_count(
+                self.session.session_id, int(old[0] or 0), conn=self.db)
         clear_dead = destination == "warzone"
         clear_bits = game_engine.ECardStates.Dead if clear_dead else 0
         new_state = old_state if destination == "warzone" else 0
@@ -2464,22 +2480,40 @@ class EffectContext:
             from rules_port.combat import remove_troop_from_combat
             remove_troop_from_combat(self.bstate, target)
         if destination == "deck":
-            # C# ``MoveCardToZone`` with an "Unknown"/random destination
-            # location shuffles the card into the deck.  Leaving it at
-            # position 0 put the moved cards on TOP, so a following "draw N"
-            # returned the same cards (Corinth's Shifted Paradigm looked like
-            # it never shuffled).
+            # Mirrors C# ``MoveCardToZoneEffectTemplate.InternalApply``:
+            # - TopHalfOfDeck draws Next(deck count) and uses that as the
+            #   random bound (the authored name says "top half", but the C#
+            #   code bounds by the whole deck count).
+            # - A positive bound draws Next(bound) for the index, which
+            #   ``AuthoritativeSessionBase.MoveCardWithDispatch`` applies.
+            # - Top/Bottom insert at that index counted from the chosen end
+            #   (``CardCollection.AddCardAtIndexAndLocation``); Bottom with no
+            #   bound is the last card.
+            # - Unknown/other locations ignore the index and go to a uniform
+            #   slot over the whole deck (``Session.FinishMovingCard``).
+            # Leaving every deck move at position 0 put it on TOP, so a
+            # following "draw N" returned the same cards.
+            from pvp_db import (db_insert_deck_card_at,
+                                db_randomly_insert_deck_cards, deck_rng_index)
+            rng = self.bstate.get("_rules_rng")
+            owner_id = int(old[0] or 0)
             dest_location = str(self.template_value(
                 "m_DestinationLocation", "") or "").rsplit(".", 1)[-1].lower()
             random_location = int(self.template_value(
                 "m_RandomLocation", -1) or -1)
             top_half = bool(self.template_value("m_TopHalfOfDeck", False))
-            if dest_location in ("", "unknown", "random") or \
-                    random_location >= 0 or top_half:
-                from pvp_db import db_randomly_insert_deck_cards
+            if dest_location in ("top", "bottom"):
+                bound = random_location
+                if top_half:
+                    bound = deck_rng_index(rng, deck_count_before)
+                index = deck_rng_index(rng, bound) if bound > 0 else 0
+                db_insert_deck_card_at(
+                    self.session.session_id, owner_id, target, index,
+                    from_bottom=dest_location == "bottom", conn=self.db)
+            else:
                 db_randomly_insert_deck_cards(
-                    self.session.session_id, int(old[0] or 0), [target],
-                    conn=self.db)
+                    self.session.session_id, owner_id, [target],
+                    conn=self.db, rng=rng)
         self.db.commit()
         details = db_card_zone_details(
             self.session.session_id, target, conn=self.db)

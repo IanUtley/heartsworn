@@ -789,17 +789,38 @@ def db_game_draw_cards(session_id, user_id, count=7, conn=None):
     return rows
 
 
-def db_game_shuffle_deck(session_id, user_id, conn=None):
-    """Shuffle one player's deck positions within the caller's transaction."""
-    import random as _shuf_rnd
+def deck_rng_index(rng, bound):
+    """Return a uniform index in ``[0, bound)`` from the session RNG.
 
+    Falls back to the stdlib RNG when no session RNG is bound.  ``bound <= 0``
+    returns 0, matching C# ``Random.Next`` callers that guard on a positive
+    count.
+    """
+    if bound <= 0:
+        return 0
+    if rng is not None and hasattr(rng, "next"):
+        # Next(1) still advances the C# RNG, so draw even for one slot.
+        return int(rng.next(bound)) % bound
+    import random as _shuf_rnd
+    return _shuf_rnd.randrange(bound)
+
+
+def db_game_shuffle_deck(session_id, user_id, conn=None, rng=None):
+    """Shuffle one player's deck positions within the caller's transaction.
+
+    ``rng`` is the battle's session RNG (``bstate["_rules_rng"]``); it is
+    optional so legacy callers keep the stdlib behaviour.
+    """
     connection = conn or _db_layer._db
     rows = connection.execute(
         "SELECT card_uid FROM game_cards "
-        "WHERE session_id=? AND user_id=? AND location='deck'",
-        (session_id, user_id)).fetchall()
-    deck = [int(row[0]) for row in rows]
-    _shuf_rnd.shuffle(deck)
+        "WHERE session_id=? AND user_id=? AND location='deck' "
+        "ORDER BY position", (session_id, user_id)).fetchall()
+    remaining = [int(row[0]) for row in rows]
+    # C# CardCollection.Shuffle repeatedly takes Next(count) from the
+    # remaining cards.
+    deck = [remaining.pop(deck_rng_index(rng, len(remaining)))
+            for _ in range(len(remaining))]
     connection.executemany(
         "UPDATE game_cards SET position=? "
         "WHERE card_uid=? AND session_id=?",
@@ -3503,16 +3524,48 @@ def db_deck_next_position(session_id, owner_id, conn=None):
     return int(row[0])
 
 
+def db_insert_deck_card_at(session_id, user_id, card_uid, index,
+                           from_bottom=False, conn=None):
+    """Place one card in a deck at a C# ``AddCardAtIndexAndLocation`` slot.
+
+    ``index`` counts from the top (index 0 is the top card) or, when
+    ``from_bottom`` is set, from the bottom (index 0 is the last card), as
+    C# does for ``ECardLocations.Bottom``.  The card's own row is excluded
+    from the ordering and every other deck card keeps its relative order.
+    """
+    connection = conn or _db_layer._db
+    rows = connection.execute(
+        "SELECT card_uid FROM game_cards "
+        "WHERE session_id=? AND user_id=? AND location='deck' "
+        "ORDER BY position", (session_id, int(user_id))).fetchall()
+    others = [int(row[0]) for row in rows if int(row[0]) != int(card_uid)]
+    index = min(max(int(index), 0), len(others))
+    split = len(others) - index if from_bottom else index
+    ordered = others[:split] + [int(card_uid)] + others[split:]
+    assignments = " ".join("WHEN ? THEN ?" for _uid in ordered)
+    params = []
+    for position, uid in enumerate(ordered):
+        params.extend((uid, position))
+    marks = ",".join("?" for _uid in ordered)
+    connection.execute(
+        "UPDATE game_cards SET position=CASE card_uid "
+        + assignments + " ELSE position END "
+        "WHERE session_id=? AND user_id=? AND card_uid IN (" + marks + ")",
+        (*params, session_id, int(user_id), *ordered))
+    if connection is _db_layer._db:
+        connection.commit()
+    return ordered.index(int(card_uid))
+
+
 def db_randomly_insert_deck_cards(session_id, user_id, card_uids,
-                                  connection=None, conn=None):
+                                  connection=None, conn=None, rng=None):
     """Reinsert selected cards at random deck slots without shuffling others.
 
     This is the persistence operation behind ``shuffle into deck`` effects.
     The selected cards are randomized among random slots while the relative
-    order of all unselected cards remains unchanged.
+    order of all unselected cards remains unchanged.  ``rng`` is the session
+    RNG when available; the stdlib RNG is used otherwise.
     """
-    import random as _shuf_rnd
-
     connection = connection or conn or _db_layer._db
     wanted = {int(uid) for uid in (card_uids or [])}
     if not wanted:
@@ -3539,7 +3592,7 @@ def db_randomly_insert_deck_cards(session_id, user_id, card_uids,
         # ``deck_count`` (past the end).
         deck_uids = [int(row[0]) for row in rows]
         others = [uid for uid in deck_uids if uid != int(card_uid)]
-        insert_position = _shuf_rnd.randrange(len(others) + 1)
+        insert_position = deck_rng_index(rng, len(others) + 1)
         ordered = (others[:insert_position] + [int(card_uid)]
                    + others[insert_position:])
         assignments = " ".join("WHEN ? THEN ?" for _uid in ordered)
@@ -3558,9 +3611,13 @@ def db_randomly_insert_deck_cards(session_id, user_id, card_uids,
     selected = [int(row[0]) for row in rows if int(row[0]) in wanted]
     if not selected:
         return []
-    _shuf_rnd.shuffle(selected)
+    for i in range(len(selected) - 1, 0, -1):
+        j = deck_rng_index(rng, i + 1)
+        selected[i], selected[j] = selected[j], selected[i]
     slots = list(range(len(rows)))
-    _shuf_rnd.shuffle(slots)
+    for i in range(len(slots) - 1, 0, -1):
+        j = deck_rng_index(rng, i + 1)
+        slots[i], slots[j] = slots[j], slots[i]
     selected_by_slot = dict(zip(sorted(slots[:len(selected)]), selected))
     remaining = [int(row[0]) for row in rows if int(row[0]) not in wanted]
     remaining_iter = iter(remaining)

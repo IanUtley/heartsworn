@@ -37,20 +37,12 @@ in place because each needs a design decision or a larger change.
       also clears damage, counters, dynamic abilities, damage shields,
       uses/cooldowns, card integer variables, and emits `CardReverted`
       (`rules_port/context.py:2926`).
-- [ ] `MoveCardToZoneEffectTemplate`: `m_DestinationLocation=Bottom` stores
-      position 0 (= top); `m_RandomLocation`/`m_TopHalfOfDeck` insert uniformly
-      over the whole deck instead of the top N; `m_ControlGivenToTargetIndex=-2`
-      and `m_UseSourceDestination` are unhandled
-      (`rules_port/context.py`, `pvp_db.db_randomly_insert_deck_cards`).
-- [ ] `DiscardCardAbilityEffectTemplate` only accepts `hand`/`choosing`
-      sources (`rules_port/context.py:1257`); C# discards from any collection.
+- [ ] `MoveCardToZoneEffectTemplate`: `m_ControlGivenToTargetIndex=-2` and
+      `m_UseSourceDestination` are unhandled (`rules_port/context.py`).
 - [ ] `ActivateAbilityEffectTemplate` resolves the child inline instead of
       pushing it on the chain after the parent, so ordering differs when the
       parent has later effects (Rhiannon of Flame, The Nameless Knight,
       Calilac).
-- [ ] `LoadPlayerDeckAbilityEffectTemplate` does not shuffle the loaded deck
-      (C# `Deck.Shuffle`) and uses `resolving_owner_id` instead of the resolved
-      target's controller (`rules_port/deck_effects.py`).
 - [ ] `TransformSelfAbilityEffectTemplate` non-PlantGarden path does not copy
       the target's gems/boons/counters/damage; `TransformCardToTarget` moves
       the source to the warzone instead of keeping its zone

@@ -220,6 +220,27 @@ def drain_stack(db, handler, game, session, pl_t, ai_t, bstate):
                                        bstate, item)
 
 
+def test_deck_insert_bottom_and_top(db):
+    """A card placed at Bottom index 0 is the last deck card (C#
+    AddCardAtIndexAndLocation), and Top index 0 is the first."""
+    import pvp_db
+    for uid, pos in ((201, 0), (202, 1), (203, 2)):
+        add_card(db, uid, 5, "plain_troop", "deck")
+        db.execute("UPDATE game_cards SET position=? WHERE card_uid=?",
+                   (pos, uid))
+    add_card(db, 204, 5, "plain_troop", "deck")
+
+    def order():
+        return [row[0] for row in db.execute(
+            "SELECT card_uid FROM game_cards WHERE session_id=1 AND user_id=5 "
+            "AND location='deck' ORDER BY position")]
+
+    pvp_db.db_insert_deck_card_at(1, 5, 204, 0, from_bottom=True, conn=db)
+    assert order() == [201, 202, 203, 204], order()
+    pvp_db.db_insert_deck_card_at(1, 5, 204, 0, from_bottom=False, conn=db)
+    assert order() == [204, 201, 202, 203], order()
+
+
 def run(name, fn):
     db = make_db()
     dbmod._db = db
@@ -1141,3 +1162,4 @@ if __name__ == "__main__":
     run("Inner Conflict can't attack/block", test_inner_conflict)
     run("Solitary Exile void + return", test_exile_void_return)
     run("Voiding an exile returns its voided cards", test_voiding_exile_returns_voided_cards)
+    run("Deck Bottom/Top insert respects C# index ends", test_deck_insert_bottom_and_top)
