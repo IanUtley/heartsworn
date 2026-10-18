@@ -31,16 +31,6 @@ in place because each needs a design decision or a larger change.
       gives the copy a normal response window. Encounter
       **Periwinkle/Elite** ("when you play a card with cost 5 or greater,
       copy it").
-- [ ] **Systemic event/RNG gaps around these champions.** No in-scope
-      champion trigger listens to the missing events today, but a future
-      champion/card will, and replays desync:
-      - `VoidCardAbilityEffectTemplate` emits only `CardExitedZoneEvent`
-        (`rules_port/context.py:691`); C# `Session.VoidCard` also enqueues
-        `CardVoidedEvent` and the destination `CardEnteredZoneEvent`.
-        `CardVoidedEvent` is never dispatched anywhere in `rules_port`.
-      - `BuryCardAbilityEffectTemplate` emits `CardDiscardedEvent` where C#
-        does not, and skips `CardExitedZoneEvent`/`HiddenCardEnteredZoneEvent`
-        (`rules_port/context.py:584`).
 
 ### Related port gaps surfaced by the same audit (not FRA-champion-specific)
 

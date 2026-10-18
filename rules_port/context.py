@@ -722,8 +722,19 @@ class EffectContext:
                 scid, discard_owner, game_engine.ECardCollections.Discard,
                 ct, template_id=row[1], attack=atk, defense=defense,
                 cost=cost, gems=gem)
+            # C# BuryCard is MoveCardWithDispatch to Discard: exit, enter and
+            # hidden enter. It never calls DiscardCard, so no CardDiscardedEvent.
+            self._emit_trigger(
+                "CardExitedZoneEvent", int(row[0]), deck_owner,
+                event_source_collection="deck",
+                event_destination_collection="discard")
             self._emit_trigger(
                 "CardEnteredZoneEvent", int(row[0]), deck_owner,
+                event_source_collection="deck",
+                event_destination_collection="discard",
+                event_previous_state=0)
+            self._emit_trigger(
+                "HiddenCardEnteredZoneEvent", int(row[0]), deck_owner,
                 event_source_collection="deck",
                 event_destination_collection="discard",
                 event_previous_state=0)
@@ -753,11 +764,13 @@ class EffectContext:
         if card_owner is None:
             return "void: target not found"
         owner = owner_uid(card_owner, self.player_uid, self.ai_uid, self.bstate)
+        # Read the source zone before the void overwrites it.
+        details = db_card_zone_details(
+            self.session.session_id, target, conn=self.db)
+        source_zone = str(details[3] or "").lower() if details else None
         db_void_card(self.session.session_id, target, conn=self.db)
         self.db.commit()
         scid = game_engine.SessionCardId(game_engine.UID(target))
-        details = db_card_zone_details(
-            self.session.session_id, target, conn=self.db)
         tpl_guid = details[0] if details else None
         _tpl, ct, _name, cost, atk, defense, gem = \
             self.handler._card_full_data(self.game, scid, tpl_guid)
@@ -765,7 +778,18 @@ class EffectContext:
             scid, owner, game_engine.ECardCollections.Void, ct,
             template_id=tpl_guid, attack=atk, defense=defense,
             cost=cost, gems=gem)
-        self._emit_trigger("CardExitedZoneEvent", target, card_owner)
+        # C# AuthoritativeSessionBase.VoidCard moves the card with
+        # MoveCardWithDispatch (exit, enter, hidden enter). Unlike the base
+        # Session.VoidCard it does not enqueue a CardVoidedEvent trigger.
+        self._emit_trigger("CardExitedZoneEvent", target, card_owner,
+                           event_source_collection=source_zone,
+                           event_destination_collection="void")
+        self._emit_trigger("CardEnteredZoneEvent", target, card_owner,
+                           event_source_collection=source_zone,
+                           event_destination_collection="void")
+        self._emit_trigger("HiddenCardEnteredZoneEvent", target, card_owner,
+                           event_source_collection=source_zone,
+                           event_destination_collection="void")
 
         # The client's ``VoidCardAbilityEffectTemplate`` records the voided
         # card on the ability's ``VoidedCards`` list attr.  Follow-up operands
