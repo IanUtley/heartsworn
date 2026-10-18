@@ -295,6 +295,14 @@ function shardClass(tpl) {
 const TYPE_GLYPH = { Troop: "&#9876;", Resource: "&#9670;", Artifact: "&#9881;", Constant: "&#8734;",
   BasicAction: "&#10022;", QuickAction: "&#9889;", Champion: "&#9819;" };
 
+const TYPE_CHAR = { Troop: "\u2694", Resource: "\u25c6", Artifact: "\u2699", Constant: "\u221e",
+  BasicAction: "\u2726", QuickAction: "\u26a1", Champion: "\u265b" };
+const SHARD_HEX = { blood: "#9b4dd1", ruby: "#e0473a", sapphire: "#3a8ae0", wild: "#45a852", diamond: "#e9dca6", multi: "#c9a14a" };
+
+function artUrl(tpl) {
+  return S.artOk && tpl && /^a\d{7}$/.test(tpl.art || "") ? `/art/${tpl.art}.jpg` : null;
+}
+
 function artStyle(tpl) {
   if (S.artOk && tpl && /^a\d{7}$/.test(tpl.art || "")) return ` style="background-image:url('/art/${tpl.art}.jpg')"`;
   return "";
@@ -370,6 +378,74 @@ function cardsIn(pid, collection) {
     .sort((a, b) => a.uid - b.uid);
 }
 
+/* ------------------------------------------------------------------ */
+/* 3D board                                                            */
+/* ------------------------------------------------------------------ */
+
+function board3d() {
+  // The three.js board (board3d.js) draws the arena, warzones and chain when
+  // WebGL is available; otherwise the flat HTML board below is used.
+  if (S.board3d === undefined && window.Board3D) {
+    S.board3d = new URLSearchParams(location.search).has("flat") ? null : Board3D.create($("#board3d"), {
+      onClick: (uid) => {
+        if (S.ui.mode === "modal") { S.ui = { mode: null }; $("#modal").classList.add("hidden"); }
+        clickCard(uid);
+      },
+      onHover: (uid) => { if (uid) showPreview(uid); else $("#preview").innerHTML = ""; },
+    });
+    document.body.classList.toggle("webgl", !!S.board3d);
+  }
+  return S.board3d || null;
+}
+
+function faceOf(card) {
+  const tpl = S.catalog.cards[(card.card_id || "").toLowerCase()];
+  if (!tpl || card.card_id === NO_GUID) return { hidden: true, sleeve: sleeveOf(card.controller).slice("sleeve-".length) };
+  const baseAtk = tpl.attack ?? card.attack, baseDef = tpl.defense ?? card.defense;
+  return {
+    name: tpl.name,
+    cost: tpl.type === "Resource" ? "" : (card.collection === COLL.Hand ? card.cost : tpl.cost),
+    type: [tpl.type, card.sub_type || tpl.subtype].filter(Boolean).join(" \u2014 "),
+    shard: SHARD_HEX[shardClass(tpl).replace("shard-", "")] || "#8d939c",
+    glyph: TYPE_CHAR[tpl.type] || "",
+    art: artUrl(tpl),
+    keywords: keywordsOf(card).slice(0, 3),
+    counters: (card.counter_counts || []).reduce((a, b) => a + b, 0),
+    showStats: !!((card.card_type & CTYPE.Troop) || tpl.type === "Troop"),
+    attack: card.attack, defense: card.defense,
+    atkCls: card.attack > baseAtk ? "buffed" : "",
+    defCls: card.defense < baseDef ? "hurt" : (card.defense > baseDef ? "buffed" : ""),
+  };
+}
+
+function boardEntry(card, zone, index, count) {
+  let highlight = interactive(card.uid);
+  if (!highlight && (card.state & CSTATE.Attacking || S.combats.has(card.uid))) highlight = "attacking";
+  if (!highlight && card.state & CSTATE.Blocking) highlight = "blocking";
+  return { uid: card.uid, zone, index, count, highlight, hidden: S.flying.has(card.uid),
+    tapped: zone !== "chain" && !!(card.state & CSTATE.Tapped), face: faceOf(card) };
+}
+
+function renderBoard3d(b) {
+  b.setTheme(boardChoice());
+  b.setCombat(document.body.dataset.combat === "1");
+  const entries = [];
+  for (const [pid, zone] of [[S.opp, "opp"], [S.me, "mine"]]) {
+    const war = [...cardsIn(pid, COLL.Warzone), ...cardsIn(pid, COLL.Underground)];
+    war.forEach((c, i) => entries.push(boardEntry(c, zone, i, war.length)));
+  }
+  S.chain.forEach((item, i) => {
+    const src = S.cards.get(item.source) || { uid: item.source, controller: 0, card_id: NO_GUID };
+    const entry = { ...boardEntry(src, "chain", i, S.chain.length), top: i === S.chain.length - 1 };
+    if (entry.face.hidden) {
+      const ability = S.catalog.abilities[(item.ability || "").toLowerCase()];
+      entry.face = { name: ability ? ability.name : "Ability", cost: "", type: "Ability", shard: "#7a6ca8", glyph: "\u2726" };
+    }
+    entries.push(entry);
+  });
+  b.update(entries);
+}
+
 function render() {
   if (!S.info) return;
   const before = handRects();
@@ -387,6 +463,8 @@ function render() {
   renderPhases();
   renderActions();
   renderModal();
+  const b = board3d();
+  if (b) renderBoard3d(b);
   $("#log").innerHTML = S.log.map((l) => `<div>${esc(l(cardName))}</div>`).join("");
   animateMoves(before);
   hideFlying();
@@ -752,11 +830,13 @@ function handRects() {
 }
 
 function centrePoint() {
+  if (S.board3d) return S.board3d.centreScreen();
   const r = $("#centre").getBoundingClientRect();
   return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
 }
 
 function burstAt(p) {
+  if (S.board3d) S.board3d.burst();
   const el = document.createElement("div");
   el.className = "burst";
   el.style.left = `${p.x}px`;
@@ -781,7 +861,8 @@ function landingOf(card) {
     case COLL.Deck: return { el: $(`#${side}-piles .deck`), viaCentre: false, fade: true };
     case COLL.Discard: return { el: $(`#${side}-piles .graveyard`), viaCentre: true, fade: true };
     case COLL.Void: return { el: $(`#${side}-piles .void`), viaCentre: true, fade: true };
-    default: return { el: document.querySelector(`#table [data-uid="${card.uid}"]`), viaCentre: true };
+    default: return S.board3d ? { rect: S.board3d.screenRect(card.uid), viaCentre: true }
+      : { el: document.querySelector(`#table [data-uid="${card.uid}"]`), viaCentre: true };
   }
 }
 
@@ -804,7 +885,7 @@ function flyCard(card, from) {
     frames.push(pose(c.x, c.y, 1.55, { offset: 0.36, filter: "brightness(1.6)" }),
       pose(c.x, c.y, 1.5, { offset: 0.62, filter: "brightness(1)" }));
   }
-  const to = land.el && land.el.getBoundingClientRect();
+  const to = land.rect || (land.el && land.el.getBoundingClientRect());
   if (to && to.width) {
     frames.push(pose(to.left + to.width / 2, to.top + to.height / 2, to.width / HAND_W, { opacity: land.fade ? 0 : 1 }));
   } else {
@@ -816,6 +897,7 @@ function flyCard(card, from) {
     el.remove();
     S.flying.delete(card.uid);
     document.querySelectorAll(`[data-uid="${card.uid}"].in-flight`).forEach((e) => e.classList.remove("in-flight"));
+    if (S.board3d) renderBoard3d(S.board3d);
   };
   el.animate(frames, { duration, easing: "cubic-bezier(.3,.7,.3,1)" }).finished.then(done, done);
 }
@@ -887,7 +969,7 @@ document.addEventListener("click", (e) => {
 document.addEventListener("mouseover", (e) => {
   const cardEl = e.target.closest("#board [data-uid], #modal [data-uid]");
   if (cardEl && cardEl.dataset.uid) showPreview(Number(cardEl.dataset.uid));
-  else if (!e.target.closest("#preview")) $("#preview").innerHTML = "";
+  else if (!e.target.closest("#preview, #board3d")) $("#preview").innerHTML = "";
 });
 
 function handleAct(name) {

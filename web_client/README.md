@@ -47,6 +47,13 @@ browser ──HTTP/JSON──> web_client.server ──3029 PlayerTransaction─
 
 ## Battle screen
 
+The arena, both warzones and the chain are a three.js scene
+(`static/board3d.js`, with three.js 0.160 vendored under `static/vendor/`).
+The hands, champions, piles, phase dial and prompts are HTML laid over it.
+Cards are 3D objects that cast shadows, lift when hovered and glide between
+places, and the braziers are real light sources. Open the page with `?flat` (or
+use a browser without WebGL) to get the flat HTML board instead.
+
 The board is a painted arena seen at a slight tilt: a stone ring around a
 field, braziers in the corners, and a centre medallion that shows a star in the
 main phases and an axe in combat (with fire across the board). Both warzones
@@ -83,4 +90,5 @@ extracted. The opponent's sleeve is derived from the sleeve ID in its
 | `match.py` | `WebMatch`: session setup, decision routing, AI seat, transactions |
 | `events_json.py` | event-to-JSON projection and the packet capture hook |
 | `catalog.py` | card / champion / ability descriptions and optional art |
-| `static/` | the browser app (no build step) |
+| `static/app.js` | state cache, HUD, prompts, card flights |
+| `static/board3d.js` | three.js arena, cards and effects |

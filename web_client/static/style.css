@@ -93,6 +93,9 @@ body[data-board="coastline"] {
 }
 
 #board { position: relative; width: 100vw; height: 100vh; overflow: clip; background: var(--outer2); }
+#board3d { position: absolute; inset: 0; }
+#board3d canvas { display: block; width: 100%; height: 100%; }
+body.webgl #scene, body.webgl #table { display: none; }
 #scene {
   position: absolute; inset: 0; pointer-events: none; overflow: hidden;
   background:
