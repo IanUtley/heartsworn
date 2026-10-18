@@ -1795,7 +1795,6 @@ class EffectContext:
         if self.native_context or self.bstate.get("_rules_port_native_effect"):
             from rules_port.destruction_effects import destroy_by_defense
             return destroy_by_defense(self)
-        import random
 
         from abilities.framework.kill_troop import kill_troop
 
@@ -1807,7 +1806,8 @@ class EffectContext:
                 self.session.session_id, int(uid), conn=self.db)
             defense = ((stat_row[0] or 0) + (stat_row[1] or 0)
                        if stat_row else 0)
-            if random.random() > 0.10 * defense:
+            from .runtime_helpers import rng_below
+            if rng_below(self.bstate, 10) >= defense:
                 kill_troop(
                     self.game, self.session, self.db, self.handler,
                     self.player_uid, self.ai_uid, int(uid), self.bstate,
@@ -2926,7 +2926,6 @@ class EffectContext:
 
     def shuffle_collection(self) -> str:
         """Shuffle the typed target controller collection and renumber slots."""
-        import random
         target = self.resolved_target()
         owner = self.target_owner(target, default=self.bstate.get(
             "resolving_owner_id", 0))
@@ -2940,7 +2939,8 @@ class EffectContext:
         rows = db_ordered_zone_uids(
             self.session.session_id, int(owner), location, conn=self.db)
         uids = [int(row[0]) for row in rows]
-        random.shuffle(uids)
+        from .runtime_helpers import rng_shuffle
+        rng_shuffle(self.bstate, uids)
         db_set_card_positions(
             [(self.session.session_id, uid, index)
              for index, uid in enumerate(uids)], conn=self.db)

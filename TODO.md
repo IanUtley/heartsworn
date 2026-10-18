@@ -41,11 +41,6 @@ in place because each needs a design decision or a larger change.
       - `BuryCardAbilityEffectTemplate` emits `CardDiscardedEvent` where C#
         does not, and skips `CardExitedZoneEvent`/`HiddenCardEnteredZoneEvent`
         (`rules_port/context.py:584`).
-      - Replay-visible rolls use stdlib `random` instead of the session RNG
-        (`Session.RandomNumberGenerator`): `rules_port/destruction_effects.py`
-        (destroy-by-defense), `rules_port/context.py` (shuffle_collection),
-        `rules_port/token_effects.py` (conscript/fuse picks),
-        `rules_port/transform_effects.py` (transform-at-random).
 
 ### Related port gaps surfaced by the same audit (not FRA-champion-specific)
 

@@ -2,12 +2,38 @@
 
 from __future__ import annotations
 
+import random
 import threading
 
 import game_engine
 
 
 _CHAMPION_ABILITY_USES_LOCK = threading.RLock()
+
+
+def rng_below(bstate, bound):
+    """Return an int in [0, bound) from the session RNG (C# Next(bound))."""
+    if bound <= 0:
+        return 0
+    rng = (bstate or {}).get("_rules_rng")
+    if rng is not None and hasattr(rng, "next"):
+        return int(rng.next(bound)) % bound
+    return random.randrange(bound)
+
+
+def rng_choice(bstate, values):
+    return values[rng_below(bstate, len(values))]
+
+
+def rng_shuffle(bstate, items):
+    """Shuffle ``items`` in place like C# ``CardCollection.Shuffle``.
+
+    C# repeatedly takes ``Next(count)`` from the remaining cards, so the
+    session RNG is consumed once per card.
+    """
+    remaining = list(items)
+    items[:] = [remaining.pop(rng_below(bstate, len(remaining)))
+                for _ in range(len(remaining))]
 
 
 def next_game_card_uid(db, session_id):

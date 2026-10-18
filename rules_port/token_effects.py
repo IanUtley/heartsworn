@@ -7,6 +7,7 @@ import json
 from collections.abc import Iterable
 from typing import Any
 import game_engine
+from .runtime_helpers import rng_choice
 
 
 def _truthy(value):
@@ -93,7 +94,7 @@ def create_matching_target(context, target, count, collection,
                           context.bstate)
     made = []
     for _ in range(max(0, int(count))):
-        template_guid = str(random.choice(pool)).lower()
+        template_guid = str(rng_choice(context.bstate, pool)).lower()
         if not db_template_exists(template_guid, conn=context.db):
             continue
         payload = db_copy_template_payload(template_guid, conn=context.db)
@@ -369,12 +370,9 @@ def _combined_cost_choices(context, candidates, count, total):
             if int(cost_by_guid.get(guid, 0) or 0) > 0]
     if not pool:
         return []
-    rng = context.bstate.get("_rules_rng")
 
     def pick():
-        if rng is not None and hasattr(rng, "next"):
-            return pool[int(rng.next(len(pool))) % len(pool)]
-        return random.choice(pool)
+        return rng_choice(context.bstate, pool)
 
     remaining = int(total)
     chosen = []
@@ -538,7 +536,7 @@ def _creation_replacement_guid(context, token_guid):
                     context, substitute_filter,
                     _authored_banned_guids(context))
                 if candidates:
-                    return random.choice(candidates)
+                    return rng_choice(context.bstate, candidates)
                 continue
             substitute = replacement_substitute(
                 attribute, linked_templates, token_guid)
@@ -613,13 +611,13 @@ def summon_token(context, payload=None):
                     context, candidates, count, combined_cost)
             elif terminus:
                 # C# draws one random fused card per amount, with replacement.
-                selected_guids = [random.choice(candidates)
+                selected_guids = [rng_choice(context.bstate, candidates)
                                   for _ in range(max(0, count))]
             elif payload.get("random_with_replacement"):
                 # Conscript calls CreateNTokensFromResource(1, randomCard)
                 # once per requested card. The same authored candidate may
                 # therefore be selected more than once.
-                selected_guids = [random.choice(candidates)
+                selected_guids = [rng_choice(context.bstate, candidates)
                                   for _ in range(max(0, count))]
             else:
                 # Choice-zone effects such as the champion charge power present

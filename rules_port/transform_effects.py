@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import random
 from types import SimpleNamespace
 import game_engine
 
@@ -532,7 +531,8 @@ def transform_card_at_random(context):
             candidates.append(row[0])
     if not candidates:
         return "transform random: no candidates"
-    new_template = random.choice(candidates)
+    from .runtime_helpers import rng_choice
+    new_template = rng_choice(context.bstate, candidates)
     # TransformCard mutates the current card in place. In particular,
     # "put into hand, then transform" must leave the generated action in hand.
     transform_instance(context, int(target), new_template, keep_zone=True)
