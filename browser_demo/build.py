@@ -60,8 +60,7 @@ def write_python_zip(path: Path) -> int:
 
 def copy_static() -> None:
     static = SITE / "static"
-    shutil.copytree(ROOT / "web_client" / "static", static, dirs_exist_ok=True,
-                    ignore=shutil.ignore_patterns("unity"))
+    shutil.copytree(ROOT / "web_client" / "static", static, dirs_exist_ok=True)
     html = (ROOT / "web_client" / "static" / "index.html").read_text(encoding="utf-8")
     head = "<head>\n"
     if head not in html:
