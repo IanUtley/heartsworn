@@ -5,7 +5,8 @@
 // page opens that folder (HexAssets.openFolder), its ``Data/gamedata`` file is
 // read and sent to the worker. The first folder opened builds the database.
 (() => {
-  const worker = new Worker("/demo/worker.js", { type: "module" });
+  // Relative to this script, so the demo works under a sub-path (GitHub Pages).
+  const worker = new Worker(new URL("worker.js", document.currentScript.src), { type: "module" });
   const pending = new Map();
   let nextId = 1;
   let markReady;

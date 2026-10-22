@@ -200,7 +200,7 @@ let dialSheet = null;
 // draw their dial from their own PhaseLens texture, which keeps their look.
 function dialTexture() {
   if (!dialSheet) {
-    dialSheet = new THREE.TextureLoader().load("/static/phase_dial.png");
+    dialSheet = new THREE.TextureLoader().load(new URL("phase_dial.png", import.meta.url).href);
     dialSheet.colorSpace = THREE.SRGBColorSpace;
     dialSheet.anisotropy = 4;
   }

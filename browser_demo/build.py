@@ -27,7 +27,7 @@ SKIP_DIRS = {"hex-private", "browser_demo", "tests", "campaign_editor", "docs",
 # data is derived from the player's gamedata, so it is built, not shipped).
 DATA_DIRS = ("campaign",)
 
-INDEX_HEAD ='  <script src="/demo/fetch-shim.js"></script>\n'
+INDEX_HEAD = '  <script src="demo/fetch-shim.js"></script>\n'
 
 
 def _skipped(rel: Path) -> bool:
@@ -66,6 +66,9 @@ def copy_static() -> None:
     head = "<head>\n"
     if head not in html:
         raise SystemExit("index.html has no <head> to hold the fetch shim")
+    # Relative links, so the page also works under a sub-path such as GitHub Pages.
+    html = html.replace('="/static/', '="static/').replace(
+        '/demo/fetch-shim.js', 'demo/fetch-shim.js')
     (SITE / "index.html").write_text(html.replace(head, head + INDEX_HEAD, 1),
                                     encoding="utf-8")
 
