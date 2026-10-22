@@ -283,6 +283,13 @@ body.webgl #table { display: none; }
   background: #1b1a2b; color: var(--ink-dim);
 }
 .power.ready { border-color: var(--glow); color: var(--ink); box-shadow: 0 0 10px rgba(124,240,255,.35); }
+/* An available charge power breathes softly, so it is noticed in the panel */
+.power.ready { animation: power-glow 2.4s ease-in-out infinite; }
+@keyframes power-glow {
+  0%, 100% { box-shadow: 0 0 6px rgba(124,240,255,.22); }
+  50% { box-shadow: 0 0 14px rgba(124,240,255,.55); }
+}
+@media (prefers-reduced-motion: reduce) { .power.ready { animation: none; } }
 
 .gem { display: inline-block; width: 12px; height: 12px; border-radius: 50%; vertical-align: -2px; border: 1px solid rgba(0,0,0,.5); box-shadow: inset 0 0 3px rgba(255,255,255,.6); }
 .gem-blood { background: var(--blood); } .gem-ruby { background: var(--ruby); }
