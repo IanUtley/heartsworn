@@ -87,14 +87,15 @@ async function cachePut(key, bytes) {
 // for next time.
 async function prepareDatabase(gamedata) {
   progress("Checking the cache...");
-  const key = `${await digest(gamedata)}-${await digest(engineZip)}`;
+  // "v2" versions the key: databases saved before the encounter-deck check are ignored.
+  const key = `v2-${await digest(gamedata)}-${await digest(engineZip)}`;
   py.FS.writeFile("/data/gamedata", gamedata);
   const cached = await cacheGet(key);
   if (cached) {
     progress("Opening the saved database...");
     py.FS.writeFile("/data/hex.db", cached);
-    py.globals.get("bridge").open_database();
-    return;
+    if (py.globals.get("bridge").open_database() > 0) return;
+    progress("The saved database is incomplete; building it again...");
   }
   py.globals.get("bridge").build_database(progress);
   progress("Saving the database for next time...");

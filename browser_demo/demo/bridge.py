@@ -30,10 +30,24 @@ def _say(report, text):
 
 
 def open_database():
-    """Point the engine at a database built earlier (see ``build_database``)."""
+    """Point the engine at a database built earlier (see ``build_database``).
+
+    Returns how many FRA encounter decks it holds; 0 means the database is
+    unusable and must be built again.
+    """
+    import sqlite3
     os.environ["HEX_GAMEDATA"] = GAMEDATA
     os.environ["HEX_DB_PATH"] = DATABASE
     os.environ.setdefault("HEX_REPO", "/app")
+    if not os.path.exists(DATABASE):
+        return 0
+    connection = sqlite3.connect(DATABASE)
+    try:
+        return int(connection.execute("SELECT COUNT(*) FROM fra_encounters").fetchone()[0])
+    except sqlite3.Error:
+        return 0
+    finally:
+        connection.close()
 
 
 def build_database(report=None):
@@ -61,6 +75,8 @@ def build_database(report=None):
         connection.close()
     _say(report, "Filling the encounter decks...")
     fra_from_gamedata.populate(GAMEDATA, DATABASE, records_dir=RECORDS)
+    if open_database() == 0:
+        raise RuntimeError("the encounter decks were not built from the gamedata")
     _say(report, "Database ready.")
     return {"ok": True}
 
