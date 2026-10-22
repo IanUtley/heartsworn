@@ -29,6 +29,26 @@ def _say(report, text):
         report(text)
 
 
+def _point_records_at_folder():
+    """Send the engine's Records lookups to the folder written from the gamedata.
+
+    hex-private is not shipped, so without this the catalog finds no card or
+    champion templates on the page.
+    """
+    if not os.path.exists(GAMEDATA):
+        return
+    from . import fra_from_gamedata
+    from pathlib import Path
+    import gamedata
+    fra_from_gamedata.write_records(GAMEDATA, RECORDS)
+    store = gamedata.DEFAULT_RECORD_STORE
+    with store._lock:
+        store.records_dir = Path(RECORDS)
+        store._cache.clear()
+        store._index.clear()
+        store._issues.clear()
+
+
 def open_database():
     """Point the engine at a database built earlier (see ``build_database``).
 
@@ -39,6 +59,7 @@ def open_database():
     os.environ["HEX_GAMEDATA"] = GAMEDATA
     os.environ["HEX_DB_PATH"] = DATABASE
     os.environ.setdefault("HEX_REPO", "/app")
+    _point_records_at_folder()
     if not os.path.exists(DATABASE):
         return 0
     connection = sqlite3.connect(DATABASE)
