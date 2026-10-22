@@ -21,6 +21,7 @@ MATCHES = {}
 ORDER = []
 GAMEDATA = "/data/gamedata"
 DATABASE = "/data/hex.db"
+RECORDS = "/data/records"
 
 
 def _say(report, text):
@@ -32,7 +33,7 @@ def open_database():
     """Point the engine at a database built earlier (see ``build_database``)."""
     os.environ["HEX_GAMEDATA"] = GAMEDATA
     os.environ["HEX_DB_PATH"] = DATABASE
-    os.environ["HEX_REPO"] = "/app"
+    os.environ.setdefault("HEX_REPO", "/app")
 
 
 def build_database(report=None):
@@ -59,7 +60,7 @@ def build_database(report=None):
     finally:
         connection.close()
     _say(report, "Filling the encounter decks...")
-    fra_from_gamedata.populate(GAMEDATA, DATABASE, records_dir="/data/records")
+    fra_from_gamedata.populate(GAMEDATA, DATABASE, records_dir=RECORDS)
     _say(report, "Database ready.")
     return {"ok": True}
 
