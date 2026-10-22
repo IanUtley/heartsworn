@@ -434,3 +434,7 @@ body[data-combat="1"] .firebar { display: block; }
 .card.resource .name, .card.resource .cost, .card.resource .type-bar,
 .card.resource .text-box, .card.resource .thresholds, .card.resource .keywords { display: none; }
 .card.resource .art { left: 0; right: 0; top: 0; bottom: 0; height: auto; border-radius: 6px; box-shadow: 0 2px 6px #000; }
+
+/* Right-click view: the card enlarged, its powers beneath */
+.enlarged { display: grid; justify-items: center; gap: 12px; }
+.enlarged .card { --card-w: 300px; --card-h: 420px; animation: none; transform: none; filter: none; }

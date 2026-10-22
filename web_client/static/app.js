@@ -909,20 +909,42 @@ function clickCard(uid) {
     }
     return;
   }
-  if (p.kind === "priority") {
-    const o = S.options.get(uid);
-    if (!o || !o.instances.length) return;
-    if (o.instances.length === 1) return startAction(uid, o.instances[0]);
-    chooseAbility(uid, o.instances);
-  }
+  // A single click does not activate a power: double-click does (see below).
 }
 
-function chooseAbility(uid, instances) {
-  openModal(`<h2>${esc(cardName(uid))}</h2><div class="champ-powers">${instances.map((inst, i) => {
+// Starts a card's power, or its Play action for a card in hand. One option starts
+// at once; several open the list of powers to choose from.
+function activateCard(uid) {
+  const p = S.prompt;
+  if (S.busy || !p || p.kind !== "priority") return false;
+  const o = S.options.get(uid);
+  if (!o || !o.instances.length) return false;
+  if (o.instances.length === 1) startAction(uid, o.instances[0]);
+  else chooseAbility(uid, o.instances);
+  return true;
+}
+
+// The buttons for a card's powers; each opens the same path as a choice in the list.
+function powerButtons(uid, instances) {
+  return instances.map((inst, i) => {
     const a = S.catalog.abilities[(inst.opt_id || "").toLowerCase()];
     const label = inst.opt_id === PLAY_ABILITY ? "Play this card" : (a ? gameText(a.text) : "Activate");
     return `<button class="power ready" data-choose-instance="${i}" data-uid="${uid}">${label}</button>`;
-  }).join("")}</div>`);
+  }).join("");
+}
+
+function chooseAbility(uid, instances) {
+  openModal(`<h2>${esc(cardName(uid))}</h2><div class="champ-powers">${powerButtons(uid, instances)}</div>`);
+}
+
+// Right-click: the card enlarged, with its powers listed beneath it when it can act now.
+function showEnlarged(uid) {
+  const c = S.cards.get(uid);
+  if (!c) return;
+  const o = S.options.get(uid);
+  const instances = o && S.prompt && S.prompt.kind === "priority" && !S.busy ? o.instances : [];
+  const powers = instances.length ? `<div class="champ-powers">${powerButtons(uid, instances)}</div>` : "";
+  openModal(`<div class="enlarged">${faceHTML({ ...c, state: 0, uid: `e${c.uid}` }, "preview-card")}${powers}</div>`);
 }
 
 function showPile(owner, collection) {
@@ -1158,10 +1180,29 @@ document.addEventListener("click", (e) => {
   const pile = e.target.closest("[data-pile]");
   if (pile) return showPile(pile.dataset.owner, pile.dataset.pile);
   const cardEl = e.target.closest("[data-uid]");
+  if (cardEl && cardEl.closest(".enlarged")) return;
   if (cardEl && cardEl.dataset.uid) {
     if (S.ui.mode === "modal") { S.ui = { mode: null }; $("#modal").classList.add("hidden"); }
     clickCard(Number(cardEl.dataset.uid));
   }
+});
+
+// Double-click on one of your own cards activates it.
+document.addEventListener("dblclick", (e) => {
+  const cardEl = e.target.closest("#board [data-uid], #my-hand [data-uid], #my-champion [data-uid]");
+  if (!cardEl || !cardEl.dataset.uid || e.target.closest("[data-power]")) return;
+  if (S.ui.mode) return;
+  activateCard(Number(cardEl.dataset.uid));
+});
+
+// Right-click on any card enlarges it and lists its powers, instead of the browser menu.
+document.addEventListener("contextmenu", (e) => {
+  const cardEl = e.target.closest("[data-uid]");
+  if (!cardEl || !cardEl.dataset.uid || cardEl.closest("#modal")) return;
+  const uid = Number(cardEl.dataset.uid);
+  if (!S.cards.get(uid)) return;
+  e.preventDefault();
+  showEnlarged(uid);
 });
 
 document.addEventListener("mouseover", (e) => {
