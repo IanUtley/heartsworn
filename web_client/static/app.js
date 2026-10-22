@@ -947,10 +947,16 @@ function showEnlarged(uid) {
   openModal(`<div class="enlarged">${faceHTML({ ...c, state: 0, uid: `e${c.uid}` }, "preview-card")}${powers}</div>`);
 }
 
+// A card in a pile shows its painted face, as in hand; a hidden card keeps its back.
+function pileCard(card) {
+  const known = card.card_id && card.card_id !== NO_GUID;
+  return known ? faceHTML(card, "pile-card") : cardHTML(card);
+}
+
 function showPile(owner, collection) {
   const cards = cardsIn(Number(owner), Number(collection));
   const title = Number(collection) === COLL.Void ? "Void" : "Graveyard";
-  openModal(`<h2>${who(Number(owner))} — ${title}</h2><div class="row">${cards.map((c) => cardHTML(c)).join("") || "<p>Empty</p>"}</div>`);
+  openModal(`<h2>${who(Number(owner))} — ${title}</h2><div class="row">${cards.map((c) => pileCard(c)).join("") || "<p>Empty</p>"}</div>`);
 }
 
 /* ------------------------------------------------------------------ */
