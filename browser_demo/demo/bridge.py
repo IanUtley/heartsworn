@@ -75,6 +75,15 @@ def build_database(report=None):
         connection.close()
     _say(report, "Filling the encounter decks...")
     fra_from_gamedata.populate(GAMEDATA, DATABASE, records_dir=RECORDS)
+    # db.py runs the database in WAL mode, so the new rows are in the -wal file.
+    # Fold them into the main file, which is the file that gets saved.
+    connection = sqlite3.connect(DATABASE)
+    try:
+        busy, _log, _done = connection.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
+    finally:
+        connection.close()
+    if busy:
+        raise RuntimeError("the database was busy and could not be saved")
     if open_database() == 0:
         raise RuntimeError("the encounter decks were not built from the gamedata")
     _say(report, "Database ready.")
