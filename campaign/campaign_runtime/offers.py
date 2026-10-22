@@ -78,6 +78,15 @@ def battle_tags(tags):
     return [str(t) for t in (tags or [])]
 
 
+def _flat_tags(tags):
+    """Every tag in a tag list or a list of "or" groups."""
+    for item in tags or ():
+        if isinstance(item, list):
+            yield from _flat_tags(item)
+        else:
+            yield str(item)
+
+
 def conjoin(base, extra):
     """Tags that must all hold: ``base`` and ``extra``. "or" groups distribute,
     so ``[a] and [[b], [c]]`` is ``[[a, b], [a, c]]``."""
@@ -332,6 +341,34 @@ def build_offers(zone: str, data: dict[str, Any],
                 **({"pre": intro["guid"]} if intro else {})})
             if intro:
                 used.add(intro["guid"])
+        # A battle whose reward is a temporary card choice (the Chapel): once
+        # the node is complete, after its success conversation, the choice is
+        # offered in the Shroomkin Haus panel with the deck-mod keys.
+        for raw, rows in data["encounters"].items():
+            if canonical_node(raw) != node_id:
+                continue
+            for battle_row in rows:
+                rewards = battle_row.get("rewards") or {}
+                if not (rewards.get("dungeon_only") and rewards.get("card_choice")):
+                    continue
+                # After the win and its success conversation (which sets its
+                # conversation flag). The node stays open until the pick.
+                success = next((c for raw, rows in data["node_conversations"].items()
+                                if canonical_node(raw) == node_id for c in rows
+                                if c["enabled"] and outcome_of(c) == "success"), None)
+                when = ([f"conversation({success['name']})"] if success
+                        else [f"completed({node_id})"])
+                node_entries.append({
+                    "id": f"choice:{battle_row['guid'][:8]}", "kind": "shroomhaus",
+                    "scene": battle_row["guid"],
+                    "label": battle_row.get("title") or battle_row.get("name"),
+                    "when": when,
+                    "choices": [c["guid"] for c in rewards["card_choice"]
+                                if isinstance(c, dict) and c.get("guid")],
+                    "dungeon_only": True,
+                    "selection_type": "Deck_Mod_Select",
+                    "selection_desc": "Deck_Mod_Select_Instructions",
+                    "source": "encounter_scenes"})
         # Explicitly tagged pre-battle / plain conversations win while their
         # tags hold; the name-derived defaults below stay the fallback.
         # With no battle scene on the node, an outcome-tagged conversation
@@ -389,8 +426,20 @@ def build_offers(zone: str, data: dict[str, Any],
                     "scene": battle["guid"], "label": battle["title"],
                     "when": [f"ChampionIsRace({race})"],
                     "source": "encounter_scenes"})
+        # Battles tagged for two or more factions each take their own intro and
+        # results. A conversation that serves both (the entrance, a shared
+        # defeat) is then offered to every faction, not only the first one.
+        battle_factions = {tag for battle in battles
+                           for tag in _flat_tags(battle.get("tags"))
+                           if tag.startswith("faction(")}
+        split_factions = len(battle_factions) > 1
+        shared_used = set(used)
+        faction_used: set[str] = set()
         for faction in (FACTIONS if any(faction_of(c["name"]) for c in conversations)
                         else ("",)):
+            if split_factions:
+                used.clear()
+                used.update(shared_used)
             mine = [c for c in conversations if c["guid"] not in used and
                     (not faction or faction_of(c["name"]) in ("", faction))]
             outcome = {}   # default result: prefer an untagged conversation
@@ -428,7 +477,9 @@ def build_offers(zone: str, data: dict[str, Any],
                     entry["results"] = results
                     used.update(r["conversation"] for r in results)
                 node_entries.append(entry)
-            if pre and battles and not plain_battles:
+            # (Not when the battles split by faction: each faction's battle
+            # already leads with the intro, and every player is one faction.)
+            if pre and battles and not plain_battles and not (split_factions and faction):
                 # Every battle here is tagged: when none of their tags hold,
                 # the conversation that leads into them still plays on its own.
                 node_entries.append({
@@ -436,6 +487,10 @@ def build_offers(zone: str, data: dict[str, Any],
                     "conversation": pre[0]["guid"], "label": pre[0]["name"],
                     "when": with_audience(None, faction),
                     "source": "campaign_node_conversations"})
+            if split_factions:
+                faction_used |= used
+        if split_factions:
+            used.update(faction_used)
         if len(plain_battles) > 1:
             for battle in plain_battles[1:]:
                 node_entries.append({

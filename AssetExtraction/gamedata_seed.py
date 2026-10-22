@@ -1285,7 +1285,8 @@ def _extract_pack_map(data: str) -> list[tuple[Any, ...]]:
 
 
 _EXTRACT_CACHE: dict[str, dict[str, Any]] = {}
-_EXTRACT_CACHE_VERSION = 10  # 10: ConversationAbilityEffect stores its conversation
+_EXTRACT_CACHE_VERSION = 11  # 11: Rage fallback ignores the Deploy "at random" choice
+# 10: ConversationAbilityEffect stores its conversation
 # 9: unset target max is int.MaxValue, not 1
 # 8: strict=False Records parsing (control chars)
 # 7: inventory_item_templates

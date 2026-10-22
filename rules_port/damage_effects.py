@@ -354,6 +354,17 @@ def _int_attr_values(context, uid):
     if isinstance(champion, dict):
         for key, value in champion.items():
             values[str(key)] = int(value or 0)
+    # A champion's static intattrs (Armor 3 from its own "You have Armor 3")
+    # are not stored anywhere; add them while their sources are in play.
+    owner = next((int(player) for player, champ in
+                  (context.bstate.get("champ_map") or {}).items()
+                  if int(champ) == int(uid)), None)
+    if owner is not None:
+        from rules_port.static_rules import champion_static_intattrs
+        for key, value in champion_static_intattrs(
+                context.db, context.session.session_id, context.bstate,
+                owner).items():
+            values[key] = values.get(key, 0) + value
     return values
 
 

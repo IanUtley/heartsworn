@@ -202,7 +202,7 @@ def initial_state(rules: dict[str, Any], *, faction: str = "",
 CAMPAIGN_KEYS = ("flags", "quests", "counters", "keywords", "faction", "race",
                  "gold_spent", "return_to")
 ZONE_KEYS = ("current", "nodes", "visited_paths", "came_from", "encounter",
-             "pass", "run_lost")
+             "pass", "run_lost", "extra_cards")
 
 
 def zone_view(rules: dict[str, Any], campaign: dict[str, Any] | None,
@@ -926,7 +926,11 @@ def _finish_node(rules, node, node_id, *, repeatable=False, retry_on_win=False):
 
     A won battle (``retry_on_win``) leaves its node retryable; a completion
     gate, when present, overrides that (see ``node_status``)."""
-    if (retry_on_win or _has_gate(rules, node_id, "completed") or
+    # A dungeon-only card choice (the Chapel) is the node's last step: the
+    # node stays open until the pick, which completes it (shroom_choice).
+    pending_pick = any(e.get("dungeon_only") for e in
+                       ((rules.get("nodes") or {}).get(node_id) or {}).get("entries") or ())
+    if (pending_pick or retry_on_win or _has_gate(rules, node_id, "completed") or
             _has_gate(rules, node_id, "retryable") or repeatable):
         node.update({"completed": False, "retryable": True, "failed": False})
     else:
@@ -1240,6 +1244,13 @@ def apply(rules: dict[str, Any], state: dict[str, Any],
             if battle and battle.get("victory") == wanted:
                 _run_actions(state, ending_actions(battle.get("victory_actions"), ending),
                              log, node_id, rules)
+            # Tagged outcomes (a defeat's conversation, a hidden-path check) carry
+            # their own actions; they run when their tags hold.
+            for outcome in (battle or {}).get("results") or ():
+                if outcome.get("conversation") == wanted and evaluate(
+                        outcome.get("when"), state, node_id):
+                    _run_actions(state, ending_actions(outcome.get("actions"), ending),
+                                 log, node_id, rules)
         name = action.get("name") or action.get("conversation") or (
             entry or {}).get("conversation", "")
         if name:

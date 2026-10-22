@@ -11,6 +11,7 @@ import sqlite3
 import sys as _sys
 import threading
 from collections import OrderedDict
+from contextlib import contextmanager
 from domain.constants import DEFAULT_STARTING_HEALTH, PLAYED_CARD_POSITION
 from domain.enums import ECardStates, ECardTypes, ETurnPhases
 
@@ -116,23 +117,81 @@ def db_next_session_instance(conn=None):
     return nxt
 
 
+_SESSION_UPSERT_SQL = (
+    "INSERT OR REPLACE INTO game_sessions "
+    "(session_id, server_id, session_name, owner_uid, state, "
+    "encounter_data, players_json, turn_order_json, seed_z, seed_w, "
+    "deck_template_id, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?, COALESCE(("
+    "SELECT created_at FROM game_sessions WHERE session_id=?), datetime('now')))")
+
+# Session rows queued by ``session_save_batch``, per thread.  Each entry holds
+# the row values captured when the save was requested, because callers may
+# change the session object afterwards (``save_pvp_state`` restores
+# ``turn_order`` in a ``finally``).
+_session_save_queue = threading.local()
+
+
+def _session_row_params(session):
+    return (str(session.session_id), str(session.server_id), session.session_name,
+            str(session.owner_uid), session.state, json.dumps(session.encounter_data),
+            json.dumps(session.players), json.dumps(session.turn_order), session.seed_z,
+            session.seed_w, session.deck_template_id, str(session.session_id))
+
+
 def db_save_session(session, conn=None):
     """Persist a game-session object in the caller's transaction."""
     connection = conn or _db_layer._db
-    connection.execute(
-        "INSERT OR REPLACE INTO game_sessions "
-        "(session_id, server_id, session_name, owner_uid, state, "
-        "encounter_data, players_json, turn_order_json, seed_z, seed_w, "
-        "deck_template_id, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?, COALESCE(("
-        "SELECT created_at FROM game_sessions WHERE session_id=?), datetime('now')))",
-        (str(session.session_id), str(session.server_id), session.session_name,
-         str(session.owner_uid), session.state, json.dumps(session.encounter_data),
-         json.dumps(session.players), json.dumps(session.turn_order), session.seed_z,
-         session.seed_w, session.deck_template_id, str(session.session_id)))
+    connection.execute(_SESSION_UPSERT_SQL, _session_row_params(session))
+
+
+@contextmanager
+def session_save_batch():
+    """Defer this thread's game-session saves until the block exits.
+
+    Each transaction would otherwise write the session row after every phase
+    step.  Queued rows are written, in one commit, when the block exits, and
+    before any read of ``game_sessions`` on this thread, so readers still see
+    their own writes.  Nested batches join the outermost one.
+    """
+    if getattr(_session_save_queue, "pending", None) is not None:
+        yield
+        return
+    _session_save_queue.pending = {}
+    try:
+        yield
+    finally:
+        try:
+            flush_pending_session_saves(commit=True)
+        finally:
+            _session_save_queue.pending = None
+
+
+def queue_session_save(session):
+    """Queue ``session``'s row if a batch is open on this thread."""
+    pending = getattr(_session_save_queue, "pending", None)
+    if pending is None:
+        return False
+    params = _session_row_params(session)
+    pending[params[0]] = params
+    return True
+
+
+def flush_pending_session_saves(commit=False):
+    """Write this thread's queued session rows on the shared connection."""
+    pending = getattr(_session_save_queue, "pending", None)
+    if not pending:
+        return
+    rows = list(pending.values())
+    pending.clear()
+    for params in rows:
+        _db_layer._db.execute(_SESSION_UPSERT_SQL, params)
+    if commit:
+        _db_layer._db.commit()
 
 
 def db_get_session(session_id, conn=None):
     """Return one persisted game session by protocol UID."""
+    flush_pending_session_saves()
     return (conn or _db_layer._db).execute(
         "SELECT * FROM game_sessions WHERE session_id=?", (str(session_id),)
     ).fetchone()
@@ -140,6 +199,7 @@ def db_get_session(session_id, conn=None):
 
 def db_get_session_by_name(session_name, conn=None):
     """Return one persisted game session by client-visible name."""
+    flush_pending_session_saves()
     return (conn or _db_layer._db).execute(
         "SELECT * FROM game_sessions WHERE session_name=?", (session_name,)
     ).fetchone()
@@ -147,18 +207,25 @@ def db_get_session_by_name(session_name, conn=None):
 
 def db_get_sessions(conn=None):
     """Return persisted sessions newest first."""
+    flush_pending_session_saves()
     return (conn or _db_layer._db).execute(
         "SELECT * FROM game_sessions ORDER BY created_at DESC").fetchall()
 
 
 def db_remove_session(session_name, conn=None):
     """Remove a game session in the caller's transaction."""
+    # A queued session save must land before this statement, or it would
+    # re-insert the row after the delete.
+    flush_pending_session_saves()
     (conn or _db_layer._db).execute(
         "DELETE FROM game_sessions WHERE session_name=?", (session_name,))
 
 
 def db_cleanup_ended_sessions(conn=None):
     """Remove game sessions that reached the terminal state."""
+    # A queued session save must land before this statement, or it would
+    # re-insert the row after the delete.
+    flush_pending_session_saves()
     (conn or _db_layer._db).execute(
         "DELETE FROM game_sessions WHERE state='ended'")
 
@@ -186,6 +253,9 @@ def db_cleanup_stale_sessions(age_days=7):
     Runs in its own short-lived write transaction, like the tournament
     cleanup, so a handler's open transaction cannot be inherited or blocked.
     """
+    # A queued session save must land before this statement, or it would
+    # re-insert the row after the delete.
+    flush_pending_session_saves()
     try:
         days = max(1, int(age_days))
     except (TypeError, ValueError):
@@ -447,6 +517,9 @@ def db_clear_session_cards(session_id, conn=None):
 
 def db_delete_game_session(session_id, conn=None):
     """Delete all database-owned rows for a completed game session."""
+    # A queued session save must land before this statement, or it would
+    # re-insert the row after the delete.
+    flush_pending_session_saves()
     connection = conn or _db_layer._db
     sid = str(session_id)
     for table in ("game_cards", "session_events", "session_transactions",
@@ -3047,6 +3120,7 @@ def db_set_card_abilities_and_attributes(session_id, card_uid, abilities_json,
 
 def db_session_turn_order(session_id, conn=None):
     """Return the decoded session battle state, if one was persisted."""
+    flush_pending_session_saves()
     connection = conn or _db_layer._db
     row = connection.execute(
         "SELECT turn_order_json FROM game_sessions WHERE session_id=?",
@@ -4621,6 +4695,9 @@ def db_apply_starting_hand_effect(session_id, card_uid, cost_mod=0,
 
 def db_cleanup_game_sessions(conn=None):
     """Remove ended sessions and cards orphaned by session cleanup."""
+    # A queued session save must land before this statement, or it would
+    # re-insert the row after the delete.
+    flush_pending_session_saves()
     connection = conn or _db_layer._db
     connection.execute("DELETE FROM game_sessions WHERE state='ended'")
     connection.execute(

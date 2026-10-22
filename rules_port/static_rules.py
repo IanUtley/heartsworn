@@ -2491,6 +2491,50 @@ def _champion_static_flags(db, session_id, battle_state, owner):
     return flags
 
 
+def champion_static_intattrs(db, session_id, battle_state, owner):
+    """Summed static intattr values on the controller's champion (Armor 3 from
+    "You have Armor 3", "Each champion gets Armor 1"). Flag intattrs stay in
+    :func:`_champion_static_flags`; only additive values are summed here.
+    """
+    totals: dict[str, int] = {}
+    owner = int(owner or 0)
+    state = battle_state if isinstance(battle_state, dict) else {}
+    champion_map = state.get("champ_map") or {}
+    champion_uid = champion_map.get(owner, champion_map.get(str(owner)))
+    champion_guid = (state.get("champ_guid_map") or {}).get(
+        str(owner), (state.get("champ_guid_map") or {}).get(owner))
+
+    def add_leaves(source_uid, ability_guid, cache):
+        if not _ability_targets_champions(db, ability_guid, cache):
+            return
+        for param, _raw in _static_leaves(db, ability_guid, cache):
+            if str(param.get("property") or "").lower() != "intattr":
+                continue
+            name = str(param.get("attribute") or "")
+            if not name or name.lower() in _CHAMPION_INTATTR_FLAGS:
+                continue
+            if str(param.get("operation") or "Add").lower() != "add":
+                continue
+            if not _static_condition_matches(
+                    db, session_id, state, param, source_uid,
+                    owner, source_uid):
+                continue
+            totals[name] = totals.get(name, 0) + int(
+                param.get("value") or param.get("amount") or 0)
+
+    with _projection_cache() as cache:
+        for source_uid in _owner_static_sources(db, session_id, owner, cache):
+            for ability_guid in _static_abilities(db, session_id, source_uid,
+                                                  cache):
+                add_leaves(source_uid, ability_guid, cache)
+        if champion_uid is not None and champion_guid:
+            from pvp_db import db_get_champion_ability_guids
+            for ability_guid in db_get_champion_ability_guids(
+                    champion_guid, conn=db):
+                add_leaves(int(champion_uid), ability_guid, cache)
+    return {name: value for name, value in totals.items() if value}
+
+
 def hand_size_unlimited(db, session_id, battle_state):
     """Whether any champion currently lifts the maximum hand size.
 

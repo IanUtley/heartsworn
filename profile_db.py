@@ -712,6 +712,14 @@ def db_get_inventory(user_id, conn=None):
         (user_id,)).fetchall()]
 
 
+def db_inventory_template_quantities(user_id, conn=None):
+    """Return ``(template_guid, quantity)`` for every inventory row."""
+    rows = _profile_connection(conn).execute(
+        "SELECT template_guid, quantity FROM player_inventory WHERE user_id=?",
+        (int(user_id),)).fetchall()
+    return [(str(row[0] or ""), int(row[1] or 0)) for row in rows]
+
+
 def db_get_inventory_items(user_id):
     """Return every inventory row with a stable, unique client UID."""
     items = []

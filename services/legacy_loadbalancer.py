@@ -1044,6 +1044,7 @@ def handle_readytostartgame_22031(handler, target, instance, data_type, reqid, c
     campaign_encounter_conversation_guid = None
     campaign_mod_choice_guid = None
     campaign_player_deck_json = None
+    campaign_extra_deck_cards = []
     if is_campaign:
         camp_id = int((session.session_name or "camp_0").split("_")[-1] or 0)
         cfg = _hc.campaign.resolve_battle_config(
@@ -1069,6 +1070,9 @@ def handle_readytostartgame_22031(handler, target, instance, data_type, reqid, c
         is_tutorial = cfg["is_tutorial"]
         player_champ_guid = cfg["player_champ_guid"]
         campaign_player_deck_json = cfg.get("player_deck_cards_json")
+        # Temporary dungeon cards (a Chapel reward pick) join the deck for
+        # this run only.
+        campaign_extra_deck_cards = cfg.get("extra_deck_cards") or []
         # A mercenary fights with its saved party deck (template GUIDs,
         # like a starter deck); deck equipment does not apply to it.
         mercenary_deck_cards = cfg.get("mercenary_deck_cards")
@@ -1142,8 +1146,10 @@ def handle_readytostartgame_22031(handler, target, instance, data_type, reqid, c
     # Configure the client-style attitude and deck strategy once at
     # the battle boundary. Campaign attitude is the fallback when an
     # encounter deck has no explicit strategy.
-    ai_deck_sleeve_guid = _hc.db_encounter_deck_sleeve(
-        ai_deck_guid, conn=_hc._db) if ai_deck_guid else None
+    from campaign_runtime.records import encounter_deck_sleeve
+    ai_deck_sleeve_guid = (
+        _hc.db_encounter_deck_sleeve(ai_deck_guid, conn=_hc._db)
+        or encounter_deck_sleeve(ai_deck_guid)) if ai_deck_guid else None
     player_deck_sleeve_guid = (
         _hc.db_deck_sleeve(deck_db_id, handler.user_profile["id"], conn=_hc._db)
         if deck_db_id else None)
@@ -1313,12 +1319,25 @@ def handle_readytostartgame_22031(handler, target, instance, data_type, reqid, c
     game.push_player_updated(
         ai_uid_t, deck_sleeve_id=ai_deck_sleeve_guid,
         champ_id=getattr(handler, "_ai_champ_scid", None))
+    # A champion's static intattrs (Armor 3 from its own ability) are on the
+    # portrait from the start; they are not stored, so they are computed here.
+    from rules_port.static_rules import champion_static_intattrs
+    player_owner = int(handler.user_profile["id"]) if handler.user_profile else 0
+    start_state = {
+        "champ_map": {"0": int(ai_champ_id.uid.uid64),
+                      str(player_owner): int(player_champ_id.uid.uid64)},
+        "champ_guid_map": {"0": ai_champ_guid, str(player_owner): player_champ_guid}}
+    player_static = champion_static_intattrs(
+        _hc._db, session.session_id, start_state, player_owner)
+    ai_static = champion_static_intattrs(_hc._db, session.session_id, start_state, 0)
     game.push_card_updated(player_champ_id, pl_uid_t, _hc.game_engine.ECardCollections.None_,
                            _hc.game_engine.ECardTypes.Champion, attack=0, defense=player_starting_health,
-                           template_id=player_champ_guid)
+                           template_id=player_champ_guid,
+                           **({"int_attrs": player_static} if player_static else {}))
     game.push_card_updated(ai_champ_id, ai_uid_t, _hc.game_engine.ECardCollections.None_,
                            _hc.game_engine.ECardTypes.Champion, attack=0, defense=ai_starting_health,
-                           template_id=ai_champ_guid)
+                           template_id=ai_champ_guid,
+                           **({"int_attrs": ai_static} if ai_static else {}))
 
     # HUD portrait name: use the champion's name (e.g. "Morgana") for
     # the player, and the trainer NPC name for the AI (e.g. "Iddi").
@@ -1391,7 +1410,7 @@ def handle_readytostartgame_22031(handler, target, instance, data_type, reqid, c
     if deck_equipment:
         _hc.log_req(f"    Deck equipment: {deck_equipment}")
     if deck_rows and deck_rows[0]:
-        card_ids = _json.loads(deck_rows[0])
+        card_ids = _json.loads(deck_rows[0]) + campaign_extra_deck_cards
         random.shuffle(card_ids)
         for pos, card_ref in enumerate(card_ids):  # Push full deck
             cid = game._new_card_id()

@@ -39,6 +39,11 @@ TPL_SPAWN = "100e05a3-9993-4edd-a2fe-66f8565c345e"
 TPL_CHRONIC_MADNESS = "b717f238-7488-46fd-82a6-0d7f2efc9623"
 TPL_INCUBATE = "ae6ffe36-c358-4ea1-94cc-d4294c1d9b1c"
 TPL_SPIDERLING_EGG = "32bf0698-63d0-483f-9fc1-7f0d75808192"
+# Word of Xentoth (Epic, PvE): Draw two cards (you), then create ten Spiderling
+# Eggs for each opposing champion and put them into their decks.
+TPL_WORD_OF_XENTOTH = "ab8ba054-f344-49d4-bc26-9a8dced76194"
+AG_WORD_OF_XENTOTH_EGGS = "15bd1d3c-a2a2-d0c9-0d53-95b487230f49"
+AG_WORD_OF_XENTOTH_DRAW = "6d74e452-55f8-f65b-465e-dafa4f51589b"
 
 AG_BROOD_DAMAGE = "aa9ca993-d6b0-8eda-b6d1-09cc622dd5d0"
 AG_INCANTATION_DRAW = "e6945521-c4bf-9b3c-5bb6-82dc8ae0f82d"
@@ -1590,6 +1595,63 @@ def test_incubate_puts_eggs_in_opposing_deck(db):
         "WHERE template_guid=? GROUP BY user_id, location",
         (TPL_SPIDERLING_EGG,)).fetchall()
     assert eggs == [(5, "deck", 3)], eggs
+
+
+def test_word_of_xentoth_draws_for_caster_and_eggs_for_opponent(db):
+    """Word of Xentoth's two abilities reach different players.
+
+    "Draw two cards" targets You, the caster, so the AI's hand grows by two and
+    the player's hand is untouched.  "Create ten Spiderling Eggs for each opposing
+    champion and put them into their decks" targets the opposing champion's owner,
+    so the player's deck gains ten eggs and the AI's deck gains none.
+    """
+    from abilities.framework.triggers import resolve_stack_trigger
+    _copy_card(db, TPL_WORD_OF_XENTOTH)
+    _copy_card(db, TPL_SPIDERLING_EGG)
+    _copy_card(db, TPL_INCUBATE)
+    add_card(db, 101, 0, TPL_WORD_OF_XENTOTH, loc="CastSpells")
+    db.execute(
+        "UPDATE game_cards SET card_abilities=? WHERE card_uid=101",
+        (json.dumps([AG_WORD_OF_XENTOTH_EGGS, AG_WORD_OF_XENTOTH_DRAW]),))
+    # Two cards in the AI's deck for the draw to take.
+    add_card(db, 201, 0, TPL_INCUBATE, loc="deck")
+    add_card(db, 202, 0, TPL_INCUBATE, loc="deck")
+    db.commit()
+    pl_t, ai_t = _pl_ai()
+    game = game_engine.Game(1, pl_t, ai_t)
+    handler = HandlerStub(db)
+    bstate = {"player_health": 20, "ai_health": 20, "turn_number": 1}
+
+    def resolve(ability_guid, target=None):
+        # "You" resolves to the caster, so the draw names the AI as its target.
+        bstate["resolving_target_uid"] = target
+        resolve_stack_trigger(
+            handler, game, SessionStub(), db, pl_t, ai_t, bstate,
+            {"kind": "spell", "ability_guid": ability_guid, "source_uid": 101})
+
+    def hand_size(owner):
+        return db.execute(
+            "SELECT COUNT(*) FROM game_cards WHERE user_id=? AND location='hand'",
+            (owner,)).fetchone()[0]
+
+    assert hand_size(0) == 0
+    # The AI's draw reads its deck through the ai module's own connection.
+    import ai as ai_mod
+    old_ai_db = ai_mod._db
+    ai_mod._db = db
+    try:
+        resolve(AG_WORD_OF_XENTOTH_DRAW, target=int(ai_t.uid64))
+    finally:
+        ai_mod._db = old_ai_db
+    assert hand_size(0) == 2, "the AI draws two cards"
+    assert hand_size(5) == 0, "the player's hand is untouched"
+
+    resolve(AG_WORD_OF_XENTOTH_EGGS)
+    eggs = db.execute(
+        "SELECT user_id, location, COUNT(*) FROM game_cards "
+        "WHERE template_guid=? GROUP BY user_id, location",
+        (TPL_SPIDERLING_EGG,)).fetchall()
+    assert eggs == [(5, "deck", 10)], eggs
 
 
 def test_ai_incubate_uses_play_card_ability_on_chain(db):

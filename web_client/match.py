@@ -58,15 +58,21 @@ _slots = itertools.count(1)
 
 
 def deck_choices():
-    """Authored FRA decks with a champion and a complete list."""
+    """Authored FRA decks with a champion whose cards the server can seed."""
     rows = _db.execute(
         "SELECT deck_guid, deck_name, champion_guid, "
         "COALESCE(NULLIF(TRIM(ai_deck_personality), ''), 'Default'), "
         "COALESCE(is_elite, 0) FROM fra_encounters "
         "ORDER BY deck_name, deck_guid").fetchall()
+    # Decks listing a card the snapshot has no template for cannot be built.
+    unseedable = {str(row[0]).lower() for row in _db.execute(
+        "SELECT DISTINCT deck_guid FROM encounter_deck_cards "
+        "WHERE LOWER(card_guid) NOT IN (SELECT LOWER(guid) FROM card_templates) "
+        "AND LOWER(card_guid) NOT IN "
+        "(SELECT LOWER(champion_guid) FROM champion_abilities)").fetchall()}
     out = []
     for deck_guid, name, champion_guid, personality, elite in rows:
-        if not champion_guid:
+        if not champion_guid or str(deck_guid).lower() in unseedable:
             continue
         out.append({"deck_guid": str(deck_guid), "name": str(name),
                     "champion_guid": str(champion_guid),
@@ -81,7 +87,10 @@ class ActionError(ValueError):
 
 class WebMatch:
     def __init__(self, player_deck_guid, opponent_deck_guid, *, seed=None,
-                 player_name="You", ai_delay=0.35):
+                 player_name="You", ai_delay=0.35, threaded=True):
+        # ``threaded=False`` runs the match inline (the Pyodide demo has no
+        # threads): setup happens here and each ``submit`` is processed at once.
+        self.threaded = threaded
         self.slot = WEB_RUN_SLOT_BASE + next(_slots)
         self.seed = int(seed if seed is not None
                         else random.randrange(1, 1 << 30))
@@ -102,9 +111,12 @@ class WebMatch:
         self._declared = set()
         self._ai_tried = set()
         self._actions: queue.Queue = queue.Queue()
-        self._worker = threading.Thread(
-            target=self._run, name=f"web-match-{self.slot}", daemon=True)
-        self._worker.start()
+        if threaded:
+            self._worker = threading.Thread(
+                target=self._run, name=f"web-match-{self.slot}", daemon=True)
+            self._worker.start()
+        else:
+            self._start()
 
     # ------------------------------------------------------------------
     # Session plumbing
@@ -380,9 +392,13 @@ class WebMatch:
             if self.busy:
                 raise ActionError("the server is still resolving")
             self.busy = True
-        self._actions.put(action)
+        if self.threaded:
+            self._actions.put(action)
+        else:
+            self._process(action)
 
-    def _run(self):
+    def _start(self):
+        """Set the seats up and run the opening steps up to the first prompt."""
         try:
             with ENGINE_LOCK:
                 self._setup()
@@ -390,22 +406,29 @@ class WebMatch:
             self._advance()
         except Exception:
             self._fail()
+
+    def _process(self, action):
+        """Apply one browser action and run the AI up to the next prompt."""
+        try:
+            self.error = None
+            self._apply(action)
+            self._advance()
+        except ActionError as exc:
+            self.error = str(exc)
+        except Exception:
+            self._fail()
+        finally:
+            with self.cond:
+                self.busy = False
+                self.cond.notify_all()
+
+    def _run(self):
+        self._start()
         while True:
             action = self._actions.get()
             if action is None:
                 return
-            try:
-                self.error = None
-                self._apply(action)
-                self._advance()
-            except ActionError as exc:
-                self.error = str(exc)
-            except Exception:
-                self._fail()
-            finally:
-                with self.cond:
-                    self.busy = False
-                    self.cond.notify_all()
+            self._process(action)
 
     def _fail(self):
         self.error = traceback.format_exc(limit=6)

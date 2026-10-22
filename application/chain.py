@@ -4,6 +4,20 @@
 class ChainMixin:
     """Methods of HCPHandler, mixed into it (see hconnect_server)."""
 
+    def _is_choice_card(self, session, card_uid):
+        """Whether a chain card is a generated Choice card.
+
+        A choice card is not cast: the client's PlayChoiceCard never queues
+        CardCastEvent, so resolving it must not re-trigger "when you play a
+        non-resource card" (Illuminate) and start a loop.
+        """
+        if not card_uid:
+            return False
+        import hconnect_server as _hc
+        row = _hc.db_card_with_template(
+            session.session_id, int(card_uid), conn=_hc._db)
+        return bool(row) and "choice" in str(row[1] or "").lower()
+
     def _completed_rules_port_chain(self, session, bstate):
         """Find the native chain item released by a completed continuation."""
         try:
@@ -405,7 +419,8 @@ class ChainMixin:
                     # Normal plays publish CardCastEvent when they enter the
                     # chain. Keep a fallback for legacy/effect-created chain
                     # items, using the same champion-source/card-target shape.
-                    if not item.get("card_cast_event_dispatched"):
+                    if (not item.get("card_cast_event_dispatched") and
+                            not self._is_choice_card(session, uid)):
                         from rules_port.chain_items import dispatch_card_cast
                         dispatch_card_cast(
                             self, session, game, bstate, pl_t, ai_t, uid,
@@ -462,7 +477,8 @@ class ChainMixin:
             # "When you play an action/... " triggers (e.g. Chimes of the
             # Zodiac's "copy it") fire against the played spell.
             if (item.get("source_uid") and
-                    not item.get("card_cast_event_dispatched")):
+                    not item.get("card_cast_event_dispatched") and
+                    not self._is_choice_card(session, uid)):
                 # Keep the event source/target identities consistent for AI
                 # and player casts. Champion triggers such as Rowdy inspect
                 # the cast card through TriggerTarget.
@@ -682,6 +698,13 @@ class ChainMixin:
         if pending_input:
             _hc.log_req("    RequestPrioritySync: held for pending client input: "
                         + ",".join(pending_input))
+            if pending_checkpoint.get("pending_trigger"):
+                # The client only sends its next transaction after a reply, so
+                # re-open the trigger picker (its events are the reply).
+                pl_t = _hc.game_engine.UID.make(244, int(self.client_reck_id))
+                ai_t = _hc.game_engine.UID.make(_hc.game_engine.SERVICE_AI_UID_TYPE, 1000)
+                self._resend_pending_trigger(
+                    session, pending_checkpoint, pl_t, ai_t)
             return True
 
         priority = getattr(

@@ -784,6 +784,15 @@ def ai_declare_attackers(handler, game, session, ai_t, pl_t, battle_state):
         cs.attacker = scid
         cs.blockers = []
         combats.append(cs)
+    if attackers:
+        # The client raises one champion-scoped CardsAttackedEvent after the
+        # whole declaration ("three or more troops attack"), as the player's
+        # attack commit does.
+        from rules_port.tac import _tac_attr_hash
+        _dispatch_triggers(
+            _db, handler, game, session, pl_t, ai_t, battle_state,
+            "CardsAttackedEvent", int(ai_champ_scid.uid.uid64), 0,
+            event_tac={_tac_attr_hash("NumAttackers"): len(attackers)})
     _db.commit()
     battle_state["ai_attackers"] = attackers
     # Native RulesPort reattachment reuses the session's shared checkpoint.
@@ -1538,10 +1547,10 @@ def run_ai_turn(handler, session, pl_t, ai_t, battle_state, start_idx=0):
         elif phase == game_engine.ETurnPhases.EndTurn:
             # Switch the turn player back to the human. Reset the cycle so
             # the human's turn starts at StartTurn (phase_idx 0).
-            # Native RulesPort phase entry emits TurnEndedEvent at EndPhase,
-            # matching the client lifecycle.  Do not emit it again here when
-            # the AI loop reaches EndTurn; that would double-fire every
-            # end-of-turn trigger in an attached session.
+            # An attached Practice session dispatches TurnEndedEvent at the
+            # native turn boundary (hconnect_server native_turn_boundary), so
+            # do not emit it again here; that would double-fire every
+            # end-of-turn trigger.
             if not native_lifecycle:
                 _dispatch_triggers(
                     _db, handler, game, session, pl_t, ai_t, battle_state,
@@ -1781,6 +1790,13 @@ def run_ai_turn(handler, session, pl_t, ai_t, battle_state, start_idx=0):
                 # BattleStateInactivePriorityWindow — the only way the Pass
                 # button renders during the opponent's turn.
                 g.push_green_light(pl_t, game_engine.EPriorityContext.ResolveTopOfChain)
+                # The Pass label is built from the last context granted, so
+                # the AI's EndPhase with an empty chain re-grants the client's
+                # EndOpponentsPhase context: passing it ends the opponent's turn.
+                if (phase == game_engine.ETurnPhases.EndPhase and
+                        not battle_state.get("stack")):
+                    g.push_green_light(
+                        pl_t, game_engine.EPriorityContext.EndOpponentsPhase)
             handler._send_battle_events(session, g, pl_t)
             # Option builders load the persisted state independently. Re-save
             # the AI stop marker after they have emitted their packet so a late
@@ -1948,8 +1964,10 @@ def ai_play_resource(handler, game, session, ai_t, battle_state):
     from rules_port.resources import resource_play_limit
     resource_limit = resource_play_limit(
         _db, session.session_id, battle_state, 0)
+    from rules_port.resources import resource_charge_amount
     resource_play = play_resource(
         battle_state, "ai", cur_grant, max_grant,
+        charge_amount=resource_charge_amount(_db, _ai_ags),
         additional_plays=max(0, resource_limit - 1))
     charge_delta = max(
         0, int(resource_play.charge.new_value) -
@@ -2478,13 +2496,15 @@ def ai_choose_main_phase_card(handler, session, battle_state, ai_t, pl_t,
         if chosen is not None:
             lethal_x = (int(evaluator.bstate.get("player_health", 20))
                         if chosen.has_variable_cost else 0)
-            return {"card": chosen, "target_uid": None,
+            return {"card": chosen,
+                    "target_uid": evaluator.choose_action_target(chosen),
                     "x_cost": lethal_x,
                     "reason": "burn_to_win", "evaluator": evaluator}
         sweep = evaluator.best_sweeper()
         if sweep is not None:
             chosen, x_cost = sweep
-            return {"card": chosen, "target_uid": None,
+            return {"card": chosen,
+                    "target_uid": evaluator.choose_action_target(chosen),
                     "x_cost": int(x_cost or 0), "reason": "sweeper",
                     "evaluator": evaluator}
         if pre_combat:

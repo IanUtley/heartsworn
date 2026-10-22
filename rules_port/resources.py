@@ -426,6 +426,35 @@ def _owner_for_side(state, side):
     return 0
 
 
+def resource_charge_amount(db, ability_guids) -> int:
+    """Charge points a resource grants, from its authored chargepoints effects.
+
+    Each CardModifier effect whose property is ``chargepoints`` adds its resolved
+    amount (an input variable is already resolved in the authored parameters).
+    A resource with no such effect grants no charge, for example Shard of Fate.
+    """
+    from pvp_db import db_ability_effect_type_params
+    total = 0
+    for guid in ability_guids or ():
+        for effect_type, param in db_ability_effect_type_params(
+                str(guid).lower(), conn=db):
+            if effect_type != "CardModifierAbilityEffectTemplate":
+                continue
+            try:
+                modifier = json.loads(param or "{}")
+            except (TypeError, ValueError):
+                continue
+            if not isinstance(modifier, dict) or modifier.get("property") != "chargepoints":
+                continue
+            try:
+                amount = int(modifier.get("amount", 0) or 0)
+            except (TypeError, ValueError):
+                amount = 0
+            if amount > 0:
+                total += amount
+    return total
+
+
 def play_resource(state: MutableMapping, side: str, current_amount: int,
                   total_amount: int, *, threshold_color: int | None = None,
                   charge_amount: int = 1,

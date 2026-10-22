@@ -1905,8 +1905,14 @@ def _pvp_sync_view_to_state(state, view, player_pid, opponent_pid):
 
 
 def _pvp_resolve_granted_resource_abilities(handler, session, state,
-                                            card_uid, owner_pid):
-    """Resolve instance-only resource abilities on a shared PvP event view."""
+                                            card_uid, owner_pid, *,
+                                            printed_skip=None):
+    """Resolve instance-only resource abilities on a shared PvP event view.
+
+    When ``printed_skip`` is given, the resource's printed non-triggered
+    abilities are resolved too (as the PvE play path does), skipping the GUIDs
+    in that set.
+    """
     pids = db_game_session_pids(session.session_id)
     if len(pids) < 2:
         return []
@@ -1934,7 +1940,8 @@ def _pvp_resolve_granted_resource_abilities(handler, session, state,
     owner_handler._current_bstate = view
     game = _ge.Game(int(session.session_id), pl_uid, opp_uid)
     _pvp_populate_game_state(game, state, owner_pid, opponent_pid)
-    from rules_port.resources import resolve_granted_resource_abilities
+    from rules_port.resources import (
+        resolve_granted_resource_abilities, resolve_printed_resource_abilities)
     from rules_port.resolution import resolve_port_ability
     logs = resolve_granted_resource_abilities(
         game, session, _db, owner_handler, pl_uid, opp_uid, view,
@@ -1944,6 +1951,10 @@ def _pvp_resolve_granted_resource_abilities(handler, session, state,
         resolve_port_ability(
             _handler, _game, _session, _db_conn, _pl_t, _ai_t, _bstate,
             guid, source, owner, target_map={}))
+    if printed_skip is not None:
+        logs += resolve_printed_resource_abilities(
+            game, session, _db, owner_handler, pl_uid, opp_uid, view,
+            int(card_uid), owner_pid, skip_guids=printed_skip)
     _pvp_sync_view_to_state(state, view, owner_pid, opponent_pid)
     pvp_save_state(session, state)
     if logs:
@@ -2251,6 +2262,15 @@ def _pvp_ready_step(session, state, turn_pid, game=None, controller_uid=None,
     changes = ready_step_for_turn(
         _db, session.session_id, turn_pid, state, str(turn_pid),
         handler=handler)
+    # Each troop this step untaps fires CardReadiedEvent (native
+    # _dispatch_card_readied_events does the same in the Practice path); queued
+    # like the other PvP events so it resolves at FirstMainPhase.
+    tapped = int(_ge.ECardStates.Tapped)
+    for uid, _template_guid, card_owner, previous, new_state in changes or ():
+        if int(previous) & tapped and not int(new_state) & tapped:
+            _pvp_defer_trigger_event(
+                state, event_type="CardReadiedEvent", source_card_id=int(uid),
+                source_player_id=card_owner, data={"event_previous_state": int(previous)})
     if changes and game is not None:
         for uid, template_guid, _owner, _previous, new_state in changes:
             scid = _ge.SessionCardId(_ge.UID(int(uid)))
@@ -6054,8 +6074,16 @@ def _pvp_project_resource_play(handler, session, inner_bytes, my_pid,
             handler, session, state, my_pid, flag)
         if trigger is not None:
             threshold_trigger_games.append(trigger)
+    # Shards of Fate resolves its printed parent in the deck-prompt branch
+    # below; every other resource resolves its printed abilities here, except
+    # a printed choice ability which the choice flow owns (as in PvE).
+    printed_skip = None
+    if not is_shards_of_fate:
+        printed_skip = ({str(resource_choice_ability).lower()}
+                        if resource_choice_ability else set())
     resource_ability_events = _pvp_resolve_granted_resource_abilities(
-        handler, session, state, int(played_card_uid), my_pid)
+        handler, session, state, int(played_card_uid), my_pid,
+        printed_skip=printed_skip)
     # The resource is now played — refresh the turn player's options so the
     # second shard no longer highlights.
     if (not is_shards_of_fate and not resource_choice_ability and
@@ -6311,6 +6339,13 @@ def _pvp_project_resource_play(handler, session, inner_bytes, my_pid,
     return True
 
 
+def _ability_has_effects_from(ability_guid, order):
+    """Whether an authored ability still has effects at or after ``order``."""
+    from gamedata import DEFAULT_RECORD_STORE, ability_graph
+    graph = ability_graph(DEFAULT_RECORD_STORE, ability_guid)
+    return graph is not None and int(order or 0) < len(graph.effects)
+
+
 def _pvp_resolve_choice(handler, session, inner_bytes, my_pid,
                         typed_payload=None):
     """Resolve a private ChooseAndPlay choice and resume its parent BOM."""
@@ -6405,6 +6440,12 @@ def _pvp_resolve_choice(handler, session, inner_bytes, my_pid,
                 continuation.get("resume_effect_order", 0) or 0))
         parent = pending.get("parent") or {}
         parent_guid = str(parent.get("ability_guid") or "").lower()
+        if parent_guid and not _ability_has_effects_from(
+                parent_guid, parent.get("resume_effect_order", 0)):
+            # The picker was the parent's last effect, so the parent has
+            # nothing left to run.  Mark its chain item complete so the chain
+            # finishes it; resuming it from order 0 would reopen the picker.
+            parent_guid = ""
         if parent_guid and not state.get("pending_choice"):
             _pvp_resolve_ability(
                 handler, g, session, view, pl_t, ai_t, parent_guid,
@@ -6445,6 +6486,13 @@ def _pvp_resolve_choice(handler, session, inner_bytes, my_pid,
         from rules_port.choice_effects import _clear_choice_zone
         _clear_choice_zone(choice_context)
         state.pop("selected_choice_uid", None)
+    if not state.get("pending_choice") and not state.get("resolution_paused"):
+        # The picker finished the chain item it paused.  Hand its real chain
+        # instance id to the completion marker so the next pass finishes the
+        # item instead of re-running its printed effects from the start.
+        completed = int(state.pop("paused_chain_instance_id", 0) or 0)
+        if completed:
+            state["completed_chain_instance_id"] = completed
     state["stack"] = view.get("stack") or []
     state["stack_player_passed"] = False
     state["stack_ai_passed"] = False

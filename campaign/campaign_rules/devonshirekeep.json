@@ -90,9 +90,18 @@
   "NodeB": {
    "blocked": [
     "conversation(Devonshire Keep - Courtyard Success - Hidden Path NOT Unlocked)"
+   ],
+   "visible": [
+    "!flag(devonshire_skip_watchtower)",
+    "completed(NodeA)"
    ]
   }
  },
  "hooks": [],
- "runtime": "rules"
+ "runtime": "rules",
+ "edited_states": {
+  "NodeB": [
+   "visible"
+  ]
+ }
 }

@@ -545,9 +545,8 @@ class CardTemplate(RecordObject):
             result.extend([flag] * count)
         return tuple(result)
 
-    @cached_property
-    def lethal(self) -> bool:
-        """Read the printed Lethal IntAttr from the serialized client TAC."""
+    def _printed_int_attr(self, name: str) -> int:
+        """The printed IntAttr ``name`` from the serialized client TAC, or 0."""
         serialized = self.field("m_SerializedTAC")
         if isinstance(serialized, RecordObject):
             encoded = serialized.field("data", "")
@@ -556,23 +555,33 @@ class CardTemplate(RecordObject):
         else:
             encoded = ""
         if not encoded:
-            return False
+            return 0
         try:
             payload = base64.b64decode(str(encoded), validate=True)
         except (ValueError, TypeError):
-            return False
-        digest = bytearray(hashlib.md5(b"Lethal").digest()[:4])
+            return 0
+        digest = bytearray(hashlib.md5(name.encode("ascii")).digest()[:4])
         if digest[0] == 0:
             digest[0] = 1
         if digest[3] == 0:
             digest[3] = 1
         offset = payload.find(bytes(reversed(digest)))
         if offset < 0 or offset + 8 > len(payload):
-            return False
+            return 0
         try:
-            return bool(struct.unpack_from("<i", payload, offset + 4)[0])
+            return int(struct.unpack_from("<i", payload, offset + 4)[0])
         except struct.error:
-            return False
+            return 0
+
+    @cached_property
+    def lethal(self) -> bool:
+        """Read the printed Lethal IntAttr from the serialized client TAC."""
+        return bool(self._printed_int_attr("Lethal"))
+
+    @cached_property
+    def cant_heal_at_end_of_turn(self) -> bool:
+        """Damage on this card is kept through the end-of-turn heal."""
+        return bool(self._printed_int_attr("CantHealAtEndOfTurn"))
 
     @property
     def resource_cost(self) -> int:

@@ -56,114 +56,28 @@ button.primary {
 }
 button.primary:disabled { filter: grayscale(1) brightness(.6); cursor: wait; }
 .status { min-height: 1.2em; margin: 0; color: var(--ink-dim); font-size: 13px; white-space: pre-wrap; }
+.client-folder { display: grid; gap: 8px; padding: 12px 14px; border: 1px dashed var(--gold); border-radius: 8px; }
+.client-folder p { margin: 0; font-size: 13px; color: var(--ink-dim); }
+.client-folder button { justify-self: start; }
+.lobby-panel button:disabled { opacity: .5; cursor: not-allowed; }
 
 /* ------------------------------------------------------------------ */
 /* Board: painted arena, gameboard themes, 3D table                    */
 /* ------------------------------------------------------------------ */
 
-/* Gameboards are named after the battleboards in the Hex inventory data.
-   Each one only sets colours; the arena is drawn the same way for all. */
-body, body[data-board="basic"] {
-  --outer: #3c4a43; --outer2: #161d1b; --stone: #8f948a; --stone-dark: #4a4f49;
-  --field: #5d8a31; --field2: #2c4a17; --sigil: transparent; --arc: #f2c94c; --fire: #ff9a2e;
-}
-body[data-board="forest"] {
-  --outer: #3b4a1d; --outer2: #10160a; --stone: #5a4a30; --stone-dark: #2a2214;
-  --field: #6b5527; --field2: #2e2410; --sigil: #ffcf5a; --arc: #ffd56b; --fire: #ffb347;
-}
-body[data-board="frostring"] {
-  --outer: #8fb6cc; --outer2: #1d3446; --stone: #c9dde8; --stone-dark: #6f8ea3;
-  --field: #e4f2fa; --field2: #9cc0d6; --sigil: #8fe3ff; --arc: #9fe8ff; --fire: #74d8ff;
-}
-body[data-board="badlands"] {
-  --outer: #7a3d1f; --outer2: #2a1208; --stone: #a8683e; --stone-dark: #5e3218;
-  --field: #c9925a; --field2: #8a5530; --sigil: transparent; --arc: #ffd27a; --fire: #ff6a2a;
-}
-body[data-board="sanctum"] {
-  --outer: #2a1424; --outer2: #090408; --stone: #54334a; --stone-dark: #24121f;
-  --field: #3a1428; --field2: #14060e; --sigil: #ff3b5c; --arc: #ff5470; --fire: #ff2d55;
-}
-body[data-board="coastline"] {
-  --outer: #1f6382; --outer2: #082233; --stone: #d8c7a0; --stone-dark: #9a865e;
-  --field: #79a95e; --field2: #3d6630; --sigil: transparent; --arc: #fff1b8; --fire: #ffcf6a;
-}
+/* The battleboard is drawn in three.js from the client's own assets; the page
+   only needs a neutral background behind it. */
+body { --outer2: #0d1210; }
+
 :root {
   --noise: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='240'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 .5 0 0 0 0 .5 0 0 0 0 .5 0 0 0 1.1 -.2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
-  --roots: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 200 200'%3E%3Cdefs%3E%3Cpath id='r' d='M80 80C72 72 64 67 54 59M62 65C58 57 57 50 51 42M54 59C46 57 39 53 30 51M45 56C41 62 35 65 28 71M51 42C49 36 45 31 40 25M51 42C55 36 55 30 59 23M30 51C25 47 21 47 15 44M28 71C24 76 19 77 14 82'/%3E%3C/defs%3E%3Cg fill='none' stroke='%23fff' stroke-width='2.2' stroke-linecap='round'%3E%3Cuse href='%23r'/%3E%3Cuse href='%23r' transform='rotate(90 100 100)'/%3E%3Cuse href='%23r' transform='rotate(180 100 100)'/%3E%3Cuse href='%23r' transform='rotate(270 100 100)'/%3E%3Ccircle cx='100' cy='100' r='97' stroke-width='1.6'/%3E%3Ccircle cx='100' cy='100' r='92.5' stroke-width='.8'/%3E%3Ccircle cx='100' cy='100' r='27' stroke-width='1.4'/%3E%3Cpath d='M73 100h54M100 73v54' stroke-width='1.2'/%3E%3C/g%3E%3C/svg%3E");
 }
 
 #board { position: relative; width: 100vw; height: 100vh; overflow: clip; background: var(--outer2); }
 #board3d { position: absolute; inset: 0; }
 #board3d canvas { display: block; width: 100%; height: 100%; }
-body.webgl #scene, body.webgl #table { display: none; }
-#scene {
-  position: absolute; inset: 0; pointer-events: none; overflow: hidden;
-  background:
-    radial-gradient(ellipse at 50% 46%, transparent 45%, rgba(0,0,0,.6) 100%),
-    var(--noise),
-    radial-gradient(ellipse at 50% 46%, var(--outer), var(--outer2) 85%);
-  background-blend-mode: normal, overlay, normal;
-  transition: background .6s;
-}
-.arena-plane {
-  position: absolute; left: 50%; top: 47%; width: min(122vh, 88vw); aspect-ratio: 1;
-  transform: translate(-50%, -50%) perspective(1600px) rotateX(36deg);
-}
-.arena, .arena-field, .arena-sigil { position: absolute; border-radius: 50%; }
-.arena {
-  inset: 0;
-  background:
-    repeating-radial-gradient(circle, transparent 0 4.2%, rgba(0,0,0,.32) 4.2% 4.5%),
-    repeating-conic-gradient(from 3deg, transparent 0 7deg, rgba(0,0,0,.38) 7deg 7.5deg),
-    var(--noise),
-    radial-gradient(circle, var(--stone) 45%, var(--stone-dark) 72%);
-  background-blend-mode: normal, normal, overlay, normal;
-  box-shadow: 0 0 0 12px rgba(0,0,0,.28), 0 40px 90px rgba(0,0,0,.65);
-}
-.arena-field {
-  inset: 19%;
-  background:
-    repeating-linear-gradient(100deg, rgba(255,255,255,.05) 0 2px, transparent 2px 6px),
-    var(--noise),
-    radial-gradient(circle at 50% 45%, var(--field), var(--field2) 78%);
-  background-blend-mode: normal, overlay, normal;
-  box-shadow: inset 0 0 50px rgba(0,0,0,.6), 0 0 0 5px rgba(0,0,0,.35);
-}
-.arena-sigil {
-  inset: 13%; background: var(--sigil);
-  -webkit-mask: var(--roots) center / contain no-repeat; mask: var(--roots) center / contain no-repeat;
-  filter: drop-shadow(0 0 6px var(--sigil)); animation: sigil 4s ease-in-out infinite alternate;
-}
-@keyframes sigil { from { opacity: .55; } to { opacity: .95; } }
-.arena-arcs i {
-  position: absolute; left: 50%; top: 50%; aspect-ratio: 1; border-radius: 50%;
-  border: 3px solid var(--arc); transform: translate(-50%, -50%);
-  -webkit-mask: linear-gradient(to bottom, transparent 54%, #000 64%); mask: linear-gradient(to bottom, transparent 54%, #000 64%);
-  box-shadow: 0 0 10px var(--arc), inset 0 0 10px var(--arc); opacity: .65;
-}
-.arena-arcs i:nth-child(1) { width: 30%; } .arena-arcs i:nth-child(2) { width: 34%; } .arena-arcs i:nth-child(3) { width: 38%; }
-
-.brazier { position: absolute; width: 74px; height: 74px; border-radius: 50%;
-  background: radial-gradient(circle, #2b2522 0 52%, #121010 53% 63%, transparent 65%); }
-.brazier.tl { left: 1.5%; top: 34%; } .brazier.tr { right: 1.5%; top: 36%; }
-.brazier.bl { left: 15%; bottom: 1%; } .brazier.br { right: 13%; bottom: 2%; }
-.brazier::before {
-  content: ""; position: absolute; left: 12%; right: 12%; bottom: 38%; height: 115%;
-  border-radius: 50% 50% 42% 42%; mix-blend-mode: screen; transform-origin: 50% 100%;
-  background: radial-gradient(ellipse at 50% 82%, #fff6c8 0, var(--fire) 28%, color-mix(in srgb, var(--fire) 45%, transparent) 52%, transparent 70%);
-  filter: blur(2px); animation: flicker 1.3s ease-in-out infinite alternate;
-}
-.brazier::after {
-  content: ""; position: absolute; inset: -70%; border-radius: 50%;
-  background: radial-gradient(circle, color-mix(in srgb, var(--fire) 30%, transparent), transparent 62%);
-  animation: glow 2.2s ease-in-out infinite alternate;
-}
-.brazier.tr::before, .brazier.bl::before { animation-delay: -.6s; }
-@keyframes flicker {
-  0% { transform: scale(1, 1); } 35% { transform: scale(1.08, .9) skewX(2deg); }
-  70% { transform: scale(.94, 1.1) skewX(-3deg); } 100% { transform: scale(1.04, .96) skewX(3deg); }
-}
-@keyframes glow { from { opacity: .6; } to { opacity: 1; } }
+#board3d .arc-layer { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 14; }
+body.webgl #table { display: none; }
 
 /* The table: both warzones and the centre, laid on a slightly tilted plane */
 #table { position: absolute; left: 220px; right: 150px; top: 62px; bottom: 232px; perspective: 1300px; pointer-events: none; }
@@ -203,12 +117,15 @@ body.webgl #scene, body.webgl #table { display: none; }
 .card {
   --shard: var(--colorless);
   position: relative; width: var(--card-w); height: var(--card-h); flex: 0 0 auto;
-  border-radius: 9px; overflow: hidden; user-select: none;
+  border-radius: 10px; overflow: hidden; user-select: none;
   background: linear-gradient(160deg, color-mix(in srgb, var(--shard) 70%, #fff 10%), color-mix(in srgb, var(--shard) 45%, #000 55%));
-  border: 2px solid color-mix(in srgb, var(--shard) 60%, #000 40%);
-  box-shadow: 0 12px 18px rgba(0,0,0,.55), inset 0 0 0 1px rgba(255,255,255,.15);
+  border: 3px solid #17120a;
+  box-shadow: 0 12px 18px rgba(0,0,0,.55), inset 0 0 0 1px #c9a14a, inset 0 0 0 3px #17120a, inset 0 0 0 4px rgba(201,161,74,.45);
   transition: transform .25s ease, box-shadow .2s, filter .25s, opacity .25s;
 }
+/* Hand, preview and mulligan cards: the board's painted face, with no DOM chrome */
+.card.painted { background: none; border: none; box-shadow: none; border-radius: 0; overflow: visible; }
+.card.painted img { display: block; width: 100%; height: 100%; pointer-events: none; user-select: none; }
 .card.fresh { animation: card-in .35s ease; }
 @keyframes card-in { from { opacity: 0; transform: translateY(-12px) scale(.92); } }
 .card.shard-blood { --shard: var(--blood); }
@@ -219,7 +136,7 @@ body.webgl #scene, body.webgl #table { display: none; }
 .card.shard-multi { --shard: #c9a14a; }
 
 .card .art {
-  position: absolute; left: 6px; right: 6px; top: 22px; height: 54%;
+  position: absolute; left: 6px; right: 6px; top: 22px; height: 52%;
   border-radius: 5px; background-size: cover; background-position: center;
   background-color: rgba(0,0,0,.35);
   background-image: radial-gradient(circle at 50% 40%, color-mix(in srgb, var(--shard) 55%, transparent), rgba(0,0,0,.55) 75%);
@@ -237,9 +154,15 @@ body.webgl #scene, body.webgl #table { display: none; }
   font-size: 12px; display: grid; place-items: center; box-shadow: 0 1px 3px #000;
 }
 .card .type-line {
-  position: absolute; left: 6px; right: 6px; top: calc(22px + 54% + 2px);
-  font-size: 9px; color: rgba(255,255,255,.85); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  min-width: 0; flex: 1; font-size: 9px; color: rgba(255,255,255,.9); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
+.card .type-bar { position: absolute; left: 5px; right: 5px; top: calc(22px + 52% + 3px); height: 15px; display: flex; align-items: center; gap: 3px; padding: 0 3px; background: linear-gradient(90deg, rgba(10,10,12,.94), rgba(44,43,41,.92), rgba(10,10,12,.94)); border: 1px solid rgba(220,196,142,.7); }
+.card .faction, .card .rarity { flex: 0 0 auto; font-size: 10px; line-height: 1; color: #f4dc8b; text-shadow: 0 1px #000; }
+.card .faction-blood { color: #c477e2; }.card .faction-ruby { color: #ff7061; }.card .faction-sapphire { color: #76bdff; }.card .faction-wild { color: #87df89; }.card .faction-diamond { color: #fff1bd; }
+.card .thresholds { position: absolute; left: 3px; top: 24px; display: grid; gap: 2px; z-index: 1; }
+.card .thresholds .gem { width: 9px; height: 9px; box-shadow: 0 1px 3px #000; }
+.card .text-box { display: block; position: absolute; left: 7px; right: 7px; top: calc(22px + 52% + 20px); bottom: 27px; padding: 3px 4px; overflow: hidden; border-radius: 3px; background: rgba(8,8,10,.78); color: #f1eee6; font-size: 7px; line-height: 1.15; }
+.card .text-box .flavor { display: none; }
 .card .stats {
   position: absolute; bottom: 4px; left: 4px; right: 4px; display: flex; justify-content: space-between;
 }
@@ -257,17 +180,17 @@ body.webgl #scene, body.webgl #table { display: none; }
 .counter { min-width: 18px; height: 18px; border-radius: 9px; background: #2c1f45; border: 1px solid #b89cff;
   font-size: 10px; display: grid; place-items: center; }
 .card .gems { position: absolute; right: 4px; bottom: 30px; }
-.card .thresholds { position: absolute; left: 3px; top: 22px; display: grid; gap: 2px; }
 
-.card.tapped { transform: rotate(14deg) translateY(4px); filter: grayscale(.55) brightness(.75); }
-.card.attacking { transform: translateY(-18px); box-shadow: 0 0 0 3px var(--danger), 0 10px 22px rgba(0,0,0,.6); }
-#opp-warzone .card.attacking { transform: translateY(18px); }
-.card.blocking { box-shadow: 0 0 0 3px #7ad3ff, 0 10px 22px rgba(0,0,0,.6); }
+.card.tapped { transform: rotate(-90deg); filter: grayscale(.55) brightness(.75); }
+.card.attacking { transform: rotate(-90deg); box-shadow: 0 0 0 3px #42ff6e, 0 10px 22px rgba(0,0,0,.6); }
+.card.blocking { box-shadow: 0 0 0 3px #ff3d3d, 0 10px 22px rgba(0,0,0,.6); }
 .card.dead { opacity: 0; transform: scale(.6); }
 
 .card.playable { box-shadow: 0 0 0 2px var(--glow), 0 0 16px 2px rgba(124,240,255,.6); cursor: pointer; }
 .card.selectable { box-shadow: 0 0 0 3px #ffe066, 0 0 18px 4px rgba(255,224,102,.55); cursor: pointer; }
-.card.selected { box-shadow: 0 0 0 3px #ff4fd8, 0 0 22px 6px rgba(255,79,216,.6); }
+.card.selected { box-shadow: 0 0 0 3px #ffb020, 0 0 22px 6px rgba(255,176,32,.7); }
+/* A card a chain item targets: golden, wherever a panel shows it. */
+.card.chain-target, .portrait.chain-target { outline: 3px solid #ffb020; outline-offset: 3px; box-shadow: 0 0 16px 4px rgba(255,176,32,.6); }
 .card.chosen-attacker { transform: translateY(-22px); box-shadow: 0 0 0 3px var(--danger), 0 0 20px rgba(255,80,60,.8); }
 
 /* Hidden card / sleeve backs */
@@ -305,8 +228,7 @@ body.webgl #scene, body.webgl #table { display: none; }
 .resource-chip {
   flex: 0 0 auto;
   width: 30px; height: 40px; border-radius: 6px; display: grid; place-items: center; font-size: 11px;
-  background: linear-gradient(var(--shard, #666), #111); border: 1px solid rgba(255,255,255,.3);
-  box-shadow: 0 2px 6px #000;
+  background: linear-gradient(var(--shard, #666), #111);
 }
 .resource-chip.tapped { filter: grayscale(.8) brightness(.5); }
 
@@ -326,16 +248,22 @@ body.webgl #scene, body.webgl #table { display: none; }
   border-radius: 8px; background: var(--glow); color: #052a30; font-weight: bold; letter-spacing: 1px;
 }
 .portrait {
-  position: relative; width: 100%; aspect-ratio: 1.7; border-radius: 12px; overflow: hidden;
+  position: relative; width: 100%; aspect-ratio: 1.25; border-radius: 12px; overflow: hidden;
   background: radial-gradient(circle at 50% 35%, color-mix(in srgb, var(--shard, #888) 80%, #fff 20%), #111 85%);
   background-size: cover; background-position: center 25%;
   display: grid; place-items: center; font-family: Georgia, serif; font-size: 44px; color: rgba(255,255,255,.75);
   box-shadow: inset 0 0 30px rgba(0,0,0,.7);
+  border: 3px solid #c9a14a; outline: 2px solid #2a1d08; outline-offset: 2px;
 }
 .portrait.selectable { box-shadow: 0 0 0 3px #ffe066, 0 0 18px 4px rgba(255,224,102,.55); cursor: pointer; }
-.portrait.selected { box-shadow: 0 0 0 3px #ff4fd8; }
+.portrait.selected { box-shadow: 0 0 0 3px #ffb020; }
 .portrait.playable { box-shadow: 0 0 0 3px var(--glow), 0 0 16px rgba(124,240,255,.6); cursor: pointer; }
-.champ-name { margin-top: 6px; font-weight: bold; font-size: 14px; color: var(--gold); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.champ-name {
+  margin-top: 8px; padding: 3px 8px; text-align: center; font-weight: bold; font-size: 13px; letter-spacing: .5px;
+  color: var(--gold); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  background: linear-gradient(90deg, rgba(0,0,0,.85), rgba(40,34,26,.95), rgba(0,0,0,.85));
+  border: 1px solid #b8913f; border-radius: 4px; box-shadow: inset 0 0 0 1px rgba(255,230,170,.2);
+}
 .player-name { font-size: 11px; color: var(--ink-dim); }
 .life {
   position: absolute; right: 2px; top: 2px; width: 52px; height: 52px; border-radius: 50%;
@@ -350,7 +278,7 @@ body.webgl #scene, body.webgl #table { display: none; }
 .thresholds-row { display: flex; gap: 3px; margin-top: 6px; flex-wrap: wrap; }
 .champ-powers { display: grid; gap: 4px; margin-top: 6px; }
 .power {
-  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+  display: block; overflow-wrap: anywhere;
   font-size: 11px; text-align: left; padding: 4px 6px; border-radius: 6px; border: 1px solid #4a4566;
   background: #1b1a2b; color: var(--ink-dim);
 }
@@ -369,14 +297,18 @@ body.webgl #scene, body.webgl #table { display: none; }
 
 .piles { display: grid; gap: 8px; justify-items: center; }
 .pile {
-  position: relative; width: 74px; height: 52px; border-radius: 8px; display: grid; place-items: center;
-  border: 1px solid rgba(255,255,255,.18); background: rgba(0,0,0,.4); font-size: 11px; color: var(--ink-dim);
+  position: relative; width: 84px; height: 116px; border-radius: 9px; display: grid; place-items: center;
+  border: 2px solid #15110a; background: rgba(0,0,0,.4); font-size: 11px; color: var(--ink-dim);
+  box-shadow: 3px 3px 0 #0c0a06, 6px 6px 0 #1d170c, 0 12px 18px rgba(0,0,0,.6);
   cursor: pointer;
 }
-.pile b { display: block; font-size: 18px; color: var(--ink); text-align: center; }
+.pile b {
+  position: absolute; left: 0; right: 0; bottom: 0; padding: 3px 0; font-size: 14px; color: var(--ink); text-align: center;
+  background: rgba(0,0,0,.72); border-top: 1px solid rgba(201,161,74,.6);
+}
 .pile.deck { background: var(--sleeve-bg); border-color: var(--sleeve-edge); }
 .pile.graveyard { background: linear-gradient(#2f2a2a, #151212); }
-.pile.void { background: radial-gradient(circle, #3a1f63, #07020f 75%); }
+.pile.void { background: radial-gradient(circle, #3a1f63, #07020f 75%); box-shadow: 3px 3px 0 #0c0a06, 6px 6px 0 #1d170c, 0 0 18px rgba(150,90,255,.55); }
 
 /* ------------------------------------------------------------------ */
 /* Centre: medallion, chain, combat fire                               */
@@ -461,19 +393,6 @@ body[data-combat="1"] .firebar { display: block; }
 #action-buttons button.secondary { min-width: 120px; }
 #preview { position: absolute; left: 214px; top: 50%; transform: translateY(-50%); z-index: 30; pointer-events: none; }
 #preview .card { --card-w: 250px; --card-h: 350px; animation: none; transform: none; filter: none; }
-#preview .card .name { font-size: 16px; left: 36px; top: 6px; height: 24px; }
-#preview .card .cost { width: 30px; height: 30px; font-size: 18px; }
-#preview .card .art { top: 36px; height: 46%; }
-#preview .card .type-line { top: calc(36px + 46% + 4px); font-size: 12px; }
-#preview .card .text-box {
-  position: absolute; left: 10px; right: 10px; top: calc(36px + 46% + 22px); bottom: 38px; font-size: 12px; line-height: 1.3;
-  background: rgba(255,250,235,.9); color: #1b1408; border-radius: 6px; padding: 6px 8px; overflow: hidden;
-}
-#preview .card .text-box .flavor { margin-top: 6px; font-style: italic; color: #5b4c33; }
-#preview .card .stats .stat { height: 30px; min-width: 34px; font-size: 18px; border-radius: 15px; }
-#preview .card .keywords, #preview .card .counters { display: none; }
-.card .text-box { display: none; }
-#preview .card .text-box { display: block; }
 
 #log {
   position: absolute; right: 104px; top: 12px; z-index: 13; text-shadow: 0 1px 2px #000; width: 230px; max-height: 64px; overflow: hidden; text-align: right;
@@ -503,3 +422,15 @@ body[data-combat="1"] .firebar { display: block; }
 
 .toast { position: absolute; left: 50%; top: 46%; transform: translateX(-50%); z-index: 70; padding: 8px 16px; border-radius: 10px;
   background: rgba(120,20,20,.9); border: 1px solid #ff9d8f; font-size: 14px; animation: float 2.5s ease-in forwards; }
+
+/* Drag to play (app.js): the ghost follows the pointer, and the board lights up
+   while a dragged hand card is above the hand. */
+.drag-ghost { position: fixed; pointer-events: none; transform: translate(-50%, -50%) scale(1.1); z-index: 100; opacity: 0.9; }
+#board.drop-target { box-shadow: inset 0 0 0 3px #e8c15a; }
+#my-hand .card { touch-action: none; }
+
+/* Resource cards are frameless, like the basic resource chips (app.js cardHTML) */
+.card.resource { background: none; border: none; box-shadow: none; border-radius: 0; overflow: visible; }
+.card.resource .name, .card.resource .cost, .card.resource .type-bar,
+.card.resource .text-box, .card.resource .thresholds, .card.resource .keywords { display: none; }
+.card.resource .art { left: 0; right: 0; top: 0; bottom: 0; height: auto; border-radius: 6px; box-shadow: 0 2px 6px #000; }

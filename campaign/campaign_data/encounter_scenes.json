@@ -3886,7 +3886,11 @@
       "title": "Rising Flames"
      }
     ],
-    "rewards_json": {},
+    "rewards_json": {
+     "gold": 150,
+     "xp": 125,
+     "one_time": false
+    },
     "ai_deck_personality": "Burn"
    },
    {
@@ -3897,7 +3901,11 @@
     "ai_deck_guid": "343e4bfc-141c-4ce1-a374-3a7d99e466df",
     "ai_champion_guid": "b32acee6-2333-4ccf-9249-9619a9186369",
     "mods_json": [],
-    "rewards_json": {},
+    "rewards_json": {
+     "gold": 300,
+     "xp": 200,
+     "one_time": false
+    },
     "ai_deck_personality": "Default"
    },
    {
@@ -3908,7 +3916,34 @@
     "ai_deck_guid": "5455c1b3-1d47-44b1-ac63-ae64272e97eb",
     "ai_champion_guid": "2b83c833-ccd5-42fb-b7c1-3eea5768ba0a",
     "mods_json": [],
-    "rewards_json": {},
+    "rewards_json": {
+     "dungeon_only": true,
+     "card_choice": [
+      {
+       "guid": "e21559c4-a7ff-4314-b8ed-6f3fbe5f55ee",
+       "name": "Power of Blood"
+      },
+      {
+       "guid": "d0de9e12-4edb-434d-9bd5-13a57e007aac",
+       "name": "Power of Diamond"
+      },
+      {
+       "guid": "eacae3c9-4363-4a7b-b4ba-4b35187f51a6",
+       "name": "Power of Ruby"
+      },
+      {
+       "guid": "0c6fbf8f-4900-4717-9098-dc89bed719a2",
+       "name": "Power of Sapphire"
+      },
+      {
+       "guid": "2f2e4d59-6299-4460-a15c-cce2283cbcaf",
+       "name": "Power of Wild"
+      }
+     ],
+     "gold": 400,
+     "xp": 250,
+     "one_time": false
+    },
     "ai_deck_personality": "Burn"
    },
    {
@@ -3936,7 +3971,11 @@
     "ai_deck_guid": "0f8132c9-866d-4ffc-b0d5-21b15e700360",
     "ai_champion_guid": "d7e4935d-fc3b-4bb3-b796-fc48bb0746ea",
     "mods_json": [],
-    "rewards_json": {},
+    "rewards_json": {
+     "gold": 400,
+     "xp": 250,
+     "one_time": false
+    },
     "ai_deck_personality": "BuildArmy"
    },
    {
@@ -3958,7 +3997,11 @@
     "ai_deck_guid": "078e301b-f76b-468a-a924-433ed34073c2",
     "ai_champion_guid": "e9b57e15-a905-49b4-80f4-2f73abce02d2",
     "mods_json": [],
-    "rewards_json": {},
+    "rewards_json": {
+     "gold": 500,
+     "xp": 300,
+     "one_time": false
+    },
     "ai_deck_personality": "Aggressive"
    },
    {
@@ -3979,7 +4022,11 @@
       "title": "Burning Mind"
      }
     ],
-    "rewards_json": {},
+    "rewards_json": {
+     "gold": 500,
+     "xp": 300,
+     "one_time": false
+    },
     "ai_deck_personality": "Aggressive"
    },
    {
@@ -4026,13 +4073,10 @@
     "rewards_json": {
      "end_of_game_rewards": [
       {
-       "one_time": true,
-       "chest_guid": "1d54da38-e03e-449c-aa2d-c9a7c0ad2cb1"
-      },
-      {
        "gold": 1000,
        "xp": 1000,
-       "one_time": false
+       "one_time": false,
+       "chest_guid": "1d54da38-e03e-449c-aa2d-c9a7c0ad2cb1"
       }
      ]
     },
@@ -4139,7 +4183,7 @@
     "rewards_json": {
      "gold": 250,
      "xp": 200,
-     "one_time": true
+     "one_time": false
     },
     "ai_deck_personality": "Aggressive",
     "actions_json": {
@@ -4170,7 +4214,7 @@
     "rewards_json": {
      "gold": 250,
      "xp": 200,
-     "one_time": true
+     "one_time": false
     },
     "ai_deck_personality": "Default",
     "actions_json": {
@@ -4346,7 +4390,7 @@
     "rewards_json": {
      "gold": 300,
      "xp": 200,
-     "one_time": true
+     "one_time": false
     },
     "ai_deck_personality": "Default",
     "actions_json": {
@@ -4369,7 +4413,7 @@
     "rewards_json": {
      "gold": 250,
      "xp": 200,
-     "one_time": true
+     "one_time": false
     },
     "ai_deck_personality": "Default",
     "actions_json": {
@@ -5283,10 +5327,9 @@
     "rewards_json": {
      "end_of_game_rewards": [
       {
-       "one_time": true
-      },
-      {
-       "one_time": true,
+       "gold": 650,
+       "xp": 500,
+       "one_time": false,
        "chest_guid": "56e231a3-f752-4e87-b04a-51c508c87c2d"
       }
      ]
@@ -5315,8 +5358,17 @@
      }
     ],
     "rewards_json": {
-     "one_time": true,
-     "card_guid": "ceeb3fb0-811f-45dd-ab84-de9e42871f28"
+     "end_of_game_rewards": [
+      {
+       "one_time": true,
+       "card_guid": "ceeb3fb0-811f-45dd-ab84-de9e42871f28"
+      },
+      {
+       "gold": 600,
+       "xp": 300,
+       "one_time": false
+      }
+     ]
     },
     "ai_deck_personality": "Aggressive"
    },
@@ -5328,8 +5380,15 @@
     "ai_deck_guid": "e5d0a899-7324-4a0b-8361-e1449efc3d4a",
     "ai_champion_guid": "45be339a-a5cf-4c8d-94b5-5eba2213c9d5",
     "mods_json": [],
-    "rewards_json": {},
-    "ai_deck_personality": "Aggressive"
+    "rewards_json": {
+     "gold": 150,
+     "xp": 125,
+     "one_time": false
+    },
+    "ai_deck_personality": "Aggressive",
+    "scene_tags": [
+     "faction(Underworld)"
+    ]
    },
    {
     "guid": "3d97ab1f-b517-47a0-895d-dc3ad75c0705",
@@ -5339,8 +5398,15 @@
     "ai_deck_guid": "44630e52-5a2f-4ac7-94f5-58cd505810db",
     "ai_champion_guid": "c495f470-e872-499b-bf6d-5d1d8f62a193",
     "mods_json": [],
-    "rewards_json": {},
-    "ai_deck_personality": "Aggressive"
+    "rewards_json": {
+     "gold": 150,
+     "xp": 125,
+     "one_time": false
+    },
+    "ai_deck_personality": "Aggressive",
+    "scene_tags": [
+     "faction(Ardent)"
+    ]
    },
    {
     "guid": "fd8c0762-5386-4776-9c3e-059f169353f3",
@@ -5374,7 +5440,11 @@
       "title": "Hall of Relics"
      }
     ],
-    "rewards_json": {},
+    "rewards_json": {
+     "gold": 350,
+     "xp": 200,
+     "one_time": false
+    },
     "ai_deck_personality": "Aggressive"
    },
    {
@@ -5398,7 +5468,11 @@
       "title": "Aid from the Coalition"
      }
     ],
-    "rewards_json": {},
+    "rewards_json": {
+     "gold": 450,
+     "xp": 250,
+     "one_time": false
+    },
     "ai_deck_personality": "Aggressive"
    },
    {
@@ -5448,7 +5522,11 @@
       "title": "Ravenous Zombies"
      }
     ],
-    "rewards_json": {},
+    "rewards_json": {
+     "gold": 200,
+     "xp": 150,
+     "one_time": false
+    },
     "ai_deck_personality": "Aggressive"
    },
    {
@@ -5923,7 +6001,11 @@
     "ai_deck_guid": "061a97e1-4e9a-4969-9ded-33151fca3a65",
     "ai_champion_guid": "b6796260-fea9-4598-8f8b-3a7c450d0574",
     "mods_json": [],
-    "rewards_json": {},
+    "rewards_json": {
+     "gold": 250,
+     "xp": 200,
+     "one_time": false
+    },
     "ai_deck_personality": "Aggressive"
    },
    {
@@ -5934,7 +6016,11 @@
     "ai_deck_guid": "d061ca08-4b14-470d-aa60-67691a738ef4",
     "ai_champion_guid": "ef489df1-7c5c-4912-8644-160e9e503f5d",
     "mods_json": [],
-    "rewards_json": {},
+    "rewards_json": {
+     "gold": 150,
+     "xp": 100,
+     "one_time": false
+    },
     "ai_deck_personality": "Aggressive"
    },
    {
@@ -5945,7 +6031,11 @@
     "ai_deck_guid": "b6c10636-0905-4330-a52e-082cbe9e0875",
     "ai_champion_guid": "9f5723ae-f8fc-4f9e-9751-a271f6bdda8e",
     "mods_json": [],
-    "rewards_json": {},
+    "rewards_json": {
+     "gold": 200,
+     "xp": 150,
+     "one_time": false
+    },
     "ai_deck_personality": "Default"
    },
    {
@@ -5956,7 +6046,11 @@
     "ai_deck_guid": "3512a741-b4db-4494-9a36-32ef861e5e72",
     "ai_champion_guid": "8d4942d7-86d9-4560-9265-cb7e6a5df401",
     "mods_json": [],
-    "rewards_json": {},
+    "rewards_json": {
+     "gold": 250,
+     "xp": 200,
+     "one_time": false
+    },
     "ai_deck_personality": "Aggressive"
    },
    {
@@ -5970,12 +6064,9 @@
     "rewards_json": {
      "end_of_game_rewards": [
       {
-       "gold": 1000,
-       "xp": 1000,
-       "one_time": false
-      },
-      {
-       "one_time": true,
+       "gold": 500,
+       "xp": 450,
+       "one_time": false,
        "chest_guid": "eda1cb9f-9900-4218-a8d1-6564573a9cf2"
       }
      ]
@@ -5990,7 +6081,11 @@
     "ai_deck_guid": "487ea5c3-7005-4bc0-9a6c-992a271a7ae1",
     "ai_champion_guid": "c12e2e30-6fca-4f08-b8e1-4289f4484a00",
     "mods_json": [],
-    "rewards_json": {},
+    "rewards_json": {
+     "gold": 400,
+     "xp": 250,
+     "one_time": false
+    },
     "ai_deck_personality": "Aggressive",
     "scene_tags": [
      "completed(NodeC)",
@@ -6015,7 +6110,11 @@
       "title": ""
      }
     ],
-    "rewards_json": {},
+    "rewards_json": {
+     "gold": 500,
+     "xp": 300,
+     "one_time": false
+    },
     "ai_deck_personality": "Aggressive",
     "scene_tags": [
      "completed(NodeC)"
@@ -6039,7 +6138,11 @@
       "title": ""
      }
     ],
-    "rewards_json": {},
+    "rewards_json": {
+     "gold": 500,
+     "xp": 300,
+     "one_time": false
+    },
     "ai_deck_personality": "Aggressive",
     "scene_tags": [
      "completed(NodeD)"

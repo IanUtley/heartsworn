@@ -114,6 +114,10 @@ class TransactionsMixin:
             phase = _be.current_phase(bstate)
         except Exception:
             bstate, phase = None, None
+        if bstate and bstate.get("pending_trigger") and not bstate.get("pvp"):
+            self._resend_pending_trigger(session, bstate, pl_t, ai_t)
+            _hc.log_req("    RequestPrioritySync: picker still pending, re-sent")
+            return True
         if bstate and phase is not None and bstate.get("turn_player") == _be.PLAYER:
             game = self._fresh_game(session, pl_t, ai_t, bstate)
             game.push_green_light(pl_t, self._priority_context_for(phase, bstate))
@@ -756,6 +760,17 @@ class TransactionsMixin:
             # here and is sent to the client normally.
             self._autopass_game_started_chain(
                 session, pl_t, ai_t, bstate, game)
+            # The first turn starts like every turn, once the GameStarted chain has
+            # granted its abilities (e.g. a scene mod's "at the start of your turn"):
+            # TurnStartedEvent fires start-of-turn triggers, whichever player goes first.
+            first_champ = (self._player_champ_scid if play_first_is_player
+                           else getattr(self, "_ai_champ_scid", None))
+            first_owner = self.user_profile["id"] if play_first_is_player else 0
+            if first_champ is not None:
+                self._dispatch_native_trigger(
+                    game, session, pl_t, ai_t, bstate, "TurnStartedEvent",
+                    int(first_champ.uid.uid64), first_owner)
+                _hc.log_req(f"    First turn: TurnStartedEvent dispatched for owner {first_owner}")
             if (_be.stack_empty(bstate) and
                     not bstate.get("pending_choice") and
                     not bstate.get("pending_deck_search") and
@@ -1798,6 +1813,9 @@ class TransactionsMixin:
                     except Exception:
                         continue
             pend = bstate.pop("pending_trigger")
+            _port = getattr(session, "_rules_port_session", None)
+            if _port is not None:
+                _port.trigger_prompt_open = False
             ag = pend["ability_guid"]
             src = int(pend["source_uid"])
             inst_id = int(pend["instance_id"])
@@ -2573,11 +2591,11 @@ class TransactionsMixin:
             # count for metadata conditions such as "three or more".
             player_champ = (getattr(self, "_player_champ_scid", None) or
                             _hc.game_engine.SessionCardId(pl_t))
+            from rules_port.tac import _tac_attr_hash
             self._dispatch_native_trigger(
                 game, session, pl_t, ai_t, bstate, "CardsAttackedEvent",
                 int(player_champ.uid.uid64), self.user_profile["id"],
-                attacker_count=len(attackers),
-                attacker_uids=list(attackers))
+                event_tac={_tac_attr_hash("NumAttackers"): len(attackers)})
         _hc._db.commit()
         game.push_combat_listing(pl_t, combats)
         self._send_battle_events(session, game, pl_t)

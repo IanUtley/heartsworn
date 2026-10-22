@@ -97,6 +97,11 @@ class ProfileStreamMixin:
         self._push_chests_stream(p)
         # Saved deck templates and mercenary parties.
         self._push_mercenary_stream(p)
+        # The mercenary party cap follows the mercenaries the account owns, so
+        # it is current before the flags are sent.
+        if p:
+            from services import mercenaries
+            mercenaries.sync_party_cap(_db, p["id"])
         # The single List<FlagData>: Reckoning account flags, including the
         # mercenary party cap (CAMP_PARTYCAP).
         self._push_reckoning_flags_stream(p)

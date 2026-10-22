@@ -1038,6 +1038,34 @@ def test_context_activate_ability_uses_typed_child_resolver():
     assert run.call_args.args[3] == {}, run.call_args
 
 
+def test_activate_hand_target_prompts_the_player_instead_of_auto_picking():
+    # Blood Sphinx's start-of-game invoke: "target a target action in your hand".
+    from rules_port import targeting
+    child = "1fe825fb-c157-bc44-c43d-25b64e43c320"
+    prompts = []
+
+    class Handler:
+        def _champion_targets(self):
+            return []
+
+        def _prompt_trigger_targets(self, game, pl_t, ai_t, session, bstate,
+                                    source_uid, ability_guid, template_guids,
+                                    candidates, owner_id=None, **_kwargs):
+            prompts.append((ability_guid, tuple(template_guids),
+                            list(candidates), owner_id))
+
+    state = {"resolving_source_uid": 123, "resolving_owner_id": 5,
+             "_rules_port_native_effect": True, "ability_variables": {}}
+    context = EffectContext.from_rules_port(
+        object(), _Session(), _DB(), Handler(), "player", "ai", state,
+        "effect", child)
+    with mock.patch.object(targeting, "legal_targets", return_value=[101, 102]):
+        assert context.activate_ability() == "activate ability: awaiting target from hand"
+    assert prompts == [(child, ("4c516c4a-0ba9-2b93-dc3e-f037338b9a2a",),
+                        [101, 102], 5)], prompts
+    assert state.get("resolution_paused") is True
+
+
 def test_ability_trace_records_authoritative_zone_and_event_deltas():
     from abilities.framework.trace import _CARD_COLUMNS, begin_effect, end_effect
 

@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any
 
 from campaign_runtime import offers
+from db import CAMPAIGN_NODE_CONVERSATION_VISIBLE
 from campaign_runtime.records import (
     CAMPAIGN_ROOT, _endings_of, _guid, _qualifiers, _records_encounters, _scene_kind,
     _short_type, champion_names, conversation_hooks, conversations,
@@ -296,8 +297,8 @@ def server_catalog(db: sqlite3.Connection, template: str = AREA_TEMPLATE,
     db_rows = [dict(row) for row in _query(db,
         "SELECT node_id, conversation_guid, conversation_name, "
         "trigger_json, priority, enabled FROM campaign_node_conversations "
-        "WHERE campaign_template=? ORDER BY node_id, priority, "
-        "conversation_name", (template,))]
+        "WHERE campaign_template=? AND " + CAMPAIGN_NODE_CONVERSATION_VISIBLE +
+        " ORDER BY node_id, priority, conversation_name", (template,))]
     seen = {str(r["conversation_guid"] or "").lower() for r in db_rows}
     # Rows a data file inserts (e.g. import_crayburn.py) appear at startup.
     db_rows += [dict(r, trigger_json=r.get("trigger_json") or {}, pending=True)
@@ -395,7 +396,9 @@ def server_catalog(db: sqlite3.Connection, template: str = AREA_TEMPLATE,
         prefixes = dungeon_prefixes(template)
         for scene in _records_encounters():
             node, variant = match_item(scene["name"], items, prefixes)
-            nodes = [node] if node else linked_encounter_nodes.get(scene["guid"], [])
+            nodes = ([node] if node else
+                     list(PLACED_SCENE_NODES.get(str(scene["guid"]).lower()) or ())
+                     or linked_encounter_nodes.get(scene["guid"], []))
             for node_id in nodes:
                 encounters.setdefault(node_id, []).append(dict(scene, variant=variant))
         scene_regex, scene_prefix = None, "\x00"     # skip the table below
@@ -415,8 +418,10 @@ def server_catalog(db: sqlite3.Connection, template: str = AREA_TEMPLATE,
                 row["name"], {n: i["name"] for n, i in (authored or {}).items()},
                 dungeon_prefixes(template))
             race = ""
+            guid = str(row["guid"] or "").lower()
             nodes = ([node] if node else
-                     linked_encounter_nodes.get(str(row["guid"] or "").lower(), []))
+                     list(PLACED_SCENE_NODES.get(guid) or ())
+                     or linked_encounter_nodes.get(guid, []))
         else:
             node, race = _scene_node(row["name"], scene_prefix, scene_regex, item_names)
             nodes = [node] if node else []
@@ -600,15 +605,28 @@ def client_node_keys(template_name: str) -> dict[str, str]:
 
 
 @functools.lru_cache(maxsize=32)
+def fork_overrides(zone_id: str) -> frozenset[str]:
+    """Nodes the zone's rules file marks ``"fork": false``: an authored node
+    that is a stop, although the client prefab flags it as a path fork."""
+    path = RULES_DIR / f"{zone_id}.json"
+    if not path.exists():
+        return frozenset()
+    rules = json.loads(path.read_text(encoding="utf-8"))
+    return frozenset(str(node) for node, info in (rules.get("nodes") or {}).items()
+                     if isinstance(info, dict) and info.get("fork") is False)
+
+
 def prefab_fork_nodes(zone_id: str) -> frozenset[str]:
     """The map nodes the client prefab flags as path forks (``IsPathFork``,
-    extracted to the editor's ``generated/<zone>/map.json`` as ``fork``)."""
+    extracted to the editor's ``generated/<zone>/map.json`` as ``fork``),
+    less the zone's ``fork_overrides``."""
     path = GENERATED_MAPS / zone_id / "map.json"
     if not path.exists():
         return frozenset()
     layout = json.loads(path.read_text(encoding="utf-8"))
-    return frozenset(str(node["id"]) for node in layout.get("nodes") or ()
-                     if node.get("fork"))
+    forks = frozenset(str(node["id"]) for node in layout.get("nodes") or ()
+                      if node.get("fork"))
+    return forks - fork_overrides(zone_id)
 
 
 @functools.lru_cache(maxsize=32)
@@ -641,6 +659,15 @@ CONVERSATION_NODE_LINKS = {
 # Underworld playthrough (playlist PL5KcPcNiQlz7KYBS72s7qYx2vxvMoDyVn, videos
 # 028-030): Fort Romor's Stables / Barracks / Command Post items start each
 # other's battles. Scene GUID -> the node its battle is fought at.
+# Encounter scenes whose name matches no map item and no visit event, placed
+# at a node explicitly. The Smoldering Dead's entrance (NodeA, "Snowy Path")
+# fights Moxom (Ardent) or Sir Bryce (Underworld); the faction tags on each
+# scene (encounter_scenes.json scene_tags) pick which one is offered.
+PLACED_SCENE_NODES = {
+    "3d97ab1f-b517-47a0-895d-dc3ad75c0705": ("NodeA",),   # Entrance to Raqqar (Ardent)
+    "09752cde-6cde-47a4-92f1-9f5d25b3e1d2": ("NodeA",),   # Entrance (Underworld)
+}
+
 SCENE_NODE_LINKS = {
     # The Command Post (NodeD): "...walk brashly into the command center"
     "728ab36c-5738-463b-b90a-604c7e06cf1e": "NodeD",   # Commander Hawthorne

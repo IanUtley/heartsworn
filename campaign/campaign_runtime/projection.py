@@ -189,6 +189,10 @@ def project(rules: dict[str, Any], state: dict[str, Any],
         if ltype == "ShroomHaus":
             data["choices"] = list((entry or {}).get("choices") or ())
             data["autostart"] = not info.get("completed")
+            if (entry or {}).get("selection_type"):
+                # The panel's title and instructions (localization keys).
+                data["selection-type"] = entry["selection_type"]
+                data["selection-desc"] = entry.get("selection_desc", "")
         if gaal_display == node:
             # The Fortune card the paid reading drew, shown by the client's
             # Gaal camp panel (a ModDisplay location).

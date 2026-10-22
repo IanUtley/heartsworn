@@ -1090,6 +1090,7 @@ def db_gaal_nodes(campaign_template, conn=None):
     return _connection(conn).execute(
         "SELECT DISTINCT node_id FROM campaign_node_conversations "
         "WHERE campaign_template=? AND enabled=1 "
+        f"AND {_db_module.CAMPAIGN_NODE_CONVERSATION_VISIBLE} "
         "AND lower(conversation_name) LIKE '%gaal%' "
         "AND lower(conversation_name) NOT LIKE '%already has fortune%'",
         (str(campaign_template or ""),)).fetchall()
@@ -1132,6 +1133,7 @@ def db_panorama_generic_rows(node, conn=None):
         "SELECT conversation_guid, trigger_json, conversation_name, priority "
         "FROM campaign_node_conversations "
         "WHERE campaign_template='AZ1' AND node_id=? AND enabled=1 "
+        f"AND {_db_module.CAMPAIGN_NODE_CONVERSATION_VISIBLE} "
         "ORDER BY priority, conversation_guid", (str(node),)
     ).fetchall()
 
@@ -1141,7 +1143,9 @@ def db_node_conversation_rows(node, campaign_template="AZ1", conn=None):
     return _connection(conn).execute(
         "SELECT conversation_guid, trigger_json, priority, conversation_name "
         "FROM campaign_node_conversations WHERE campaign_template=? "
-        "AND node_id=? AND enabled=1 ORDER BY priority, conversation_guid",
+        "AND node_id=? AND enabled=1 "
+        f"AND {_db_module.CAMPAIGN_NODE_CONVERSATION_VISIBLE} "
+        "ORDER BY priority, conversation_guid",
         (str(campaign_template or "AZ1"), str(node))).fetchall()
 
 
@@ -1524,7 +1528,8 @@ def db_az1_node_conversation_ids(conn=None):
     """Return enabled authored AZ1 node/conversation pairs."""
     return _connection(conn).execute(
         "SELECT node_id, conversation_guid FROM campaign_node_conversations "
-        "WHERE campaign_template='AZ1' AND enabled=1"
+        "WHERE campaign_template='AZ1' AND enabled=1 "
+        f"AND {_db_module.CAMPAIGN_NODE_CONVERSATION_VISIBLE}"
     ).fetchall()
 
 

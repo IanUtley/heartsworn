@@ -2729,6 +2729,38 @@ def test_end_of_turn_damage_heal_skips_cant_heal_at_end_of_turn():
         db._db.commit()
 
 
+def test_printed_cant_heal_at_end_of_turn_keeps_template_damage():
+    import db
+    import pvp_db
+    from rules_port.lifecycle import clear_combat_damage
+    from tests.tests_combat import TPL_GLADIATOR
+
+    decaying_giant = "1d47a6a1-52ea-4e01-ba73-5f78483bac49"
+    session_id = 987654327
+    giant_uid, healed_uid = 987650151, 987650152
+    try:
+        pvp_db.db_insert_generated_card(
+            session_id, 5, giant_uid, decaying_giant, "warzone", "Troop",
+            "[]", 0, giant_uid, conn=db._db)
+        pvp_db.db_insert_generated_card(
+            session_id, 5, healed_uid, TPL_GLADIATOR, "warzone", "Troop",
+            "[]", 0, healed_uid, conn=db._db)
+        db._db.execute(
+            "UPDATE game_cards SET card_damage=6 WHERE session_id=?",
+            (session_id,))
+        db._db.commit()
+        clear_combat_damage(db._db, session_id)
+        rows = dict(db._db.execute(
+            "SELECT card_uid, card_damage FROM game_cards WHERE session_id=?",
+            (session_id,)).fetchall())
+        assert rows[giant_uid] == 6
+        assert rows[healed_uid] == 0
+    finally:
+        db._db.execute("DELETE FROM game_cards WHERE session_id=?",
+                       (session_id,))
+        db._db.commit()
+
+
 def test_charge_point_cost_modifier_applies_to_the_plan():
     import db
     import pvp_db

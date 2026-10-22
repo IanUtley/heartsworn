@@ -176,6 +176,7 @@ class PendingChoicesMixin:
                                    else (target_template_ids or [None])[0]),
             "target_entries": [
                 {"index": index, "template_id": tid,
+                 "uids": [int(u) for u in _uids],
                  "minimum": minimum, "maximum": maximum}
                 for index, tid, _uids, minimum, maximum in entries],
             "trigger_target_uid": (None if trigger_target_uid is None
@@ -259,6 +260,13 @@ class PendingChoicesMixin:
                     f"{chooser_pid} targets={len(entries)}")
             return
         _be.save_state(session, bstate)
+        _port = getattr(session, "_rules_port_session", None)
+        if _port is not None:
+            _port.trigger_prompt_open = True
+        # DEBUG (trigger picker): what the client's target picker is sent.
+        _hc.log_req("    [DEBUG-PICKER] trigger %s source=%s owner=%s chooser=%s "
+                    "entries=%s" % (ability_guid[:8], hex(source_uid), prompt_owner_id,
+                                    pl_t, [(index, tid, list(uids)) for index, tid, uids, _mn, _mx in entries]))
         # PlayerOptionList: trigger card + the ability as an option + the
         # legal candidates as a TargetInstance keyed by the target template.
         ev = game._make_event(_hc.game_engine.PlayerOptionListSessionEventArgs)
@@ -296,6 +304,49 @@ class PendingChoicesMixin:
         game.push_green_light(pl_t, _hc.game_engine.EPriorityContext.Normal)
         _hc.log_req(f"    Trigger target prompt: {ability_guid[:8]} source={hex(source_uid)} "
                 f"targets={len(entries)} inst={inst_id}")
+
+    def _resend_pending_trigger(self, session, bstate, pl_t, ai_t):
+        """Re-send the target picker for a trigger still waiting on the player.
+
+        Rebuilds the PlayerOptionList and TriggeredAbilityActivationData from the
+        stored pending_trigger record, so a priority sync while the choice is
+        open brings the picker back instead of leaving the game stuck.
+        """
+        import hconnect_server as _hc
+        pend = bstate["pending_trigger"]
+        source_uid = int(pend["source_uid"])
+        game = self._fresh_game(session, pl_t, ai_t, bstate)
+        ev = game._make_event(_hc.game_engine.PlayerOptionListSessionEventArgs)
+        ev.player_id = pl_t
+        opt = game._make_event(_hc.game_engine.PlayerOptionSessionEventArgs)
+        opt.card = _hc.game_engine.SessionCardId(_hc.game_engine.UID(source_uid))
+        opt.state = _hc.game_engine.ECardUsage.Activate
+        inst = game._make_event(_hc.game_engine.OptionInstanceSessionEventArgs)
+        inst.opt_id = _hc.game_engine.ResourceId.from_str(pend["ability_guid"])
+        for entry in pend.get("target_entries") or []:
+            tid = entry["template_id"]
+            inst.target_ids.append(_hc.game_engine.ResourceId.from_str(tid))
+            tgt = game._make_event(_hc.game_engine.TargetInstanceSessionEventArgs)
+            tgt.target_index = int(entry["index"])
+            tgt.target_id = _hc.game_engine.ResourceId.from_str(tid)
+            tgt.targets = [_hc.game_engine.SessionCardId(_hc.game_engine.UID(int(u)))
+                           for u in entry.get("uids") or []]
+            inst.target_instances.append(tgt)
+            inst.min_target_counts.append(int(entry["minimum"]))
+            inst.max_target_counts.append(int(entry["maximum"]))
+        opt.instances.append(inst)
+        ev.options.append(opt)
+        game._push(ev)
+        ev39 = _hc.game_engine.TriggeredAbilityActivationDataRequiredSessionEventArgs()
+        ev39.player_id = pl_t
+        ev39.ability_instance_ids = [int(pend["instance_id"])]
+        ev39.ability_template_ids = [_hc.game_engine.ResourceId.from_str(pend["ability_guid"])]
+        ev39.source_card_ids = [_hc.game_engine.SessionCardId(_hc.game_engine.UID(source_uid))]
+        game._push(ev39)
+        game.push_green_light(pl_t, _hc.game_engine.EPriorityContext.Normal)
+        self._send_battle_events(session, game, pl_t)
+        _hc.log_req(f"    Trigger picker re-sent: {pend['ability_guid'][:8]} "
+                    f"entries={len(pend.get('target_entries') or [])}")
 
     def _queue_conversation_prompt(self, game, session, pl_t, ai_t, bstate,
                                    conversation_id):
@@ -1160,6 +1211,9 @@ class PendingChoicesMixin:
                 except Exception:
                     continue
         bstate.pop("pending_trigger")
+        _port = getattr(session, "_rules_port_session", None)
+        if _port is not None:
+            _port.trigger_prompt_open = False
         ag = pend["ability_guid"]
         src = int(pend["source_uid"])
         inst_id = int(pend["instance_id"])

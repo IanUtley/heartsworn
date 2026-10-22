@@ -241,9 +241,10 @@ class RecordsTriggerDiscovery:
         source_uid = _uid_int(source_uid)
         extra_target = _uid_int(extra_target)
         candidates: dict[int, list[str]] = {}
+        own: set[int] = set()
         if source_uid is not None:
             uid = int(source_uid)
-            candidates.setdefault(uid, []).extend(card_abilities(uid))
+            self._add_card(candidates, own, uid, card_abilities(uid))
         # CardCreatedEvent is the synchronous client call to
         # ActivateCardCreationAbilities(newCard). It is scoped to that new
         # card's own trigger collection; unlike OtherCardCreatedEvent it is
@@ -255,8 +256,7 @@ class RecordsTriggerDiscovery:
         # card's printed or granted list; offer it as a candidate here.
         for key, values in (self.battle_state.get(
                 "registered_triggers") or {}).items():
-            candidates.setdefault(int(key), []).extend(
-                str(value).lower() for value in values)
+            self._add_registered(candidates, int(key), values)
         # CardCastEvent's target is the card being cast, not another
         # registered trigger source. A troop that only gained Warzone trigger
         # registration as this cast resolved cannot hear its own earlier cast
@@ -265,7 +265,7 @@ class RecordsTriggerDiscovery:
                 int(extra_target) != int(source_uid or 0) and
                 event_type != "CardCastEvent"):
             uid = int(extra_target)
-            candidates.setdefault(uid, []).extend(card_abilities(uid))
+            self._add_card(candidates, own, uid, card_abilities(uid))
 
         owner_id = source_owner_uid
         if owner_id is None and source_uid is not None:
@@ -299,23 +299,43 @@ class RecordsTriggerDiscovery:
         # authored conditions decide which side actually responds.
         for side in sides:
             for uid, abilities in champion_holders(side).items():
-                candidates.setdefault(int(uid), []).extend(abilities)
+                self._add_card(candidates, own, int(uid), abilities)
             for zone_group in zone_sets:
                 for uid, abilities in zone_holders(side, zone_group).items():
                     if (event_type == "CardEnteredZoneEvent" or
                             (int(uid) != int(source_uid or 0) and
                              int(uid) != int(extra_target or 0))):
-                        candidates.setdefault(int(uid), []).extend(abilities)
+                        self._add_card(candidates, own, int(uid), abilities)
         return self._freeze(candidates)
 
     @staticmethod
     def _freeze(candidates: dict[int, list[str]]):
-        # A card's ability fires at most once per event; the same card can be
-        # reported by more than one zone or side scan, so drop repeats here.
+        # Repeat scans of a card are dropped as they are added (_add_card); a
+        # card's own stacked copies of an ability are kept, so each can fire.
         return tuple(
-            TriggerCandidate(int(uid), tuple(dict.fromkeys(
-                str(g).lower() for g in abilities)))
+            TriggerCandidate(int(uid), tuple(str(g).lower() for g in abilities))
             for uid, abilities in candidates.items() if abilities)
+
+    @staticmethod
+    def _add_card(candidates, own, uid, abilities):
+        """A card's own ability list, once per card: a scan that reports the
+        card again adds nothing. Its repeated grants (two copies of one
+        ability) stay repeated, so each copy can fire."""
+        uid = int(uid)
+        abilities = [str(g).lower() for g in abilities]
+        if uid in own or not abilities:
+            return
+        own.add(uid)
+        candidates.setdefault(uid, []).extend(abilities)
+
+    @staticmethod
+    def _add_registered(candidates, uid, values):
+        """Session-registered triggers add only what the card does not have."""
+        held = candidates.setdefault(int(uid), [])
+        for value in values:
+            key = str(value).lower()
+            if key not in held:
+                held.append(key)
 
 
 __all__ = ["RecordsTriggerDiscovery", "TriggerCandidate"]

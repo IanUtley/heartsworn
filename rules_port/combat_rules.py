@@ -46,8 +46,7 @@ def player_has_eligible_attackers(db, session_id, battle_state, player_id):
                  int(template_attrs or 0))
         attrs |= int(effective_attributes(
             db, session_id, battle_state or {}, int(uid)) or 0)
-        if attrs & int(game_engine.ECardAttributes.CantAttack |
-                       game_engine.ECardAttributes.Defensive):
+        if not can_attack_card(db, session_id, battle_state, uid, attrs):
             continue
         if (card_state & int(game_engine.ECardStates.StartedATurnOnYourSide)
                 or attrs & int(game_engine.ECardAttributes.Speed)):
@@ -124,6 +123,22 @@ def card_int_attr(db, session_id, uid, name, battle_state=None):
     from .static_rules import effective_card_int_attr
     return effective_card_int_attr(
         db, session_id, battle_state or {}, int(uid), name, total)
+
+
+def can_attack_card(db, session_id, battle_state, uid, attrs):
+    """C# Card.CombatantStatus attack gate, shared by every attack path.
+
+    CantAttack always stops a troop. Defensive stops it unless its
+    IgnoresDefensive int-attribute is set (Talonkeep Watcher, while another
+    Watcher or a Talonkeep Hunter is in play). Summoning sickness, tapping and
+    the attack phase are checked by the callers.
+    """
+    if attrs & int(game_engine.ECardAttributes.CantAttack):
+        return False
+    if attrs & int(game_engine.ECardAttributes.Defensive):
+        return card_int_attr(db, session_id, int(uid), "IgnoresDefensive",
+                             battle_state=battle_state) > 0
+    return True
 
 
 def can_block(db, session_id, battle_state, attacker_uid, blocker_uid):

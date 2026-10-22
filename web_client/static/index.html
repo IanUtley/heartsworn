@@ -12,6 +12,13 @@
     <div class="lobby-panel">
       <h1>Heartsworn</h1>
       <p class="subtitle">Hex: Shards of Fate, in the browser</p>
+      <div class="client-folder">
+        <p>Point to your <b>HEX SHARDS OF FATE</b> folder. Card art, card sounds and
+          battleboards are read from it in this page and never uploaded.</p>
+        <button id="pick-folder" class="secondary">Choose Hex folder&hellip;</button>
+        <input type="file" id="folder-input" webkitdirectory hidden>
+        <p id="folder-status" class="status"></p>
+      </div>
       <label>Your name <input id="player-name" maxlength="32" value="You"></label>
       <div class="deck-pickers">
         <label>Your deck
@@ -24,6 +31,7 @@
       <div class="cosmetics">
         <label>Card sleeve <select id="sleeve-choice"></select></label>
         <label>Gameboard <select id="board-choice"></select></label>
+        <label>Sound volume <input type="range" id="volume-choice" min="0" max="100" step="5"> <span id="volume-value"></span></label>
       </div>
       <button id="start-match" class="primary">Battle</button>
       <p id="lobby-status" class="status"></p>
@@ -33,17 +41,6 @@
   <section id="battle" class="screen hidden">
     <div id="board">
       <div id="board3d"></div>
-      <div id="scene" aria-hidden="true">
-        <div class="arena-plane">
-          <div class="arena"></div>
-          <div class="arena-field"></div>
-          <div class="arena-sigil"></div>
-          <div class="arena-arcs"><i></i><i></i><i></i></div>
-        </div>
-        <div class="brazier tl"></div><div class="brazier tr"></div>
-        <div class="brazier bl"></div><div class="brazier br"></div>
-      </div>
-
       <div id="table">
         <div class="plane">
           <div class="zone-row warzone" id="opp-warzone"></div>
@@ -83,6 +80,7 @@
 
   <div id="modal" class="hidden"><div class="modal-card" id="modal-body"></div></div>
 </div>
+<script type="module" src="/static/hex_assets.js"></script>
 <script type="module" src="/static/board3d.js"></script>
 <script src="/static/app.js"></script>
 </body>

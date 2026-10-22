@@ -101,7 +101,7 @@
       "outcome:fail"
      ],
      "actions": {
-      "A0": [
+      "*": [
        "teleport(devonshirekeep,Node001)"
       ]
      }
@@ -120,7 +120,12 @@
      "tags": [
       "outcome:success",
       "keyword(Burning)"
-     ]
+     ],
+     "actions": {
+      "*": [
+       "set_flag(devonshire_skip_watchtower)"
+      ]
+     }
     }
    },
    {
@@ -134,7 +139,8 @@
      "label": "Gate - Courtyard Success - Hidden Path Unlocked",
      "source": "import_dungeons.py",
      "tags": [
-      "outcome:success"
+      "outcome:success",
+      "!keyword(Burning)"
      ]
     }
    },
@@ -375,7 +381,15 @@
     "enabled": true,
     "trigger_json": {
      "label": "Oratory",
-     "source": "import_dungeons.py"
+     "source": "import_dungeons.py",
+     "actions": {
+      "zombie_fight": [
+       "encounter(3f1bfe1d-5f2e-4136-a31f-f4a3a326da06)"
+      ],
+      "knight_fight": [
+       "encounter(83def324-a2cf-4234-95a5-2b473de20796)"
+      ]
+     }
     }
    },
    {
@@ -4286,6 +4300,65 @@
      "source": "import_dungeons.py",
      "tags": [
       "outcome:success"
+     ]
+    }
+   },
+   {
+    "campaign_template": "The Smoldering Dead",
+    "conversation_guid": "381c7b01-0762-41f0-98a5-5f3c721b7644",
+    "node_id": "NodeA",
+    "conversation_name": "The Smoldering Dead - Entrance",
+    "priority": 1,
+    "enabled": true,
+    "trigger_json": {
+     "label": "Entrance",
+     "source": "campaign_editor"
+    }
+   },
+   {
+    "campaign_template": "The Smoldering Dead",
+    "conversation_guid": "7cb3decf-61dc-4eb4-9e8c-88f77a128b58",
+    "node_id": "NodeA",
+    "conversation_name": "The Smoldering Dead - Entrance Success - Ardent",
+    "priority": 2,
+    "enabled": true,
+    "trigger_json": {
+     "label": "Entrance success - Ardent",
+     "tags": [
+      "outcome:success",
+      "faction(Ardent)"
+     ],
+     "source": "campaign_editor"
+    }
+   },
+   {
+    "campaign_template": "The Smoldering Dead",
+    "conversation_guid": "86a7f06e-64e6-415f-b548-654e001f706a",
+    "node_id": "NodeA",
+    "conversation_name": "The Smoldering Dead - Entrance Success - Underworld",
+    "priority": 3,
+    "enabled": true,
+    "trigger_json": {
+     "label": "Entrance success - Underworld",
+     "tags": [
+      "outcome:success",
+      "faction(Underworld)"
+     ],
+     "source": "campaign_editor"
+    }
+   },
+   {
+    "campaign_template": "The Smoldering Dead",
+    "conversation_guid": "94f56bcd-5516-41c4-b4f5-8b3762cd69fc",
+    "node_id": "NodeA",
+    "conversation_name": "The Smoldering Dead - Entrance Fail",
+    "priority": 4,
+    "enabled": true,
+    "trigger_json": {
+     "label": "Entrance fail",
+     "source": "campaign_editor",
+     "tags": [
+      "outcome:fail"
      ]
     }
    }

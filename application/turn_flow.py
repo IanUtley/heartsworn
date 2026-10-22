@@ -48,8 +48,11 @@ class TurnFlowMixin:
         if session is not None and str(
                 getattr(session, "session_name", "") or "").startswith(
                     "tourney-"):
+            from pvp_db import session_save_batch
             from services.tournament_game import pvp_session_lock
-            with pvp_session_lock(session):
+            # The batch is closed before the lock is released, so the watchdog
+            # and the other client never reload a session row that is stale.
+            with pvp_session_lock(session), session_save_batch():
                 return self._dispatch_rules_port_transaction_locked(
                     session, command, player_uid)
         return self._dispatch_rules_port_transaction_locked(
@@ -519,17 +522,16 @@ class TurnFlowMixin:
             # scheduler's post-resolution events (GreenLight/TurnPhaseUpdated/
             # AbilityPushedOnChain) would replace it, so suppress them until
             # the prompt is answered.
-            prompt_pending = False
-            if (session.session_name or "").startswith("tourney-"):
-                try:
-                    from rules_port.persistence import load_state
-                    _live = load_state(session) or {}
-                    prompt_pending = any(_live.get(key) for key in (
-                        "pending_choice", "pending_trigger",
-                        "pending_deck_search", "pending_conversation",
-                        "pending_discard_ability", "resolution_paused"))
-                except Exception:
-                    prompt_pending = False
+            prompt_pending = bool(getattr(port, "trigger_prompt_open", False))
+            try:
+                from rules_port.persistence import load_state
+                _live = load_state(session) or {}
+                prompt_pending = prompt_pending or any(_live.get(key) for key in (
+                    "pending_choice", "pending_trigger",
+                    "pending_deck_search", "pending_conversation",
+                    "pending_discard_ability", "resolution_paused"))
+            except Exception:
+                pass
             if game is not None and game.events:
                 _hc.log_req(
                     "    RulesPort post-tick event sink: "
@@ -1597,11 +1599,17 @@ class TurnFlowMixin:
         champion_counters = bstate.get("champion_counters") or {}
         champion_attrs = bstate.get("champion_int_attrs") or {}
 
-        def _champion_int_attrs(scid):
+        def _champion_int_attrs(scid, owner):
             # Runtime champion IntAttrs (Toxified, ...) ride on the champion
             # CardUpdated; Unity's champion HUD derives its state icons from
-            # them, so a re-pushed champion must keep them.
-            attrs = champion_attrs.get(str(int(scid.uid.uid64))) or {}
+            # them, so a re-pushed champion must keep them. Static ones (Armor 3
+            # from the champion's own ability) are not stored, so they are added
+            # here too; without them the re-push clears the portrait's armor.
+            from rules_port.static_rules import champion_static_intattrs
+            attrs = dict(champion_attrs.get(str(int(scid.uid.uid64))) or {})
+            for name, value in champion_static_intattrs(
+                    _hc._db, session.session_id, bstate, owner).items():
+                attrs[name] = int(attrs.get(name, 0) or 0) + value
             return {str(k): int(v) for k, v in attrs.items() if v}
         ai_champ = getattr(self, "_ai_champ_scid", None)
         if ai_champ:
@@ -1611,7 +1619,7 @@ class TurnFlowMixin:
                 [], [_hc.game_engine.ResourceId.from_str(g) for g in getattr(self, "_ai_champ_ability_guids", [])])
             ai_cdef.counters = dict(champion_counters.get(
                 str(int(ai_champ.uid.uid64)), {}) or {})
-            ai_cdef.int_attrs = _champion_int_attrs(ai_champ)
+            ai_cdef.int_attrs = _champion_int_attrs(ai_champ, 0)
             game.card_defs[ai_champ] = ai_cdef
         pl_champ = getattr(self, "_player_champ_scid", None)
         if pl_champ:
@@ -1622,7 +1630,8 @@ class TurnFlowMixin:
                 [], list(pl_abilities))
             cdef.counters = dict(champion_counters.get(
                 str(int(pl_champ.uid.uid64)), {}) or {})
-            cdef.int_attrs = _champion_int_attrs(pl_champ)
+            cdef.int_attrs = _champion_int_attrs(
+                pl_champ, int(self.user_profile["id"]) if self.user_profile else 0)
             # Carry the persisted spell-power escalation (player_sp_uses) onto
             # the champion CardDef so the client's button shows the INCREASED
             # SP cost (e.g. Soothsaying 4->5 after one use) — a re-pushed
@@ -2221,6 +2230,10 @@ class TurnFlowMixin:
             # and the following phase transitions remain RulesPort-owned.
             port.materialize_current_phase()
         port.drive_until_input(max_steps=64)
+        if getattr(port, "trigger_prompt_open", False):
+            # The picker is out: the turn waits for the answer (no further phase update).
+            _hc.log_req("    Trigger choice open: turn held until it is answered")
+            return False
         # A resolver can queue server-owned chain responses (a troop's Deploy
         # trigger) while it finishes.  Give the AI the same follow-up passes
         # the transaction pass handler would, or the client is left staring at

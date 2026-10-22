@@ -2978,7 +2978,7 @@ function sceneEntryLines(entry) {
   if ((entry.mercenaries || []).length) lines.push(`${entry.mercenaries.map((m) => `${m.quantity > 1 ? `${m.quantity} ` : ""}${mercenaryName(m.guid)}`).join(", ")} (mercenary)`);
   if ((entry.sleeves || []).length) lines.push(`${entry.sleeves.map((m) => `${m.quantity > 1 ? `${m.quantity} ` : ""}${sleeveName(m.guid)}`).join(", ")} (sleeve)`);
   const when = entry.when && entry.when.length ? fmtCond(entry.when) : "";
-  return `${lines.join(" · ") || "(nothing)"}${when ? ` — only if ${when}` : ""}${entry.one_time === false ? " (repeatable)" : " (once)"}`;
+  return `${lines.join(" · ") || "(nothing)"}${when ? ` — only if ${when}` : ""}${entry.one_time === true ? " (once)" : " (repeatable)"}`;
 }
 
 function sceneRewardSummary(rewards) {
@@ -3014,7 +3014,7 @@ function sceneEntryForm(entry, i) {
     <div class="card-head"><b>Reward ${i + 1}</b><button type="button" class="small" data-sr="del-entry" data-i="${i}">Remove</button></div>
     <div class="reward-row"><label>Gold <input type="number" min="0" class="sr-gold" value="${entry.gold || 0}"></label>
       <label>XP <input type="number" min="0" class="sr-xp" value="${entry.xp || 0}"></label>
-      <label><input type="checkbox" class="sr-once" ${entry.one_time === false ? "" : "checked"}> once only</label></div>
+      <label><input type="checkbox" class="sr-once" ${entry.one_time === true ? "checked" : ""}> once only</label></div>
     <div class="reward-row"><span class="reward-race">Chest</span>${chestSelect(`sr-chest-${i}`, entry.chest_guid || "")}</div>
     <div class="reward-row"><span class="reward-race">Card</span>
       <input list="rw-card-list" class="sr-card" data-icon="card" value="${esc(cardIsGuid ? cardName(entry.card_guid) : entry.card_guid)}" placeholder="(none)" ${cardIsGuid ? "" : "title=\"condition token, kept as is\""}>${cardImg(cardIsGuid ? entry.card_guid : "")}
@@ -3130,6 +3130,8 @@ function buildSceneRewards(entries) {
   else if (entries.length === 1) Object.assign(out, entries[0]);
   const choices = collectSceneChoices();
   if (choices.length) out.card_choice = choices.map((guid) => ({ guid, name: cardName(guid) }));
+  const dungeonOnly = document.getElementById("sr-dungeon-only");
+  if (dungeonOnly && dungeonOnly.checked) out.dungeon_only = true;
   return out;
 }
 
@@ -3140,7 +3142,7 @@ async function openSceneRewards(guid) {
   const rewards = scene.rewards || {};
   const listShape = Array.isArray(rewards.end_of_game_rewards);
   sceneDraft = { guid, listShape, choices: (rewards.card_choice || []).map((c) => c.guid), entries: JSON.parse(JSON.stringify(sceneEntries(rewards))),
-    extras: Object.fromEntries(Object.entries(rewards).filter(([k]) => !SCENE_ENTRY_KEYS.includes(k) && k !== "end_of_game_rewards" && k !== "card_choice")) };
+    extras: Object.fromEntries(Object.entries(rewards).filter(([k]) => !SCENE_ENTRY_KEYS.includes(k) && !["end_of_game_rewards", "card_choice", "dungeon_only"].includes(k))) };
   document.getElementById("scene-rewards-body").innerHTML = `<h2>${esc(scene.title || scene.name)} — battle rewards</h2>
     <p class="muted small-text"><code>${esc(scene.name)}</code> · saved to <code>campaign_data/encounter_scenes.json</code>, applied at server start.
     ${Object.keys(sceneDraft.extras).length ? `Also kept unchanged: ${Object.keys(sceneDraft.extras).map((k) => `<code>${esc(k)}</code>`).join(", ")}.` : ""}</p>
@@ -3150,6 +3152,7 @@ async function openSceneRewards(guid) {
     <div class="muted small-text">The player picks one of these cards (<code>card_choice</code>); leave empty for none.</div>
     <div id="sr-choice"></div>
     <button type="button" class="small" data-sr="add-choice">+ Card choice</button>
+    <label class="small-text"><input type="checkbox" id="sr-dungeon-only" ${rewards.dungeon_only ? "checked" : ""}> Dungeon only: the chosen card joins this dungeon run's deck and is not added to the collection</label>
     <details><summary>Raw JSON (advanced)</summary><textarea id="sr-json" rows="8" spellcheck="false"></textarea>
       <div class="actions"><button type="button" class="small" data-sr="to-json">Form → JSON</button>
       <button type="button" class="small" data-sr="from-json">JSON → form</button></div></details>
@@ -3173,7 +3176,7 @@ document.getElementById("scene-rewards").addEventListener("click", async (event)
     if (!["close", "from-json", "save", "to-json"].includes(kind)) sceneDraft.choices = collectSceneChoices();
     if (kind === "add-choice") { sceneDraft.choices.push(""); renderSceneForm(); }
     else if (kind === "del-choice") { sceneDraft.choices.splice(j, 1); renderSceneForm(); }
-    else if (kind === "add-entry") { sceneDraft.entries = collectSceneEntries(); sceneDraft.entries.push({ gold: 0, xp: 0, one_time: true }); renderSceneForm(); }
+    else if (kind === "add-entry") { sceneDraft.entries = collectSceneEntries(); sceneDraft.entries.push({ gold: 0, xp: 0, one_time: false }); renderSceneForm(); }
     else if (kind === "del-entry") { sceneDraft.entries = collectSceneEntries(); sceneDraft.entries.splice(i, 1); renderSceneForm(); }
     else if (kind === "add-sd") { sceneDraft.entries = collectSceneEntries(); sceneDraft.entries[i].stardust = [...(sceneDraft.entries[i].stardust || []), { rarity: "common", amount: 1, probability: 100 }]; renderSceneForm(); }
     else if (kind === "del-sd") { sceneDraft.entries = collectSceneEntries(); sceneDraft.entries[i].stardust.splice(j, 1); renderSceneForm(); }
@@ -3189,7 +3192,8 @@ document.getElementById("scene-rewards").addEventListener("click", async (event)
       sceneDraft.listShape = Array.isArray(rewards.end_of_game_rewards);
       sceneDraft.entries = sceneEntries(rewards);
       sceneDraft.choices = (rewards.card_choice || []).map((c) => c.guid);
-      sceneDraft.extras = Object.fromEntries(Object.entries(rewards).filter(([k]) => !SCENE_ENTRY_KEYS.includes(k) && k !== "end_of_game_rewards" && k !== "card_choice"));
+      sceneDraft.extras = Object.fromEntries(Object.entries(rewards).filter(([k]) => !SCENE_ENTRY_KEYS.includes(k) && !["end_of_game_rewards", "card_choice", "dungeon_only"].includes(k)));
+      document.getElementById("sr-dungeon-only").checked = !!rewards.dungeon_only;
       renderSceneForm();
     } else if (kind === "save") {
       const result = await postJSON("/api/edit/scene-rewards", { scene: sceneDraft.guid, rewards: buildSceneRewards(collectSceneEntries()) });

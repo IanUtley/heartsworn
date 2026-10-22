@@ -101,6 +101,57 @@ class CombatMixin:
                        "event_sink", None)
         if sink is not None:
             sink.drain_into(game)
+        # A trigger picker is published inside the phase that starts it, so the
+        # packet can carry a TurnPhaseUpdated the client applies after the picker
+        # opens (UIBattle collapses non-root states on it). Send the picker in its
+        # own packet, after the events before it.
+        picker_packet = None
+        names = [type(e).__name__ for e in game.events]
+        prompt_idx = [i for i, n in enumerate(names)
+                      if n == "TriggeredAbilityActivationDataRequiredSessionEventArgs"]
+        phase_idx = [i for i, n in enumerate(names)
+                     if n == "TurnPhaseUpdatedSessionEventArgs"]
+        if prompt_idx and phase_idx:
+            i39 = prompt_idx[-1]
+            start = i39 - 1 if (i39 > 0 and names[i39 - 1] ==
+                                "PlayerOptionListSessionEventArgs") else i39
+            end = i39 + 1
+            if end < len(names) and names[end] == "GreenLightSessionEventArgs":
+                end += 1
+            evs = list(game.events)
+            picker_packet = evs[start:end]
+            game.events = evs[:start] + evs[end:]
+        # An open picker holds priority for the chooser until it is answered.
+        # The client collapses its open states on any TurnPhaseUpdated that
+        # arrives after the picker, whatever its priority holder. The picker
+        # packet already carries the turn's phase, so a packet sent while the
+        # picker is open (the AI end-turn hand-back) drops its phase updates.
+        prompt_open = bool(getattr(getattr(session, "_rules_port_session", None),
+                                   "trigger_prompt_open", False))
+        if prompt_open and not picker_packet:
+            game.events = [ev for ev in game.events
+                           if type(ev).__name__ != "TurnPhaseUpdatedSessionEventArgs"]
+        if picker_packet or prompt_open:
+            chooser = (pl_t if isinstance(pl_t, _hc.game_engine.UID)
+                       else _hc.game_engine.UID(int(getattr(pl_t, "uid64", pl_t))))
+            for ev in game.events:
+                if type(ev).__name__ == "TurnPhaseUpdatedSessionEventArgs":
+                    ev.priority_player_id = chooser
+        if picker_packet:
+            # The picker opens the chooser's turn, but the turn boundary puts no
+            # phase update of the new turn on the wire. Lead the picker packet
+            # with the port's current phase so the client shows it, not the
+            # outgoing turn's end phase.
+            port = getattr(session, "_rules_port_session", None)
+            if port is not None:
+                phase_ev = game._make_event(
+                    _hc.game_engine.TurnPhaseUpdatedSessionEventArgs)
+                phase_ev.turn_phase = port.current_turn_phase
+                phase_ev.active_player_id = chooser
+                phase_ev.priority_player_id = chooser
+                picker_packet.insert(0, phase_ev)
+            _hc.log_req("    [DEBUG-PACKET] picker sent as its own packet: " + ", ".join(
+                type(e).__name__.replace("SessionEventArgs", "") for e in picker_packet))
         from rules_port.visibility import (project_visible_hands,
                                            project_visible_top_decks)
         current_state = getattr(self, "_current_bstate", {}) or {}
@@ -163,18 +214,30 @@ class CombatMixin:
                     event.controller = projected_owner
         except Exception as exc:
             _hc.log_req(f"    Card owner projection skipped: {exc}")
-        pkt = game.make_network_packet(pl_t)
-        dw = _hc.encode_datawrapper(0, 3055, _hc.compress_gzip(_hc.encode_sync_event(pkt)), 1,
-                                "00000000-0000-0000-0000-000000000000")
-        self._game_scnt = max(self._game_scnt, self.scnt) + 1
-        self.scnt = self._game_scnt
-        gs_inst = str(session.server_id)
-        self.send({
-            "issuer": f"0.0.0.0.ServiceGameSession.{_hc.SERVICE_GAME_SESSION_UID}.{session.session_id}.{self.scnt}",
-            "target": "ServiceGameSession", "instance": gs_inst,
-            "reqid": 0, "c": 0, "conh": 0, "sid": self.sid,
-        }, dw)
-        self._event_q.append((self.scnt, dw, {}))
+        batches = [list(game.events)]
+        if picker_packet:
+            batches.append(picker_packet)
+        for batch in batches:
+            game.events = batch
+            _hc.log_req("    [DEBUG-SEND] packet: " + ", ".join(
+                type(e).__name__.replace("SessionEventArgs", "") + (
+                    f"(priority={getattr(e, 'priority_player_id', None)})"
+                    if type(e).__name__ == "TurnPhaseUpdatedSessionEventArgs" else "")
+                for e in batch))
+            pkt = game.make_network_packet(pl_t)
+            dw = _hc.encode_datawrapper(0, 3055, _hc.compress_gzip(_hc.encode_sync_event(pkt)), 1,
+                                    "00000000-0000-0000-0000-000000000000")
+            self._game_scnt = max(self._game_scnt, self.scnt) + 1
+            self.scnt = self._game_scnt
+            gs_inst = str(session.server_id)
+            self.send({
+                "issuer": f"0.0.0.0.ServiceGameSession.{_hc.SERVICE_GAME_SESSION_UID}.{session.session_id}.{self.scnt}",
+                "target": "ServiceGameSession", "instance": gs_inst,
+                "reqid": 0, "c": 0, "conh": 0, "sid": self.sid,
+            }, dw)
+            self._event_q.append((self.scnt, dw, {}))
+        # Sent events are consumed: a later drain must not send them again.
+        game.events = []
         return True
 
     def _push_phase_options_empty(self, session, pl_t, ai_t, game=None,
@@ -321,6 +384,7 @@ class CombatMixin:
         self._auto_declare_force_attackers(session, pl_t, ai_t, bstate, game)
         rows = _hc.db_warzone_troops_basic(session.session_id, self.user_profile["id"])
         from rules_port.static_rules import effective_attributes
+        from rules_port.combat_rules import can_attack_card
         ready = []
         for uid, ct, state in rows:
             state = state or 0
@@ -333,9 +397,8 @@ class CombatMixin:
                  or ((attrs or 0) & _hc.game_engine.ECardAttributes.Speed))
                     and not (state & _hc.game_engine.ECardStates.Tapped)
                     and not (state & _hc.game_engine.ECardStates.Attacking)
-                    and not ((attrs or 0) &
-                             (_hc.game_engine.ECardAttributes.CantAttack |
-                              _hc.game_engine.ECardAttributes.Defensive))):
+                    and can_attack_card(
+                        _hc._db, session.session_id, bstate, uid, attrs or 0)):
                 ready.append(_hc.game_engine.SessionCardId(_hc.game_engine.UID(uid)))
         ev = game._make_event(_hc.game_engine.PlayerOptionListSessionEventArgs)
         ev.player_id = pl_t
@@ -366,6 +429,7 @@ class CombatMixin:
         _be = self._checkpoint_engine(session)
         from pvp_db import db_card_state_value as db_card_state_raw
         from rules_port.static_rules import effective_attributes
+        from rules_port.combat_rules import can_attack_card
         rows = _hc.db_warzone_troops_basic(session.session_id,
                                        self.user_profile["id"])
         ai_champ_uid = getattr(self, "_ai_champ_scid", None)
@@ -385,8 +449,7 @@ class CombatMixin:
             if not (state & _hc.game_engine.ECardStates.StartedATurnOnYourSide) \
                     and not (attrs & _hc.game_engine.ECardAttributes.Speed):
                 continue
-            if attrs & (_hc.game_engine.ECardAttributes.CantAttack |
-                        _hc.game_engine.ECardAttributes.Defensive):
+            if not can_attack_card(_hc._db, session.session_id, bstate, uid, attrs):
                 continue
             u = int(uid)
             if u in attackers:
@@ -889,6 +952,42 @@ class CombatMixin:
         save_state(session, sacrifice_state)
         return str(result).startswith("killed")
 
+    def _discard_same_cost(self, game, session, pl_t, ai_t, bstate):
+        """Discard every card in the opposing champion's hand that costs the
+        same as the voided troop (DiscardAllCardsWithTheSameCostAsTheVoidedTroop).
+
+        The voided troop is still in the Void, so its cost is read from its own
+        card (with its modifiers), not from the template.
+        """
+        import hconnect_server as _hc
+        from pvp_db import db_card_zone_details
+        human_id = (int(self.user_profile["id"])
+                    if isinstance(self.user_profile, dict) else 0)
+        owner = int(bstate.get("resolving_owner_id") or 0)
+        victim_id = 0 if owner == human_id else human_id
+        voided = bstate.get("resolving_target_uid")
+        if not voided:
+            _hc.log_req("    Same-cost discard: no voided troop recorded")
+            return
+
+        def card_cost(uid):
+            row = db_card_zone_details(session.session_id, int(uid), conn=_hc._db)
+            if not row:
+                return None
+            scid = _hc.game_engine.SessionCardId(_hc.game_engine.UID(int(uid)))
+            return int(self._card_full_data(game, scid, row[0], None)[3] or 0)
+
+        cost = card_cost(voided)
+        matching = [int(uid) for (uid,) in _hc.db_hand_card_uids(
+            session.session_id, victim_id, conn=_hc._db)
+            if card_cost(uid) == cost]
+        for uid in matching:
+            gd, _owner_uid = self._discard_card_to_owner(session, pl_t, ai_t, uid)
+            if gd is not None:
+                game.events.extend(gd.events)
+        _hc.log_req(f"    Same-cost discard: voided cost={cost}, "
+                    f"discarded {len(matching)} card(s) from owner {victim_id}")
+
     def _push_discard_prompt(self, game, session, pl_t, ai_t, bstate,
                              ability_guid=None):
         """Push a class-23 AbilityActivationDataRequired prompt so the PLAYER
@@ -899,6 +998,16 @@ class CombatMixin:
         _be = self._checkpoint_engine(session)
         player_champ_scid = getattr(self, "_player_champ_scid", None)
         resolving_ability = ability_guid or bstate.get("resolving_ability", "")
+        from gamedata import DEFAULT_RECORD_STORE
+        same_cost = DEFAULT_RECORD_STORE.get(
+            "AbilityTemplate", str(resolving_ability).lower())
+        if same_cost is not None and "SameCostAsTheVoidedTroop" in str(
+                getattr(same_cost, "name", "")):
+            # No choice here: every opposing card in hand that costs what the
+            # voided troop cost is discarded, one at a time (each raises
+            # CardDiscardedEvent for "discards a card" triggers).
+            self._discard_same_cost(game, session, pl_t, ai_t, bstate)
+            return
         # AI-controlled abilities must never open a human card picker.  The
         # responsible owner is carried by the resolver checkpoint; choose a
         # random card from that owner's hand and let the normal discard

@@ -267,11 +267,24 @@ def ability_source_target_uid(db, session_id, source_uid, template_id,
     """
     if source_uid is None:
         return None
-    if not bool(_target_field(template_id, "m_ChoiceOverride", False)):
-        return int(source_uid)
     source = _source_card(db, session_id, int(source_uid), controller_uid)
+    if not _choice_redirects_to_parent(template_id, source):
+        return int(source_uid)
     parent = int((source or {}).get("parent_uid") or 0)
     return parent or int(source_uid)
+
+
+def _choice_redirects_to_parent(template_id, source):
+    """Whether an authored 'This' target means the card that created the source.
+
+    Records set ``m_ChoiceOverride`` to 0 on every target, so a Choice card's own
+    "This" (Take Flight giving Flight) is redirected by its card type as well:
+    the Choice card is put into play for its parent, and the parent is what the
+    effect acts on.
+    """
+    if bool(_target_field(template_id, "m_ChoiceOverride", False)):
+        return True
+    return (source or {}).get("card_type") == "Choice"
 
 
 def _target_spec(template_id):
@@ -1278,7 +1291,7 @@ def validate_target_selection(db, session_id, controller_uid, template_id,
         player_filter = template.get("player_filter")
         if kind == "AbilitySourceCardTargetTemplate":
             expected_uid = int(source_uid or 0)
-            if (bool(_target_field(template_id, "m_ChoiceOverride", False)) and
+            if (_choice_redirects_to_parent(template_id, source) and
                     int((source or {}).get("parent_uid") or 0)):
                 expected_uid = int(source["parent_uid"])
                 source = _source_card(db, session_id, expected_uid,

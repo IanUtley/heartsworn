@@ -434,6 +434,8 @@ class Game:
         ev.int_attrs = dict(kwargs.get('int_attrs', getattr(cdef, 'int_attrs', {}) or {}))
         # The client's Armor icon reads the dedicated armor fields, not int_attrs.
         ev.armor = int(ev.int_attrs.get('Armor', 0) or 0)
+        if effective_card_type & ECardTypes.Champion:  # DEBUG-ARMOR
+            print(f'[DEBUG-ARMOR] champion CardUpdated uid={cid} player={player_uid} armor={ev.armor} int_attrs={ev.int_attrs}', flush=True)  # DEBUG-ARMOR
         ev.current_armor = max(0, ev.armor - int(ev.int_attrs.get('ArmorUsed', 0) or 0))
         template_id = kwargs.get('template_id', None)
         if template_id:

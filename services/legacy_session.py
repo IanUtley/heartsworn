@@ -74,6 +74,7 @@ def handle_playertransaction_3029(handler, target, instance, data_type, reqid, c
     # Decode the raw transaction once at the application boundary;
     # execution below consumes typed flags without reparsing bytes.
     transaction = _hc.classify_player_transaction(inner_bytes)
+    _hc.log_req(f"    [DEBUG-TX] 3029 from reck={handler.client_reck_id} bytes={bytes(inner_bytes[:72])!r}")
     # Run labeled recovery even when nested ObjFmt parsing failed,
     # then reclassify with the real command flags so combat and
     # continuation-specific raw recovery rules are available.

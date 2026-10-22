@@ -371,13 +371,18 @@ def db_mark_session_packet_sent(session_id, target_player_uid, body):
 
 
 _REPLAYABLE_PVP_SESSION_PREFIXES = ("tourney-", "pvp-", "Challenge_")
+# Simulator sessions are named ``tourney-<id>-autoplay``: the ``tourney-`` prefix
+# keeps the engine's tournament behaviour, and the suffix keeps them out of replay.
+SIMULATOR_SESSION_SUFFIX = "-autoplay"
 
 
 def _is_replayable_pvp_session(session_id):
     row = _db_layer._db.execute(
         "SELECT session_name FROM game_sessions WHERE session_id=?",
         (str(session_id),)).fetchone()
-    return bool(row and (row[0] or "").startswith(_REPLAYABLE_PVP_SESSION_PREFIXES))
+    name = (row[0] or "") if row else ""
+    return name.startswith(_REPLAYABLE_PVP_SESSION_PREFIXES) and not name.endswith(
+        SIMULATOR_SESSION_SUFFIX)
 
 
 def _record_session_events(session_id, target_player_uid, event_byte_list):

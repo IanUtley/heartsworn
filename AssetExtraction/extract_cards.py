@@ -679,9 +679,13 @@ def main():
         # card text has no Rage keyword.  Only materialize Rage when the
         # template actually declares it in its game text.
         rage_value = _int_field(rec, "m_RageValue")
+        # A Deploy "gets one of the following at random" names Rage as one
+        # option, not as printed Rage, so that sentence is not read.
+        printed_text = re.sub(r"at random:.*?(?:\.|$)", "",
+                              _str_field(rec, "m_GameText"),
+                              flags=re.IGNORECASE | re.DOTALL)
         if not rage_value:
-            rage_match = re.search(r"\brage\s+(\d+)\b",
-                                   _str_field(rec, "m_GameText"),
+            rage_match = re.search(r"\brage\s+(\d+)\b", printed_text,
                                    re.IGNORECASE)
             rage_value = int(rage_match.group(1)) if rage_match else 0
         if rage_value and not re.search(

@@ -215,5 +215,9 @@ def _build(db, zone_id: str, path: Path):
                            key=by_name)
             others = [e for e in spec["entries"] if e.get("kind") not in kind_rank]
             spec["entries"] = battles + talks + others
+        # A dungeon-only card choice follows its battle, and the battle has no
+        # condition, so the choice is listed first to be reached once it holds.
+        spec["entries"] = ([e for e in spec["entries"] if e.get("dungeon_only")] +
+                           [e for e in spec["entries"] if not e.get("dungeon_only")])
     # Checked after merging: live scene-action hooks set flags too.
     return merged, engine.validate(merged)

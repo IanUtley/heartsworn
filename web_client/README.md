@@ -10,9 +10,12 @@ python3 -m web_client.server   # http://127.0.0.1:8780/
 
 Options: `--port`, `--host` (or `HEX_WEB_PORT` / `HEX_WEB_HOST`), and
 `--live-db` to play on `HEX_DB_PATH`/`hconnect.db` instead of a private
-snapshot. Set `HEX_CLIENT_ROOT` to a Hex install (the folder holding
-`AssetBundles/`) to show real card and champion art; without it cards are drawn
-with shard-coloured frames.
+snapshot.
+
+The lobby asks for the `HEX SHARDS OF FATE` folder first. The page reads card
+art, card-play sounds and battleboards from that folder in the browser
+(`static/unity/`) and keeps them in memory; nothing is uploaded and the server
+does not serve art. Battle stays disabled until the folder is read.
 
 ## How it talks to the server
 
@@ -75,12 +78,52 @@ offers in an option are highlighted when you play the card. Attack and block
 declarations, trigger target pickers, play/draw and mulligan are prompts from
 the server's current decision.
 
-Card sleeves and gameboards are chosen in the lobby or the in-game menu and
-remembered in the browser. The gameboards are named after battleboards in the
-inventory data (Basic, Forest, Frost Ring, Badlands, Sanctum of Suffering,
-Coastline) and drawn in CSS, since the client's 3D board scenes are not
-extracted. The opponent's sleeve is derived from the sleeve ID in its
-`DeckCreated` event.
+Gameboards are chosen in the lobby or the in-game menu and remembered in the
+browser. The battleboard bundles (`AssetBundles/gameboards/*.ab`) are decoded in
+the page: the playing surface is textured onto the arena field and the props
+around it are three.js meshes. Deck daises sit on their deck anchors (`PlayerDeckAnchorTarget`,
+`OpponentDeckAnchorTarget`). A board that places its own dais at the anchor (badlands'
+`BattleBoard_*` copies) keeps that copy and leaves out its other copies of that side;
+otherwise the authored dais is translated onto the anchor, since the client parents
+it there and keeps its offset. Everything under a dais moves with it, its void portal
+and fire ring included. The surface glows by its `_ESRA` mask: the red
+channel lights the rune lines and the blue channel the reflective centre, in the
+colours of the board's look preset in `board3d.js`. A board without an `_ESRA`
+mask glows by its `_EmissionMap`, lit by the material's `_EmissionColor` (badlands'
+lava lines). The bundles also hold the
+imported models the board was built from (`MDL_*`, on Unity's
+`Default-Material`); a copy is dropped when the board places the same mesh in
+the arena itself. Props with no texture, and objects that the battleboard's
+animation clips switch on and off (the void portal and intro effects), are left
+out. The board is scaled to cover the screen, so no space beyond it shows at the
+edges. Decoded boards and the board list are cached in the browser under a
+version key (`board7:`, `boards7`); bump it when the decoder changes. Without
+the folder the painted arena is used.
+Card sleeves are still drawn in CSS from the sleeve ID in each `DeckCreated`
+event.
+
+Card-play sounds come from the card's `m_SoundEventOnSpawn` in the gamedata
+(the catalog's `sound`). The clip is read from the card's own art bundle in
+`AssetBundles/cardsets/*.harc`. About 97% of card clips resolve this way; the
+rest are filed under another card's bundle or absent from the client.
+
+## Client asset reader
+
+`static/unity/` reads the Unity 5.6 containers without any server help:
+
+| File | Role |
+|---|---|
+| `reader.js` | byte sources, LZ4 block data, UnityFS bundles, HARC archives |
+| `lzma.js` | LZMA blocks (some card bundles) |
+| `serialized.js` | serialized files, object table, generic TypeTree reader |
+| `media.js` | Texture2D pixels (DXT1/DXT5, RGB/RGBA/ARGB, RGB565), Mesh attributes |
+| `fsb.js` | FMOD FSB5 Vorbis banks remuxed to Ogg for `decodeAudioData` |
+| `vorbis_setups.js` | the three Vorbis setup packets FSB banks refer to |
+| `install.js` | the Hex folder: art index, card sounds, battleboard scenes |
+
+The readers were checked against UnityPy output (object tables, texture pixels,
+mesh attributes, and the decoded sound container). `vorbis_setups.js` is
+extracted from vgmstream's FSB codebook table.
 
 ## Files
 

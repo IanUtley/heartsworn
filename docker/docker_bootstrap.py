@@ -503,6 +503,25 @@ def run_tests(path: Path) -> None:
         print("[docker] all startup tests passed", flush=True)
 
 
+def vacuum_database(path: Path) -> None:
+    """Rebuild the database file on every startup.
+
+    SQLite keeps pages freed by DELETE inside the file, so the file never
+    shrinks on its own.  Checkpointing the WAL first folds its committed pages
+    back in, and VACUUM then rewrites the file with only live pages.  Runs
+    before any service opens the database (restart.sh stops them first).
+    """
+    before = path.stat().st_size
+    connection = sqlite3.connect(path, timeout=300)
+    try:
+        connection.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        connection.execute("VACUUM")
+    finally:
+        connection.close()
+    print(f"[docker] vacuumed {path}: {before} -> {path.stat().st_size} bytes",
+          flush=True)
+
+
 def main() -> int:
     path = database_path()
     configured_gamedata = gamedata_path()
@@ -534,6 +553,7 @@ def main() -> int:
         upgrade_database(path)
         populate_missing_fra_data(path, configured_records)
         validate_static_data(path)
+        vacuum_database(path)
         return 0
 
     if configured_gamedata is None:
@@ -547,6 +567,7 @@ def main() -> int:
     print(f"[docker] database created at {path}", flush=True)
     populate_missing_fra_data(path, configured_records)
     validate_static_data(path)
+    vacuum_database(path)
     run_tests(path)
     return 0
 

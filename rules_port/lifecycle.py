@@ -415,16 +415,36 @@ def card_ready_blocked(db, session_id, card_uid):
     return False
 
 
+_READY_CLEAR_MASK = (game_engine.ECardStates.Tapped |
+                     game_engine.ECardStates.Attacking |
+                     game_engine.ECardStates.HasAttacked |
+                     game_engine.ECardStates.Blocking |
+                     game_engine.ECardStates.HasBlocked)
+
+
+def ready_card(db, session_id, card_uid, previous, attrs):
+    """C# Session.ReadyCard for one warzone card: clear its ready-step bits.
+
+    A card that CantReadyAutomatically, or that ``card_ready_blocked`` holds,
+    keeps Tapped. The row is written here and the new state bits returned; the
+    caller raises CardReadiedEvent when Tapped was cleared, so every untap
+    raises the same event whichever path readies the card.
+    """
+    from pvp_db import db_reset_warzone_troop
+    mask = _READY_CLEAR_MASK
+    blocked = bool(
+        attrs and int(attrs) &
+        game_engine.ECardAttributes.CantReadyAutomatically)
+    if blocked or card_ready_blocked(db, session_id, card_uid):
+        mask &= ~game_engine.ECardStates.Tapped
+    db_reset_warzone_troop(session_id, int(card_uid), mask, conn=db)
+    return int(previous) & ~mask
+
+
 def ready_cards_for_turn(db, session_id, owner_id, battle_state=None):
     """Apply the port-owned Prep readiness transition for one controller."""
     from pvp_db import (db_warzone_cards_with_state,
-                        db_warzone_card_state_attributes,
-                        db_reset_warzone_troop)
-    clear_mask = (game_engine.ECardStates.Tapped |
-                  game_engine.ECardStates.Attacking |
-                  game_engine.ECardStates.HasAttacked |
-                  game_engine.ECardStates.Blocking |
-                  game_engine.ECardStates.HasBlocked)
+                        db_warzone_card_state_attributes)
     changed = []
     for card_uid, template_guid, card_owner, card_state in \
             db_warzone_cards_with_state(session_id, conn=db):
@@ -434,14 +454,7 @@ def ready_cards_for_turn(db, session_id, owner_id, battle_state=None):
         attrs_row = db_warzone_card_state_attributes(
             session_id, int(card_uid), conn=db)
         attrs = attrs_row[1] if attrs_row else 0
-        mask = clear_mask
-        blocked = bool(
-            attrs and int(attrs) &
-            game_engine.ECardAttributes.CantReadyAutomatically)
-        if blocked or card_ready_blocked(db, session_id, card_uid):
-            mask &= ~game_engine.ECardStates.Tapped
-        db_reset_warzone_troop(session_id, int(card_uid), mask, conn=db)
-        new_state = previous & ~mask
+        new_state = ready_card(db, session_id, card_uid, previous, attrs)
         if new_state != previous:
             changed.append((int(card_uid), template_guid, int(card_owner or 0),
                             previous, new_state))
@@ -516,8 +529,16 @@ def decrement_ability_cooldowns(db, session_id, owner_id, battle_state=None):
 def clear_combat_damage(db, session_id):
     from pvp_db import (db_clear_warzone_damage_except,
                         db_warzone_troop_state_rows)
+    from gamedata import DEFAULT_RECORD_STORE
     exempt = []
     for row in db_warzone_troop_state_rows(session_id, conn=db):
+        # A printed "not healed at the end of each turn" (Decaying Giant) keeps
+        # its damage whatever its instance buffs say.
+        template = DEFAULT_RECORD_STORE.get(
+            "CardTemplate", str(row[1] or "").lower())
+        if template is not None and template.cant_heal_at_end_of_turn:
+            exempt.append(int(row[0]))
+            continue
         for raw in (row[5], row[6]):
             try:
                 buffs = json.loads(raw or "{}")
@@ -571,9 +592,14 @@ def clear_expired_temporary_attributes(db, session_id, owner_id, boundary,
                 bit = int(bit_text)
             except (TypeError, ValueError):
                 continue
+            # "This turn" (EndOfTurn) ends at the end of whichever turn it was
+            # cast in, even when the caster's opponent's turn is the one ending
+            # (C# AbilityManager.RemoveEndOfTurnAbilities), so the end_turn
+            # boundary does not need the caster to be the ending player.
             if (isinstance(rule, dict) and
-                    int(rule.get("owner", -1)) == int(owner_id) and
-                    rule.get("boundary") == boundary):
+                    rule.get("boundary") == boundary and
+                    (boundary == "end_turn" or
+                     int(rule.get("owner", -1)) == int(owner_id))):
                 expired_bits |= bit
             else:
                 remaining[bit_text] = rule

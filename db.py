@@ -31,6 +31,15 @@ DB_PATH = os.environ.get(
     os.path.join(os.path.dirname(__file__), "hconnect.db"),
 )
 
+# Filter for ``campaign_node_conversations`` reads (use with the bare table name).
+# An editor placement (origin 'data') shadows the seeded placements of the same
+# conversation, so a seeded row is hidden while any editor placement exists.
+CAMPAIGN_NODE_CONVERSATION_VISIBLE = (
+    "(origin='data' OR NOT EXISTS (SELECT 1 FROM campaign_node_conversations AS s "
+    "WHERE s.campaign_template=campaign_node_conversations.campaign_template "
+    "AND LOWER(s.conversation_guid)=LOWER(campaign_node_conversations.conversation_guid) "
+    "AND s.origin='data'))")
+
 REQUEST_LOG = "/tmp/hconnect_requests.log"
 _log_req_file = open(REQUEST_LOG, "a", buffering=1)
 SESSION_LOG_DIR = os.environ.get("HEX_SESSION_LOG_DIR", "/tmp/hconnect_sessions")

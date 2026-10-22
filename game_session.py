@@ -148,17 +148,19 @@ def create_encounter_session(session_name, encounter_data, player_uid, conn=None
 
 
 def _save(session, conn=None):
-    owns_connection = conn is None
-    conn = conn or _db()
-    try:
-        # session_id/server_id/owner_uid are unsigned 64-bit UIDs which can
-        # exceed SQLite's signed 64-bit INTEGER range, so store them as TEXT.
-        db_layer.db_save_session(session, conn=conn)
-        if owns_connection:
-            conn.commit()
-    finally:
-        if owns_connection:
-            conn.close()
+    # Inside a battle dispatch the row is written once when the batch ends.
+    if db_layer.queue_session_save(session):
+        return
+    # Saves run after nearly every transaction, so reuse the server's shared
+    # connection (as persistence.save_state does) rather than opening one per
+    # save.  Without a caller connection this commits the shared connection.
+    owns_commit = conn is None
+    conn = connection_db._db if conn is None else conn
+    # session_id/server_id/owner_uid are unsigned 64-bit UIDs which can
+    # exceed SQLite's signed 64-bit INTEGER range, so store them as TEXT.
+    db_layer.db_save_session(session, conn=conn)
+    if owns_commit:
+        conn.commit()
 
 
 def _load(row):

@@ -15,6 +15,7 @@ import io
 import json
 import struct
 from binascii import hexlify
+from functools import lru_cache
 
 PARTY_CAP_FLAG = "CAMP_PARTYCAP"
 ZERO_GUID = "00000000-0000-0000-0000-000000000000"
@@ -245,6 +246,29 @@ def unlock_first_party_slot(db, user_id):
     flag, changed = db_ensure_reckoning_flag_minimum(
         user_id, PARTY_CAP_FLAG, 1, default_maximum=4, conn=db)
     return flag if changed else None
+
+
+@lru_cache(maxsize=None)
+def mercenary_item_guids():
+    """GUIDs of the InventoryMercenaryData items; inventory rows reference them."""
+    from gamedata import DEFAULT_RECORD_STORE
+    return frozenset(item.guid.lower()
+                     for item in DEFAULT_RECORD_STORE.load("InventoryItemData")
+                     if item.is_a("InventoryMercenaryData") and item.guid)
+
+
+def sync_party_cap(db, user_id):
+    """Set CAMP_PARTYCAP to min(3, the mercenaries the account owns).
+
+    Called at login, before the account flags are sent.
+    """
+    from profile_db import db_inventory_template_quantities
+    mercenaries = mercenary_item_guids()
+    owned = sum(quantity for guid, quantity
+                in db_inventory_template_quantities(user_id, conn=db)
+                if guid.lower() in mercenaries)
+    set_flag(db, user_id, PARTY_CAP_FLAG, min(3, owned), 4)
+    db.commit()
 
 
 def get_parties(db, user_id):

@@ -943,6 +943,21 @@ class HCPHandler(RulesPortProjectionMixin, ProfileStreamMixin, CardPlayMixin, Ca
                     self.user_profile.get("id", 0)
                     if current_state.get("turn_player") == "player"
                     and isinstance(self.user_profile, dict) else 0)
+                # The native EndPhase exit publishes only CombatEndedEvent, so
+                # the outgoing turn's "at the end of your turn" triggers fire
+                # here, before the cleanup below, as the legacy EndTurn
+                # hand-over did.  Triggers queue onto the chain as usual.
+                from rules_port.triggers import dispatch_native_trigger
+                turn_end_projection = (
+                    getattr(getattr(_port, "event_sink", None), "game", None)
+                    or game)
+                dispatch_native_trigger(
+                    db=_db, handler=self, game=turn_end_projection,
+                    session=_session, player_uid=turn_end_projection.player_uid,
+                    ai_uid=turn_end_projection.ai_uid,
+                    battle_state=current_state,
+                    event_type="TurnEndedEvent", source_card_id=None,
+                    source_player_id=outgoing_owner)
                 self._clear_combat_damage(_session, current_state)
                 self._clear_expired_temporary_attributes(
                     _session, current_state, outgoing_owner, "end_turn",

@@ -259,7 +259,10 @@ def reveal_cards(context):
                   not context.bstate.get("pvp")):
                 context.game.events[-1]._hand_reveal_viewer_uid = \
                     context.player_uid
-            if context.game.events[-1]._hand_reveal_viewer_uid is not None:
+            # Only the viewer-scoped branches tag the update; the event class
+            # raises AttributeError for an untagged field, so read it with a default.
+            if getattr(context.game.events[-1], "_hand_reveal_viewer_uid",
+                       None) is not None:
                 # Coverflow reveals are temporary (C# Inactive=true).
                 context.game.events[-1]._temporary_reveal = True
         context.game._push(event)

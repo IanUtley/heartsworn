@@ -134,6 +134,42 @@ def _play_choice_card(context, chosen_uid, owner_id):
     return True
 
 
+def _owner_pick_target(context, ability_guid, source_uid, owner_id):
+    """``(template guid, legal uids)`` for the owner's first explicit target
+    outside the choosing zone, or None.
+
+    Choosing-zone pickers are handled by the choice continuation, and an AI
+    owner's targets are chosen by its evaluator, so neither is offered here.
+    """
+    from gamedata import DEFAULT_RECORD_STORE, ability_graph
+    from .targeting import (filter_restricts_to_zone, legal_targets,
+                            target_uses_both_players)
+    if int(owner_id or 0) == 0:
+        return None
+    graph = ability_graph(DEFAULT_RECORD_STORE, ability_guid)
+    if graph is None:
+        return None
+    for target in graph.targets:
+        if not target.requires_input or int(target.minimum or 0) < 1:
+            continue
+        card_filter = getattr(target, "card_filter", None)
+        to_dict = getattr(card_filter, "to_dict", None)
+        if callable(to_dict):
+            card_filter = to_dict()
+        if filter_restricts_to_zone(card_filter, "Choosing"):
+            continue
+        candidates = legal_targets(
+            context.db, context.session.session_id, int(owner_id),
+            target.guid, source_uid,
+            both_players=target_uses_both_players(context.db, target.guid),
+            champions=(getattr(context.handler, "_champion_targets",
+                               lambda: [])() or []),
+            battle_state=context.bstate)
+        if candidates:
+            return target.guid, [int(uid) for uid in candidates]
+    return None
+
+
 def _resolve_choice_card_abilities(context, chosen_uid, source_uid, owner_id):
     from pvp_db import (db_card_ability_payload, db_card_mutation_field,
                         db_set_card_mutation_field)
@@ -177,6 +213,21 @@ def _resolve_choice_card_abilities(context, chosen_uid, source_uid, owner_id):
         if (graph.manual or graph.trigger_event_type or ability_index >= 0 or
                 not graph.effects):
             continue
+        # An authored target the owner must pick (Putrid Bark's "target
+        # opposing Rotmutt") is offered on the board before the ability
+        # resolves, as a triggered ability's target prompt is.
+        picked = _owner_pick_target(context, str(guid).lower(), choice_source_uid,
+                                    owner_id)
+        if picked is not None:
+            prompt = getattr(context.handler, "_prompt_trigger_targets", None)
+            if callable(prompt):
+                target_guid, candidates = picked
+                prompt(context.game, context.player_uid, context.ai_uid,
+                       context.session, context.bstate, choice_source_uid,
+                       str(guid).lower(), [target_guid], [candidates],
+                       owner_id=owner_id)
+                results.append("choice card ability: awaiting target")
+                continue
         old_source = context.bstate.get("resolving_source_uid")
         old_targets = {
             key: context.bstate.get(key)

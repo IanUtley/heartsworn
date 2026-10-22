@@ -1046,6 +1046,12 @@ class EffectContext:
 
         attrs = dict((self.bstate.get("champion_int_attrs") or {}).get(
             str(int(champion_uid)), {}) or {})
+        # Static intattrs (Armor from the champion's own ability) show on the
+        # portrait too, beside the stored runtime values.
+        from rules_port.static_rules import champion_static_intattrs
+        for name, value in champion_static_intattrs(
+                self.db, self.session.session_id, self.bstate, owner).items():
+            attrs[name] = attrs.get(name, 0) + value
         scid = game_engine.SessionCardId(game_engine.UID(int(champion_uid)))
         card_defs = getattr(self.game, "card_defs", None)
 
@@ -4317,6 +4323,40 @@ class EffectContext:
                         choice_target = (
                             index, [int(uid) for uid in candidates], from_deck)
                     break
+            # A player's child that picks a card from its hand ("target an action in
+            # your hand") is the player's choice, not an automatic pick: prompt them
+            # with the same target prompt a triggered ability uses.
+            hand_pick = None
+            prompt_targets = getattr(self.handler, "_prompt_trigger_targets", None)
+            if child is not None and int(owner_id or 0) != 0 and callable(prompt_targets):
+                for target in child.targets:
+                    card_filter = getattr(target, "card_filter", None)
+                    to_dict = getattr(card_filter, "to_dict", None)
+                    if callable(to_dict):
+                        card_filter = to_dict()
+                    if (target.requires_input and target.explicit and
+                            str(target.target_kind or "").endswith("AbilityTargetTemplate") and
+                            filter_restricts_to_zone(card_filter, "Hand")):
+                        hand_candidates = legal_targets(
+                            self.db, self.session.session_id, int(owner_id or 0),
+                            target.guid, source_uid,
+                            both_players=str(target.player_filter or "").lower()
+                            not in {"self", "you", "controller"},
+                            champions=(getattr(
+                                self.handler, "_champion_targets", lambda: [])()
+                                       or []),
+                            battle_state=self.bstate)
+                        if hand_candidates:
+                            hand_pick = (target.guid, [int(uid) for uid in hand_candidates])
+                        break
+            if hand_pick is not None:
+                template_guid, hand_uids = hand_pick
+                self.bstate["resolution_paused"] = True
+                prompt_targets(
+                    self.game, self.player_uid, self.ai_uid, self.session,
+                    self.bstate, int(source_uid or 0), child_guid,
+                    (template_guid,), hand_uids, owner_id=int(owner_id or 0))
+                return "activate ability: awaiting target from hand"
             if choice_target is not None and int(owner_id or 0) != 0:
                 target_index, choice_uids, from_deck = choice_target
                 # The chosen card can live in a hidden collection rather than

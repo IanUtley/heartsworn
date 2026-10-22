@@ -29,14 +29,15 @@ const PHASE_TRACK = [[7, "Ready"], [9, "Draw"], [10, "Main"], [12, "Attack"], [1
 const PASS_LABELS = { 2: "Ready", 4: "Continue to combat", 6: "Resolve", 7: "Continue to second main",
   9: "End turn", 11: "End turn", 14: "Resolve combat", 15: "Pass", 16: "Pass" };
 const SLEEVES = ["classic", "blood", "ruby", "sapphire", "wild", "diamond", "cosmic"];
-// Named after battleboards in the Hex inventory data (InventoryGameboardData).
-const BOARDS = [["basic", "Basic Battleboard"], ["forest", "Forest Battleboard"], ["frostring", "Frost Ring Battleboard"],
-  ["badlands", "Badlands Battleboard"], ["sanctum", "Sanctum of Suffering Battleboard"], ["coastline", "Coastline Battleboard"]];
+// The battleboards are the AssetBundles/gameboards/*.ab files in the Hex folder.
+// The lobby fills this list once the folder is read.
+let boards = [];
+const boardLabel = (key) => key.charAt(0).toUpperCase() + key.slice(1).replace(/_/g, " ");
 const AXE = `<svg viewBox="0 0 32 32" width="38" height="38"><path fill="currentColor" d="M15 3h2v27h-2z"/><path fill="currentColor" d="M17 7c5 0 9-2 11-4 1 5 1 13-1 18-2-2-6-3.5-10-3.5zM15 7C10 7 6 5 4 3c-1 5-1 13 1 18 2-2 6-3.5 10-3.5z"/></svg>`;
 const HAND_W = 112, HAND_H = 157;   // --hand-w / --hand-h
 
 const $ = (sel) => document.querySelector(sel);
-const boardChoice = () => { const b = storage("hex.board"); return BOARDS.some(([v]) => v === b) ? b : "basic"; };
+const boardChoice = () => { const b = storage("hex.board"); return boards.includes(b) ? b : (boards[0] || "basic"); };
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
 function storage(key, value) {
@@ -57,7 +58,7 @@ const S = {
   phase: {}, greenlight: {}, chain: [], options: new Map(), combats: new Map(), decks: {},
   prompt: null, busy: true, error: null, ended: false,
   ui: { mode: null }, catalog: { cards: {}, abilities: {} }, wanted: { cards: new Set(), abilities: new Set() },
-  artOk: null, log: [], prevLife: {}, rendered: new Set(), flying: new Set(), lastChain: 0,
+  log: [], prevLife: {}, rendered: new Set(), flying: new Set(), lastChain: 0,
 };
 
 function resetState() {
@@ -67,6 +68,7 @@ function resetState() {
     prompt: null, busy: true, error: null, ended: false, ui: { mode: null }, log: [], prevLife: {},
     rendered: new Set(), flying: new Set(), lastChain: 0,
   });
+  pendingSounds.clear();
 }
 
 function want(section, guid) {
@@ -102,6 +104,7 @@ function applyEvent(ev) {
       S.cards.set(card.uid, card);
       want("cards", card.card_id);
       (card.abilities || []).forEach((a) => want("abilities", a));
+      flushCardSounds();
       break;
     }
     case "DeckCreated":
@@ -156,6 +159,8 @@ function applyEvent(ev) {
     }
     case "TroopCardPlayed": case "SpellCardPlayed": case "ArtifactCardPlayed": case "ResourceCardPlayed":
       logLine((names) => `${who(ev.player_id)} played ${names(ev.session_card_id)}`);
+      pendingSounds.add(ev.session_card_id);
+      flushCardSounds();
       break;
     case "CardDestroyed":
       logLine((names) => `${names(ev.session_card_id)} was destroyed`);
@@ -251,17 +256,7 @@ async function loadCatalog() {
     cards.forEach((g) => { S.catalog.cards[g] = found.cards[g] || null; });
     abilities.forEach((g) => { S.catalog.abilities[g] = found.abilities[g] || null; });
   } catch (err) { /* names fill in on the next packet */ }
-  probeArt();
-}
-
-function probeArt() {
-  if (S.artOk !== null) return;
-  const sample = Object.values(S.catalog.cards).find((c) => c && /^a\d{7}$/.test(c.art || ""));
-  if (!sample) return;
-  S.artOk = false;
-  const img = new Image();
-  img.onload = () => { S.artOk = true; render(); };
-  img.src = `/art/${sample.art}.jpg`;
+  flushCardSounds();
 }
 
 /* ------------------------------------------------------------------ */
@@ -299,13 +294,16 @@ const TYPE_CHAR = { Troop: "\u2694", Resource: "\u25c6", Artifact: "\u2699", Con
   BasicAction: "\u2726", QuickAction: "\u26a1", Champion: "\u265b" };
 const SHARD_HEX = { blood: "#9b4dd1", ruby: "#e0473a", sapphire: "#3a8ae0", wild: "#45a852", diamond: "#e9dca6", multi: "#c9a14a" };
 
+// Card art decoded from the player's client install (hex_assets.js). It is
+// null until the decode finishes, and then the card is drawn again.
 function artUrl(tpl) {
-  return S.artOk && tpl && /^a\d{7}$/.test(tpl.art || "") ? `/art/${tpl.art}.jpg` : null;
+  if (!tpl || !/^a\d{7}$/.test(tpl.art || "") || !window.HexAssets) return null;
+  return HexAssets.artUrl(tpl.art, () => render());
 }
 
 function artStyle(tpl) {
-  if (S.artOk && tpl && /^a\d{7}$/.test(tpl.art || "")) return ` style="background-image:url('/art/${tpl.art}.jpg')"`;
-  return "";
+  const url = artUrl(tpl);
+  return url ? ` style="background-image:url('${url}')"` : "";
 }
 
 function thresholdGems(tpl) {
@@ -334,6 +332,8 @@ function cardHTML(card, extra = "", style = "") {
   const styleAttr = style ? ` style="${style}"` : "";
   if (hidden) return `<div class="card back ${sleeveOf(card.controller)} ${freshClass(card)} ${extra}" data-uid="${card.uid}"${styleAttr}></div>`;
   const classes = ["card", shardClass(tpl), freshClass(card), extra];
+  // Basic resources render frameless: just the shard art, no card chrome.
+  if (tpl && tpl.type === "Resource") classes.push("resource");
   if (card.state & CSTATE.Tapped) classes.push("tapped");
   if (card.state & CSTATE.Attacking || S.combats.has(card.uid)) classes.push("attacking");
   if (card.state & CSTATE.Blocking) classes.push("blocking");
@@ -347,13 +347,28 @@ function cardHTML(card, extra = "", style = "") {
   const counters = (card.counter_counts || []).map((n) => n > 0 ? `<span class="counter">${n}</span>` : "").join("");
   const cost = tpl && tpl.type !== "Resource" ? `<div class="cost">${card.collection === COLL.Hand ? card.cost : (tpl ? tpl.cost : card.cost)}</div>` : "";
   const text = tpl ? `<div class="text-box">${gameText(tpl.text)}${tpl.flavor ? `<div class="flavor">${esc(tpl.flavor)}</div>` : ""}</div>` : "";
+  const faction = Object.keys((tpl && tpl.thresholds) || {}).find((color) => color !== "Colorless") || "Colorless";
+  const rarity = tpl && tpl.rarity ? tpl.rarity : "Common";
   return `<div class="${classes.join(" ")}" data-uid="${card.uid}"${styleAttr}>
     ${cost}<div class="name">${esc(name)}</div>
     <div class="art"${artStyle(tpl)}>${artStyle(tpl) ? "" : (TYPE_GLYPH[tpl && tpl.type] || "")}</div>
-    <div class="type-line">${esc(typeName)} ${thresholdGems(tpl)}</div>
+    <div class="thresholds">${thresholdGems(tpl)}</div>
+    <div class="type-bar"><span class="faction faction-${faction.toLowerCase()}" title="${esc(faction)}">${faction === "Colorless" ? "◇" : "✦"}</span><div class="type-line">${esc(typeName)}</div><span class="rarity rarity-${rarity.toLowerCase()}" title="${esc(rarity)}">${rarity === "Legendary" ? "✦" : rarity === "Rare" ? "◆" : rarity === "Uncommon" ? "●" : "○"}</span></div>
     ${text}<div class="keywords">${kws}</div><div class="counters">${counters}</div>
     ${showStats ? `<div class="stats"><span class="stat atk ${atkCls}">${card.attack}</span><span class="stat def ${defCls}">${card.defense}</span></div>` : ""}
   </div>`;
+}
+
+// Hand, preview and mulligan cards show the card as the board paints it (board3d.js
+// cardImage), so they match the cards on the board. The state classes keep their glow.
+function faceHTML(card, extra = "", style = "") {
+  const styleAttr = style ? ` style="${style}"` : "";
+  const classes = ["card", "painted", freshClass(card), extra];
+  if (card.state & CSTATE.Tapped) classes.push("tapped");
+  if (card.state & CSTATE.Attacking || S.combats.has(card.uid)) classes.push("attacking");
+  if (card.state & CSTATE.Blocking) classes.push("blocking");
+  const src = window.Board3D ? window.Board3D.cardImage(faceOf(card), () => render()) : "";
+  return `<div class="${classes.join(" ")}" data-uid="${card.uid}"${styleAttr}><img src="${src}" alt=""></div>`;
 }
 
 function hashIndex(guid, n) {
@@ -402,10 +417,22 @@ function faceOf(card) {
   const tpl = S.catalog.cards[(card.card_id || "").toLowerCase()];
   if (!tpl || card.card_id === NO_GUID) return { hidden: true, sleeve: sleeveOf(card.controller).slice("sleeve-".length) };
   const baseAtk = tpl.attack ?? card.attack, baseDef = tpl.defense ?? card.defense;
+  const cost = card.collection === COLL.Hand ? card.cost : tpl.cost;
   return {
     name: tpl.name,
-    cost: tpl.type === "Resource" ? "" : (card.collection === COLL.Hand ? card.cost : tpl.cost),
+    cost: tpl.type === "Resource" || tpl.kind === "champion" ? "" : (tpl.variable && !cost ? tpl.variable : `${cost}${tpl.variable || ""}`),
+    // The client tints a changed cost: red when raised, green when lowered.
+    costCls: cost > tpl.cost ? "hurt" : (cost < tpl.cost ? "buffed" : ""),
     type: [tpl.type, card.sub_type || tpl.subtype].filter(Boolean).join(" \u2014 "),
+    types: tpl.types || String(tpl.type || "").split("|").filter(Boolean),
+    subtype: card.sub_type || tpl.subtype || "",
+    rarity: tpl.rarity || "Common",
+    faction: Object.keys(tpl.thresholds || {}).find((color) => color !== "Colorless") || "Colorless",
+    house: tpl.faction || "None",
+    set: tpl.set || 0, pve: !!tpl.pve, immortal: !!tpl.immortal,
+    unique: !!tpl.unique, unlimited: !!tpl.unlimited,
+    resources: tpl.resources || null, sockets: tpl.sockets || 0, flavor: tpl.flavor || "",
+    thresholds: tpl.thresholds || {}, text: tpl.text || "",
     shard: SHARD_HEX[shardClass(tpl).replace("shard-", "")] || "#8d939c",
     glyph: TYPE_CHAR[tpl.type] || "",
     art: artUrl(tpl),
@@ -418,25 +445,70 @@ function faceOf(card) {
   };
 }
 
-function boardEntry(card, zone, index, count) {
+function boardEntry(card, zone, index, count, plan) {
   let highlight = interactive(card.uid);
   if (!highlight && (card.state & CSTATE.Attacking || S.combats.has(card.uid))) highlight = "attacking";
   if (!highlight && card.state & CSTATE.Blocking) highlight = "blocking";
   return { uid: card.uid, zone, index, count, highlight, hidden: S.flying.has(card.uid),
-    tapped: zone !== "chain" && !!(card.state & CSTATE.Tapped), face: faceOf(card) };
+    tapped: zone !== "chain" && !!(card.state & CSTATE.Tapped),
+    attacking: plan.attackers.has(card.uid), blocking: plan.blockers.has(card.uid),
+    face: faceOf(card) };
+}
+
+// The combat as the board draws it: every declared attacker with the blockers
+// assigned to it, plus the attack or block the player is still choosing.
+function combatPlan() {
+  const attackers = new Map();   // attacker uid -> [blocker uid]
+  for (const [uid, combat] of S.combats) attackers.set(uid, [...(combat.blockers || [])]);
+  const ui = S.ui;
+  if (ui.mode === "attack") for (const uid of ui.chosen) if (!attackers.has(uid)) attackers.set(uid, []);
+  if (ui.mode === "defend") {
+    for (const uid of (S.prompt && S.prompt.attackers) || []) if (!attackers.has(uid)) attackers.set(uid, []);
+    for (const [attacker, blockers] of Object.entries(ui.blocks)) {
+      const uid = Number(attacker);
+      attackers.set(uid, [...new Set([...(attackers.get(uid) || []), ...blockers])]);
+    }
+  }
+  const blockers = new Set([...attackers.values()].flat());
+  return { attackers: new Set(attackers.keys()), blockers, plan: attackers };
+}
+
+// Card-play sounds. The gamedata names each card's clip (catalog `sound`). An
+// opponent's card may still be hidden when it is played, so its sound waits for
+// the identity the server sends once the card leaves the hand.
+const pendingSounds = new Set();
+function flushCardSounds() {
+  for (const uid of [...pendingSounds]) {
+    const card = S.cards.get(uid);
+    if (!card || card.card_id === NO_GUID) continue;
+    const tpl = S.catalog.cards[card.card_id];
+    if (tpl === undefined) continue;               // the catalog entry is still on its way
+    pendingSounds.delete(uid);
+    if (tpl && tpl.sound && window.HexAssets) HexAssets.playClip(tpl.art, tpl.sound);
+  }
+}
+
+// The lobby's battleboard, from the client install or private storage.
+function syncGameboard(b) {
+  const key = boardChoice();
+  if (b.gameboardKey === key || !window.HexAssets) return;
+  b.gameboardKey = key;
+  HexAssets.gameboard(key).then((board) => { if (board) b.setGameboard(board); });
 }
 
 function renderBoard3d(b) {
-  b.setTheme(boardChoice());
+  syncGameboard(b);
   b.setCombat(document.body.dataset.combat === "1");
+  b.setPhase(S.phase.turn_phase);
   const entries = [];
+  const plan = combatPlan();
   for (const [pid, zone] of [[S.opp, "opp"], [S.me, "mine"]]) {
     const war = [...cardsIn(pid, COLL.Warzone), ...cardsIn(pid, COLL.Underground)];
-    war.forEach((c, i) => entries.push(boardEntry(c, zone, i, war.length)));
+    war.forEach((c, i) => entries.push(boardEntry(c, zone, i, war.length, plan)));
   }
   S.chain.forEach((item, i) => {
     const src = S.cards.get(item.source) || { uid: item.source, controller: 0, card_id: NO_GUID };
-    const entry = { ...boardEntry(src, "chain", i, S.chain.length), top: i === S.chain.length - 1 };
+    const entry = { ...boardEntry(src, "chain", i, S.chain.length, plan), top: i === S.chain.length - 1 };
     if (entry.face.hidden) {
       const ability = S.catalog.abilities[(item.ability || "").toLowerCase()];
       entry.face = { name: ability ? ability.name : "Ability", cost: "", type: "Ability", shard: "#7a6ca8", glyph: "\u2726" };
@@ -444,6 +516,42 @@ function renderBoard3d(b) {
     entries.push(entry);
   });
   b.update(entries);
+  b.setArcs(boardArcs(plan));
+}
+
+function portrait(pid) {
+  return document.querySelector(pid === S.me ? "#my-champion .portrait" : "#opp-champion .portrait");
+}
+
+// The portrait of the champion a uid names, or the uid itself for a card.
+function arcEnd(uid) {
+  const owner = Object.entries(S.champions).find(([, champion]) => champion === uid);
+  return owner ? portrait(Number(owner[0])) : uid;
+}
+
+// Attack and block arcs for the declared combat, and gold arcs for the chain's targets.
+// A blocked attacker draws no arc to the champion: its blockers' red arcs stand instead.
+function boardArcs(plan) {
+  const arcs = [];
+  for (const [attacker, blockers] of plan.plan) {
+    if (!blockers.length) {
+      const controller = (S.cards.get(attacker) || {}).controller;
+      arcs.push({ from: attacker, to: portrait(controller === S.me ? S.opp : S.me), kind: "attack" });
+    }
+    for (const blocker of blockers) arcs.push({ from: blocker, to: attacker, kind: "block" });
+  }
+  for (const item of S.chain) {
+    for (const target of item.targets || []) arcs.push({ from: item.source, to: arcEnd(target), kind: "target" });
+  }
+  return arcs;
+}
+
+// Golden outline for the chain's targets wherever they show as cards in a panel.
+function markChainTargets() {
+  const targets = new Set(S.chain.flatMap((item) => item.targets || []));
+  document.querySelectorAll("#modal [data-uid], #board [data-uid]").forEach((el) => {
+    el.classList.toggle("chain-target", targets.has(Number(el.dataset.uid)));
+  });
 }
 
 function render() {
@@ -463,6 +571,7 @@ function render() {
   renderPhases();
   renderActions();
   renderModal();
+  markChainTargets();
   const b = board3d();
   if (b) renderBoard3d(b);
   $("#log").innerHTML = S.log.map((l) => `<div>${esc(l(cardName))}</div>`).join("");
@@ -506,7 +615,10 @@ function renderChampion(pid, sel) {
   const el = $(sel);
   const uid = S.champions[pid];
   const champCard = uid ? S.cards.get(uid) : null;
-  const tplGuid = (champCard && champCard.card_id) || S.championTemplates[pid];
+  // A hidden opposing champion reports NO_GUID as its card, so fall back to the
+  // template the game started with (its art and name come from that catalog entry).
+  const shownGuid = champCard && champCard.card_id !== NO_GUID ? champCard.card_id : null;
+  const tplGuid = shownGuid || S.championTemplates[pid];
   const tpl = S.catalog.cards[(tplGuid || "").toLowerCase()];
   const p = S.players[pid] || {};
   const life = p.health ?? (tpl ? tpl.health : 20);
@@ -523,7 +635,7 @@ function renderChampion(pid, sel) {
   const powers = (champCard ? champCard.abilities : []).map((g) => {
     const a = S.catalog.abilities[(g || "").toLowerCase()];
     if (!a || !a.manual) return "";
-    const ready = pid === S.me && optionInstance(uid, g) ? "ready" : "";
+    const ready = pid === S.me && activatablePower(uid, g) ? "ready" : "";
     const cost = a.costs || {};
     const price = cost.charge_points ? `&#9889;${cost.charge_points}` : (cost.activation ? `<span class="cost-icon">${cost.activation}</span>` : "");
     return `<button class="power ${ready}" data-power="${esc(g)}" data-uid="${uid}" title="${esc(a.text.replace(/<[^>]+>/g, ""))}">${price} ${gameText(a.text).split("<br>")[0].replace(/^.*?&rarr;\s*/, "")}</button>`;
@@ -553,7 +665,7 @@ function fan(cards, sign) {
   return cards.map((c, i) => {
     const off = i - (cards.length - 1) / 2;
     const style = `--r:${(sign * off * spread).toFixed(2)}deg;--y:${(sign * off * off * spread * 0.6).toFixed(1)}px`;
-    return cardHTML(c, interactive(c.uid), style);
+    return faceHTML(c, interactive(c.uid), style);
   }).join("");
 }
 
@@ -567,13 +679,9 @@ function renderZones() {
   for (const [pid, prefix] of [[S.opp, "opp"], [S.me, "my"]]) {
     const war = [...cardsIn(pid, COLL.Warzone), ...cardsIn(pid, COLL.Underground)];
     $(`#${prefix}-warzone`).innerHTML = war.map((c) => cardHTML(c, interactive(c.uid))).join("");
-    const res = cardsIn(pid, COLL.PlayedResources);
-    $(`#${prefix}-resources`).innerHTML = res.map((c) => {
-      const tpl = S.catalog.cards[(c.card_id || "").toLowerCase()];
-      const shard = shardClass(tpl).replace("shard-", "");
-      return `<div class="resource-chip ${c.state & CSTATE.Tapped ? "tapped" : ""} ${interactive(c.uid)}" data-uid="${c.uid}"
-        style="--shard:var(--${shard || "colorless"})" title="${esc(tpl ? tpl.name : "Resource")}">&#9670;</div>`;
-    }).join("");
+    // PlayedResources is a hidden zone, so its cards are not drawn on the board.
+    // The resource count is shown in the champion panel instead.
+    $(`#${prefix}-resources`).innerHTML = "";
   }
 }
 
@@ -671,7 +779,7 @@ function renderModal() {
       <div class="buttons"><button data-act="play_first">Play first</button><button class="secondary" data-act="draw_first">Draw first</button></div>`;
   } else if (p && !S.busy && p.kind === "mulligan") {
     const hand = cardsIn(S.me, COLL.Hand);
-    html = `<h2>Starting hand</h2><div class="row">${hand.map((c) => cardHTML(c)).join("")}</div>
+    html = `<h2>Starting hand</h2><div class="row">${hand.map((c) => faceHTML(c)).join("")}</div>
       <div class="buttons"><button data-act="keep">Keep</button><button class="secondary" data-act="mulligan">Mulligan</button></div>`;
   } else if (p && !S.busy && p.kind === "choose" && p.candidates.some((uid) => !onBoard(uid))) {
     html = `<h2>Choose a card</h2><div class="row">${p.candidates.map((uid) => {
@@ -715,6 +823,13 @@ function optionInstance(uid, abilityGuid) {
   const o = S.options.get(uid);
   if (!o) return null;
   return o.instances.find((i) => (i.opt_id || "").toLowerCase() === String(abilityGuid).toLowerCase()) || null;
+}
+
+// A charge power's option when it can be used now: a priority window, nothing in flight.
+// Its text box shows as ready, and clicking it starts the power, only under this condition.
+function activatablePower(uid, abilityGuid) {
+  if (!S.prompt || S.prompt.kind !== "priority" || S.busy) return null;
+  return optionInstance(uid, abilityGuid);
 }
 
 function startAction(uid, instance) {
@@ -857,7 +972,8 @@ function animateMoves(before) {
 function landingOf(card) {
   const side = card.controller === S.me ? "my" : "opp";
   switch (card.collection) {
-    case COLL.PlayedResources: return { el: $(`#${side}-resources [data-uid="${card.uid}"]`), viaCentre: false };
+    // A resource played by either player flies through the centre, then settles in its row.
+    case COLL.PlayedResources: return { el: $(`#${side}-resources [data-uid="${card.uid}"]`), viaCentre: true };
     case COLL.Deck: return { el: $(`#${side}-piles .deck`), viaCentre: false, fade: true };
     case COLL.Discard: return { el: $(`#${side}-piles .graveyard`), viaCentre: true, fade: true };
     case COLL.Void: return { el: $(`#${side}-piles .void`), viaCentre: true, fade: true };
@@ -937,10 +1053,90 @@ function floatAtChampion(pid, text, kind) {
 function showPreview(uid) {
   const c = S.cards.get(uid);
   if (!c || !c.card_id || c.card_id === NO_GUID) { $("#preview").innerHTML = ""; return; }
-  $("#preview").innerHTML = cardHTML({ ...c, state: 0, uid: `p${c.uid}` }, "preview-card");
+  $("#preview").innerHTML = faceHTML({ ...c, state: 0, uid: `p${c.uid}` }, "preview-card");
 }
 
+/* ------------------------------------------------------------------ */
+/* Drag to play: a hand card released above the hand plays its Play option */
+/* ------------------------------------------------------------------ */
+
+const DRAG_THRESHOLD = 6;      // px of movement before a press becomes a drag
+const DRAG_CLICK_WINDOW = 400; // ms after a drop in which the trailing click is ignored
+const drag = { uid: 0, el: null, startX: 0, startY: 0, ghost: null, active: false, endedAt: 0 };
+
+// The play area is everything on the board above the hand row.
+function overPlayArea(x, y) {
+  if (y >= $("#my-hand").getBoundingClientRect().top) return false;
+  const under = document.elementFromPoint(x, y);
+  return !!(under && under.closest("#board"));
+}
+
+function moveDragGhost(x, y) {
+  drag.ghost.style.left = `${x}px`;
+  drag.ghost.style.top = `${y}px`;
+  $("#board").classList.toggle("drop-target", overPlayArea(x, y));
+}
+
+function beginDrag(x, y) {
+  drag.active = true;
+  drag.ghost = drag.el.cloneNode(true);
+  drag.ghost.removeAttribute("data-uid");
+  drag.ghost.classList.add("drag-ghost");
+  document.body.appendChild(drag.ghost);
+  moveDragGhost(x, y);
+}
+
+function endDrag() {
+  if (drag.ghost) drag.ghost.remove();
+  $("#board").classList.remove("drop-target");
+  drag.el = null;
+  drag.ghost = null;
+  drag.active = false;
+}
+
+function playDropped(uid) {
+  const p = S.prompt;
+  if (S.busy || !p || p.kind !== "priority") return;
+  if (S.ui && S.ui.mode) return;
+  const instance = optionInstance(uid, PLAY_ABILITY);
+  if (instance) startAction(uid, instance);
+}
+
+document.addEventListener("pointerdown", (e) => {
+  if (e.button !== 0) return;
+  const el = e.target.closest("#my-hand [data-uid]");
+  if (!el || !el.dataset.uid) return;
+  drag.uid = Number(el.dataset.uid);
+  drag.el = el;
+  drag.startX = e.clientX;
+  drag.startY = e.clientY;
+});
+
+document.addEventListener("pointermove", (e) => {
+  if (!drag.el) return;
+  if (!drag.active) {
+    if (Math.hypot(e.clientX - drag.startX, e.clientY - drag.startY) < DRAG_THRESHOLD) return;
+    beginDrag(e.clientX, e.clientY);
+  }
+  moveDragGhost(e.clientX, e.clientY);
+});
+
+document.addEventListener("pointerup", (e) => {
+  if (!drag.el) return;
+  if (drag.active) {
+    if (overPlayArea(e.clientX, e.clientY)) playDropped(drag.uid);
+    drag.endedAt = performance.now();
+  }
+  endDrag();
+});
+
+document.addEventListener("pointercancel", () => { if (drag.el) endDrag(); });
+
 document.addEventListener("click", (e) => {
+  if (drag.endedAt && performance.now() - drag.endedAt < DRAG_CLICK_WINDOW) {
+    drag.endedAt = 0;
+    return;
+  }
   const actEl = e.target.closest("[data-act]");
   if (actEl) return handleAct(actEl.dataset.act);
   const inst = e.target.closest("[data-choose-instance]");
@@ -953,8 +1149,10 @@ document.addEventListener("click", (e) => {
   }
   const power = e.target.closest("[data-power]");
   if (power) {
-    const instance = optionInstance(Number(power.dataset.uid), power.dataset.power);
-    if (instance && S.prompt && S.prompt.kind === "priority" && !S.busy) startAction(Number(power.dataset.uid), instance);
+    const uid = Number(power.dataset.uid);
+    const instance = activatablePower(uid, power.dataset.power);
+    if (instance) startAction(uid, instance);
+    else if (power.closest("#my-champion")) toast("That charge power cannot be used right now.");
     return;
   }
   const pile = e.target.closest("[data-pile]");
@@ -992,13 +1190,60 @@ function handleAct(name) {
 /* Lobby                                                               */
 /* ------------------------------------------------------------------ */
 
+// The lobby and in-game menu offer the boards the folder has.
+function boardOptions() {
+  return boards.map((v) => `<option value="${v}" ${v === boardChoice() ? "selected" : ""}>${boardLabel(v)}</option>`).join("");
+}
+
+function fillBoardSelects() {
+  $("#board-choice").innerHTML = boardOptions();
+  $("#board-choice").value = boardChoice();
+}
+
+// The Hex client folder: the match cannot start until its art and sounds are
+// read, because the cards and boards are drawn from them. A folder chosen on an
+// earlier visit is offered again first and falls back to the picker.
+let savedFolder = false;
+async function chooseHexFolder() {
+  const status = $("#folder-status");
+  try {
+    let tree = savedFolder ? await HexAssets.useSavedFolder() : null;
+    if (!tree) {
+      const picked = await HexAssets.pickFolder($("#folder-input"));
+      if (!picked) return;
+      tree = picked.tree;
+    }
+    status.textContent = "Reading the client assets\u2026";
+    await HexAssets.openFolder(tree, (text) => { status.textContent = `${text}\u2026`; });
+    boards = await HexAssets.boardNames();
+    fillBoardSelects();
+    // Load the card frames now, while the lobby shows, so the first battle is not
+    // drawn first in the fallback frame.
+    status.textContent = "Loading card frames…";
+    await HexAssets.preloadCardChrome();
+    status.textContent = "Client assets ready: card art, card sounds and battleboards.";
+    $("#pick-folder").textContent = "Choose another folder\u2026";
+    $("#start-match").disabled = false;
+    $("#lobby-status").textContent = "";
+  } catch (err) {
+    status.textContent = err.message;
+  }
+}
+
 async function loadLobby() {
-  const sleeve = $("#sleeve-choice"), board = $("#board-choice");
+  const sleeve = $("#sleeve-choice");
   sleeve.innerHTML = SLEEVES.map((s) => `<option value="${s}">${s[0].toUpperCase() + s.slice(1)}</option>`).join("");
-  board.innerHTML = BOARDS.map(([v, n]) => `<option value="${v}">${n}</option>`).join("");
   sleeve.value = storage("hex.sleeve") || "classic";
-  board.value = boardChoice();
   $("#player-name").value = storage("hex.name") || "You";
+  // Sounds default to half volume; the slider is saved and applied as it moves.
+  const volume = $("#volume-choice");
+  volume.value = storage("hex.volume") ?? "50";
+  const applyVolume = () => {
+    $("#volume-value").textContent = `${volume.value}%`;
+    if (window.HexAssets) HexAssets.setVolume(volume.value / 100);
+  };
+  applyVolume();
+  volume.oninput = () => { storage("hex.volume", volume.value); applyVolume(); };
   try {
     const { decks } = await api("/api/decks");
     const opts = decks.map((d) => `<option value="${d.deck_guid}">${esc(d.name.replace(/^Arena_/, "").replace(/_/g, " "))}${d.champion ? ` — ${esc(d.champion)}` : ""}</option>`).join("");
@@ -1050,15 +1295,32 @@ function backToLobby() {
 }
 
 $("#start-match").addEventListener("click", startMatch);
+$("#start-match").disabled = true;
+$("#pick-folder").addEventListener("click", chooseHexFolder);
+// Module scripts run before DOMContentLoaded, so window.HexAssets exists here.
+document.addEventListener("DOMContentLoaded", async () => {
+  if (!(await HexAssets.hasSavedFolder())) return;
+  savedFolder = true;
+  $("#pick-folder").textContent = "Use saved Hex folder\u2026";
+  $("#folder-status").textContent = "Your Hex folder from an earlier visit is saved in this browser.";
+  boards = await HexAssets.boardNames();
+  fillBoardSelects();
+});
 $("#menu-button").addEventListener("click", () => {
   openModal(`<h2>Menu</h2>
     <div class="lobby-panel" style="background:none;border:0;box-shadow:none;padding:0">
       <label>Card sleeve <select id="menu-sleeve">${SLEEVES.map((s) => `<option ${s === (storage("hex.sleeve") || "classic") ? "selected" : ""}>${s}</option>`).join("")}</select></label>
-      <label>Gameboard <select id="menu-board">${BOARDS.map(([v, n]) => `<option value="${v}" ${v === (boardChoice()) ? "selected" : ""}>${n}</option>`).join("")}</select></label>
+      <label>Gameboard <select id="menu-board">${boardOptions()}</select></label>
+      <label>Sound volume <input type="range" id="menu-volume" min="0" max="100" step="5" value="${storage("hex.volume") ?? 50}"> <span id="menu-volume-value">${storage("hex.volume") ?? 50}%</span></label>
     </div>
     <div class="buttons"><button class="secondary" data-act="new-match">Concede and leave</button></div>`);
   $("#menu-sleeve").addEventListener("change", (e) => { storage("hex.sleeve", e.target.value); render(); });
   $("#menu-board").addEventListener("change", (e) => { storage("hex.board", e.target.value); render(); });
+  $("#menu-volume").addEventListener("input", (e) => {
+    $("#menu-volume-value").textContent = `${e.target.value}%`;
+    storage("hex.volume", e.target.value);
+    if (window.HexAssets) HexAssets.setVolume(e.target.value / 100);
+  });
 });
 document.body.dataset.board = boardChoice();
 loadLobby();

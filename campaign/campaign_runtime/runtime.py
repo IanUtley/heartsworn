@@ -389,6 +389,13 @@ def shroom_choice(handler, zone: Zone, oparms):
         getattr(handler, "_log_req", print)(
             f"    Shroom Haus choice rejected: card={card} node={node}")
         return
+    if entry.get("dungeon_only"):
+        # A temporary card joins the deck for this dungeon run only: it is
+        # kept in the zone's state, not in the collection.
+        zone.apply({"type": "shroom_choice", "node": node, "card": card})
+        zone.eng.setdefault("extra_cards", []).append(card)
+        zone.rt.pop("active", None)
+        return
     granted = _campaign()._grant_card_reward(handler, zone.db, zone.user_id, card)
     if granted:
         zone.apply({"type": "shroom_choice", "node": node, "card": card})
@@ -569,6 +576,36 @@ def _count_dungeon_run(zone: Zone, won: bool):
         zone.eng["run_lost"] = True
 
 
+def _champion_keywords(session) -> list[str]:
+    """Statuses the player's champion had when the battle ended.
+
+    A champion's counters live in the battle state keyed by counter GUID.
+    Burning is the only one a campaign keyword reads here.
+    """
+    import battle_engine
+    from rules_port.builtin_rules import BURNING_COUNTER_GUID
+    battle = battle_engine.load_state(session) or {}
+    keywords = []
+    for owner, uid in (battle.get("champ_map") or {}).items():
+        if str(owner) == "0":
+            continue            # the AI's champion
+        counters = (battle.get("champion_counters") or {}).get(str(uid)) or {}
+        if int(counters.get(BURNING_COUNTER_GUID, 0) or 0) > 0:
+            keywords.append("Burning")
+    return keywords
+
+
+def _result_conversation(entry, won: bool, state, node: str):
+    """The battle's result conversation: the first tagged outcome whose tags
+    hold, else the untagged victory/defeat conversation."""
+    outcome = "success" if won else "fail"
+    for result in entry.get("results") or ():
+        if (result.get("outcome") == outcome and result.get("when") and
+                engine.evaluate(result["when"], state, node)):
+            return result.get("conversation")
+    return entry.get("victory" if won else "defeat")
+
+
 def battle_end(zone: Zone, session, won: bool):
     """The battle finished: apply its result to the engine."""
     battle = zone.rt.pop("battle", None) or {}
@@ -583,7 +620,8 @@ def battle_end(zone: Zone, session, won: bool):
     events += [str(e) for e in zone.rt.pop("battle_events", None) or ()]
     result = None
     if entry and started.get("node") != node:
-        result = entry.get("victory" if won else "defeat")
+        result = _result_conversation(
+            entry, won, dict(zone.eng, keywords=_champion_keywords(session)), node)
     action = {"type": "encounter_result", "node": node, "scene": scene,
               "victory": bool(won), "events": events,
               "result_conversation": bool(result)}
@@ -629,9 +667,15 @@ def handle_teleport(handler, zone: Zone):
     dest, node = str(target.get("zone") or ""), str(target.get("node") or "")
     if dest.lower() == zone.zone_id.lower():
         if node:
+            # Same zone: the player is moved, so the client's token must walk
+            # there too (a force_move, as a rules walk-back).
+            node = _resolve_node(zone, node)
             zone.apply({"type": "visit", "node": node})
+            zone.rt["force_move"] = node
         return
     zone.rt.pop("active", None)
+    # Temporary dungeon cards last only for the run: leaving the zone ends it.
+    zone.eng.pop("extra_cards", None)
     zone.store()
     zone.teleported = dest
     if rules_loader.runtime_enabled(dest):

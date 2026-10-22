@@ -88,7 +88,10 @@
     "conversation_guid": "05f60371-b0c3-46f2-a3a0-0cac626351a0",
     "trigger_json": {
      "label": "Winter Moon dialogue - Ardent",
-     "source": "conversation_name"
+     "source": "conversation_name",
+     "tags": [
+      "faction(Ardent)"
+     ]
     },
     "priority": 4000
    },
@@ -97,7 +100,10 @@
     "conversation_guid": "dfa3a46b-66f6-4593-9868-ba884564c201",
     "trigger_json": {
      "label": "Kagulichu dialogue - Underworld",
-     "source": "conversation_name"
+     "source": "conversation_name",
+     "tags": [
+      "faction(Underworld)"
+     ]
     },
     "priority": 4000
    },
@@ -1788,8 +1794,8 @@
      "label": "Brutecrown Delta - Underworld - repeating until dungeon complete",
      "source": "conversation_name",
      "tags": [
-      "talkedAt(Node057B)",
-      "faction(Underworld)"
+      "faction(Underworld)",
+      "!completedQuest(q_brutecrown_bluff)"
      ]
     },
     "priority": 302
@@ -2783,14 +2789,8 @@
      "label": "Brutecrown Delta - Ardent - repeating until dungeon complete",
      "source": "conversation_name",
      "tags": [
-      [
-       "faction(Ardent)",
-       "!talkedAt(Node057A)"
-      ],
-      [
-       "faction(Ardent)",
-       "talkedAt(Node057A)"
-      ]
+      "faction(Ardent)",
+      "!completedQuest(q_brutecrown_bluff)"
      ]
     },
     "priority": 300

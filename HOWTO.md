@@ -169,6 +169,7 @@ or display text.
 | `rules_port/` | Semantic port of hex-private/HexClient/Game.Shared rules; owns C#-ordered session/action, phase, priority, chain, combat, transaction, ability, trigger, and target primitives |
 | `game_session.py` | session lifecycle and DB-backed session state |
 | `ai.py` | AI turn, card-choice, and combat decisions |
+| `hexai/` | offline self-play capture, training (numpy or optional PyTorch/CUDA), and the opt-in runtime policy/value agent; see `hexai/README.md` |
 | `abilities/` | metadata-driven ability parsing, targeting, conditions, effect leaves, and the shared `EffectContext`/`AbilityBuilder` adapters |
 | `ability.py` | compatibility facade for the `abilities/` package |
 | `campaign.py` | campaign protocol and authored campaign state; campaign SQL migration into `pve_db` remains work in progress |

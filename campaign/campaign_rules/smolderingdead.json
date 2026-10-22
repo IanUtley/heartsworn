@@ -44,7 +44,7 @@
  },
  "nodes": {
   "NodeA": {},
-  "NodeB": {},
+  "NodeB": {"fork": false},
   "NodeC": {},
   "NodeD": {},
   "NodeF": {}

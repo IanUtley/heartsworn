@@ -99,6 +99,29 @@ def _short_type(value: Any) -> str:
     return str(value or "").rsplit(".", 1)[-1]
 
 
+def encounter_deck_sleeve(deck_guid) -> str | None:
+    """The sleeve a campaign encounter's opponent plays with.
+
+    Campaign encounter decks have no ``fra_encounters`` row, so the sleeve is
+    authored on the deck's template: EncounterDeck.m_DeckTemplateId ->
+    DeckTemplate.m_DeckSleeve.  Returns None when the deck has no sleeve.
+    """
+    from gamedata import DEFAULT_RECORD_STORE
+    from gamedata.records import reference_guid
+    guid = str(deck_guid or "").strip().lower()
+    if not guid.strip("0-"):
+        return None
+    deck = DEFAULT_RECORD_STORE.get("EncounterDeck", guid)
+    if deck is None:
+        return None
+    template_guid = reference_guid(deck.field("m_DeckTemplateId"))
+    template = DEFAULT_RECORD_STORE.get("DeckTemplate", template_guid)
+    if template is None:
+        return None
+    sleeve = reference_guid(template.field("m_DeckSleeve")).lower()
+    return sleeve if sleeve.strip("0-") else None
+
+
 def champion_names() -> dict[str, str]:
     return {_guid(r.get("m_Id")): str(r.get("m_Name") or "").strip()
             for r in records("ChampionTemplate") if r.get("m_Name")}

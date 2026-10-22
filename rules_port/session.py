@@ -2709,6 +2709,9 @@ class AuthoritativeSession:
         """
         steps = 0
         while steps < int(max_steps):
+            # A trigger choice is open: the turn waits for the player's answer.
+            if getattr(self, "trigger_prompt_open", False):
+                break
             steps += 1
             progressed = self.tick()
             if not progressed:

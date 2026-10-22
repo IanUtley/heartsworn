@@ -65,6 +65,7 @@ import game_session as gs
 import hconnect_server as hcs
 import encoder
 from db import _db, log_req, set_log_level
+from replay_db import SIMULATOR_SESSION_SUFFIX
 from pvp_db import (
     db_ai_hand_playables, db_clear_session_cards,
     db_copy_template_payload, db_delete_game_session,
@@ -83,6 +84,20 @@ from services.tournament_game import (
     handle_ready_for_game_setup, handle_ready_for_game_events,
     player_handlers, player_handler_lock, _pvp_fra_view, pvp_shared_port,
 )
+
+# Optional HexAI instrumentation/agent.  Import failures must never break the
+# simulation: capture is opt-in via HEXAI_CAPTURE_DIR and the agent via
+# HEXAI_MODEL, so an untouched game behaves exactly as before.
+try:
+    from hexai import capture as _hexai_capture
+    from hexai import candidates as _hexai_candidates
+    from hexai import features as _hexai_features
+    from hexai.agent import get_agent as _hexai_get_agent
+except Exception:  # pragma: no cover - defensive for stripped deployments
+    _hexai_capture = None
+    _hexai_candidates = None
+    _hexai_features = None
+    _hexai_get_agent = None
 
 SET1 = "0382f729-7710-432b-b761-13677982dcd2"
 SCRATCH_SESSION_BASE = 987700
@@ -859,6 +874,95 @@ def _ai_evaluator_for_seat(handler, session, state, owner_id, opponent_id,
     return evaluator
 
 
+def _hexai_capture_decision(evaluator, session, state, seat_pid, opponent_pid,
+                            *, kind, candidates, chosen, meta=None):
+    """Write one decision sample when capture is enabled."""
+    if _hexai_capture is None or not _hexai_capture.enabled():
+        return
+    try:
+        feature_ids = _hexai_features.encode_state(
+            evaluator, state, seat_pid, opponent_pid, session=session)
+        _hexai_capture.record_decision(
+            seat_pid=seat_pid, opponent_pid=opponent_pid,
+            turn=int(state.get("turn_number", 0) or 0),
+            kind=kind, feature_ids=feature_ids,
+            candidates=[_hexai_candidates.candidate_record(c)
+                        for c in candidates],
+            chosen=chosen, meta=meta)
+    except Exception as exc:  # capture must never stop a game
+        log_req(f"    [hexai] capture skipped: {exc!r}")
+
+
+def _hexai_main_decision(evaluator, session, state, seat_pid, opponent_pid,
+                         decision, *, pre_combat):
+    """Capture the main-phase decision and optionally rerank with a model."""
+    if _hexai_capture is None:
+        return decision
+    debug = os.environ.get("HEXAI_DEBUG") == "1"
+    agent = None
+    if _hexai_get_agent is not None:
+        try:
+            agent = _hexai_get_agent()
+        except Exception:
+            agent = None
+    if agent is None and not _hexai_capture.enabled():
+        return decision
+    candidates = _hexai_candidates.main_phase_candidates(
+        evaluator, pre_combat=pre_combat, greedy_decision=decision)
+    if debug:
+        keys = ([c["key"] for c in candidates]
+                if len(candidates) > 1 else [])
+        log_req(f"    [hexai] main candidates={len(candidates)} "
+                f"greedy={_hexai_candidates.greedy_key(decision)} "
+                f"agent={'on' if agent is not None else 'off'} keys={keys}")
+    if agent is not None:
+        try:
+            replacement = agent.choose_main(
+                evaluator, state, seat_pid, opponent_pid, decision,
+                pre_combat=pre_combat, session=session,
+                candidates=candidates)
+        except Exception as exc:
+            log_req(f"    [hexai] agent skipped: {exc!r}")
+            replacement = None
+        if replacement and replacement.get("kind") != "keep":
+            if debug:
+                log_req(
+                    f"    [hexai] override {decision.get('kind')} -> "
+                    f"{replacement.get('kind')} "
+                    f"({replacement.get('reason')})")
+            decision = replacement
+    if not _hexai_capture.enabled():
+        return decision
+    chosen_key = _hexai_candidates.greedy_key(decision)
+    if chosen_key not in {candidate["key"] for candidate in candidates}:
+        if decision.get("kind") not in (None, "pass", "card"):
+            chosen_key = f"keep:{decision['kind']}"
+    _hexai_capture_decision(
+        evaluator, session, state, seat_pid, opponent_pid,
+        kind="main", candidates=candidates, chosen=chosen_key,
+        meta={"reason": decision.get("reason")})
+    return decision
+
+
+def _hexai_combat_decision(evaluator, session, state, seat_pid, opponent_pid,
+                           *, kind, chosen_key, alternates=(), meta=None):
+    """Capture an attack/block/resource/choice decision (value sample)."""
+    if _hexai_capture is None or not _hexai_capture.enabled():
+        return
+    keys = [chosen_key] + [key for key in alternates
+                            if key and key != chosen_key]
+    candidates = [{
+        "key": key,
+        "kind": kind,
+        "score": 1.0 if index == 0 else 0.0,
+        "action_ids": _hexai_features.encode_action(
+            kind, extra_keys=(key,)),
+    } for index, key in enumerate(keys)]
+    _hexai_capture_decision(
+        evaluator, session, state, seat_pid, opponent_pid, kind=kind,
+        candidates=candidates, chosen=chosen_key, meta=meta)
+
+
 def _record_card_decision(report, evaluator, chosen, choice_reason,
                           only_quick_actions=False):
     if report is None:
@@ -1020,6 +1124,13 @@ def _ai_attack_decision(handler, session, state, owner_id, opponent_id,
             "eligible": [int(card.card_uid) for card in eligible],
             "blockers": [int(card.card_uid) for card in blockers],
         })
+    attack_key = ("attack:" + "+".join(sorted(
+        str(getattr(card, "template_guid", "") or "").lower()
+        for card in chosen))) if chosen else "attack:none"
+    _hexai_combat_decision(
+        evaluator, session, state, owner_id, opponent_id, kind="attack",
+        chosen_key=attack_key, alternates=("attack:none", "attack:all"),
+        meta={"reason": reason})
     return [int(card.card_uid) for card in chosen], reason
 
 
@@ -1087,6 +1198,23 @@ def _ai_block_decision(handler, session, state, owner_id, opponent_id,
             "attackers": [int(uid) for uid in attacker_uids],
             "blocks": details,
         })
+    if blocker_map:
+        templates = {}
+        for collection in (own_cards, opposing_cards):
+            for uid, card in collection.items():
+                templates[int(uid)] = str(
+                    getattr(card, "template_guid", "") or "").lower()
+        pairs = []
+        for attacker, blockers in sorted(blocker_map.items()):
+            for blocker in blockers:
+                pairs.append(f"{templates.get(int(attacker), '?')}>"
+                             f"{templates.get(int(blocker), '?')}")
+        block_key = "block:" + "+".join(sorted(pairs))
+    else:
+        block_key = "block:none"
+    _hexai_combat_decision(
+        evaluator, session, state, owner_id, opponent_id, kind="block",
+        chosen_key=block_key, alternates=("block:none",))
     return blocker_map
 
 
@@ -1515,15 +1643,19 @@ def _ai_main_decision(handler, session, state, owner_id, opponent_id,
         return {"kind": "resource_sink", "ability": resource_sink_decision,
                 "reason": "resource_sink"}
     if chosen is not None:
-        return {"kind": "card", "card": chosen,
-                "target_uid": card_decision.get("target_uid"),
-                "target_uids": list(card_decision.get("target_uids") or (
-                    [card_decision["target_uid"]]
-                    if card_decision.get("target_uid") is not None else [])),
-                "target_map": card_decision.get("target_map"),
-                "x_cost": int(card_decision.get("x_cost", 0) or 0),
-                "reason": reason}
-    return {"kind": "pass", "reason": "pass_no_play"}
+        decision = {"kind": "card", "card": chosen,
+                    "target_uid": card_decision.get("target_uid"),
+                    "target_uids": list(card_decision.get("target_uids") or (
+                        [card_decision["target_uid"]]
+                        if card_decision.get("target_uid") is not None else [])),
+                    "target_map": card_decision.get("target_map"),
+                    "x_cost": int(card_decision.get("x_cost", 0) or 0),
+                    "reason": reason}
+    else:
+        decision = {"kind": "pass", "reason": "pass_no_play"}
+    return _hexai_main_decision(
+        evaluator, session, state, owner_id, opponent_id, decision,
+        pre_combat=pre_combat)
 
 
 def _ai_quick_decision(handler, session, state, owner_id, opponent_id,
@@ -1688,12 +1820,29 @@ def _play_one_game(seed, turns_cap=AUTOPLAY_TURN_CAP, deck_specs=None,
                    client_ai_pid=None, client_ai_timeout=90.0,
                    unity_data_path=None):
     rnd = random.Random(seed)
+    # Engine rules (opening-hand shuffle, random discard, random picks) draw
+    # from the module-level RNG; seed it too so a serial run is reproducible.
+    random.seed(seed)
     session_id, pids = _autoplay_identity(seed, run_slot)
     _cleanup(session_id, pids)
+    hexai_game_id = f"{seed}-{int(run_slot or 0)}"
+    if _hexai_capture is not None:
+        decks = {}
+        for index, pid in enumerate(pids):
+            spec = deck_specs[index] if deck_specs and index < len(
+                deck_specs) else {}
+            decks[str(pid)] = {
+                "name": spec.get("name"),
+                "deck_guid": spec.get("deck_guid"),
+                "champion_guid": spec.get("champion_guid"),
+                "personality": spec.get("ai_deck_personality"),
+            }
+        _hexai_capture.begin_game(hexai_game_id, seed, pids, decks)
     row_id_run_base = (int(run_slot or 0) * AUTOPLAY_ROW_ID_RUN_STRIDE)
 
     session = gs.GameSession(session_id, session_id * AUTOPLAY_SERVER_ID_MULTIPLIER,
-                             f"tourney-{session_id}", pids[0])
+                             f"tourney-{session_id}{SIMULATOR_SESSION_SUFFIX}",
+                             pids[0])
     for pid in pids:
         session.add_player(encoder.make_uid(PLAYER_UID_TYPE, pid), 0)
 
@@ -2061,7 +2210,6 @@ def _play_one_game(seed, turns_cap=AUTOPLAY_TURN_CAP, deck_specs=None,
                     continue
                 damage_phase_key = (current_turn_number, int(phase))
                 if damage_order_phase_key != damage_phase_key:
-                    before_priority = state.get("priority_pid")
                     _transaction(
                         player_handlers[turn_pid], session,
                         b"AssignDamageOrderTransaction;",
@@ -2080,24 +2228,11 @@ def _play_one_game(seed, turns_cap=AUTOPLAY_TURN_CAP, deck_specs=None,
                             "    [pvp-autoplay] game ended during damage "
                             f"resolution: {terminal_result}")
                         break
-                    after_turn = _autoplay_report_int(after_state.get(
-                        "turn_number", current_turn_number))
-                    pending_input = any(after_state.get(key) for key in (
-                        "pending_trigger", "pending_choice",
-                        "pending_deck_search", "pending_discard_ability"))
-                    if (after_state.get("phase") == phase and
-                            after_turn == current_turn_number and
-                            after_state.get("priority_pid") == before_priority and
-                            state.get("stack") == after_state.get("stack") and
-                            state.get("passes") == after_state.get("passes") and
-                            state.get("stack_passed") ==
-                            after_state.get("stack_passed") and
-                            not pending_input):
-                        raise RuntimeError(
-                            "AssignDamageOrder did not advance the native "
-                            f"phase or priority (phase={phase}, "
-                            f"turn={current_turn_number}, "
-                            f"priority={before_priority})")
+                    # The damage transaction is consumed here. Resolved damage
+                    # triggers can rebuild the phase priority window with the
+                    # same seat first, so an unchanged snapshot is not a stall:
+                    # the next pass drives that window, and the guard below
+                    # still ends a window that never completes.
                     continue
 
                 before_priority = state.get("priority_pid")
@@ -2575,6 +2710,18 @@ def _play_one_game(seed, turns_cap=AUTOPLAY_TURN_CAP, deck_specs=None,
                     # The empty declaration advances directly through the
                     # native no-combat path. Do not send DeclareAttack passes.
                     post_attack_state = pvp_load_state(attack_session)
+                    # Troops declared earlier in this phase already form the
+                    # combat, so an empty re-declaration keeps those attackers
+                    # and does not reach the no-combat skip. Pass the priority
+                    # window that holds the phase instead.
+                    if (post_attack_state is not None and
+                            post_attack_state.get("phase") ==
+                            game_engine.ETurnPhases.DeclareAttack and
+                            post_attack_state.get("attackers")):
+                        _pass_native_priority_window(
+                            session, pids, player_handlers,
+                            profiler=profiler)
+                        continue
                     if (post_attack_state is None or
                             post_attack_state.get("phase") ==
                             game_engine.ETurnPhases.DeclareAttack):
@@ -2647,23 +2794,35 @@ def _play_one_game(seed, turns_cap=AUTOPLAY_TURN_CAP, deck_specs=None,
     except Exception:
         return turns, traceback.format_exc()
     finally:
-        if report is not None or outcome is not None:
+        stores_report = report is not None or outcome is not None
+        capturing = (_hexai_capture is not None and
+                     _hexai_capture.enabled())
+        if stores_report or capturing:
             last_session = gs.find_session_by_player(
                 game_engine.UID.make(PLAYER_UID_TYPE, pids[0]).to_uint64())
             last_session = last_session or session
             last_state = pvp_load_state(last_session) or {}
             terminal_result = _autoplay_terminal_result(
                 last_session, last_state, pids)
-            _autoplay_store_game_end(report, outcome, terminal_result)
-            if report is not None:
-                report["hand_at_end"] = _autoplay_finalize_hand(
-                    hand_tracker, session_id, pids, last_state)
-                report["turns"] = turns
-                report["last_phase"] = str(last_state.get("phase"))
-                report["health"] = {
-                    str(pid): int(last_state.get(f"hp_{pid}", 20) or 0)
-                    for pid in pids
-                }
+            if capturing:
+                _hexai_capture.end_game(
+                    hexai_game_id,
+                    (terminal_result or {}).get("winner_id"),
+                    turns=turns,
+                    health={str(pid): int(
+                        last_state.get(f"hp_{pid}", 20) or 0)
+                        for pid in pids})
+            if stores_report:
+                _autoplay_store_game_end(report, outcome, terminal_result)
+                if report is not None:
+                    report["hand_at_end"] = _autoplay_finalize_hand(
+                        hand_tracker, session_id, pids, last_state)
+                    report["turns"] = turns
+                    report["last_phase"] = str(last_state.get("phase"))
+                    report["health"] = {
+                        str(pid): int(last_state.get(f"hp_{pid}", 20) or 0)
+                        for pid in pids
+                    }
         _cleanup(session_id, pids)
     return turns, None
 
@@ -2702,16 +2861,154 @@ def _run_simulation_job(job):
         return 0, traceback.format_exc()
 
 
-def _run_simulation_jobs(jobs, workers=None, progress=None):
+def _run_simulation_job_in_process(job):
+    """Run one game in a worker process and return its report and profile.
+
+    The report and profiler are mutated in place by the game, so the worker
+    returns its own copies for the coordinator to merge back.  The profiler
+    holds a lock, which cannot cross the process boundary, so the worker
+    starts a fresh one and returns plain counters.
+    """
+    seed, kwargs = job
+    profiler = _new_simulation_profiler()
+    kwargs = dict(kwargs, profiler=profiler)
+    result = _run_simulation_job((seed, kwargs))
+    counters = {key: value for key, value in profiler.items()
+                if key != "_lock"}
+    return result, kwargs["report"], counters
+
+
+def _merge_profile_counters(target, source):
+    """Add one worker's profiler counters into the batch profiler."""
+    for key, value in source.items():
+        if isinstance(value, dict):
+            _merge_profile_counters(target.setdefault(key, {}), value)
+        else:
+            target[key] = target.get(key, 0) + value
+
+
+def _simulation_process_worker(task_queue, result_queue):
+    """Worker loop: run games until the coordinator sends a ``None`` task."""
+    while True:
+        task = task_queue.get()
+        if task is None:
+            return
+        index, payload = task
+        try:
+            outcome = ("ok", _run_simulation_job_in_process(payload))
+        except BaseException:
+            outcome = ("error", traceback.format_exc())
+        result_queue.put((index, outcome))
+
+
+def _copy_simulation_db(source, directory, index):
+    """Give one worker its own snapshot so its SQLite writes never contend."""
+    target = os.path.join(directory, f"worker-{index}.db")
+    source_connection = sqlite3.connect(source, timeout=30)
+    target_connection = sqlite3.connect(target, timeout=30)
+    try:
+        source_connection.backup(target_connection)
+    finally:
+        target_connection.close()
+        source_connection.close()
+    return target
+
+
+def _run_simulation_jobs_in_processes(jobs, worker_count, progress=None):
+    """Run ``(seed, kwargs)`` jobs in spawned worker processes, keeping order.
+
+    Pure-Python game work holds the GIL, so threads cannot use more than one
+    core.  Each worker is a fresh ``spawn`` interpreter, which imports ``db``
+    and opens its own connection; a forked child would reuse the parent's open
+    connection, which SQLite does not allow across ``fork``.  ``db`` reads
+    ``HEX_DB_PATH`` at import, so each worker is started with its own copy of
+    the snapshot in that variable.
+    """
+    import copy
+    import multiprocessing
+
+    payloads = []
+    for seed, kwargs in jobs:
+        payload = {key: value for key, value in kwargs.items()
+                   if key not in ("profiler", "report")}
+        payload["report"] = copy.deepcopy(kwargs.get("report") or {})
+        payloads.append((seed, payload))
+
+    context = multiprocessing.get_context("spawn")
+    task_queue = context.Queue()
+    result_queue = context.Queue()
+    for index, payload in enumerate(payloads):
+        task_queue.put((index, payload))
+    for _ in range(worker_count):
+        task_queue.put(None)
+
+    source = os.environ.get("HEX_DB_PATH")
+    copy_directory = None
+    if source and os.path.isfile(source):
+        copy_directory = tempfile.TemporaryDirectory(prefix="hex-pvp-workers-")
+    workers = []
+    try:
+        for index in range(worker_count):
+            previous = os.environ.get("HEX_DB_PATH")
+            if copy_directory is not None:
+                os.environ["HEX_DB_PATH"] = _copy_simulation_db(
+                    source, copy_directory.name, index)
+            try:
+                process = context.Process(
+                    target=_simulation_process_worker,
+                    args=(task_queue, result_queue), daemon=True)
+                process.start()
+            finally:
+                if copy_directory is not None:
+                    if previous is None:
+                        os.environ.pop("HEX_DB_PATH", None)
+                    else:
+                        os.environ["HEX_DB_PATH"] = previous
+            workers.append(process)
+
+        results = [None] * len(jobs)
+        for completed in range(1, len(jobs) + 1):
+            index, (status, value) = result_queue.get()
+            if status != "ok":
+                results[index] = (0, value)
+            else:
+                result, report, counters = value
+                _, kwargs = jobs[index]
+                if kwargs.get("report") is not None:
+                    kwargs["report"].clear()
+                    kwargs["report"].update(report)
+                if kwargs.get("profiler") is not None:
+                    _merge_profile_counters(kwargs["profiler"], counters)
+                results[index] = result
+            if progress is not None:
+                progress(completed, len(jobs), index, results[index])
+        for process in workers:
+            process.join()
+        return results
+    finally:
+        for process in workers:
+            if process.is_alive():
+                process.terminate()
+        if copy_directory is not None:
+            copy_directory.cleanup()
+
+
+def _run_simulation_jobs(jobs, workers=None, progress=None, processes=False):
     """Run complete games concurrently while preserving result order.
 
     ``progress`` is called from the coordinator thread as each job finishes;
     it receives ``(completed, total, job_index, result)``.  Keeping callbacks
     out of the worker threads makes progress reporting safe for callers that
-    also update shared standings or write to a single output stream.
+    also update shared standings or write to a single output stream.  With
+    ``processes`` the games run in worker processes instead of threads; the
+    jobs must then carry only ``profiler`` and ``report`` as their mutable
+    state.
     """
     jobs = list(jobs)
     worker_count = _simulation_worker_count(len(jobs), workers)
+    if processes and worker_count > 1:
+        return _run_simulation_jobs_in_processes(
+            jobs, worker_count, progress=progress)
     if worker_count <= 1:
         results = []
         for job_index, job in enumerate(jobs):
@@ -2828,7 +3125,7 @@ def main_fra(deck_guids=None, turns_cap=30, show_profile=False,
             "report": run_report,
             "run_slot": run_index,
         }))
-    results = _run_simulation_jobs(run_jobs, workers=workers)
+    results = _run_simulation_jobs(run_jobs, workers=workers, processes=True)
     for (run_index, run_seed, run_report), (turns, err) in zip(
             run_contexts, results):
         if not report["decks"]:
@@ -3394,8 +3691,9 @@ if __name__ == "__main__":
                         help="in round-robin mode, run only the first N "
                              "pairings (useful for profiling)")
     parser.add_argument("--workers", type=int, default=None,
-                        help="parallel simulation threads (default: capped "
-                             "by CPU count; use 1 for serial execution)")
+                        help="parallel simulation workers; --fra runs them in "
+                             "processes (default: capped by CPU count; use 1 "
+                             "for serial execution)")
     parser.add_argument("--profile", action="store_true",
                         help="print AI, RulesPort, and transaction timings")
     parser.add_argument(

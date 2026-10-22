@@ -678,6 +678,7 @@ _PUBLIC_HELP_LINES = (
     "!account-cleanup — reset your account, keeping PvE and alt-art cards",
     "!collection-fix [apply] — match collection counts to owned card instances",
     "!campaign-cleanup — repair your campaign when a scene has no options",
+    "!restart — restart the current campaign encounter (lives are not lost)",
     "!issue <title> — open a prefilled GitHub issue with session diagnostics",
     "!playtest <token> — start a campaign editor Play battle (nothing is saved)",
 )
@@ -747,6 +748,11 @@ def handle_command(handler, cmd: str, room: str, username: str) -> str:
     if action == "campaign-cleanup":
         try:
             return _campaign_cleanup_command(handler, parts[1:])
+        except Exception as exc:
+            return f"Error: {exc}"
+    if action == "restart":
+        try:
+            return _cmd_restart(handler)
         except Exception as exc:
             return f"Error: {exc}"
     if action == "campaign-restart":
@@ -1122,6 +1128,51 @@ def _cmd_encounter(handler, args):
                                "ServiceCampaign", str(hconnect_server.UID_TYPE["ServiceCampaign"]),
                                0, hconnect_server.SERVICE_MAIL_UID)
     return f"Launched encounter {encounter_guid} (camp={camp_id})"
+
+
+def _cmd_restart(handler):
+    """Restart the current campaign encounter: !restart.
+
+    The live battle is abandoned with no result: no GameEnded, no
+    gameendnotify, so Wins, Losses and dungeon lives are left alone.  The same
+    encounter (scene, conversation and mod choice) is then relaunched.
+    """
+    from campaign_runtime import progress
+    from campaign_playtest import is_playtest_campaign
+    from pve_db import db_campaign_protocol_row, db_champion_last_deck_id
+    from pvp_db import db_delete_game_session
+    db = hconnect_server._db
+    player_uid = encoder.make_uid(hconnect_server.UID_TYPE["ServicePlayer"],
+                                  int(handler.client_reck_id))
+    session = game_session.find_session_by_player(player_uid)
+    if not session or not str(session.session_name or "").startswith("camp_"):
+        return "No campaign battle to restart"
+    camp_id = int(session.session_name[5:])
+    if is_playtest_campaign(camp_id):
+        return "Editor Play battles cannot be restarted"
+    row = db_campaign_protocol_row(camp_id, conn=db)
+    if not row:
+        return "Campaign not found"
+    champ_id = row[0]
+    with progress.champion_lock(champ_id):
+        state = _json.loads(row[1] or "{}")
+        encounter = state.get("ActiveEncounterGuid")
+        if not encounter:
+            return "No encounter in progress to restart"
+        # Drop the live battle's rows (cards, events, transactions, session)
+        # without applying a result.  The relaunch below records a fresh one.
+        db_delete_game_session(session.session_id)
+        deck_db_id = db_champion_last_deck_id(champ_id, conn=db)
+        deck_uid64 = (deck_db_id << 8) | 17 if deck_db_id else 0
+        campaign._launch_encounter(
+            handler, db, camp_id, champ_id, encounter, deck_uid64, 0,
+            "00000000-0000-0000-0000-000000000000", "ServiceCampaign",
+            str(hconnect_server.UID_TYPE["ServiceCampaign"]), 0,
+            hconnect_server.SERVICE_MAIL_UID,
+            encounter_mod_conversation_guid=state.get(
+                "ActiveEncounterConversationGuid"),
+            mod_choice=state.get("ActiveEncounterModChoice"))
+    return f"Restarted encounter {encounter} (camp={camp_id}); lives unchanged"
 
 
 def _cmd_game_end(handler, args):

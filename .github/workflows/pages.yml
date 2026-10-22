@@ -1,0 +1,55 @@
+name: Browser demo (GitHub Pages)
+
+# Builds browser_demo/site and publishes it. The site contains code only: the
+# player's own Hex folder supplies the gamedata, and the database is built in
+# their browser. Nothing from the game is built into the site.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # build.py copies Pyodide from browser_demo/probe/node_modules. That folder
+      # is not committed, so install the pinned version here.
+      - name: Install Pyodide
+        run: npm install --no-save --prefix browser_demo/probe pyodide@314.0.7
+
+      - name: Build the site
+        run: python3 browser_demo/build.py
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: browser_demo/site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

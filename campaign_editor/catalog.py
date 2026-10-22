@@ -47,6 +47,7 @@ def card_art_on_demand(art: str) -> Path | None:
 
 # The data side is shared with the server's campaign runtime.
 from campaign_runtime import offers  # noqa: E402
+from db import CAMPAIGN_NODE_CONVERSATION_VISIBLE  # noqa: E402
 from campaign_runtime.catalog_data import (  # noqa: E402,F401
     _EMPTY_CATALOG, _audience, _authored_items, _json, _quest_conditions,
     data_mtime, data_overrides, dungeon_prefixes, encounter_event_nodes,
@@ -450,7 +451,8 @@ def quest_action_index(db: sqlite3.Connection | None
         for row in db.execute(
                 "SELECT campaign_template, node_id, conversation_guid, "
                 "conversation_name, trigger_json, enabled "
-                "FROM campaign_node_conversations"):
+                "FROM campaign_node_conversations WHERE "
+                + CAMPAIGN_NODE_CONVERSATION_VISIBLE):
             row = dict(zip(("campaign_template", "node_id", "conversation_guid",
                             "conversation_name", "trigger_json", "enabled"), row))
             merge("node", (row["campaign_template"],
@@ -527,6 +529,11 @@ def area_payload(db: sqlite3.Connection | None, zone_id: str = AREA_TEMPLATE
         return panorama_payload(db, entry)
     else:
         layout = json.loads(map_path.read_text(encoding="utf-8"))
+        # An authored node stays a stop even where the prefab flags a fork.
+        overrides = _catalog_data.fork_overrides(zone_id)
+        for layout_node in layout["nodes"]:
+            if layout_node["id"] in overrides:
+                layout_node["fork"] = False
     template = scene_template(entry["records"]) if entry.get("records") else None
     authored = _authored_items(template)
     # A map node with no SceneData item of its own takes its name from its
@@ -549,7 +556,10 @@ def area_payload(db: sqlite3.Connection | None, zone_id: str = AREA_TEMPLATE
     data = zone_catalog(db, entry, authored)
 
     # NodeR -> Node00R is the overworld's spelling only (dungeons use NodeA..).
-    canon = offers.canonical_node if entry["kind"] == "overworld" else (lambda n: n)
+    # The same mapping the offers use, so a panel row sits on the node it is offered on
+    # (AZ2's faction variants Node057A/B fold onto Node057).
+    overworld_canon = offers.canonical_az2_node if zone_id == "AZ2" else offers.canonical_node
+    canon = overworld_canon if entry["kind"] == "overworld" else (lambda n: n)
 
     def by_node(rows):
         merged: dict[str, list] = {}

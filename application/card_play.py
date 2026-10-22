@@ -1199,8 +1199,10 @@ class CardPlayMixin:
                 change = apply_resource_change(
                     bstate, "player", "threshold", amount, color=flag)
                 threshold_changes.append((flag, amount, change))
+        from rules_port.resources import resource_charge_amount
         resource_play = play_resource(
             bstate, "player", current_grant, max_grant,
+            charge_amount=resource_charge_amount(_hc._db, ability_guids),
             additional_plays=max(0, resource_limit - 1))
         charge_delta = max(
             0, int(resource_play.charge.new_value) -

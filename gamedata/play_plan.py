@@ -326,8 +326,17 @@ class AbilityInstance:
 
     @staticmethod
     def _variable_requires_input(variable: Any) -> bool:
-        return bool(_int(_field(variable, "m_RequiresPlayerInput"))) or bool(
-            _int(_field(variable, "m_RequiresExplicitSet")))
+        if _int(_field(variable, "m_RequiresPlayerInput")):
+            return True
+        # RequiresExplicitSet on a player-state variable (the source's health
+        # or resources) means the engine must read it, not that the player
+        # picks it: Double Down's "equal to your health" asks for nothing.
+        kind = (variable.short_type if isinstance(variable, RecordObject)
+                else str(_field(variable, "_t", "")))
+        if kind.endswith(("SourcePlayerHealthVariable",
+                          "SourcePlayerResourceAbilityVariable")):
+            return False
+        return bool(_int(_field(variable, "m_RequiresExplicitSet")))
 
     def _cost_target_spec(self, index: int) -> TargetSpec | None:
         # Additional-cost targets (sacrifice/exhaust/etc.) are authored on

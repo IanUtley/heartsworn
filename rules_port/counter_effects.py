@@ -201,6 +201,20 @@ def counter_spell(context):
     return f"countered {hex(target)}"
 
 
+def _emit_counter_added(context, target, name, old, new, owner):
+    """``CounterAddedToCardEvent`` for a gain, typed by the counter's name.
+
+    Cards with a "when this gains a seed counter" trigger (a Seed Pod at three)
+    only fire on this event, so every native counter gain must emit it.
+    """
+    if new <= old:
+        return
+    from rules_port.tac import _tac_attr_hash
+    context._emit_trigger(
+        "CounterAddedToCardEvent", target, owner,
+        event_tac={_tac_attr_hash("GainedCounterType"): name})
+
+
 def change_counter(context, target, name, counter_guid, amount, operation):
     """Apply one typed counter operation and emit its client projection."""
     from pvp_db import db_card_mutation_field, db_set_card_mutation_field
@@ -225,6 +239,7 @@ def change_counter(context, target, name, counter_guid, amount, operation):
         _project(context, target, champion_owner, guid, old, new, champion=True)
         if new < old:
             add_ability_stat(context.bstate, "CountersRemoved", old - new)
+        _emit_counter_added(context, target, name, old, new, champion_owner)
         return old, new
     raw = db_card_mutation_field(context.session.session_id, target,
                                  "permanent_buffs", conn=context.db)
@@ -253,4 +268,5 @@ def change_counter(context, target, name, counter_guid, amount, operation):
     _project(context, target, owner if owner is not None else 0, guid, old, new)
     if new < old:
         add_ability_stat(context.bstate, "CountersRemoved", old - new)
+    _emit_counter_added(context, target, name, old, new, owner)
     return old, new

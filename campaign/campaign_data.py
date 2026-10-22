@@ -17,8 +17,11 @@ table has an ``origin`` column: ``'seed'`` for rows the seed code created
 (the column default) and ``'data'`` for rows a data file inserted. After all
 files are applied, ``apply_all`` deletes the ``'data'`` rows whose key no
 file lists any more. ``'seed'`` rows are never deleted (a file entry for a
-seed row only overrides columns), and nothing is deleted when any file was
-skipped, since its rows cannot be told apart from removed ones.
+seed row only overrides columns). A ``campaign_node_conversations`` row that
+names a node is an editor placement: it is stored with ``origin='data'`` and
+shadows the seeded placements of the same conversation, which stay in the table
+and are used again once the editor row is removed. Nothing is deleted when any
+file was skipped, since its rows cannot be told apart from removed ones.
 
 File format::
 
@@ -169,6 +172,10 @@ def apply_data(db, data: dict[str, Any]) -> dict[str, int]:
             spec["insert"] and rows and _has_origin(db, table)) else {}
         for row in rows:
             key = {k: row[k] for k in spec["key"]}
+            # A row that names a node is an editor placement (see the docstring).
+            placed = table == "campaign_node_conversations" and bool(row.get("node_id"))
+            if placed:
+                key["node_id"] = row["node_id"]
             row_values = row
             if table == "encounter_scenes":
                 row_values = {
@@ -180,6 +187,8 @@ def apply_data(db, data: dict[str, Any]) -> dict[str, int]:
             values = {c: _value(c, v) for c, v in row_values.items()
                       if c in spec["columns"]
                       and not (c in spec.get("skip_blank", ()) and v in ("", None))}
+            if placed:
+                values["origin"] = ORIGIN_DATA
             where = " AND ".join(f"{k}=?" for k in key)
             exists = db.execute(f"SELECT 1 FROM {table} WHERE {where}",
                                 tuple(key.values())).fetchone()
