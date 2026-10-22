@@ -124,8 +124,12 @@ export class HexInstall {
           const texture = objectsOf(found.serialized, "Texture2D")[0];
           if (texture) return decodeTexture(found.serialized.read(texture));
         }
+        console.warn(`Card art ${art}: no texture in the Hex folder's card bundles`);
         return null;
-      })().catch(() => null));
+      })().catch((err) => {
+        console.warn(`Card art ${art} could not be decoded`, err);
+        return null;
+      }));
     }
     return this.pixels.get(art);
   }
