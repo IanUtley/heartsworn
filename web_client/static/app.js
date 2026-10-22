@@ -1204,10 +1204,10 @@ function fillBoardSelects() {
 // read, because the cards and boards are drawn from them. A folder chosen on an
 // earlier visit is offered again first and falls back to the picker.
 let savedFolder = false;
-async function chooseHexFolder() {
+async function chooseHexFolder(fresh = false) {
   const status = $("#folder-status");
   try {
-    let tree = savedFolder ? await HexAssets.useSavedFolder() : null;
+    let tree = savedFolder && !fresh ? await HexAssets.useSavedFolder() : null;
     if (!tree) {
       const picked = await HexAssets.pickFolder($("#folder-input"));
       if (!picked) return;
@@ -1222,7 +1222,8 @@ async function chooseHexFolder() {
     status.textContent = "Loading card frames…";
     await HexAssets.preloadCardChrome();
     status.textContent = "Client assets ready: card art, card sounds and battleboards.";
-    $("#pick-folder").textContent = "Choose another folder\u2026";
+    $("#pick-folder").textContent = "Use this Hex folder\u2026";
+    $("#change-folder").hidden = false;
     $("#start-match").disabled = false;
     $("#lobby-status").textContent = "";
   } catch (err) {
@@ -1296,7 +1297,8 @@ function backToLobby() {
 
 $("#start-match").addEventListener("click", startMatch);
 $("#start-match").disabled = true;
-$("#pick-folder").addEventListener("click", chooseHexFolder);
+$("#pick-folder").addEventListener("click", () => chooseHexFolder(false));
+$("#change-folder").addEventListener("click", () => chooseHexFolder(true));
 // Art and boards that were waiting for the folder are asked for again by a redraw.
 window.addEventListener("hex-assets-ready", () => render());
 // Module scripts run before DOMContentLoaded, so window.HexAssets exists here.
@@ -1304,6 +1306,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   if (!(await HexAssets.hasSavedFolder())) return;
   savedFolder = true;
   $("#pick-folder").textContent = "Use saved Hex folder\u2026";
+  $("#change-folder").hidden = false;
   $("#folder-status").textContent = "Your Hex folder from an earlier visit is saved in this browser.";
   boards = await HexAssets.boardNames();
   fillBoardSelects();
