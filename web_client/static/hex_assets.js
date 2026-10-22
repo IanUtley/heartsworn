@@ -24,6 +24,9 @@ async function openFolder(tree, onProgress) {
   const install = await HexInstall.open(tree);
   await install.indexArt(onProgress);
   state.install = install;
+  // Art and boards asked for while the folder was still being indexed were
+  // not decoded; the page redraws on this event and asks again.
+  window.dispatchEvent(new Event("hex-assets-ready"));
   return install;
 }
 
@@ -89,13 +92,15 @@ async function pngOf(pixels) {
 function artUrl(art, onReady) {
   if (!ART.test(art || "")) return null;
   if (state.art.has(art)) return state.art.get(art);
+  // Nothing can be decoded before the folder is indexed, so do not mark it asked.
+  if (!state.install) return null;
   if (!state.artAsked.has(art)) {
     state.artAsked.add(art);
     loadArt(art).then((url) => {
       if (!url) return;
       state.art.set(art, url);
       if (onReady) onReady();
-    }).catch(() => {});
+    }).catch((err) => console.warn(`Card art ${art} could not be read from the Hex folder`, err));
   }
   return null;
 }

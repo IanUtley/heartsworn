@@ -1297,6 +1297,8 @@ function backToLobby() {
 $("#start-match").addEventListener("click", startMatch);
 $("#start-match").disabled = true;
 $("#pick-folder").addEventListener("click", chooseHexFolder);
+// Art and boards that were waiting for the folder are asked for again by a redraw.
+window.addEventListener("hex-assets-ready", () => render());
 // Module scripts run before DOMContentLoaded, so window.HexAssets exists here.
 document.addEventListener("DOMContentLoaded", async () => {
   if (!(await HexAssets.hasSavedFolder())) return;
