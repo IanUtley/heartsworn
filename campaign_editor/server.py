@@ -558,12 +558,14 @@ def _create_play(db, session, body):
     ``when`` tags."""
     import campaign_playtest
     scene = str(body.get("scene") or "").strip().lower()
-    row = db.execute("SELECT name, title, ai_deck_guid FROM encounter_scenes "
-                     "WHERE guid=?", (scene,)).fetchone() if db and scene else None
+    import campaign_source
+    campaign_source.ensure_campaign_path()
+    import campaign_content
+    row = campaign_content.scene(scene) if scene else None
     if not row:
         raise LookupError(f"unknown encounter scene {scene or '(none)'}")
-    if not row[2]:
-        raise ValueError(f"{row[1] or row[0]} has no AI deck: not a battle")
+    if not row.get("ai_deck_guid"):
+        raise ValueError(f"{row.get('title') or row.get('name') or scene} has no AI deck: not a battle")
     state = body.get("state")
     created = campaign_playtest.create_request(session["user_id"], {
         "scene": scene, "account": session["name"],
@@ -571,7 +573,7 @@ def _create_play(db, session, body):
         "sim_state": state if isinstance(state, dict) else None})
     return {"token": created["token"], "command": created["command"],
             "expires_in": campaign_playtest.REQUEST_TTL_SECONDS,
-            "scene": scene, "title": row[1] or row[0], "account": session["name"]}
+            "scene": scene, "title": row.get("title") or row.get("name"), "account": session["name"]}
 
 
 def _sim_layout(engine, loaded, state):

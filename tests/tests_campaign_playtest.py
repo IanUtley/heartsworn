@@ -123,10 +123,12 @@ def test_play_builds_the_scene_battle_and_saves_nothing():
 
     # A scene that fixes the player's champion and deck.
     handler, record, cfg = _play(user_id, OVERRIDE_SCENE)
-    scene = db._db.execute(
-        "SELECT ai_deck_guid, ai_champion_guid, player_champion_guid, "
-        "player_deck_guid, gameboard FROM encounter_scenes WHERE guid=?",
-        (OVERRIDE_SCENE,)).fetchone()
+    import campaign_source
+    campaign_source.ensure_campaign_path()
+    import campaign_content
+    row = campaign_content.scene(OVERRIDE_SCENE)
+    scene = (row["ai_deck_guid"], row["ai_champion_guid"], row["player_champion_guid"],
+             row["player_deck_guid"], row["gameboard"])
     assert cfg["scene_guid"] == OVERRIDE_SCENE
     assert cfg["ai_deck_guid"] == scene[0] and cfg["ai_champ_guid"] == scene[1]
     assert cfg["player_champ_guid"] == scene[2]

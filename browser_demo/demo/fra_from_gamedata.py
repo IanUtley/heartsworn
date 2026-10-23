@@ -38,5 +38,5 @@ def populate(gamedata_path, db_path, records_dir="/data/records"):
     out = write_records(gamedata_path, records_dir)
     encounter_rows, card_rows, unresolved = pf.extract_rows(out, {})
     encounters, cards = pf.apply_rows(Path(db_path), encounter_rows, card_rows)
-    print(f"fra_encounters={encounters} encounter_deck_cards={cards} unresolved={len(unresolved)}")
+    print(f"fra_encounters={encounters} fra_cards={cards} unresolved={len(unresolved)}")
     return encounters, cards

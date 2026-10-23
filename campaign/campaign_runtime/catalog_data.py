@@ -18,7 +18,8 @@ from pathlib import Path
 from typing import Any
 
 from campaign_runtime import offers
-from db import CAMPAIGN_NODE_CONVERSATION_VISIBLE
+import campaign_content
+import campaign_content
 from campaign_runtime.records import (
     CAMPAIGN_ROOT, _endings_of, _guid, _qualifiers, _records_encounters, _scene_kind,
     _short_type, champion_names, conversation_hooks, conversations,
@@ -30,6 +31,13 @@ ZONES_PATH = RULES_DIR / "zones.json"
 GENERATED_MAPS = CAMPAIGN_ROOT.parent / "campaign_editor" / "generated"
 _ZONES_LOCK = threading.Lock()
 _ZONES: tuple[float, list[dict[str, Any]]] | None = None
+
+
+_SCENE_COLUMNS = ("guid", "name", "title", "ai_champion_guid", "ai_deck_guid", "mods_json",
+                  "rewards_json", "actions_json", "ai_deck_personality", "player_champion_guid",
+                  "player_deck_guid", "gameboard")
+_QUEST_TEMPLATE_COLUMNS = ("script_name", "name", "title", "objectives_json", "campaign_group",
+                           "enabled", "start_hook", "rewards_json")
 
 
 def _query(db, sql, params=()):
@@ -294,21 +302,13 @@ def server_catalog(db: sqlite3.Connection, template: str = AREA_TEMPLATE,
     pending = {(r.get("campaign_template"), str(r.get("conversation_guid") or "").lower()): r
                for r in data_overrides("campaign_node_conversations")}
     node_conversations: dict[str, list[dict[str, Any]]] = {}
-    db_rows = [dict(row) for row in _query(db,
-        "SELECT node_id, conversation_guid, conversation_name, "
-        "trigger_json, priority, enabled FROM campaign_node_conversations "
-        "WHERE campaign_template=? AND " + CAMPAIGN_NODE_CONVERSATION_VISIBLE +
-        " ORDER BY node_id, priority, conversation_name", (template,))]
-    seen = {str(r["conversation_guid"] or "").lower() for r in db_rows}
-    # Rows a data file inserts (e.g. import_crayburn.py) appear at startup.
-    db_rows += [dict(r, trigger_json=r.get("trigger_json") or {}, pending=True)
-                for (t, guid), r in pending.items()
-                if t == template and guid not in seen and r.get("node_id")]
-    for row in db_rows:   # saved campaign rows win until the DB is refreshed
-        saved = pending.get((template, str(row["conversation_guid"] or "").lower())) or {}
-        for column in ("node_id", "conversation_name", "priority", "enabled"):
-            if column in saved:
-                row[column] = saved[column]
+    # Visible campaign node conversations (campaign_content): the Records seed with the
+    # campaign data files applied, minus seed rows an editor placement shadows.
+    db_rows = [{"node_id": r.get("node_id"), "conversation_guid": r.get("conversation_guid"),
+                "conversation_name": r.get("conversation_name"), "trigger_json": r.get("trigger_json"),
+                "priority": r.get("priority"), "enabled": r.get("enabled", 1)}
+               for r in campaign_content.node_conversations()
+               if r.get("campaign_template") == template]
     for row in sorted(db_rows, key=lambda r: (str(r["node_id"]), r.get("priority") or 0,
                                                str(r.get("conversation_guid") or ""))):
         guid = str(row["conversation_guid"] or "").lower()
@@ -319,7 +319,6 @@ def server_catalog(db: sqlite3.Connection, template: str = AREA_TEMPLATE,
         node_conversations.setdefault(row["node_id"], []).append({
             "guid": guid, "name": name,
             "template": template, "edited": "trigger_json" in override,
-            "pending": bool(row.get("pending")),
             "trigger": trigger, "audience": _audience(name, trigger.get("tags")),
             "priority": row.get("priority"), "enabled": bool(row.get("enabled", True)),
             "hooks": conversation_hooks(guid) if ui else {},
@@ -328,11 +327,10 @@ def server_catalog(db: sqlite3.Connection, template: str = AREA_TEMPLATE,
     pending_quests = {(r.get("quest_script"), str(r.get("conversation_guid") or "").lower(),
                        r.get("campaign_template")): r
                       for r in data_overrides("quest_conversations")}
-    for row in _query(db,
-            "SELECT quest_script, conversation_guid, node_id, npc, role, "
-            "faction, conversation_name, start_hook, conditions_json, "
-            "priority, enabled FROM quest_conversations "
-            "WHERE campaign_template=? ORDER BY node_id, priority", (template,)):
+    quest_rows = sorted((r for r in campaign_content.quest_conversations()
+                         if r.get("campaign_template") == template),
+                        key=lambda r: (str(r.get("node_id") or ""), int(r.get("priority") or 0)))
+    for row in quest_rows:
         conditions = _quest_conditions(row, pending_quests.get(
             (row["quest_script"], str(row["conversation_guid"] or "").lower(), template)))
         actions, actions_default = quest_actions(
@@ -404,13 +402,9 @@ def server_catalog(db: sqlite3.Connection, template: str = AREA_TEMPLATE,
         scene_regex, scene_prefix = None, "\x00"     # skip the table below
     item_names = {re.sub(r"^\d+\s*-\s*", "", item["name"]).strip().lower(): node
                   for node, item in (authored or {}).items()}
-    for row in _query(db,
-            "SELECT guid, name, title, ai_champion_guid, ai_deck_guid, "
-            "mods_json, rewards_json, actions_json, ai_deck_personality, "
-            "player_champion_guid, player_deck_guid, gameboard "
-            "FROM encounter_scenes "
-            "WHERE name LIKE ? ORDER BY name",
-            ("%",)):    # the prefix is matched in _scene_node (any spacing)
+    scene_rows = sorted(campaign_content.scenes(), key=lambda r: str(r.get("name") or ""))
+    for row in ({k: r.get(k) for k in _SCENE_COLUMNS} for r in scene_rows):
+        # every scene; the prefix is matched in _scene_node (any spacing)
         variant = ""
         if item_scene_match:
             # Dungeon scenes are named after their node (+ a difficulty/form).
@@ -473,10 +467,9 @@ def server_catalog(db: sqlite3.Connection, template: str = AREA_TEMPLATE,
     pending_rewards = {r.get("script_name"): r.get("rewards_json")
                        for r in data_overrides("quest_templates")
                        if "rewards_json" in r}
-    for row in _query(db,
-            "SELECT script_name, name, title, objectives_json, "
-            "campaign_group, enabled, start_hook, rewards_json "
-            "FROM quest_templates ORDER BY script_name"):
+    for row in sorted(({k: r.get(k) for k in _QUEST_TEMPLATE_COLUMNS}
+                       for r in campaign_content.quest_templates()),
+                      key=lambda r: str(r["script_name"] or "")):
         rewards = pending_rewards.get(row["script_name"])
         if rewards is None:
             rewards = _json(row["rewards_json"], {})
@@ -489,9 +482,10 @@ def server_catalog(db: sqlite3.Connection, template: str = AREA_TEMPLATE,
             "start_hook": row["start_hook"] or "",
             "objectives": _json(row["objectives_json"], []),
             "in_records": row["script_name"] in records_by_script})
-    edges = [dict(row) for row in _query(db,
-        "SELECT from_node, to_node, path_name FROM campaign_node_edges "
-        "WHERE campaign_template=?", (template,))]
+    # Ordered by to_node, as the (campaign_template, to_node) index returned them.
+    edges = sorted(({"from_node": r["from_node"], "to_node": r["to_node"], "path_name": r["path_name"]}
+                    for r in campaign_content.edges() if r["campaign_template"] == template),
+                   key=lambda r: str(r["to_node"]))
     # Conversations an ability starts mid-battle (ConversationAbilityEffect):
     # they are not an encounter's pre-battle talk.
     triggered = {str(row[0]).lower() for row in _query(db,
@@ -736,15 +730,15 @@ def player_options(db) -> dict[str, Any]:
     """Choices for a scene's player champion and deck (blank = the player's own).
 
     Champions: every ChampionTemplate record. Decks: every EncounterDeck record
-    that has cards in the database, labelled with the scene(s) using it.
+    that has cards (campaign_content), labelled with the scene(s) using it.
     """
     names = champion_names()
     champions = sorted(({"guid": g, "name": n} for g, n in names.items() if n),
                        key=lambda c: c["name"].casefold())
-    cards = {str(row[0]).lower() for row in _query(db, "SELECT DISTINCT deck_guid FROM encounter_deck_cards")}
+    cards = campaign_content.deck_guids()
     scene_names: dict[str, list[str]] = {}
-    for scene_name, ai_deck, player_deck in _query(
-            db, "SELECT name, ai_deck_guid, player_deck_guid FROM encounter_scenes"):
+    for scene in campaign_content.scenes():
+        scene_name, ai_deck, player_deck = scene.get("name"), scene.get("ai_deck_guid"), scene.get("player_deck_guid")
         for deck in (ai_deck, player_deck):
             if deck:
                 scene_names.setdefault(str(deck).lower(), []).append(str(scene_name))

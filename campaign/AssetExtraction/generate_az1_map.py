@@ -14,7 +14,6 @@ import html
 import json
 import math
 import re
-import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -293,36 +292,32 @@ def conversation_label(name: str) -> str:
 
 
 def load_node_details(database_path: Path, records_path: Path) -> dict[str, NodeDetails]:
-    """Load authored AZ1 encounter/conversation details when the DB exists."""
-    if not database_path.exists():
-        return {}
+    """Load authored AZ1 encounter/conversation details (campaign_content)."""
     champion_map = champion_names(records_path)
     details = {}
-    db = None
-    try:
-        db = sqlite3.connect(str(database_path))
-        scene_rows = db.execute(
-            "SELECT name, title, ai_champion_guid FROM encounter_scenes "
-            "WHERE name LIKE 'AZ 1 - NODE %' "
-            "AND TRIM(COALESCE(ai_champion_guid, '')) <> '' "
-            "AND ai_champion_guid <> '00000000-0000-0000-0000-000000000000' "
-            "ORDER BY name"
-        ).fetchall()
-        conversation_rows = db.execute(
-            "SELECT cnc.node_id, cnc.conversation_name, cnc.trigger_json, "
-            "       qc.quest_script, qc.role "
-            "FROM campaign_node_conversations cnc "
-            "LEFT JOIN quest_conversations qc "
-            "  ON qc.conversation_guid=cnc.conversation_guid "
-            " AND qc.campaign_template='AZ1' AND qc.enabled=1 "
-            "WHERE cnc.campaign_template='AZ1' AND cnc.enabled=1 "
-            "ORDER BY cnc.node_id, cnc.priority, cnc.conversation_guid"
-        ).fetchall()
-    except sqlite3.Error:
-        return {}
-    finally:
-        if db is not None:
-            db.close()
+    import campaign_source
+    campaign_source.ensure_campaign_path()
+    import campaign_content
+    scene_rows = sorted(
+        ((r.get("name"), r.get("title"), r.get("ai_champion_guid"))
+         for r in campaign_content.scenes()
+         if str(r.get("name") or "").lower().startswith("az 1 - node ")
+         and str(r.get("ai_champion_guid") or "").strip()
+         and str(r.get("ai_champion_guid")) != "00000000-0000-0000-0000-000000000000"),
+        key=lambda row: str(row[0]))
+    quest_links = [q for q in campaign_content.quest_conversations()
+                   if q.get("campaign_template") == "AZ1" and int(bool(q.get("enabled", 1)))]
+    conversation_rows = []
+    for cnc in sorted((c for c in campaign_content.table("campaign_node_conversations")
+                       if c.get("campaign_template") == "AZ1" and int(bool(c.get("enabled", 1)))),
+                      key=lambda c: (str(c.get("node_id")), int(c.get("priority") or 0),
+                                     str(c.get("conversation_guid") or ""))):
+        matches = [q for q in quest_links if q.get("conversation_guid") == cnc.get("conversation_guid")]
+        for q in (matches or [None]):   # LEFT JOIN: keep the node row without a quest row
+            conversation_rows.append((cnc.get("node_id"), cnc.get("conversation_name"),
+                                      cnc.get("trigger_json"),
+                                      q.get("quest_script") if q else None,
+                                      q.get("role") if q else None))
 
     accumulated = {}
     for scene_name, scene_title, champion_guid in scene_rows:

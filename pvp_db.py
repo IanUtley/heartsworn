@@ -2435,35 +2435,31 @@ def db_gem_templates(conn=None):
 
 
 def db_encounter_deck_cards(deck_guid, conn=None):
-    """Return the authored card rows for an encounter deck.
+    """Return ``(card_guid, quantity, gem_types_new_list_json)`` rows for an encounter deck.
 
-    A card GUID Records never defines is replaced by its card-map target
-    (campaign/campaign_data/card_map.json). Rows keep their order and count,
-    since callers index each row's gem slots.
+    Served from campaign_content (Records and campaign/campaign_data): scene opponent
+    decks and Arena decks, with unresolved GUIDs mapped by the card map. Rows keep
+    their order and count, since callers index each row's gem slots. ``conn`` is
+    unused and kept so callers do not change.
     """
     import campaign_source
     campaign_source.ensure_campaign_path()
-    import campaign_data
+    import campaign_content
 
-    connection = conn or _db_layer._db
-    rows = connection.execute(
-        "SELECT card_guid, quantity, gem_types_new_list_json "
-        "FROM encounter_deck_cards WHERE deck_guid=?", (deck_guid,)
-    ).fetchall()
-    card_map = campaign_data.load_card_map()
-    if not card_map:
-        return rows
-    return [(card_map.get(str(card_guid or "").lower(), card_guid), quantity, gems)
-            for card_guid, quantity, gems in rows]
+    return [(row["card_guid"], row["quantity"], row["gem_types_new_list_json"])
+            for row in campaign_content.deck_cards(deck_guid)]
 
 
 def db_scene_mods(scene_guid, conn=None):
-    """Return the serialized encounter-scene modifier payload."""
-    connection = conn or _db_layer._db
-    row = connection.execute(
-        "SELECT mods_json FROM encounter_scenes WHERE guid=?", (scene_guid,)
-    ).fetchone()
-    return row[0] if row else None
+    """Return the serialized encounter-scene modifier payload (campaign_content).
+
+    ``conn`` is unused and kept so callers do not change.
+    """
+    import campaign_source
+    campaign_source.ensure_campaign_path()
+    import campaign_content
+    row = campaign_content.scene(scene_guid)
+    return row.get("mods_json") if row else None
 
 
 def db_template_ability_guids(template_guid, conn=None):

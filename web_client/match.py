@@ -65,11 +65,15 @@ def deck_choices():
         "COALESCE(is_elite, 0) FROM fra_encounters "
         "ORDER BY deck_name, deck_guid").fetchall()
     # Decks listing a card the snapshot has no template for cannot be built.
-    unseedable = {str(row[0]).lower() for row in _db.execute(
-        "SELECT DISTINCT deck_guid FROM encounter_deck_cards "
-        "WHERE LOWER(card_guid) NOT IN (SELECT LOWER(guid) FROM card_templates) "
-        "AND LOWER(card_guid) NOT IN "
-        "(SELECT LOWER(champion_guid) FROM champion_abilities)").fetchall()}
+    import campaign_source
+    campaign_source.ensure_campaign_path()
+    import campaign_content
+    known = {str(row[0]).lower() for row in _db.execute("SELECT guid FROM card_templates")}
+    known |= {str(row[0]).lower() for row in _db.execute(
+        "SELECT DISTINCT champion_guid FROM champion_abilities")}
+    unseedable = {str(row["deck_guid"]).lower()
+                  for row in campaign_content.table("encounter_deck_cards")
+                  if str(row["card_guid"]).lower() not in known}
     out = []
     for deck_guid, name, champion_guid, personality, elite in rows:
         if not champion_guid or str(deck_guid).lower() in unseedable:

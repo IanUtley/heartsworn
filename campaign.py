@@ -535,11 +535,14 @@ _AZ0_RACE_CONFIG = {
 def _crayburn_quest_end_conv(db, race_name):
     """GUID of the race's "Crayburn Castle - <Race> - Quest End" report
     conversation (authored in campaign/campaign_data), or None."""
-    row = db.execute(
-        "SELECT conversation_guid FROM campaign_node_conversations "
-        "WHERE conversation_name=? LIMIT 1",
-        (f"Crayburn Castle - {race_name} - Quest End",)).fetchone()
-    return row[0] if row else None
+    import campaign_source
+    campaign_source.ensure_campaign_path()
+    import campaign_content
+    name = f"Crayburn Castle - {race_name} - Quest End"
+    for row in campaign_content.table("campaign_node_conversations"):
+        if row.get("conversation_name") == name:
+            return row.get("conversation_guid")
+    return None
 
 
 def _az0_config(champion_race):

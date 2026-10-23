@@ -47,9 +47,11 @@ PANORAMAS_BY_TEMPLATE = {
 
 def _scene_guid(db, template: str, node: str) -> str:
     """The encounter scene of an overworld map node (``... - PANORAMA``)."""
-    for row in db.execute("SELECT guid, name FROM encounter_scenes "
-                          "WHERE name LIKE ? ORDER BY name",
-                          (f"{template[:2]} {template[2:]} - NODE %",)):
+    prefix = f"{template[:2]} {template[2:]} - node ".lower()
+    scenes = sorted((r for r in catalog.campaign_content.scenes()
+                     if str(r.get("name") or "").lower().startswith(prefix)),
+                    key=lambda r: str(r.get("name")))
+    for row in scenes:
         if (catalog.scene_node_id(row["name"]) == node and
                 "PANORAMA" in row["name"].upper()):
             return str(row["guid"]).lower()

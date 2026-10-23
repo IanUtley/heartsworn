@@ -30,6 +30,16 @@ if str(ROOT) not in sys.path:
 from ai_deck_strategy import evaluate_deck_strategy
 
 
+def _deck_cards(deck_guid):
+    """``(card_guid, quantity)`` rows of a deck, as campaign_content holds them."""
+    import campaign_source
+    campaign_source.ensure_campaign_path()
+    import campaign_content
+    return sorted(((row["card_guid"], row["quantity"])
+                   for row in campaign_content.deck_cards(deck_guid, mapped=False)),
+                  key=lambda row: row[0])
+
+
 def update_fra_deck_personalities(
     db: sqlite3.Connection,
     *,
@@ -55,11 +65,7 @@ def update_fra_deck_personalities(
             if not force and current and str(current).strip():
                 profiles[str(deck_guid).lower()] = str(current).strip()
                 continue
-            cards = db.execute(
-                "SELECT card_guid, quantity FROM encounter_deck_cards "
-                "WHERE deck_guid=? ORDER BY card_guid",
-                (deck_guid,),
-            ).fetchall()
+            cards = _deck_cards(deck_guid)
             result = evaluate_deck_strategy(cards)
             personality = result.personality or "Default"
             profiles[str(deck_guid).lower()] = personality
@@ -79,25 +85,26 @@ def update_fra_deck_personalities(
         # Encounter scenes: an authored per-scene personality is never
         # overwritten (blank scenes are filled with the deck's evaluated
         # profile; ``force`` recomputes every scene).
-        scene_decks = db.execute(
-            "SELECT ai_deck_guid, MIN(name), "
-            "SUM(CASE WHEN ai_deck_personality IS NULL "
-            "OR TRIM(ai_deck_personality)='' THEN 1 ELSE 0 END) "
-            "FROM encounter_scenes WHERE ai_deck_guid IS NOT NULL "
-            "AND TRIM(ai_deck_guid)<>'' GROUP BY ai_deck_guid "
-            "ORDER BY MIN(name), ai_deck_guid"
-        ).fetchall()
+        import campaign_source
+        campaign_source.ensure_campaign_path()
+        import campaign_content
+        grouped = {}
+        for scene in campaign_content.scenes():
+            deck = str(scene.get("ai_deck_guid") or "").strip()
+            if not deck:
+                continue
+            entry = grouped.setdefault(deck, [scene.get("name"), 0])
+            entry[0] = min(entry[0], scene.get("name"))
+            entry[1] += 0 if str(scene.get("ai_deck_personality") or "").strip() else 1
+        scene_decks = sorted(((deck, name, blanks) for deck, (name, blanks) in grouped.items()),
+                             key=lambda row: (str(row[1]), row[0]))
         for deck_guid, scene_name, blanks in scene_decks:
             if not force and not blanks:
                 continue
             key = str(deck_guid).lower()
             personality = profiles.get(key)
             if personality is None:
-                cards = db.execute(
-                    "SELECT card_guid, quantity FROM encounter_deck_cards "
-                    "WHERE deck_guid=? ORDER BY card_guid",
-                    (deck_guid,),
-                ).fetchall()
+                cards = _deck_cards(deck_guid)
                 result = evaluate_deck_strategy(cards)
                 personality = result.personality or "Default"
                 profiles[key] = personality
@@ -109,20 +116,8 @@ def update_fra_deck_personalities(
                     output(f"{scene_name} [{deck_guid}]: {personality} — "
                            f"{score_summary}; "
                            f"gap={result.features.get('strategy_score_gap', 0):.1f}")
-            if force:
-                db.execute(
-                    "UPDATE encounter_scenes SET ai_deck_personality=? "
-                    "WHERE ai_deck_guid=? AND (ai_deck_personality IS NULL "
-                    "OR TRIM(ai_deck_personality)<>?)",
-                    (personality, deck_guid, personality),
-                )
-            else:
-                db.execute(
-                    "UPDATE encounter_scenes SET ai_deck_personality=? "
-                    "WHERE ai_deck_guid=? AND (ai_deck_personality IS NULL "
-                    "OR TRIM(ai_deck_personality)='')",
-                    (personality, deck_guid),
-                )
+            # Scene personalities are editor data (campaign_data/encounter_scenes.json);
+            # the evaluator reports them but does not write them.
 
         db.execute(
             "UPDATE fra_challengers "

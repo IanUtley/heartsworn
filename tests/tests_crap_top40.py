@@ -1685,15 +1685,13 @@ def test_fra_simulation_plays_a_seeded_duel_and_writes_its_report(tmp_path):
     import db as shared
     import pvp_autoplay
     db = make_db()
-    champion = "1ae73dcf-e96e-4536-aec3-f53efb5e1c96"
-    troops = ["8305c05f-8355-4740-8599-2cf4a85c2c79", "018bc77c-013f-493b-9ba3-3a286607c989"]
-    decks = ["aaaaaaaa-0000-0000-0000-00000000d001", "aaaaaaaa-0000-0000-0000-00000000d002"]
-    for deck in decks:
+    # Two real Arena decks with their own champions: cards come from Records (campaign_content).
+    champions = {"bbfd8f29-e549-4eda-9e21-735620d3b5ff": "f8f86969-2e47-4901-8c9e-7fbf8d859e22",
+                 "d987d23d-3d68-453e-9ea4-1070ee21b2cc": "91ca6c6b-3665-48fa-be85-95cf7938fe57"}
+    decks = list(champions)
+    for deck, champion in champions.items():
         db.execute("INSERT INTO fra_encounters (deck_guid, deck_name, name, champion_guid, "
                    "base_deck_name) VALUES (?, ?, ?, ?, ?)", (deck, deck, deck, champion, deck))
-        for card in troops:
-            db.execute("INSERT INTO encounter_deck_cards (deck_guid, card_guid, quantity) "
-                       "VALUES (?, ?, 6)", (deck, card))
     db.commit()
     previous_shared, previous_autoplay = shared._db, pvp_autoplay._db
     shared._db = db
@@ -2374,11 +2372,13 @@ def test_saving_conversation_actions_records_them_for_the_ending(tmp_path, monke
     import editing
     # Redirect the campaign data directory: the save writes a JSON file there.
     monkeypatch.setattr(catalog, "DATA_DIR", tmp_path)
-    db = make_db()
-    db.execute("INSERT INTO campaign_node_conversations (campaign_template, conversation_guid, "
-               "node_id, trigger_json) VALUES ('AZ1', 'conv-x', 'Node00A', '{}')")
-    db.commit()
-    saved = editing.save_conversation_actions(db, "AZ1", "conv-x", "win", ["set_flag(probe)"])
+    import campaign_source
+    campaign_source.ensure_campaign_path()
+    import campaign_content
+    real = next(r for r in campaign_content.table("campaign_node_conversations")
+                if r["campaign_template"] == "AZ1")
+    guid = real["conversation_guid"]
+    saved = editing.save_conversation_actions(None, "AZ1", guid, "win", ["set_flag(probe)"])
     assert saved["actions"] == {"win": ["set_flag(probe)"]}, saved
     written = _json.loads((tmp_path / "AZ1.json").read_text(encoding="utf-8"))
     row = written["tables"]["campaign_node_conversations"][0]
@@ -2451,29 +2451,18 @@ def test_gem_extraction_reads_each_gem_type_from_the_inventory_records():
     assert ability_rows == [] and effect_rows == [], (ability_rows, effect_rows)
 
 
+from pathlib import Path as _Path
+REPO_RECORDS_DIR = _Path(__file__).resolve().parent.parent / "hex-private" / "Records"
+
+
 def test_az1_node_details_come_from_its_encounter_scene_row(tmp_path):
-    import sqlite3
+    # The AZ1 map details come from campaign_content (Records plus the data files).
     sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "campaign", "AssetExtraction"))
     import generate_az1_map as mapper
-    records = tmp_path / "Records"
-    records.mkdir()
-    (records / "ChampionTemplate.jsonl").write_text("")
-    database = tmp_path / "hconnect.db"
-    connection = sqlite3.connect(database)
-    connection.execute("CREATE TABLE encounter_scenes (name TEXT, title TEXT, ai_champion_guid TEXT)")
-    connection.execute("CREATE TABLE campaign_node_conversations (node_id TEXT, conversation_name TEXT, "
-                       "trigger_json TEXT, conversation_guid TEXT, campaign_template TEXT, enabled INTEGER, "
-                       "priority INTEGER)")
-    connection.execute("CREATE TABLE quest_conversations (conversation_guid TEXT, campaign_template TEXT, "
-                       "enabled INTEGER, quest_script TEXT, role TEXT)")
-    connection.execute("INSERT INTO encounter_scenes VALUES ('AZ 1 - NODE A', 'Battle at A', "
-                       "'aaaaaaaa-0000-0000-0000-00000000c001')")
-    connection.commit()
-    connection.close()
-    details = mapper.load_node_details(database, records)
-    node = details["Node00A"]
-    assert node.encounters == ("Battle at A",), node
-    assert node.champions == ("aaaaaaaa-0000-0000-0000-00000000c001",), node
+    details = mapper.load_node_details(tmp_path / "unused.db", REPO_RECORDS_DIR)
+    node = details["Node003"]
+    assert node.encounters == ("Wild Cub",), node
+    assert node.pre_conversations == ("Feralroot Bear",), node
 
 
 def test_set_one_coverage_sweep_reports_the_non_resource_cards(monkeypatch, capsys):
@@ -2895,15 +2884,13 @@ def test_fra_round_robin_plays_one_match_per_deck_pair_and_writes_the_report(tmp
     import db as shared
     import pvp_autoplay
     db = make_db()
-    champion = "1ae73dcf-e96e-4536-aec3-f53efb5e1c96"
-    troops = ["8305c05f-8355-4740-8599-2cf4a85c2c79", "018bc77c-013f-493b-9ba3-3a286607c989"]
-    decks = ["aaaaaaaa-0000-0000-0000-00000000d001", "aaaaaaaa-0000-0000-0000-00000000d002"]
-    for deck in decks:
+    # Two real Arena decks with their own champions: cards come from Records (campaign_content).
+    champions = {"bbfd8f29-e549-4eda-9e21-735620d3b5ff": "f8f86969-2e47-4901-8c9e-7fbf8d859e22",
+                 "d987d23d-3d68-453e-9ea4-1070ee21b2cc": "91ca6c6b-3665-48fa-be85-95cf7938fe57"}
+    decks = list(champions)
+    for deck, champion in champions.items():
         db.execute("INSERT INTO fra_encounters (deck_guid, deck_name, name, champion_guid, "
                    "base_deck_name) VALUES (?, ?, ?, ?, ?)", (deck, deck, deck, champion, deck))
-        for card in troops:
-            db.execute("INSERT INTO encounter_deck_cards (deck_guid, card_guid, quantity) "
-                       "VALUES (?, ?, 6)", (deck, card))
     db.commit()
     previous_shared, previous_autoplay = shared._db, pvp_autoplay._db
     shared._db = db

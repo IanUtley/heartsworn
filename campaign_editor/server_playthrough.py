@@ -438,10 +438,12 @@ def _explore_core(db, campaign, rules_loader, handler, responses, pushes,
 def _ending_for(db, conversation_guid):
     """The ending a player would usually pick: the first scripted one that
     has an ending action (accept a battle, travel on ...)."""
-    rows = db.execute(
-        "SELECT trigger_json FROM campaign_node_conversations WHERE LOWER(conversation_guid)=? "
-        "UNION ALL SELECT conditions_json FROM quest_conversations WHERE LOWER(conversation_guid)=?",
-        (str(conversation_guid).lower(), str(conversation_guid).lower())).fetchall()
+    import campaign_content
+    guid = str(conversation_guid).lower()
+    rows = [(r.get("trigger_json"),) for r in campaign_content.table("campaign_node_conversations")
+            if str(r.get("conversation_guid") or "").lower() == guid]
+    rows += [(r.get("conditions_json"),) for r in campaign_content.quest_conversations()
+             if str(r.get("conversation_guid") or "").lower() == guid]
     for (raw,) in rows:
         try:
             actions = (json.loads(raw or "{}") or {}).get("actions") or {}

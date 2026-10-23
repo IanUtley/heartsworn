@@ -28,13 +28,26 @@ def _ensure_two_decks():
     decks = web_match.deck_choices()
     if len(decks) >= 2:
         return decks
-    rows = _db.execute(
-        "SELECT s.ai_deck_guid, s.name, s.ai_champion_guid "
-        "FROM encounter_scenes s JOIN encounter_deck_cards d "
-        "ON d.deck_guid=s.ai_deck_guid "
-        "WHERE COALESCE(s.ai_champion_guid, '')<>'' "
-        "GROUP BY s.ai_deck_guid HAVING SUM(d.quantity) >= 40 "
-        "ORDER BY s.ai_deck_guid LIMIT 2").fetchall()
+    import campaign_source
+    campaign_source.ensure_campaign_path()
+    import campaign_content
+    totals = {}
+    for card in campaign_content.table("encounter_deck_cards"):
+        deck = str(card["deck_guid"]).lower()
+        totals[deck] = totals.get(deck, 0) + int(card["quantity"] or 0)
+    rows = []
+    seen = set()
+    for scene in sorted(campaign_content.scenes(), key=lambda r: str(r.get("ai_deck_guid") or "")):
+        deck_guid, name, champion_guid = scene.get("ai_deck_guid"), scene.get("name"), scene.get("ai_champion_guid")
+        if not str(champion_guid or ""):
+            continue
+        key = str(deck_guid).lower()
+        if key in seen or totals.get(key, 0) < 40:
+            continue
+        seen.add(key)
+        rows.append((deck_guid, name, champion_guid))
+        if len(rows) == 2:
+            break
     for deck_guid, name, champion_guid in rows:
         _db.execute(
             "INSERT OR IGNORE INTO fra_encounters (deck_guid, deck_name, "

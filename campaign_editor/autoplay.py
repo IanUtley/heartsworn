@@ -52,6 +52,7 @@ from typing import Any
 import campaign_rules as engine
 import catalog
 from campaign_runtime import catalog_data, locate
+import campaign_content
 
 MAX_STEPS = 2000
 MAX_CHILD_ENTRIES = 4
@@ -701,32 +702,20 @@ def _override(table, key_field, key):
 
 
 def quest_reward(db, script):
-    """``rewards_json`` of a quest (campaign file first, then the database),
-    or None when the quest is disabled."""
-    row = _override("quest_templates", "script_name", script)
-    enabled = True
-    db_row = db.execute("SELECT rewards_json, enabled FROM quest_templates "
-                        "WHERE script_name=?", (script,)).fetchone() if db else None
-    if db_row is not None:
-        enabled = bool(db_row[1])
-    if row is not None and "enabled" in row:
-        enabled = bool(row["enabled"])
-    if not enabled:
+    """``rewards_json`` of a quest (merged: Records plus the campaign data files),
+    or None when the quest is disabled. ``db`` is unused."""
+    template = next((r for r in campaign_content.quest_templates()
+                     if r.get("script_name") == script), None)
+    if template is None or not int(bool(template.get("enabled", 1))):
         return None
-    if row is not None and "rewards_json" in row:
-        return _json(row["rewards_json"], {})
-    return _json(db_row[0], {}) if db_row is not None else {}
+    return _json(template.get("rewards_json"), {})
 
 
 def scene_rewards(db, scene):
-    """The scene's end-of-game reward records (campaign._scene_reward_records)."""
-    row = _override("encounter_scenes", "guid", scene)
-    if row is not None and "rewards_json" in row:
-        data = _json(row["rewards_json"], {})
-    else:
-        db_row = db.execute("SELECT rewards_json FROM encounter_scenes WHERE guid=?",
-                            (str(scene),)).fetchone() if db else None
-        data = _json(db_row[0] if db_row else None, {})
+    """The scene's end-of-game reward records (campaign._scene_reward_records).
+    ``db`` is unused."""
+    row = campaign_content.scene(str(scene))
+    data = _json(row.get("rewards_json") if row else None, {})
     if not isinstance(data, dict):
         return []
     found = data.get("end_of_game_rewards")
@@ -744,18 +733,12 @@ def scene_rewards(db, scene):
 
 
 def conversation_reward(db, guid):
-    """``(reward, one_time)`` of a conversation, or None."""
-    row = _override("conversation_rewards", "conversation_guid", guid)
-    db_row = db.execute("SELECT reward_json, one_time, enabled FROM conversation_rewards "
-                        "WHERE conversation_guid=?", (str(guid),)).fetchone() if db else None
-    if row is not None:
-        reward = _json(row.get("reward_json"), {})
-        one_time = bool(row.get("one_time", True))
-        enabled = bool(row.get("enabled", True))
-    elif db_row is not None:
-        reward, one_time, enabled = _json(db_row[0], {}), bool(db_row[1]), bool(db_row[2])
-    else:
+    """``(reward, one_time)`` of a conversation, or None (``db`` is unused)."""
+    row = campaign_content.conversation_reward(guid)
+    if row is None:
         return None
+    reward_json, one_time, enabled = row
+    reward = _json(reward_json, {})
     return (reward, one_time) if enabled and reward else None
 
 

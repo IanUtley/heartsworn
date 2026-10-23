@@ -938,78 +938,105 @@ def db_campaign_set_last_campaign(champion_id, campaign_id, conn=None):
     )
 
 
+def _content():
+    """campaign_content, with campaign/ on the import path."""
+    import campaign_source
+    campaign_source.ensure_campaign_path()
+    import campaign_content
+    return campaign_content
+
+
+def _visible_node_rows(template, node=None):
+    """Enabled, visible campaign node conversations of one template (and node)."""
+    return [r for r in _content().node_conversations()
+            if str(r.get("campaign_template")) == str(template)
+            and (node is None or str(r.get("node_id")) == str(node))
+            and int(bool(r.get("enabled", 1)))]
+
+
+def _quest_rows(**where):
+    """Quest conversation rows whose fields equal ``where``, in build order."""
+    rows = []
+    for row in _content().quest_conversations():
+        if all(str(row.get(k)) == str(v) for k, v in where.items()):
+            rows.append(row)
+    return rows
+
+
+def _by_priority(rows):
+    return sorted(rows, key=lambda r: int(r.get("priority") or 0))  # stable: keeps build order
+
+
+def _like(value, pattern_text):
+    """SQL LIKE for a plain prefix/substring pattern (ASCII case-insensitive)."""
+    return str(value or "").lower().startswith(pattern_text.lower())
+
+
 def db_quest_conversations(quest_script, conn=None):
     """Return enabled authored quest conversation variants."""
-    return _connection(conn).execute(
-        "SELECT conversation_guid, role, faction, conversation_name "
-        "FROM quest_conversations WHERE quest_script=? AND enabled=1 "
-        "ORDER BY priority, conversation_guid", (str(quest_script),)
-    ).fetchall()
+    rows = _by_priority(r for r in _quest_rows(quest_script=str(quest_script))
+                        if int(bool(r.get("enabled", 1))))
+    rows = sorted(rows, key=lambda r: (int(r.get("priority") or 0), str(r.get("conversation_guid") or "").lower()))
+    return [(r.get("conversation_guid"), r.get("role"), r.get("faction"), r.get("conversation_name"))
+            for r in rows]
 
 
 def db_encounter_scene_exists(scene_guid, conn=None):
     """Whether an authored encounter scene exists."""
-    return bool(_connection(conn).execute(
-        "SELECT 1 FROM encounter_scenes WHERE guid=?", (scene_guid,)
-    ).fetchone())
+    return _content().scene(scene_guid) is not None
 
 
 def db_az1_scene_rows(conn=None):
     """Return AZ1 node scene identity/display fields for objective matching."""
-    return _connection(conn).execute(
-        "SELECT guid, name, title FROM encounter_scenes "
-        "WHERE name LIKE 'AZ 1 - NODE %' ORDER BY name"
-    ).fetchall()
+    rows = [r for r in _content().scenes() if _like(r.get("name"), "AZ 1 - NODE ")]
+    rows.sort(key=lambda r: str(r.get("name") or ""))
+    return [(r.get("guid"), r.get("name"), r.get("title")) for r in rows]
 
 
 def db_az1_scene_metadata(conn=None):
     """Return AZ1 scene identity, names, and authored rewards."""
-    return _connection(conn).execute(
-        "SELECT guid, name, rewards_json FROM encounter_scenes "
-        "WHERE name LIKE 'AZ 1 - NODE %'"
-    ).fetchall()
+    return [(r.get("guid"), r.get("name"), r.get("rewards_json"))
+            for r in _content().scenes() if _like(r.get("name"), "AZ 1 - NODE ")]
 
 
 def db_az1_edges(conn=None):
     """Return the authored directed AZ1 map edges."""
-    return _connection(conn).execute(
-        "SELECT from_node, to_node, path_name FROM campaign_node_edges "
-        "WHERE campaign_template='AZ1'"
-    ).fetchall()
+    # Ordered by to_node, as the (campaign_template, to_node) index returned them.
+    return sorted(((r["from_node"], r["to_node"], r["path_name"])
+                   for r in _content().edges() if r["campaign_template"] == "AZ1"),
+                  key=lambda row: str(row[1]))
 
 
 def db_az1_edge_exists(from_node, to_node, conn=None):
     """Whether two AZ1 nodes are directly connected."""
-    return bool(_connection(conn).execute(
-        "SELECT 1 FROM campaign_node_edges "
-        "WHERE campaign_template='AZ1' AND from_node=? AND to_node=?",
-        (str(from_node), str(to_node))).fetchone())
+    return any(r["campaign_template"] == "AZ1" and str(r["from_node"]) == str(from_node)
+               and str(r["to_node"]) == str(to_node) for r in _content().edges())
 
 
 def db_az1_fork_edge_exists(from_node, to_node, conn=None):
     """Whether two AZ1 nodes connect through one client-only fork node."""
-    return bool(_connection(conn).execute(
-        "SELECT 1 FROM campaign_node_edges first "
-        "JOIN campaign_node_edges second ON second.campaign_template=first.campaign_template "
-        "AND second.from_node=first.to_node "
-        "WHERE first.campaign_template='AZ1' AND first.from_node=? "
-        "AND second.to_node=? AND lower(first.to_node) LIKE 'fork%'",
-        (str(from_node), str(to_node))).fetchone())
+    edges = [r for r in _content().edges() if r["campaign_template"] == "AZ1"]
+    for first in edges:
+        if str(first["from_node"]) != str(from_node) or not _like(first["to_node"], "fork"):
+            continue
+        for second in edges:
+            if second["from_node"] == first["to_node"] and str(second["to_node"]) == str(to_node):
+                return True
+    return False
 
 
 def db_quest_template(script_name=None, campaign_group=None, conn=None):
     """Return the first enabled quest template matching the requested scope."""
-    sql = ("SELECT script_name, title, objectives_json, campaign_group, "
-           "start_hook FROM quest_templates WHERE enabled=1")
-    params = []
+    rows = [r for r in _content().quest_templates() if int(bool(r.get("enabled", 1)))]
     if script_name:
-        sql += " AND script_name=?"
-        params.append(script_name)
+        rows = [r for r in rows if r.get("script_name") == script_name]
     if campaign_group:
-        sql += " AND campaign_group=?"
-        params.append(campaign_group)
-    sql += " ORDER BY script_name LIMIT 1"
-    return _connection(conn).execute(sql, params).fetchone()
+        rows = [r for r in rows if r.get("campaign_group") == campaign_group]
+    if not rows:
+        return None
+    r = min(rows, key=lambda r: str(r.get("script_name") or ""))
+    return (r.get("script_name"), r.get("title"), r.get("objectives_json"),
+            r.get("campaign_group"), r.get("start_hook"))
 
 
 def db_quest_campaign_id(champion_id, script_name, conn=None):
@@ -1087,23 +1114,21 @@ def db_latest_campaign_state(champion_id, campaign_type, conn=None,
 
 def db_gaal_nodes(campaign_template, conn=None):
     """Return enabled authored Gaal camp node IDs for an area."""
-    return _connection(conn).execute(
-        "SELECT DISTINCT node_id FROM campaign_node_conversations "
-        "WHERE campaign_template=? AND enabled=1 "
-        f"AND {_db_module.CAMPAIGN_NODE_CONVERSATION_VISIBLE} "
-        "AND lower(conversation_name) LIKE '%gaal%' "
-        "AND lower(conversation_name) NOT LIKE '%already has fortune%'",
-        (str(campaign_template or ""),)).fetchall()
+    nodes = set()
+    for r in _visible_node_rows(str(campaign_template or "")):
+        name = str(r.get("conversation_name") or "").lower()
+        if "gaal" in name and "already has fortune" not in name:
+            nodes.add(r.get("node_id"))
+    return [(node,) for node in sorted(nodes, key=str)]
 
 
 def db_panorama_conversation_npc(node_id, conversation_guid, conn=None):
     """Return the authored NPC/role for an AZ1 conversation node."""
-    return _connection(conn).execute(
-        "SELECT npc, role FROM quest_conversations "
-        "WHERE campaign_template='AZ1' AND node_id=? "
-        "AND conversation_guid=? AND enabled=1 "
-        "ORDER BY priority, rowid LIMIT 1",
-        (node_id, str(conversation_guid or ""))).fetchone()
+    rows = [r for r in _quest_rows(campaign_template="AZ1", node_id=str(node_id),
+                                   conversation_guid=str(conversation_guid or "").lower())
+            if int(bool(r.get("enabled", 1)))]
+    rows = sorted(rows, key=lambda r: int(r.get("priority") or 0))
+    return (rows[0].get("npc"), rows[0].get("role")) if rows else None
 
 
 def db_champion_template_guid_by_name(name, conn=None):
@@ -1116,49 +1141,46 @@ def db_champion_template_guid_by_name(name, conn=None):
 
 def db_panorama_quest_rows(node, conn=None):
     """Return authored quest-linked AZ1 conversations for a node."""
-    return _connection(conn).execute(
-        "SELECT qc.quest_script, qc.conversation_guid, qc.role, qc.faction, "
-        "qc.npc, qc.priority, COALESCE(NULLIF(qc.start_hook, ''), "
-        "NULLIF(qt.start_hook, ''), ''), COALESCE(qc.conditions_json, '{}') "
-        "FROM quest_conversations qc "
-        "LEFT JOIN quest_templates qt ON qt.script_name=qc.quest_script "
-        "WHERE qc.campaign_template='AZ1' AND qc.node_id=? "
-        "AND qc.enabled=1 ORDER BY qc.priority, qc.rowid", (str(node),)
-    ).fetchall()
+    content = _content()
+    templates = {r.get("script_name"): r for r in content.quest_templates()}
+    rows = []
+    for r in _quest_rows(campaign_template="AZ1", node_id=str(node)):
+        if not int(bool(r.get("enabled", 1))):
+            continue
+        template = templates.get(r.get("quest_script")) or {}
+        start = r.get("start_hook") or template.get("start_hook") or ""
+        rows.append((r.get("quest_script"), r.get("conversation_guid"), r.get("role"),
+                     r.get("faction"), r.get("npc"), r.get("priority"), start,
+                     r.get("conditions_json") or "{}"))
+    return sorted(rows, key=lambda row: int(row[5] or 0))
 
 
 def db_panorama_generic_rows(node, conn=None):
     """Return generic authored AZ1 node conversations."""
-    return _connection(conn).execute(
-        "SELECT conversation_guid, trigger_json, conversation_name, priority "
-        "FROM campaign_node_conversations "
-        "WHERE campaign_template='AZ1' AND node_id=? AND enabled=1 "
-        f"AND {_db_module.CAMPAIGN_NODE_CONVERSATION_VISIBLE} "
-        "ORDER BY priority, conversation_guid", (str(node),)
-    ).fetchall()
+    rows = sorted(_visible_node_rows("AZ1", str(node)),
+                  key=lambda r: (int(r.get("priority") or 0), str(r.get("conversation_guid") or "").lower()))
+    return [(r.get("conversation_guid"), r.get("trigger_json"), r.get("conversation_name"),
+             r.get("priority")) for r in rows]
 
 
 def db_node_conversation_rows(node, campaign_template="AZ1", conn=None):
     """Return enabled authored conversations for an exact campaign node."""
-    return _connection(conn).execute(
-        "SELECT conversation_guid, trigger_json, priority, conversation_name "
-        "FROM campaign_node_conversations WHERE campaign_template=? "
-        "AND node_id=? AND enabled=1 "
-        f"AND {_db_module.CAMPAIGN_NODE_CONVERSATION_VISIBLE} "
-        "ORDER BY priority, conversation_guid",
-        (str(campaign_template or "AZ1"), str(node))).fetchall()
+    rows = sorted(_visible_node_rows(str(campaign_template or "AZ1"), str(node)),
+                  key=lambda r: (int(r.get("priority") or 0), str(r.get("conversation_guid") or "").lower()))
+    return [(r.get("conversation_guid"), r.get("trigger_json"), r.get("priority"),
+             r.get("conversation_name")) for r in rows]
 
 
 def db_conversation_name(conversation_guid, conn=None):
     """Return the authored name of a catalogued campaign conversation."""
     guid = str(conversation_guid or "").lower()
-    connection = _connection(conn)
-    for table in ("campaign_node_conversations", "quest_conversations"):
-        row = connection.execute(
-            f"SELECT conversation_name FROM {table} "
-            "WHERE LOWER(conversation_guid)=? LIMIT 1", (guid,)).fetchone()
-        if row and row[0]:
-            return row[0]
+    content = _content()
+    for rows in (content.table("campaign_node_conversations"), content.quest_conversations()):
+        for r in rows:
+            if str(r.get("conversation_guid") or "").lower() == guid:
+                if r.get("conversation_name"):
+                    return r["conversation_name"]
+                break
     return None
 
 
@@ -1166,52 +1188,48 @@ def db_conversation_action_tables(conversation_guid, conn=None):
     """Return the editor's ending-action tables (``{ending|"*": [action]}``)
     authored on a conversation's node and quest rows."""
     guid = str(conversation_guid or "").lower()
-    connection = _connection(conn)
+    content = _content()
+    sources = [(r.get("trigger_json"), r) for r in content.table("campaign_node_conversations")
+               if str(r.get("conversation_guid") or "").lower() == guid and int(bool(r.get("enabled", 1)))]
+    sources += [(r.get("conditions_json"), r) for r in content.quest_conversations()
+                if str(r.get("conversation_guid") or "").lower() == guid and int(bool(r.get("enabled", 1)))]
     tables = []
-    for sql in ("SELECT trigger_json FROM campaign_node_conversations "
-                "WHERE LOWER(conversation_guid)=? AND enabled=1",
-                "SELECT conditions_json FROM quest_conversations "
-                "WHERE LOWER(conversation_guid)=? AND enabled=1"):
-        for (raw,) in connection.execute(sql, (guid,)).fetchall():
-            try:
-                actions = (json.loads(raw or "{}") or {}).get("actions")
-            except (TypeError, ValueError, AttributeError):
-                continue
-            if isinstance(actions, dict):
-                tables.append(actions)
+    for raw, _row in sources:
+        try:
+            actions = (json.loads(raw or "{}") or {}).get("actions")
+        except (TypeError, ValueError, AttributeError):
+            continue
+        if isinstance(actions, dict):
+            tables.append(actions)
     return tables
 
 
 def db_quest_template_start(quest_script, conn=None):
     """Return ``(start_hook, campaign_group)`` for a quest template, or None."""
-    return _connection(conn).execute(
-        "SELECT COALESCE(start_hook, ''), COALESCE(campaign_group, 'AREA') "
-        "FROM quest_templates WHERE script_name=?",
-        (str(quest_script),)).fetchone()
+    for r in _content().quest_templates():
+        if r.get("script_name") == str(quest_script):
+            return (r.get("start_hook") or "", r.get("campaign_group") or "AREA")
+    return None
 
 
 def db_panorama_npc_quest_scripts(node, npc, conn=None):
     """Return quest scripts associated with an AZ1 node/NPC pair."""
-    return _connection(conn).execute(
-        "SELECT DISTINCT quest_script FROM quest_conversations "
-        "WHERE campaign_template='AZ1' AND node_id=? AND npc=? "
-        "AND enabled=1", (str(node), str(npc))).fetchall()
+    scripts = {r.get("quest_script") for r in _quest_rows(campaign_template="AZ1", node_id=str(node),
+                                                          npc=str(npc))
+               if int(bool(r.get("enabled", 1)))}
+    return [(script,) for script in sorted(scripts, key=str)]
 
 
 def db_encounter_scene_rewards(scene_guid, conn=None):
     """Return the authored serialized rewards for one encounter scene."""
-    row = _connection(conn).execute(
-        "SELECT rewards_json FROM encounter_scenes WHERE guid=?",
-        (str(scene_guid),)).fetchone()
-    return row[0] if row else None
+    row = _content().scene(str(scene_guid))
+    return row.get("rewards_json") if row else None
 
 
 def db_encounter_scene_actions(scene_guid, conn=None):
     """Serialized ``{"pre"|"victory"|"defeat": [action]}`` for one scene."""
-    row = _connection(conn).execute(
-        "SELECT actions_json FROM encounter_scenes WHERE guid=?",
-        (str(scene_guid),)).fetchone()
-    return row[0] if row else None
+    row = _content().scene(str(scene_guid))
+    return row.get("actions_json") if row else None
 
 
 def db_void_tamed_troop_rows(session_id, player_user_id, owner, conn=None):
@@ -1390,39 +1408,54 @@ def db_champion_last_campaign_id(champion_id, conn=None):
 
 def db_quest_start_rows(conversation_guid, campaign_template, conn=None):
     """Return eligible authored quest starts in their source order."""
-    return _connection(conn).execute(
-        "SELECT qc.quest_script, COALESCE(NULLIF(qt.start_hook, ''), "
-        "NULLIF(qc.start_hook, ''), ''), qc.faction, "
-        "COALESCE(qt.campaign_group, 'AREA') FROM quest_conversations qc "
-        "LEFT JOIN quest_templates qt ON qt.script_name=qc.quest_script "
-        "WHERE qc.conversation_guid=? AND qc.campaign_template=? "
-        "AND qc.role='start' AND qc.enabled=1 "
-        "ORDER BY qc.priority, qc.quest_script",
-        (str(conversation_guid), str(campaign_template))).fetchall()
+    content = _content()
+    templates = {r.get("script_name"): r for r in content.quest_templates()}
+    rows = []
+    for r in content.quest_conversations():
+        if (str(r.get("conversation_guid")) != str(conversation_guid)
+                or str(r.get("campaign_template")) != str(campaign_template)
+                or r.get("role") != "start" or not int(bool(r.get("enabled", 1)))):
+            continue
+        template = templates.get(r.get("quest_script")) or {}
+        start = template.get("start_hook") or r.get("start_hook") or ""
+        rows.append((r.get("priority") or 0, r.get("quest_script"), start, r.get("faction"),
+                     template.get("campaign_group") or "AREA"))
+    rows.sort(key=lambda row: (int(row[0]), str(row[1])))
+    return [row[1:] for row in rows]
 
 
 def db_quest_node_rows(node, conn=None):
     """Return enabled AZ1 quest conversations for one node."""
-    return _connection(conn).execute(
-        "SELECT quest_script, conversation_guid, role, faction, "
-        "COALESCE(conditions_json, '{}') "
-        "FROM quest_conversations WHERE campaign_template='AZ1' "
-        "AND node_id=? AND enabled=1 ORDER BY priority, conversation_guid",
-        (str(node),)).fetchall()
+    rows = [r for r in _quest_rows(campaign_template="AZ1", node_id=str(node))
+            if int(bool(r.get("enabled", 1)))]
+    rows.sort(key=lambda r: (int(r.get("priority") or 0), str(r.get("conversation_guid") or "").lower()))
+    return [(r.get("quest_script"), r.get("conversation_guid"), r.get("role"), r.get("faction"),
+             r.get("conditions_json") or "{}") for r in rows]
 
 
 def db_conversation_reward(conversation_guid, conn=None):
-    """Return the authored reward policy for one conversation."""
-    return _connection(conn).execute(
-        "SELECT reward_json, one_time, enabled FROM conversation_rewards "
-        "WHERE conversation_guid=?", (str(conversation_guid),)).fetchone()
+    """Return ``(reward_json, one_time, enabled)`` for one conversation, or None.
+
+    From campaign_content (Records and campaign/campaign_data); ``conn`` is
+    unused and kept so callers do not change.
+    """
+    import campaign_source
+    campaign_source.ensure_campaign_path()
+    import campaign_content
+
+    row = campaign_content.conversation_reward(conversation_guid)
+    if row is None:
+        return None
+    reward_json, one_time, enabled = row
+    return reward_json, int(one_time), int(enabled)
 
 
 def db_quest_template_reward(quest_script, conn=None):
     """``(rewards_json, enabled)`` for a quest's completion reward, or None."""
-    return _connection(conn).execute(
-        "SELECT rewards_json, enabled FROM quest_templates WHERE script_name=?",
-        (str(quest_script),)).fetchone()
+    for r in _content().quest_templates():
+        if r.get("script_name") == str(quest_script):
+            return (r.get("rewards_json") or "{}", int(bool(r.get("enabled", 1))))
+    return None
 
 
 def db_fortune_card_guids(set_guid, conn=None):
@@ -1435,19 +1468,21 @@ def db_fortune_card_guids(set_guid, conn=None):
 
 def db_encounter_scene_runtime(scene_guid, conn=None):
     """Return scene fields used to construct a campaign encounter."""
-    return _connection(conn).execute(
-        "SELECT guid, name, title, gameboard, ai_deck_guid, "
-        "ai_champion_guid, ai_deck_personality FROM encounter_scenes "
-        "WHERE guid=?", (str(scene_guid),)).fetchone()
+    r = _content().scene(str(scene_guid))
+    if r is None:
+        return None
+    return (r.get("guid"), r.get("name"), r.get("title"), r.get("gameboard"),
+            r.get("ai_deck_guid"), r.get("ai_champion_guid"), r.get("ai_deck_personality"))
 
 
 def db_encounter_scene_player_override(scene_guid, conn=None):
     """``(player_champion_guid, player_deck_guid)`` for a scene; blank means
     the player keeps their own champion and deck."""
-    row = _connection(conn).execute(
-        "SELECT COALESCE(player_champion_guid, ''), COALESCE(player_deck_guid, '') "
-        "FROM encounter_scenes WHERE guid=?", (str(scene_guid),)).fetchone()
-    return (row[0] or None, row[1] or None) if row else (None, None)
+    r = _content().scene(str(scene_guid))
+    if r is None:
+        return (None, None)
+    return (str(r.get("player_champion_guid") or "") or None,
+            str(r.get("player_deck_guid") or "") or None)
 
 
 def db_campaign_template_name(campaign_id, conn=None):
@@ -1507,13 +1542,14 @@ def db_active_area_campaign(champion_id, template_name="AZ1", conn=None):
 
 def db_active_quest_hooks(champion_id, conn=None):
     """Return started quest campaigns and their authored start hooks."""
-    return _connection(conn).execute(
-        "SELECT c.id, qt.start_hook FROM campaigns c "
-        "JOIN quest_templates qt ON qt.script_name=c.template_name "
-        "WHERE c.champion_id=? AND c.campaign_type='QUEST' "
-        "AND c.state_json IS NOT NULL AND c.is_started=1 "
-        "AND qt.enabled=1 AND qt.start_hook<>'' ORDER BY c.id", (champion_id,)
-    ).fetchall()
+    hooks = {r.get("script_name"): r.get("start_hook") or ""
+             for r in _content().quest_templates()
+             if int(bool(r.get("enabled", 1))) and (r.get("start_hook") or "")}
+    campaigns = _connection(conn).execute(
+        "SELECT id, template_name FROM campaigns WHERE champion_id=? "
+        "AND campaign_type='QUEST' AND state_json IS NOT NULL AND is_started=1 "
+        "ORDER BY id", (champion_id,)).fetchall()
+    return [(cid, hooks[template]) for cid, template in campaigns if template in hooks]
 
 
 def db_campaign_state(campaign_id, conn=None):
@@ -1526,11 +1562,8 @@ def db_campaign_state(campaign_id, conn=None):
 
 def db_az1_node_conversation_ids(conn=None):
     """Return enabled authored AZ1 node/conversation pairs."""
-    return _connection(conn).execute(
-        "SELECT node_id, conversation_guid FROM campaign_node_conversations "
-        "WHERE campaign_template='AZ1' AND enabled=1 "
-        f"AND {_db_module.CAMPAIGN_NODE_CONVERSATION_VISIBLE}"
-    ).fetchall()
+    return [(r.get("node_id"), r.get("conversation_guid"))
+            for r in _visible_node_rows("AZ1")]
 
 
 def db_started_quest_states(champion_id, conn=None):
@@ -1544,11 +1577,10 @@ def db_started_quest_states(champion_id, conn=None):
 
 def db_encounter_deck_personality(deck_guid, conn=None):
     """Return an authored AI deck personality, if one exists."""
-    row = _connection(conn).execute(
-        "SELECT ai_deck_personality FROM encounter_scenes "
-        "WHERE ai_deck_guid=? AND ai_deck_personality IS NOT NULL LIMIT 1",
-        (deck_guid,)).fetchone()
-    return row[0] if row else None
+    for r in _content().scenes():
+        if str(r.get("ai_deck_guid") or "") == str(deck_guid) and r.get("ai_deck_personality") is not None:
+            return r["ai_deck_personality"]
+    return None
 
 
 def db_encounter_deck_sleeve(deck_guid, conn=None):

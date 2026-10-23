@@ -47,7 +47,6 @@ def card_art_on_demand(art: str) -> Path | None:
 
 # The data side is shared with the server's campaign runtime.
 from campaign_runtime import offers  # noqa: E402
-from db import CAMPAIGN_NODE_CONVERSATION_VISIBLE  # noqa: E402
 from campaign_runtime.catalog_data import (  # noqa: E402,F401
     _EMPTY_CATALOG, _audience, _authored_items, _json, _quest_conditions,
     data_mtime, data_overrides, dungeon_prefixes, encounter_event_nodes,
@@ -55,6 +54,7 @@ from campaign_runtime.catalog_data import (  # noqa: E402,F401
     DATA_DIR, SCENE_NODE_LINKS)
 from campaign_runtime import catalog_data as _catalog_data  # noqa: E402
 import campaign_data  # noqa: E402
+import campaign_content  # noqa: E402
 from campaign_runtime.catalog_data import server_catalog as _server_catalog  # noqa: E402
 from campaign_runtime.records import (  # noqa: E402,F401
     _endings_of, _events, _guid, _qualifiers, _records_encounters,
@@ -283,13 +283,12 @@ def _card_thresholds(threshold_json: Any) -> list[dict[str, Any]]:
 def unresolved_decks(db: sqlite3.Connection) -> set[str]:
     """Encounter decks that hold a card GUID Records never defines.
 
-    The join compares the stored GUIDs as they are (all lowercase, so the
-    card_templates primary key is used); LOWER() here made it a full scan.
+    Checked against the card_templates primary key; all GUIDs are lowercase.
     """
-    return {str(row[0]).lower() for row in db.execute(
-        "SELECT DISTINCT d.deck_guid FROM encounter_deck_cards d "
-        "LEFT JOIN card_templates c ON c.guid=d.card_guid "
-        "WHERE c.guid IS NULL")}
+    known = {str(row[0]).lower() for row in db.execute("SELECT guid FROM card_templates")}
+    return {str(row["deck_guid"]).lower()
+            for row in campaign_content.table("encounter_deck_cards")
+            if str(row["card_guid"]).lower() not in known}
 
 
 def encounter_deck(db: sqlite3.Connection, scene_guid: str) -> dict[str, Any]:
@@ -299,42 +298,40 @@ def encounter_deck(db: sqlite3.Connection, scene_guid: str) -> dict[str, Any]:
     it to a CardTemplate (``mapped``), which then supplies its name and stats.
     ``display_guid`` is the card whose art and text the editor shows.
     """
-    row = db.execute(
-        "SELECT name, title, ai_deck_guid FROM encounter_scenes WHERE LOWER(guid)=?",
-        (str(scene_guid or "").lower(),)).fetchone()
-    if row is None:
+    scene = campaign_content.scene(str(scene_guid or ""))
+    if scene is None:
         raise LookupError("no such encounter scene")
-    deck_guid = str(row[2] or "").lower()
+    deck_guid = str(scene.get("ai_deck_guid") or "").lower()
     card_map = campaign_data.load_card_map()
     cards = []
     if deck_guid:
-        for card_guid, quantity, name, cost, card_type, attack, defense, thresholds in db.execute(
-                "SELECT d.card_guid, d.quantity, c.name, c.cost, c.card_type, "
-                "c.attack, c.defense, c.threshold_json "
-                "FROM encounter_deck_cards d "
-                "LEFT JOIN card_templates c ON LOWER(c.guid)=LOWER(d.card_guid) "
-                "WHERE LOWER(d.deck_guid)=? ORDER BY c.cost, c.name",
-                (deck_guid,)).fetchall():
-            guid = str(card_guid or "").lower()
+        for deck_row in campaign_content.deck_cards(deck_guid, mapped=False):
+            guid = str(deck_row["card_guid"]).lower()
+            quantity = int(deck_row["quantity"] or 0)
+            info = db.execute(
+                "SELECT name, cost, card_type, attack, defense, threshold_json "
+                "FROM card_templates WHERE guid=?", (guid,)).fetchone()
+            name, cost, card_type, attack, defense, thresholds = (
+                info if info is not None else (None, None, None, None, None, None))
             entry = {
                 "guid": guid,
-                "quantity": int(quantity or 0),
+                "quantity": quantity,
                 "name": name or "",
                 "cost": int(cost or 0),
                 "card_type": card_type or "",
                 "attack": attack,
                 "defense": defense,
                 "thresholds": _card_thresholds(thresholds),
-                "missing": name is None,
+                "missing": info is None,
                 "mapped": False,
                 "display_guid": guid,
             }
-            if name is None:
+            if info is None:
                 entry["name"] = "??????"
                 target = card_map.get(guid)
                 mapped = db.execute(
                     "SELECT name, cost, card_type, attack, defense, threshold_json "
-                    "FROM card_templates WHERE LOWER(guid)=?",
+                    "FROM card_templates WHERE guid=?",
                     (target or "",)).fetchone() if target else None
                 if mapped is not None:
                     entry.update(name=mapped[0] or "??????", cost=int(mapped[1] or 0),
@@ -343,7 +340,10 @@ def encounter_deck(db: sqlite3.Connection, scene_guid: str) -> dict[str, Any]:
                                  thresholds=_card_thresholds(mapped[5]),
                                  mapped=True, display_guid=target)
             cards.append(entry)
-    return {"scene": str(scene_guid).lower(), "name": row[1] or row[0] or "",
+        # The deck's columns run by cost, then name (unknown cards sort first).
+        cards.sort(key=lambda c: (c["cost"], c["name"]))
+    return {"scene": str(scene_guid).lower(),
+            "name": scene.get("title") or scene.get("name") or "",
             "deck_guid": deck_guid or None, "card_count": sum(c["quantity"] for c in cards),
             "unresolved": sum(c["quantity"] for c in cards if c["missing"]),
             "cards": cards}
@@ -359,12 +359,10 @@ def _plain_game_text(value: Any) -> str:
 
 def encounter_champion_abilities(db: sqlite3.Connection, scene_guid: str) -> dict[str, Any]:
     """The opposing champion's powers for one encounter: a title and description each."""
-    row = db.execute(
-        "SELECT name, title, ai_champion_guid FROM encounter_scenes WHERE LOWER(guid)=?",
-        (str(scene_guid or "").lower(),)).fetchone()
-    if row is None:
+    scene = campaign_content.scene(str(scene_guid or ""))
+    if scene is None:
         raise LookupError("no such encounter scene")
-    champion = str(row[2] or "").lower()
+    champion = str(scene.get("ai_champion_guid") or "").lower()
     abilities = []
     if champion:
         seen = set()
@@ -485,25 +483,13 @@ def quest_action_index(db: sqlite3.Connection | None
         if "enabled" in row:
             found["enabled"] = bool(row["enabled"])
 
-    if db is not None:
-        for row in db.execute(
-                "SELECT campaign_template, node_id, conversation_guid, "
-                "conversation_name, trigger_json, enabled "
-                "FROM campaign_node_conversations WHERE "
-                + CAMPAIGN_NODE_CONVERSATION_VISIBLE):
-            row = dict(zip(("campaign_template", "node_id", "conversation_guid",
-                            "conversation_name", "trigger_json", "enabled"), row))
-            merge("node", (row["campaign_template"],
-                           str(row["conversation_guid"]).lower()), row, "trigger_json")
-        for row in db.execute(
-                "SELECT campaign_template, node_id, conversation_guid, "
-                "conversation_name, quest_script, role, conditions_json, enabled "
-                "FROM quest_conversations"):
-            row = dict(zip(("campaign_template", "node_id", "conversation_guid",
-                            "conversation_name", "quest_script", "role",
-                            "conditions_json", "enabled"), row))
-            merge("quest", (row["quest_script"],
-                            str(row["conversation_guid"]).lower()), row, "conditions_json")
+    # Visible node and quest conversations (campaign_content: Records plus the data files).
+    for row in campaign_content.node_conversations():
+        merge("node", (row["campaign_template"], str(row["conversation_guid"]).lower()),
+              row, "trigger_json")
+    for row in campaign_content.quest_conversations():
+        merge("quest", (row["quest_script"], str(row["conversation_guid"]).lower()),
+              row, "conditions_json")
     for row in data_overrides("campaign_node_conversations"):
         merge("node", (row.get("campaign_template"),
                        str(row.get("conversation_guid") or "").lower()), row,

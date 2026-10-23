@@ -3,8 +3,8 @@
 
 The Arena records are DeckTemplate records whose ``m_DeckName`` starts with
 ``Arena_``.  The deck template is the identifier used by the current server
-when it starts an Arena match, so ``fra_encounters.deck_guid`` and the
-corresponding ``encounter_deck_cards.deck_guid`` both use that GUID.
+when it starts an Arena match, so ``fra_encounters.deck_guid`` is also the key
+campaign_content reads the deck's cards by (from the same record; there is no card table).
 
 DeckTemplate does not contain the Arena roster's tier or boss classification.
 Those fields are therefore nullable and can be supplied with a JSON
@@ -302,17 +302,7 @@ def apply_rows(db_path: Path, encounter_rows: list[tuple[Any, ...]], card_rows: 
             encounter_rows,
         )
 
-        arena_decks = [row[0] for row in encounter_rows]
-        if arena_decks:
-            db.executemany(
-                "DELETE FROM encounter_deck_cards WHERE deck_guid=?",
-                ((deck_guid,) for deck_guid in arena_decks),
-            )
-        db.executemany(
-            "INSERT INTO encounter_deck_cards "
-            "(deck_guid, card_guid, quantity, gem_types_new_list_json) VALUES (?,?,?,?)",
-            card_rows,
-        )
+        # The Arena deck cards are not stored: campaign_content reads them from Records.
         from AssetExtraction.evaluate_fra_deck_personalities import (
             update_fra_deck_personalities,
         )

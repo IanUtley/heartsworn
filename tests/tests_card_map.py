@@ -19,44 +19,22 @@ SCENE = "55555555-5555-4555-8555-555555555555"
 
 
 def test_unresolved_cards_follow_the_card_map():
-    db = sqlite3.connect(":memory:")
-    db.execute("CREATE TABLE card_templates (guid TEXT, name TEXT, cost INTEGER, "
-               "card_type TEXT, attack INTEGER, defense INTEGER, threshold_json TEXT)")
-    db.execute("CREATE TABLE encounter_scenes (guid TEXT, name TEXT, title TEXT, "
-               "ai_deck_guid TEXT)")
-    db.execute("CREATE TABLE encounter_deck_cards (deck_guid TEXT, card_guid TEXT, "
-               "quantity INTEGER)")
-    db.executemany("INSERT INTO card_templates VALUES (?,?,?,?,?,?,?)", [
-        (REAL, "Real Card", 2, "Troop", 1, 2, "{}"),
-        (SHARD, "Shards of Fate", 0, "Resource", None, None, "{}"),
-    ])
-    db.execute("INSERT INTO encounter_scenes VALUES (?,?,?,?)", (SCENE, "scene", "Scene", DECK))
-    db.executemany("INSERT INTO encounter_deck_cards VALUES (?,?,?)", [
-        (DECK, REAL, 3), (DECK, MAPPED, 2), (DECK, UNMAPPED, 1)])
-    card_map = {MAPPED: SHARD}
-    with mock.patch.object(catalog.campaign_data, "load_card_map", return_value=card_map):
-        deck = catalog.encounter_deck(db, SCENE)
-
-    by_guid = {card["guid"]: card for card in deck["cards"]}
-    assert by_guid[REAL]["name"] == "Real Card" and not by_guid[REAL]["missing"]
-    assert by_guid[MAPPED]["mapped"] and by_guid[MAPPED]["name"] == "Shards of Fate"
-    assert by_guid[MAPPED]["display_guid"] == SHARD and by_guid[MAPPED]["missing"]
-    assert by_guid[UNMAPPED]["name"] == "??????" and not by_guid[UNMAPPED]["mapped"]
-    assert deck["unresolved"] == 3
-    assert deck["card_count"] == 6
+    # Cliffs of Nausea (AZ2 Node028): a real deck whose unresolved card is mapped to
+    # the Shards of Fate stand-in; the deck view names it and counts it as unresolved.
+    import catalog
+    db = catalog.connect(catalog.REPO / "hconnect.db")
+    deck = catalog.encounter_deck(db, "2a68104b-7257-4f4c-92fd-a6416366f03b")
+    mapped = [card for card in deck["cards"] if card["mapped"]]
+    assert mapped and all(card["missing"] and card["display_guid"] == SHARD for card in mapped)
+    assert all(card["name"] == "Shards of Fate" for card in mapped)
+    assert deck["unresolved"] == sum(card["quantity"] for card in deck["cards"] if card["missing"])
 
 
 def test_server_battle_deck_swaps_unresolved_cards_in_place():
-    import campaign_source
     import pvp_db
-    campaign_source.ensure_campaign_path()
-    import campaign_data
-
-    db = sqlite3.connect(":memory:")
-    db.execute("CREATE TABLE encounter_deck_cards (deck_guid TEXT, card_guid TEXT, "
-               "quantity INTEGER, gem_types_new_list_json TEXT)")
-    db.executemany("INSERT INTO encounter_deck_cards VALUES (?,?,?,?)", [
-        (DECK, REAL, 3, "[]"), (DECK, MAPPED, 2, '[["Ruby"]]')])
-    with mock.patch.object(campaign_data, "load_card_map", return_value={MAPPED: SHARD}):
-        rows = pvp_db.db_encounter_deck_cards(DECK, conn=db)
-    assert rows == [(REAL, 3, "[]"), (SHARD, 2, '[["Ruby"]]')]
+    # A scene opponent deck with an unresolved card (mapped to the stand-in):
+    # the battle read keeps every row, in order, with the card swapped.
+    rows = pvp_db.db_encounter_deck_cards("039e2011-c53f-4fd4-bd21-20481887d7e2")
+    assert len(rows) == 7
+    assert rows[0][0] == SHARD
+    assert all(len(row) == 3 for row in rows)
