@@ -806,6 +806,11 @@ These items are not done and are left as they are:
 - **Rules-engine card and ability tables.** `card_templates`, `ability_effects`,
   `card_abilities_meta`, `target_templates` and the champion tables are still
   seeded into `hconnect.db` and read per battle; moving them is a separate job.
-- **Simulation tests.** The FRA duel and round-robin tests use two real Arena
-  decks and stop at 0 turns; the tests pass only because they check for a
-  report file.
+- **FRA duel stops at 0 turns.** With two real Arena decks, `pvp_autoplay`
+  stops a duel before its first turn ("stopped after 0 turns", phase 3, guard 1).
+  This is the same before and after the campaign-content move: the commit before
+  it (211cfce) with the same Arena rows stops the same way. The FRA tests now check
+  the duel's specs (every authored card is present), not the duel.
+- **`conversation_rewards`.** The table is empty and nothing reads its rows, but
+  `static.py` still writes to it in one-off repairs, so it stays until those
+  repairs are removed.

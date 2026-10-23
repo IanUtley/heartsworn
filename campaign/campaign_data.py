@@ -63,7 +63,7 @@ def load_card_map() -> dict[str, str]:
 # tunes seeded quests but does not invent them.
 TABLES: dict[str, dict[str, Any]] = {
     # The campaign editor owns every encounter scene: full definitions live in
-    # campaign/campaign_data/encounter_scenes.json and are inserted/updated at start.
+    # campaign/campaign_data/encounter_scenes.json (campaign_content reads them).
     "encounter_scenes": {
         "key": ("guid",), "insert": True,
         "columns": {"name", "title", "gameboard", "ai_deck_guid", "ai_champion_guid",

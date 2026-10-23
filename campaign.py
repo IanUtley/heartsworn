@@ -2980,7 +2980,7 @@ def _launch_encounter(handler, db, camp_id, champ_id, encounter_guid,
     if scene_row:
         log(f"    Launch encounter: {encounter_guid} scene={scene_row[1]} board={scene_row[3]}")
     else:
-        log(f"    Launch encounter: {encounter_guid} not in encounter_scenes")
+        log(f"    Launch encounter: {encounter_guid} not a known encounter scene")
 
     reck_id = getattr(handler, "client_reck_id", "0") or "0"
     session_name = f"camp_{camp_id}"

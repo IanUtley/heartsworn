@@ -27,3 +27,22 @@ def test_campaign_tables_come_from_records_and_the_data_files():
                 if r["origin"] != "data"
                 and (r["campaign_template"], r["conversation_guid"].lower()) in placed]
     assert not shadowed, shadowed[:1]
+    # a data file that fails validation is skipped whole; a valid one is applied
+    import json
+    import tempfile
+    from pathlib import Path
+    import campaign_data
+    saved = campaign_data.DATA_DIR
+    with tempfile.TemporaryDirectory() as folder:
+        Path(folder, "good.json").write_text(json.dumps({"schema_version": 1, "tables": {
+            "encounter_scenes": [{"guid": "00000000-0000-4000-8000-0000000000aa",
+                                  "name": "Test scene", "title": "T"}]}}))
+        Path(folder, "bad.json").write_text(json.dumps({"schema_version": 1, "tables": {
+            "encounter_scenes": [{"name": "no guid"}]}}))
+        campaign_data.DATA_DIR = Path(folder)
+        try:
+            built = campaign_content.table("encounter_scenes")
+        finally:
+            campaign_data.DATA_DIR = saved
+    assert len(built) == 337, len(built)   # the 336 scenes plus the valid file's one
+    assert any(r.get("name") == "Test scene" for r in built)

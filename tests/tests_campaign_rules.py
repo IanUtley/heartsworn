@@ -380,6 +380,26 @@ def test_or_groups_and_generated_crayburn_rules():
     assert cr.layout(rules, won)["nodes"]["InnerBailey"]["visible"]
 
 
+def test_deck_evaluator_scores_fra_decks_without_touching_scene_rows():
+    """The startup evaluator scores FRA decks from campaign_content's cards and writes only
+    the FRA tables: scene personalities are editor data, so no encounter_scenes table is
+    needed or written."""
+    import sqlite3
+    from AssetExtraction.evaluate_fra_deck_personalities import (
+        update_fra_deck_personalities)
+    db = sqlite3.connect(":memory:")
+    db.executescript("""
+        CREATE TABLE fra_encounters (deck_guid TEXT, deck_name TEXT, ai_deck_personality TEXT);
+        CREATE TABLE fra_challengers (encounter_deck_guid TEXT, ai_deck_personality TEXT);
+        INSERT INTO fra_encounters VALUES ('bbfd8f29-e549-4eda-9e21-735620d3b5ff',
+                                           'Arena_Angel_of_Dawn', '');
+        INSERT INTO fra_challengers VALUES ('bbfd8f29-e549-4eda-9e21-735620d3b5ff', '');
+    """)
+    update_fra_deck_personalities(db)
+    personality, = db.execute("SELECT ai_deck_personality FROM fra_encounters").fetchone()
+    assert personality, "the evaluator should give the Arena deck a personality"
+
+
 def test_card_selector_offers_flagged_cards_and_clears_the_won_one():
     tower, walls = "a" * 8 + "-0000-0000-0000-" + "0" * 12, "b" * 8 + "-0000-0000-0000-" + "0" * 12
     mods = [{"title": "Plain", "mods": [{"guid": "c" * 8}]},

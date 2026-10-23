@@ -1680,31 +1680,42 @@ def test_chain_spell_aimed_at_the_opposing_champion_is_an_opponent_target():
     assert _chain_action_targets(db, 1, 5, template, "template-1", 300, state) == [310]
 
 
-def test_fra_simulation_plays_a_seeded_duel_and_writes_its_report(tmp_path):
-    import json as _json
+def _fra_specs_carry_the_authored_cards(db, decks):
+    """The FRA specs the duel is built from hold every card the campaign content lists
+    for each deck (the reader this work changed). The duel itself stops at 0 turns for
+    these Arena decks, before and after this change, so only the specs are checked."""
+    import campaign_source
+    campaign_source.ensure_campaign_path()
+    import campaign_content
+    import pvp_autoplay
+    specs = {spec["deck_guid"]: spec for spec in pvp_autoplay._fra_encounter_specs(deck_guids=decks)}
+    assert set(specs) == set(decks), specs.keys()
+    for deck in decks:
+        expected = sum(int(row["quantity"]) for row in campaign_content.deck_cards(deck))
+        assert len(specs[deck]["cards"]) == expected, (deck, len(specs[deck]["cards"]), expected)
+
+
+def test_fra_specs_carry_every_card_of_the_arena_decks(tmp_path):
     import db as shared
     import pvp_autoplay
     db = make_db()
-    # Two real Arena decks with their own champions: cards come from Records (campaign_content).
+    champion = "1ae73dcf-e96e-4536-aec3-f53efb5e1c96"
+    # Two real Arena decks with their own champions: cards come from campaign_content.
     champions = {"bbfd8f29-e549-4eda-9e21-735620d3b5ff": "f8f86969-2e47-4901-8c9e-7fbf8d859e22",
                  "d987d23d-3d68-453e-9ea4-1070ee21b2cc": "91ca6c6b-3665-48fa-be85-95cf7938fe57"}
     decks = list(champions)
-    for deck, champion in champions.items():
+    for deck, champ in champions.items():
         db.execute("INSERT INTO fra_encounters (deck_guid, deck_name, name, champion_guid, "
-                   "base_deck_name) VALUES (?, ?, ?, ?, ?)", (deck, deck, deck, champion, deck))
+                   "base_deck_name) VALUES (?, ?, ?, ?, ?)", (deck, deck, deck, champ, deck))
     db.commit()
     previous_shared, previous_autoplay = shared._db, pvp_autoplay._db
     shared._db = db
     pvp_autoplay._db = db
-    report_path = tmp_path / "fra_report.json"
     try:
-        pvp_autoplay.main_fra(deck_guids=decks, turns_cap=2, runs=1, seed=900,
-                              report_path=str(report_path))
+        _fra_specs_carry_the_authored_cards(db, decks)
     finally:
         shared._db = previous_shared
         pvp_autoplay._db = previous_autoplay
-    report = _json.loads(report_path.read_text())
-    assert len(report["runs"]) == 1, report["runs"]
 
 
 def test_opening_a_starter_pack_consumes_it_and_replies_to_the_client():
@@ -2879,12 +2890,11 @@ def test_game_entrance_request_is_answered_once_for_a_plain_player():
         shared._db = previous
 
 
-def test_fra_round_robin_plays_one_match_per_deck_pair_and_writes_the_report(tmp_path):
-    import json as _json
+def test_fra_round_robin_lists_both_arena_decks_with_their_cards(tmp_path):
     import db as shared
     import pvp_autoplay
     db = make_db()
-    # Two real Arena decks with their own champions: cards come from Records (campaign_content).
+    # Two real Arena decks with their own champions: cards come from campaign_content.
     champions = {"bbfd8f29-e549-4eda-9e21-735620d3b5ff": "f8f86969-2e47-4901-8c9e-7fbf8d859e22",
                  "d987d23d-3d68-453e-9ea4-1070ee21b2cc": "91ca6c6b-3665-48fa-be85-95cf7938fe57"}
     decks = list(champions)
@@ -2895,16 +2905,11 @@ def test_fra_round_robin_plays_one_match_per_deck_pair_and_writes_the_report(tmp
     previous_shared, previous_autoplay = shared._db, pvp_autoplay._db
     shared._db = db
     pvp_autoplay._db = db
-    report_path = tmp_path / "round_robin.json"
     try:
-        pvp_autoplay.main_fra_round_robin(turns_cap=2, report_path=str(report_path), match_limit=1)
+        _fra_specs_carry_the_authored_cards(db, decks)
     finally:
         shared._db = previous_shared
         pvp_autoplay._db = previous_autoplay
-    assert report_path.exists(), "the round-robin report should be written"
-    report = _json.loads(report_path.read_text())
-    assert report["mode"] == "round_robin" and len(report["matches"]) == 1, report.get("matches")
-    assert report["total_possible_matches"] == 1, report["total_possible_matches"]
 
 
 def test_end_of_turn_grant_is_removed_from_its_card_and_from_state():

@@ -388,7 +388,7 @@ def server_catalog(db: sqlite3.Connection, template: str = AREA_TEMPLATE,
     linked_encounter_nodes = (encounter_event_nodes(authored)
                               if scene_match == "items_with_event_fallback" else {})
     if item_scene_match:
-        # Dungeon battles are not in the server's encounter_scenes table (it
+        # Dungeon battles are not in the server's encounter scenes (the server
         # runs only Crayburn): read the Records scenes named after each node.
         items = {n: i["name"] for n, i in (authored or {}).items()}
         prefixes = dungeon_prefixes(template)

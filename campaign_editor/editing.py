@@ -1,8 +1,8 @@
 """Admin campaign edits, saved to the shared campaign files.
 
 * Conversation tags -> ``campaign/campaign_data/<template>.json`` as a
-  ``campaign_node_conversations`` row (``trigger_json.tags``); the server
-  applies it to the database at startup (``campaign_data.apply_all``).
+  ``campaign_node_conversations`` row (``trigger_json.tags``); campaign_content
+  reads the file, so the server sees it on the next build.
 * Node state tags -> ``campaign/campaign_rules/<zone>.json`` ``nodes.<id>.<state>``.
 
 Records and the database are never written. Every save validates the whole
@@ -769,7 +769,7 @@ def save_scene_rewards(db: sqlite3.Connection, scene_guid: str,
     rewards = clean_scene_rewards(rewards)
     row = _scene(scene_guid)
     if row is None:
-        raise LookupError("this scene is not in the server's encounter_scenes table")
+        raise LookupError("this scene is not a known encounter scene")
     if _is_dialog(row.get("name")):
         raise ValueError("DIALOG scenes have no rewards")
     path = campaign_data.DATA_DIR / "encounter_scenes.json"
@@ -823,7 +823,7 @@ def save_scene_actions(db: sqlite3.Connection, scene_guid: str,
     actions = clean_scene_actions(actions)
     row = _scene(scene_guid)
     if row is None:
-        raise LookupError("this scene is not in the server's encounter_scenes table")
+        raise LookupError("this scene is not a known encounter scene")
     path = campaign_data.DATA_DIR / "encounter_scenes.json"
     with _WRITE_LOCK:
         data = _read_doc(path, {"schema_version": campaign_data.SCHEMA_VERSION, "tables": {}})
@@ -874,7 +874,7 @@ def save_scene_tags(db: sqlite3.Connection, scene_guid: str,
     cleaned = clean_battle_tags(tags)
     row = _scene(scene_guid)
     if row is None:
-        raise LookupError("this scene is not in the server's encounter_scenes table")
+        raise LookupError("this scene is not a known encounter scene")
     path = campaign_data.DATA_DIR / "encounter_scenes.json"
     with _WRITE_LOCK:
         data = _read_doc(path, {"schema_version": campaign_data.SCHEMA_VERSION, "tables": {}})
@@ -900,7 +900,7 @@ def save_scene_personality(db: sqlite3.Connection, scene_guid: str,
         raise ValueError(f"personality must be one of {', '.join(catalog.DECK_PERSONALITIES)}")
     row = _scene(scene_guid)
     if row is None:
-        raise LookupError("this scene is not in the server's encounter_scenes table")
+        raise LookupError("this scene is not a known encounter scene")
     path = campaign_data.DATA_DIR / "encounter_scenes.json"
     with _WRITE_LOCK:
         data = _read_doc(path, {"schema_version": campaign_data.SCHEMA_VERSION, "tables": {}})
@@ -939,7 +939,7 @@ def save_scene_player(db: sqlite3.Connection, scene_guid: str, champion: str | N
         raise ValueError("the player deck must be an encounter deck from Records")
     row = _scene(scene_guid)
     if row is None:
-        raise LookupError("this scene is not in the server's encounter_scenes table")
+        raise LookupError("this scene is not a known encounter scene")
     campaign_data = _campaign_data()
     path = campaign_data.DATA_DIR / "encounter_scenes.json"
     with _WRITE_LOCK:
@@ -999,7 +999,7 @@ def save_scene_gameboard(db: sqlite3.Connection, scene_guid: str, gameboard: Any
     """Set the gameboard one encounter scene is played on.
 
     The value is a GameboardEnums name (plain letters/digits). Written to the
-    scene's campaign_data/encounter_scenes.json row and to the database at once.
+    scene's campaign_data/encounter_scenes.json row.
     """
     gameboard = str(gameboard or "").strip()
     if not re.fullmatch(r"[A-Za-z0-9]+", gameboard):
@@ -1008,7 +1008,7 @@ def save_scene_gameboard(db: sqlite3.Connection, scene_guid: str, gameboard: Any
         raise ValueError(f"gameboard must be one of {', '.join(GAMEBOARDS)}")
     row = _scene(scene_guid)
     if row is None:
-        raise LookupError("this scene is not in the server's encounter_scenes table")
+        raise LookupError("this scene is not a known encounter scene")
     campaign_data = _campaign_data()
     path = campaign_data.DATA_DIR / "encounter_scenes.json"
     with _WRITE_LOCK:
@@ -1096,7 +1096,7 @@ def save_scene_mods(db: sqlite3.Connection, scene_guid: str,
     mods = clean_scene_mods(mods)
     row = _scene(scene_guid)
     if row is None:
-        raise LookupError("this scene is not in the server's encounter_scenes table")
+        raise LookupError("this scene is not a known encounter scene")
     path = campaign_data.DATA_DIR / "encounter_scenes.json"
     with _WRITE_LOCK:
         data = _read_doc(path, {"schema_version": campaign_data.SCHEMA_VERSION, "tables": {}})
