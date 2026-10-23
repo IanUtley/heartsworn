@@ -722,6 +722,12 @@ def clean_scene_rewards(rewards: Any) -> dict[str, Any]:
     return clean
 
 
+def _is_dialog(scene_name: str) -> bool:
+    """A DIALOG scene (conversation only, no battle): the runtime's scene role."""
+    from campaign_runtime import records
+    return records._scene_kind(scene_name, False) == "dialog"
+
+
 def save_scene_rewards(db: sqlite3.Connection, scene_guid: str,
                        rewards: Any) -> dict[str, Any]:
     """Set an encounter scene's rewards in ``campaign_data/encounter_scenes.json``.
@@ -731,10 +737,12 @@ def save_scene_rewards(db: sqlite3.Connection, scene_guid: str,
     """
     campaign_data = _campaign_data()
     rewards = clean_scene_rewards(rewards)
-    row = db.execute("SELECT guid FROM encounter_scenes WHERE LOWER(guid)=?",
+    row = db.execute("SELECT guid, name FROM encounter_scenes WHERE LOWER(guid)=?",
                      (str(scene_guid).lower(),)).fetchone()
     if row is None:
         raise LookupError("this scene is not in the server's encounter_scenes table")
+    if _is_dialog(row[1]):
+        raise ValueError("DIALOG scenes have no rewards")
     path = campaign_data.DATA_DIR / "encounter_scenes.json"
     with _WRITE_LOCK:
         data = _read_doc(path, {"schema_version": campaign_data.SCHEMA_VERSION, "tables": {}})

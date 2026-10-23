@@ -153,7 +153,12 @@
     "enabled": true,
     "trigger_json": {
      "label": "Entrance",
-     "source": "import_dungeons.py"
+     "source": "import_dungeons.py",
+     "actions": {
+      "*": [
+       "clear_flag(devonshire_*)"
+      ]
+     }
     }
    },
    {
@@ -339,7 +344,18 @@
     "enabled": true,
     "trigger_json": {
      "label": "Minstrel's Gallery",
-     "source": "import_dungeons.py"
+     "source": "import_dungeons.py",
+     "tags": [
+      "!flag(devonshire_skip_mindpyre)"
+     ],
+     "actions": {
+      "encounter_avoided": [
+       "set_flag(devonshire_skip_mindpyre)"
+      ],
+      "encounter_triggered": [
+       "clear_flag(devonshire_skip_mindpyre)"
+      ]
+     }
     }
    },
    {
@@ -1913,7 +1929,7 @@
      "label": "Castle Ruins - in game conversation transition 2 vargar",
      "source": "import_dungeons.py",
      "tags": [
-      "faction(brutecrown_chose_vargar)"
+      "flag(brutecrown_chose_vargar)"
      ]
     }
    },
@@ -1988,7 +2004,8 @@
      "label": "Castle Ruins - success burgg",
      "source": "import_dungeons.py",
      "tags": [
-      "outcome:success"
+      "outcome:success",
+      "flag(brutecrown_chose_burgg)"
      ],
      "actions": {
       "*": [
@@ -2009,7 +2026,8 @@
      "label": "Castle Ruins - success vargar",
      "source": "import_dungeons.py",
      "tags": [
-      "outcome:success"
+      "outcome:success",
+      "flag(brutecrown_chose_vargar)"
      ],
      "actions": {
       "*": [
@@ -2030,7 +2048,8 @@
      "label": "Castle Ruins - success zagg",
      "source": "import_dungeons.py",
      "tags": [
-      "outcome:success"
+      "outcome:success",
+      "flag(brutecrown_chose_zagg)"
      ],
      "actions": {
       "*": [
@@ -2118,7 +2137,8 @@
      "source": "import_dungeons.py",
      "tags": [
       "outcome:success",
-      "faction(Underworld)"
+      "faction(Underworld)",
+      "flag(brutecrown_chose_burgg)"
      ],
      "actions": {
       "*": [
@@ -2139,7 +2159,8 @@
      "source": "import_dungeons.py",
      "tags": [
       "outcome:success",
-      "faction(Underworld)"
+      "faction(Underworld)",
+      "flag(brutecrown_chose_vargar)"
      ],
      "actions": {
       "*": [
@@ -2160,7 +2181,8 @@
      "source": "import_dungeons.py",
      "tags": [
       "outcome:success",
-      "faction(Underworld)"
+      "faction(Underworld)",
+      "flag(brutecrown_chose_zagg)"
      ],
      "actions": {
       "*": [

@@ -672,12 +672,15 @@ class TransactionsMixin:
                         (fra_start_state.get(key) or {}).items()
                     }
             native_port = getattr(session, "_rules_port_session", None)
+            first_turn_started_natively = False
             if native_port is not None:
                 # The setup packet contains the client's non-interactive
                 # StartGame phase, but the cached native scheduler is still
                 # sitting on its Mulligan priority action. Leave that action
                 # before invoking either the human or AI turn driver.
                 if native_port.begin_first_turn(first_turn_uid):
+                    # Entering StartTurn already dispatched TurnStartedEvent.
+                    first_turn_started_natively = True
                     _hc.log_req(
                         "    RulesPort began first turn: "
                         f"active={native_port.active_player_id!r}")
@@ -766,7 +769,9 @@ class TransactionsMixin:
             first_champ = (self._player_champ_scid if play_first_is_player
                            else getattr(self, "_ai_champ_scid", None))
             first_owner = self.user_profile["id"] if play_first_is_player else 0
-            if first_champ is not None:
+            # Dispatching it again would resolve the start-of-turn abilities twice
+            # (Cloaked Figure's Catalysis mills the next three cards a second time).
+            if first_champ is not None and not first_turn_started_natively:
                 self._dispatch_native_trigger(
                     game, session, pl_t, ai_t, bstate, "TurnStartedEvent",
                     int(first_champ.uid.uid64), first_owner)

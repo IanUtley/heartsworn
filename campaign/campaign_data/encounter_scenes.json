@@ -259,11 +259,7 @@
     "ai_deck_guid": "",
     "ai_champion_guid": "",
     "mods_json": [],
-    "rewards_json": {
-     "gold": 100,
-     "one_time": false,
-     "xp": 100
-    },
+    "rewards_json": {},
     "ai_deck_personality": ""
    },
    {
@@ -436,11 +432,7 @@
     "ai_deck_guid": "",
     "ai_champion_guid": "",
     "mods_json": [],
-    "rewards_json": {
-     "gold": 100,
-     "one_time": false,
-     "xp": 100
-    },
+    "rewards_json": {},
     "ai_deck_personality": ""
    },
    {
@@ -1055,11 +1047,7 @@
     "ai_deck_guid": "",
     "ai_champion_guid": "",
     "mods_json": [],
-    "rewards_json": {
-     "gold": 100,
-     "one_time": false,
-     "xp": 100
-    },
+    "rewards_json": {},
     "ai_deck_personality": ""
    },
    {
@@ -1208,11 +1196,7 @@
     "ai_deck_guid": "",
     "ai_champion_guid": "",
     "mods_json": [],
-    "rewards_json": {
-     "gold": 100,
-     "one_time": false,
-     "xp": 100
-    },
+    "rewards_json": {},
     "ai_deck_personality": ""
    },
    {
@@ -1223,11 +1207,7 @@
     "ai_deck_guid": "",
     "ai_champion_guid": "",
     "mods_json": [],
-    "rewards_json": {
-     "gold": 100,
-     "one_time": false,
-     "xp": 100
-    },
+    "rewards_json": {},
     "ai_deck_personality": ""
    },
    {
@@ -1442,11 +1422,7 @@
     "ai_deck_guid": "",
     "ai_champion_guid": "",
     "mods_json": [],
-    "rewards_json": {
-     "gold": 100,
-     "one_time": false,
-     "xp": 100
-    },
+    "rewards_json": {},
     "ai_deck_personality": ""
    },
    {
@@ -1546,11 +1522,7 @@
     "ai_deck_guid": "",
     "ai_champion_guid": "",
     "mods_json": [],
-    "rewards_json": {
-     "gold": 100,
-     "one_time": false,
-     "xp": 100
-    },
+    "rewards_json": {},
     "ai_deck_personality": ""
    },
    {
@@ -1561,11 +1533,7 @@
     "ai_deck_guid": "",
     "ai_champion_guid": "",
     "mods_json": [],
-    "rewards_json": {
-     "gold": 100,
-     "one_time": false,
-     "xp": 100
-    },
+    "rewards_json": {},
     "ai_deck_personality": ""
    },
    {
@@ -1599,11 +1567,7 @@
     "ai_deck_guid": "",
     "ai_champion_guid": "",
     "mods_json": [],
-    "rewards_json": {
-     "gold": 100,
-     "one_time": false,
-     "xp": 100
-    },
+    "rewards_json": {},
     "ai_deck_personality": ""
    },
    {
@@ -1819,10 +1783,7 @@
     "ai_deck_guid": "",
     "ai_champion_guid": "",
     "mods_json": [],
-    "rewards_json": {
-     "one_time": true,
-     "card_guid": "a0c95420-f569-4e14-bd42-0366d998da30"
-    },
+    "rewards_json": {},
     "ai_deck_personality": ""
    },
    {
@@ -1833,11 +1794,7 @@
     "ai_deck_guid": "",
     "ai_champion_guid": "",
     "mods_json": [],
-    "rewards_json": {
-     "gold": 100,
-     "one_time": false,
-     "xp": 100
-    },
+    "rewards_json": {},
     "ai_deck_personality": ""
    },
    {
@@ -1888,11 +1845,7 @@
     "ai_deck_guid": "",
     "ai_champion_guid": "",
     "mods_json": [],
-    "rewards_json": {
-     "gold": 100,
-     "one_time": false,
-     "xp": 100
-    },
+    "rewards_json": {},
     "ai_deck_personality": ""
    },
    {
@@ -1903,11 +1856,7 @@
     "ai_deck_guid": "",
     "ai_champion_guid": "",
     "mods_json": [],
-    "rewards_json": {
-     "gold": 100,
-     "one_time": false,
-     "xp": 100
-    },
+    "rewards_json": {},
     "ai_deck_personality": ""
    },
    {
@@ -2041,11 +1990,7 @@
     "ai_deck_guid": "",
     "ai_champion_guid": "",
     "mods_json": [],
-    "rewards_json": {
-     "gold": 100,
-     "one_time": false,
-     "xp": 100
-    },
+    "rewards_json": {},
     "ai_deck_personality": ""
    },
    {
@@ -3986,7 +3931,11 @@
     "ai_deck_guid": "fb27f2b1-128e-4d7c-bfa4-42c473ba6c72",
     "ai_champion_guid": "ba88fd9b-fd0f-455e-86a2-77295b906251",
     "mods_json": [],
-    "rewards_json": {},
+    "rewards_json": {
+     "gold": 250,
+     "xp": 250,
+     "one_time": false
+    },
     "ai_deck_personality": "Aggressive"
    },
    {
@@ -4037,7 +3986,11 @@
     "ai_deck_guid": "e7166609-e8ff-4668-9c2a-82a04985058d",
     "ai_champion_guid": "f30bb8ff-971e-4526-bce3-44465b7fff40",
     "mods_json": [],
-    "rewards_json": {},
+    "rewards_json": {
+     "gold": 400,
+     "xp": 300,
+     "one_time": false
+    },
     "ai_deck_personality": "Aggressive"
    },
    {

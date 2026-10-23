@@ -175,6 +175,10 @@ with the `CantReady`,
 controller's Ready step. When a player buries cards, every other player's
 champion `BuryBonus` adds to the number buried. Cards with
 `CantHealAtEndOfTurn` keep their marked damage through the end-of-turn heal.
+While a player has a warzone card carrying `OpposingTroopsDontHealAtEndOfTurn`,
+every other player's troops keep their marked damage through the end-of-turn
+heal. The flagged player's own troops still heal, unless the other player also
+has such a card, in which case neither side's troops heal.
 At StartTurn, if the active player has a warzone card with the `Lifebound`
 IntAttr, that player's discard cards carrying the same marker return to the
 warzone.

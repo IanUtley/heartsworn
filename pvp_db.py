@@ -3926,6 +3926,14 @@ def db_warzone_troop_state_rows(session_id, conn=None):
         "AND gc.card_type LIKE '%Troop%'", (session_id,)).fetchall()
 
 
+def db_warzone_card_heal_rows(session_id, conn=None):
+    """Return owner, type and buffs for every warzone card (end-of-turn heal)."""
+    return (conn or _db_layer._db).execute(
+        "SELECT card_uid, user_id, template_guid, card_type, "
+        "permanent_buffs, temporary_buffs FROM game_cards "
+        "WHERE session_id=? AND location='warzone'", (session_id,)).fetchall()
+
+
 def db_card_death_info(session_id, card_uid, conn=None):
     """Return template, controller, and effective authored attributes."""
     return (conn or _db_layer._db).execute(
@@ -4767,10 +4775,15 @@ def db_add_card_damage(session_id, card_uid, amount, conn=None):
 
 
 def db_reset_warzone_troop(session_id, card_uid, clear_state_bits, conn=None):
-    """Clear a troop's turn/combat state and reset marked combat damage."""
+    """Clear a troop's turn/combat state bits.
+
+    Damage is not touched here: C# ``Session.ReadyCard`` only clears Tapped,
+    and marked damage is removed solely by the end-of-turn heal
+    (``clear_combat_damage``), which keeps ``CantHealAtEndOfTurn`` troops.
+    """
     connection = conn or _db_layer._db
     connection.execute(
-        "UPDATE game_cards SET card_state = card_state & ~?, card_damage=0 "
+        "UPDATE game_cards SET card_state = card_state & ~? "
         "WHERE session_id=? AND card_uid=?",
         (clear_state_bits, session_id, int(card_uid)),
     )

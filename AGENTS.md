@@ -71,7 +71,7 @@ full restart. The reloaded set is defined by `reload_runtime_modules()` in
   (including `rules_port/static_rules.py`), `application/`, `services/`,
   `gamemodes/`, `campaign_runtime/`.
 
-Not reloaded: `hconnect_server.py` and `commands.py` (the reload driver itself),
+Not reloaded: `hconnect_server.py` and `commands.py` (the reload driver itself), and `application/commands.py` (the command classes the dispatcher and server share; re-running it breaks their identity),
 so changes to them need `bash restart.sh`. Also not reloaded: `ability.py`
 (a facade named `ability`, not under `abilities/`), the `domain/` modules
 other than `domain/constants.py`, and everything under `gamedata/`. The Records

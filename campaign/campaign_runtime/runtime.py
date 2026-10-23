@@ -701,7 +701,11 @@ def _zone_row(zone: Zone, dest_entry) -> int:
     return cid
 
 
-def _enter_runtime_zone(handler, zone: Zone, dest: str, node: str):
+def _enter_runtime_zone(handler, zone: Zone, dest: str, node: str, *,
+                        resume: bool = False):
+    """Put the champion in ``dest``. A normal entry starts a dungeon afresh;
+    ``resume`` (the editor's save to champion) keeps the progress stored for
+    it, so the saved position is where the champion next plays."""
     entry = catalog_data.zone(dest)
     row_id = _zone_row(zone, entry)
     raw = pve_db.db_campaign_state(row_id, conn=zone.db)
@@ -717,7 +721,7 @@ def _enter_runtime_zone(handler, zone: Zone, dest: str, node: str):
     # A finished run starts clean next time (Fort Romor): the zone's node
     # progress and its per-run flags go, only the "finished" mark stays.
     replay = entry.get("replay") or {}
-    if (replay.get("when_flag") in (zone.campaign.get("flags") or ()) and
+    if (not resume and replay.get("when_flag") in (zone.campaign.get("flags") or ()) and
             dest in zone.zones):
         keep = set(replay.get("keep_flags") or ())
         patterns = replay.get("clear_flags") or ()
@@ -729,7 +733,7 @@ def _enter_runtime_zone(handler, zone: Zone, dest: str, node: str):
                     if k in ("Started", "TutorialDone")}
     # Each entry starts a dungeon with lives afresh: its nodes, lives and run
     # streak go back to the rules' start, so leaving and re-entering resets all.
-    if _has_lives(rules_loader.rules(zone.db, dest)[0]):
+    if not resume and _has_lives(rules_loader.rules(zone.db, dest)[0]):
         zone.zones.pop(dest, None)
         previous = {k: v for k, v in previous.items()
                     if k in ("Started", "TutorialDone")}
@@ -776,7 +780,7 @@ def activate_zone(db, champ_id: int, dest: str):
     if not last:
         raise LookupError("this champion has no campaign yet")
     zone = Zone(db, last, dest)
-    _enter_runtime_zone(None, zone, dest, "")
+    _enter_runtime_zone(None, zone, dest, "", resume=True)
 
 
 # ---------------------------------------------------------------- protocol

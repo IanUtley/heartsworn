@@ -248,6 +248,11 @@ def test_ai_turn_pauses_while_a_client_prompt_is_open():
         {"pending_discard_ability": "06570445-27e3-fc87-2e17-a7b5e1de693d"})
     assert not ai._ai_turn_prompt_pending({"pending_choice": None})
     assert not ai._ai_turn_prompt_pending(None)
+    # A RulesPort trigger target picker (revived Witch's Deploy) pauses too.
+    from types import SimpleNamespace
+    port = SimpleNamespace(trigger_prompt_open=True)
+    assert ai._ai_turn_prompt_pending(
+        {}, SimpleNamespace(_rules_port_session=port))
 
 
 def test_native_attack_declaration_survives_the_next_projection():

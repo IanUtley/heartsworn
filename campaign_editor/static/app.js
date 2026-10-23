@@ -715,11 +715,13 @@ function rewardText(rewards) {
   return `<pre>${esc(JSON.stringify(rewards, null, 1))}</pre>`;
 }
 
-function select(node) {
+// ``switchTab`` false refreshes the node panel without leaving the active tab
+// (a simulator action re-renders the map and must not jump to Node).
+function select(node, { switchTab = true } = {}) {
   selected = node;
   updateHash();
   draw();
-  showTab("node");
+  if (switchTab) showTab("node");
   const a = node.authored;
   const s = nodeState(node);
   let html = `<h2>${esc(a ? a.title : node.id)}</h2><div class="muted"><code>${esc(node.id)}</code>${a ? ` · ${esc(a.name)} · ${esc(a.terrain)}` : " · no SceneData entry"}</div>`;
@@ -1245,8 +1247,8 @@ function refreshSim() {
   renderLegend();
   if (area && area.zone.kind === "panorama") {
     const npc = area.panorama.npcs.find((n) => n.name === pano.npc);
-    if (npc) selectNpc(npc); else if (pano.camera) placeNpcs();
-  } else if (selected) select(selected); else draw();
+    if (npc) selectNpc(npc, { switchTab: false }); else if (pano.camera) placeNpcs();
+  } else if (selected) select(selected, { switchTab: false }); else draw();
 }
 
 // Continue the simulation in the teleport's zone, carrying race, flags,
@@ -1434,8 +1436,12 @@ function simStateTable(st) {
 
   const counters = Object.entries(st.counters || {}).sort(([a], [b]) => a.localeCompare(b));
   html += `<h4>Counters</h4><table class="state-table"><tbody>${counters.map(([name, value]) =>
-    `<tr><td><code>counter(${esc(name)})</code></td><td>${Number(value) || 0}</td></tr>`).join("") ||
-    `<tr><td class="muted">none</td></tr>`}</tbody></table>`;
+    `<tr><td><code>counter(${esc(name)})</code></td><td><input type="number" class="sim-counter-value" data-counter="${esc(name)}" value="${Number(value) || 0}"></td>
+      <td>${x({ type: "set_counter", counter: name, value: null }, "Remove counter")}</td></tr>`).join("") ||
+    `<tr><td class="muted">none</td></tr>`}</tbody></table>
+    <div class="row"><input id="sim-counter-new" placeholder="counter name, e.g. answer_score" autocomplete="off">
+      <input type="number" id="sim-counter-new-value" value="1" aria-label="counter value">
+      <button type="button" id="sim-counter-add">Add</button></div>`;
 
   const quests = Object.entries(st.quests || {}).filter(([, q]) => q.status !== "not_started");
   const questInfo = (script) => (rules.rules.quests || {})[script] || area.quests.find((q) => q.script === script) || {};
@@ -1522,6 +1528,8 @@ document.addEventListener("change", (event) => {
     simApply({ type: "set_node", node: target.dataset.nodeId, values: { [target.dataset.field]: target.checked } });
   } else if (target.classList.contains("sim-node-talks")) {
     simApply({ type: "set_node", node: target.dataset.nodeId, values: { talks: Math.max(0, Number(target.value) || 0) } });
+  } else if (target.classList.contains("sim-counter-value")) {
+    simApply({ type: "set_counter", counter: target.dataset.counter, value: Number(target.value) || 0 });
   } else if (target.classList.contains("sim-node-outcome")) {
     simApply({ type: "set_node", node: target.dataset.nodeId, values: { outcome: target.value || null } });
   }
@@ -1561,6 +1569,11 @@ document.addEventListener("click", async (event) => {
   if (id === "sim-keyword-add") {
     const input = document.getElementById("sim-keyword-new");
     if (input.value.trim()) simApply({ type: "set_keyword", keyword: input.value.trim(), present: true });
+    return;
+  }
+  if (id === "sim-counter-add") {
+    const name = document.getElementById("sim-counter-new").value.trim();
+    if (name) simApply({ type: "set_counter", counter: name, value: Number(document.getElementById("sim-counter-new-value").value) || 0 });
     return;
   }
   if (id === "sim-new") {
@@ -4216,9 +4229,9 @@ function npcCards(npc) {
     : (total ? hiddenNote(total, 0) : `<p class="muted">No conversations in the tables name this NPC.</p>`);
 }
 
-function selectNpc(npc) {
+function selectNpc(npc, { switchTab = true } = {}) {
   pano.npc = npc.name;
-  showTab("node");
+  if (switchTab) showTab("node");
   const live = state && state.nodes ? state.nodes[npc.name] || null : null;
   const node = npcNode(npc);
   pano.npcNode = node;

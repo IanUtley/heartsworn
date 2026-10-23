@@ -996,22 +996,30 @@ def combat_has_swiftstrike(db, session, bstate):
            game_engine.ECardAttributes.DualStrike)
         for uid in uids)
 
-def _ai_turn_prompt_pending(battle_state):
+def _ai_turn_prompt_pending(battle_state, session=None):
     """Whether a client-owned prompt is open during the AI's turn.
 
     ``resolve_combat`` pushes its own prompt packet, so the AI phase loop must
     not follow it with a phase packet: the TurnPhaseUpdated/PlayerOptionList
     would tear the picker down ("priority passed while a non-root state is
     active") right after it opens.  That is the deck-search coverflow
-    (Darkspire Priestess) and the class-23 discard picker a Deathcry opens for
+    (Darkspire Priestess), the class-23 discard picker a Deathcry opens for
     the opposing champion (Bloatcap's "each opposing champion chooses and
-    discards a card").  The answer (SetAbilityActivationData) resumes the AI
-    turn from the stored phase cursor.
+    discards a card"), and the target picker of a triggered ability the
+    RulesPort queues during the AI's combat (a revived Shadowgrove Witch's
+    Deploy).  The answer (SetAbilityActivationData) resumes the AI turn from
+    the stored phase cursor.
     """
+    port = getattr(session, "_rules_port_session", None)
+    if getattr(port, "trigger_prompt_open", False):
+        return True
     if not isinstance(battle_state, dict):
         return False
+    # ``pending_trigger`` is persisted, so a picker that survives a restart
+    # (where the in-memory port flag is not rebuilt) still holds the AI turn.
     return bool(battle_state.get("pending_deck_search")
-                or battle_state.get("pending_discard_ability"))
+                or battle_state.get("pending_discard_ability")
+                or battle_state.get("pending_trigger"))
 
 
 def run_ai_turn(handler, session, pl_t, ai_t, battle_state, start_idx=0):
@@ -1649,7 +1657,7 @@ def run_ai_turn(handler, session, pl_t, ai_t, battle_state, start_idx=0):
         # sending this phase packet — its TurnPhaseUpdated/PlayerOptionList
         # would tear the client's picker down right after it opens, so the
         # player never got to answer it.
-        if _ai_turn_prompt_pending(battle_state):
+        if _ai_turn_prompt_pending(battle_state, session):
             battle_state["ai_turn_phase_idx"] = idx + 1
             be.save_state(session, battle_state)
             log_req("    AI turn paused for a pending client prompt")

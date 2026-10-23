@@ -2761,6 +2761,70 @@ def test_printed_cant_heal_at_end_of_turn_keeps_template_damage():
         db._db.commit()
 
 
+def test_opposing_troops_dont_heal_at_end_of_turn_blocks_only_opponent():
+    import db
+    import pvp_db
+    from rules_port.lifecycle import clear_combat_damage
+    from tests.tests_combat import TPL_GLADIATOR
+
+    angel = "7a870f1a-689b-476d-ac94-f64d7bcdc355"
+    session_id = 987654329
+    angel_uid, own_uid, opponent_uid = 987650171, 987650172, 987650173
+    try:
+        pvp_db.db_insert_generated_card(
+            session_id, 5, angel_uid, angel, "warzone", "Troop",
+            "[]", 0, angel_uid, conn=db._db)
+        pvp_db.db_insert_generated_card(
+            session_id, 5, own_uid, TPL_GLADIATOR, "warzone", "Troop",
+            "[]", 0, own_uid, conn=db._db)
+        pvp_db.db_insert_generated_card(
+            session_id, 6, opponent_uid, TPL_GLADIATOR, "warzone", "Troop",
+            "[]", 0, opponent_uid, conn=db._db)
+        db._db.execute(
+            "UPDATE game_cards SET card_damage=3 WHERE session_id=? "
+            "AND card_uid IN (?, ?)", (session_id, own_uid, opponent_uid))
+        db._db.commit()
+        clear_combat_damage(db._db, session_id)
+        rows = dict(db._db.execute(
+            "SELECT card_uid, card_damage FROM game_cards WHERE session_id=?",
+            (session_id,)).fetchall())
+        assert rows[own_uid] == 0
+        assert rows[opponent_uid] == 3
+    finally:
+        db._db.execute("DELETE FROM game_cards WHERE session_id=?",
+                       (session_id,))
+        db._db.commit()
+
+
+def test_ready_step_keeps_cant_heal_at_end_of_turn_damage():
+    import db
+    import pvp_db
+    import game_engine
+    from rules_port.lifecycle import ready_card
+
+    decaying_giant = "1d47a6a1-52ea-4e01-ba73-5f78483bac49"
+    session_id = 987654328
+    giant_uid = 987650161
+    try:
+        pvp_db.db_insert_generated_card(
+            session_id, 5, giant_uid, decaying_giant, "warzone", "Troop",
+            "[]", 0, giant_uid, conn=db._db)
+        db._db.execute(
+            "UPDATE game_cards SET card_damage=6 WHERE session_id=?",
+            (session_id,))
+        db._db.commit()
+        ready_card(db._db, session_id, giant_uid,
+                   int(game_engine.ECardStates.Tapped), 0)
+        damage = db._db.execute(
+            "SELECT card_damage FROM game_cards WHERE session_id=? "
+            "AND card_uid=?", (session_id, giant_uid)).fetchone()[0]
+        assert damage == 6
+    finally:
+        db._db.execute("DELETE FROM game_cards WHERE session_id=?",
+                       (session_id,))
+        db._db.commit()
+
+
 def test_charge_point_cost_modifier_applies_to_the_plan():
     import db
     import pvp_db

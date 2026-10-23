@@ -308,7 +308,10 @@ def build_offers(zone: str, data: dict[str, Any],
             c for raw, rows in data["node_conversations"].items()
             if canonical_node(raw) == node_id for c in rows if c["enabled"]
             # A panorama's conversations play inside the panorama, not here.
-            and not (claim and claimed_by_panorama(c, claim))]
+            and not (claim and claimed_by_panorama(c, claim))
+            # A conversation an ability starts mid-battle (a champion's would-lose
+            # replacement) is not pre-battle talk or a battle's outcome.
+            and c["guid"] not in triggered]
         taken = {e.get("conversation") for e in node_entries}
         conversations = [c for c in conversations if c["guid"] not in taken]
         all_battles = [e for raw, rows in data["encounters"].items()
@@ -382,6 +385,8 @@ def build_offers(zone: str, data: dict[str, Any],
                     "actions": actions_of(c)}
                    for c in conversations if outcome_of(c)]
         raced = set()
+        # Battle scenes a tagged conversation already offers behind its gate.
+        gated_scenes: set[str] = set()
         for conversation in tagged:
             used.add(conversation["guid"])
             when = tags_of(conversation) if outcome_of(conversation) else \
@@ -402,6 +407,7 @@ def build_offers(zone: str, data: dict[str, Any],
                     entry["actions"] = actions_of(conversation)
                 if battle:
                     raced.add(race)
+                    gated_scenes.add(battle["guid"])
                     entry.update(kind="encounter", scene=battle["guid"],
                                  pre=conversation["guid"])
                     # The result conversations for the same audience.
@@ -454,6 +460,10 @@ def build_offers(zone: str, data: dict[str, Any],
             # no tagged conversation, so the default path never skips a gate.
             for battle, battle_tags in battle_offers(battles):
                 if battle is None or (battle_tags and tagged):
+                    continue
+                # The same scene is already offered behind its conversation's
+                # gate; offering it again unconditionally would skip that gate.
+                if battle["guid"] in gated_scenes:
                     continue
                 if battle_tags:
                     audience = [f"faction({faction})"] if faction else []

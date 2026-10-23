@@ -34,6 +34,15 @@ _HANDLER_MIXIN_MODULES = (
 )
 
 
+# Modules a SIGUSR1 reload must keep. ``hconnect_server`` holds references to
+# these modules' objects, and the dispatcher is keyed by their classes: re-running
+# ``application.commands`` would give the dispatcher new command classes while
+# the server still sends the old ones ("Unsupported application command"). The
+# command types are therefore fixed for the life of the process; a change to
+# ``application/commands.py`` needs a restart.
+NOT_RELOADED = frozenset({"commands", "hconnect_server", "application.commands"})
+
+
 def reload_runtime_modules():
     """Reload loaded Python runtime modules used by the HConnect SIGUSR1 hook.
 
@@ -95,7 +104,7 @@ def reload_runtime_modules():
             module.__name__ == prefix
             or module.__name__.startswith(prefix + ".")
             for prefix in prefixes)
-        and module.__name__ not in {"commands", "hconnect_server"}
+        and module.__name__ not in NOT_RELOADED
     }
     for module in sorted(loaded.values(),
                          key=lambda item: item.__name__.count("."),

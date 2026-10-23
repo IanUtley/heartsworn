@@ -526,31 +526,62 @@ def decrement_ability_cooldowns(db, session_id, owner_id, battle_state=None):
     return cards, champions
 
 
-def clear_combat_damage(db, session_id):
-    from pvp_db import (db_clear_warzone_damage_except,
-                        db_warzone_troop_state_rows)
-    from gamedata import DEFAULT_RECORD_STORE
-    exempt = []
-    for row in db_warzone_troop_state_rows(session_id, conn=db):
-        # A printed "not healed at the end of each turn" (Decaying Giant) keeps
-        # its damage whatever its instance buffs say.
-        template = DEFAULT_RECORD_STORE.get(
-            "CardTemplate", str(row[1] or "").lower())
-        if template is not None and template.cant_heal_at_end_of_turn:
-            exempt.append(int(row[0]))
+_CANT_HEAL_AT_END_OF_TURN = "CantHealAtEndOfTurn".lower()
+_OPPOSING_TROOPS_DONT_HEAL = "OpposingTroopsDontHealAtEndOfTurn".lower()
+
+
+def _end_of_turn_heal_flags(template, raw_permanent, raw_temporary):
+    """Lowercase heal-gating IntAttr names a card carries, printed or buffed.
+
+    C# reads these through ``Card.GetCardContext().GetBool``, so an instance
+    buff counts the same as the printed TAC.
+    """
+    flags = set()
+    if template is not None:
+        if template.cant_heal_at_end_of_turn:
+            flags.add(_CANT_HEAL_AT_END_OF_TURN)
+        if template.opposing_troops_dont_heal_at_end_of_turn:
+            flags.add(_OPPOSING_TROOPS_DONT_HEAL)
+    for raw in (raw_permanent, raw_temporary):
+        try:
+            buffs = json.loads(raw or "{}")
+        except (TypeError, ValueError, json.JSONDecodeError):
             continue
-        for raw in (row[5], row[6]):
-            try:
-                buffs = json.loads(raw or "{}")
-            except (TypeError, ValueError, json.JSONDecodeError):
-                continue
-            attrs = buffs.get("int_attrs") if isinstance(buffs, dict) else None
-            if isinstance(attrs, dict) and any(
-                    str(name).lower() == "canthealatendofturn"
-                    and int(value or 0) > 0
-                    for name, value in attrs.items()):
-                exempt.append(int(row[0]))
-                break
+        attrs = buffs.get("int_attrs") if isinstance(buffs, dict) else None
+        if isinstance(attrs, dict):
+            flags.update(str(name).lower() for name, value in attrs.items()
+                         if int(value or 0) > 0)
+    return flags
+
+
+def clear_combat_damage(db, session_id):
+    """C# Session.ResetCardDamage for the end-of-turn heal.
+
+    A troop is not healed when it carries ``CantHealAtEndOfTurn`` (it keeps
+    its marked damage), or when another player's warzone card carries
+    ``OpposingTroopsDontHealAtEndOfTurn``. The card's own controller still heals
+    unless their opponent has such a card too, in which case both are blocked.
+    """
+    from pvp_db import (db_clear_warzone_damage_except,
+                        db_warzone_card_heal_rows)
+    from gamedata import DEFAULT_RECORD_STORE
+    rows = db_warzone_card_heal_rows(session_id, conn=db)
+    flags = {}
+    for row in rows:
+        template = DEFAULT_RECORD_STORE.get(
+            "CardTemplate", str(row[2] or "").lower())
+        flags[int(row[0])] = _end_of_turn_heal_flags(
+            template, row[4], row[5])
+    opposing_owners = {int(row[1]) for row in rows
+                       if _OPPOSING_TROOPS_DONT_HEAL in flags[int(row[0])]}
+    exempt = []
+    for row in rows:
+        if "troop" not in str(row[3] or "").lower():
+            continue
+        uid, owner = int(row[0]), int(row[1])
+        if (_CANT_HEAL_AT_END_OF_TURN in flags[uid]
+                or opposing_owners - {owner}):
+            exempt.append(uid)
     db_clear_warzone_damage_except(session_id, exempt, conn=db)
     db.commit()
 

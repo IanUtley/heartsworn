@@ -482,3 +482,98 @@ if __name__ == "__main__":
         if name.startswith("test_"):
             fn()
             print("PASS", name)
+
+
+def test_editor_set_counter_writes_the_value_and_null_removes_it():
+    """The simulator's Counters edit sets a counter the ``counter(...)`` tag
+    reads, and ``value: None`` removes it again."""
+    rules = {"schema_version": 1, "start": {"node": "A", "flags": []},
+             "map": {"paths": []}, "nodes": {}}
+    state = cr.initial_state(rules)
+    state, _ = cr.apply(rules, state,
+                        {"type": "set_counter", "counter": "answer_score", "value": 2})
+    assert state["counters"]["answer_score"] == 2
+    assert cr.evaluate(cr.tags_condition(["counter(answer_score,2)"]), state, "A")
+    state, _ = cr.apply(rules, state,
+                        {"type": "set_counter", "counter": "answer_score", "value": None})
+    assert "answer_score" not in state["counters"]
+
+
+def test_placed_scenes_stay_with_their_own_dungeon():
+    """A scene placed at a node of one dungeon is not attached to the same
+    node id of another dungeon (Smoldering Dead's entrance is not Devonshire's
+    NodeA)."""
+    from campaign_runtime import catalog_data
+    entrance = "09752cde-6cde-47a4-92f1-9f5d25b3e1d2"
+    assert catalog_data.placed_scene_nodes("The Smoldering Dead", entrance) == ("NodeA",)
+    assert catalog_data.placed_scene_nodes("Devonshire Keep", entrance) == ()
+
+
+def test_node_finished_without_a_visit_opens_its_paths():
+    """A battle won from the simulator's scene card (no visit first) completes
+    its node, and the node's paths and neighbours show as for a visited one."""
+    rules = {"schema_version": 1, "start": {"node": "A", "flags": []},
+             "map": {"paths": [{"id": "Path_A_B", "from": "A", "to": "B"},
+                               {"id": "Path_B_C", "from": "B", "to": "C"}]},
+             "nodes": {"B": {"entries": [{"kind": "encounter", "scene": SCENE,
+                                          "when": {}}]}}}
+    state = cr.initial_state(rules)
+    state, _ = cr.apply(rules, state, {"type": "encounter_result", "node": "B",
+                                       "scene": SCENE, "victory": True, "events": []})
+    assert "B" not in cr.visited_nodes(state)
+    nodes = cr.layout(rules, state)["nodes"]
+    assert nodes["C"]["visible"]
+
+
+def test_pre_battle_conversation_ending_runs_its_actions():
+    """A battle's pre-battle conversation (the entry's ``pre``) runs its ending
+    actions, so a skip ending can clear the battle's gate."""
+    conv = "ab63de15-0000-4000-8000-000000000001"
+    rules = {"schema_version": 1, "start": {"node": "A", "flags": []},
+             "map": {"paths": [{"id": "Path_A_B", "from": "A", "to": "B"}]},
+             "nodes": {"B": {"entries": [{
+                 "id": "tagged:ab63de15", "kind": "encounter", "scene": SCENE,
+                 "pre": conv, "when": ["!flag(skip_it)"],
+                 "actions": {"encounter_avoided": ["set_flag(skip_it)"]}}]}}}
+    state = cr.initial_state(rules)
+    state, _ = cr.apply(rules, state, {"type": "visit", "node": "B"})
+    state, _ = cr.apply(rules, state, {"type": "conversation_end", "node": "B",
+                                       "conversation": conv,
+                                       "ending": "encounter_avoided"})
+    assert "skip_it" in state["flags"]
+    assert cr.active_entry(rules, state, "B") is None
+
+
+def test_validator_counts_flags_set_by_result_actions():
+    """A flag a battle's result conversation sets is not a dead gate, while a
+    flag nothing sets is still reported."""
+    rules = {"schema_version": 1, "start": {"node": "A", "flags": []},
+             "map": {"paths": [{"id": "Path_A_B", "from": "A", "to": "B"}]},
+             "nodes": {"B": {"entries": [{
+                 "id": "battle", "kind": "encounter", "scene": SCENE,
+                 "results": [{"outcome": "success", "conversation": GIVER,
+                              "when": [], "actions": {"*": ["set_flag(from_result)"]}}]}],
+                 "visible": {"all": [{"flag": "from_result"}]}},
+                 "C": {"visible": {"all": [{"flag": "never_set"}]}}}}
+    texts = [p["text"] for p in cr.validate(rules)]
+    assert not any("from_result" in t for t in texts)
+    assert any("never_set" in t for t in texts)
+
+
+def test_editor_refuses_rewards_on_dialog_scenes():
+    """A DIALOG scene is conversation only: the editor never gives it rewards."""
+    import sqlite3
+    sys.path.insert(0, os.path.join(ROOT, "campaign_editor"))
+    import editing
+    db = sqlite3.connect(":memory:")
+    db.execute("CREATE TABLE encounter_scenes (guid TEXT, name TEXT)")
+    db.execute("INSERT INTO encounter_scenes VALUES (?, ?)",
+               ("7656fe84-bc7a-4e2d-b8ae-2741164a7a26",
+                "AZ 1 - NODE 07 - GAAL CAMP 1 - DIALOG"))
+    try:
+        editing.save_scene_rewards(db, "7656fe84-bc7a-4e2d-b8ae-2741164a7a26",
+                                   {"gold": 100})
+    except ValueError as exc:
+        assert "DIALOG" in str(exc)
+    else:
+        raise AssertionError("DIALOG scene accepted rewards")

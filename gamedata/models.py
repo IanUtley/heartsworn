@@ -583,6 +583,11 @@ class CardTemplate(RecordObject):
         """Damage on this card is kept through the end-of-turn heal."""
         return bool(self._printed_int_attr("CantHealAtEndOfTurn"))
 
+    @cached_property
+    def opposing_troops_dont_heal_at_end_of_turn(self) -> bool:
+        """Other players' troops are not healed at the end of each turn."""
+        return bool(self._printed_int_attr("OpposingTroopsDontHealAtEndOfTurn"))
+
     @property
     def resource_cost(self) -> int:
         return _int(self.field("m_ResourceCost"))

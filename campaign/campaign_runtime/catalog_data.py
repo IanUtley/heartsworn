@@ -397,7 +397,7 @@ def server_catalog(db: sqlite3.Connection, template: str = AREA_TEMPLATE,
         for scene in _records_encounters():
             node, variant = match_item(scene["name"], items, prefixes)
             nodes = ([node] if node else
-                     list(PLACED_SCENE_NODES.get(str(scene["guid"]).lower()) or ())
+                     list(placed_scene_nodes(template, scene["guid"]))
                      or linked_encounter_nodes.get(scene["guid"], []))
             for node_id in nodes:
                 encounters.setdefault(node_id, []).append(dict(scene, variant=variant))
@@ -420,7 +420,7 @@ def server_catalog(db: sqlite3.Connection, template: str = AREA_TEMPLATE,
             race = ""
             guid = str(row["guid"] or "").lower()
             nodes = ([node] if node else
-                     list(PLACED_SCENE_NODES.get(guid) or ())
+                     list(placed_scene_nodes(template, guid))
                      or linked_encounter_nodes.get(guid, []))
         else:
             node, race = _scene_node(row["name"], scene_prefix, scene_regex, item_names)
@@ -660,13 +660,22 @@ CONVERSATION_NODE_LINKS = {
 # 028-030): Fort Romor's Stables / Barracks / Command Post items start each
 # other's battles. Scene GUID -> the node its battle is fought at.
 # Encounter scenes whose name matches no map item and no visit event, placed
-# at a node explicitly. The Smoldering Dead's entrance (NodeA, "Snowy Path")
-# fights Moxom (Ardent) or Sir Bryce (Underworld); the faction tags on each
-# scene (encounter_scenes.json scene_tags) pick which one is offered.
+# at a node explicitly, per campaign template (node ids repeat across zones,
+# so a placement must not leak into another dungeon's NodeA). The Smoldering
+# Dead's entrance (NodeA, "Snowy Path") fights Moxom (Ardent) or Sir Bryce
+# (Underworld); the faction tags on each scene (encounter_scenes.json
+# scene_tags) pick which one is offered.
 PLACED_SCENE_NODES = {
-    "3d97ab1f-b517-47a0-895d-dc3ad75c0705": ("NodeA",),   # Entrance to Raqqar (Ardent)
-    "09752cde-6cde-47a4-92f1-9f5d25b3e1d2": ("NodeA",),   # Entrance (Underworld)
+    "The Smoldering Dead": {
+        "3d97ab1f-b517-47a0-895d-dc3ad75c0705": ("NodeA",),   # Entrance to Raqqar (Ardent)
+        "09752cde-6cde-47a4-92f1-9f5d25b3e1d2": ("NodeA",),   # Entrance (Underworld)
+    },
 }
+
+
+def placed_scene_nodes(template: str, guid: str) -> tuple[str, ...]:
+    """The nodes a scene is explicitly placed at in ``template``'s dungeon."""
+    return PLACED_SCENE_NODES.get(str(template or ""), {}).get(str(guid).lower(), ())
 
 SCENE_NODE_LINKS = {
     # The Command Post (NodeD): "...walk brashly into the command center"

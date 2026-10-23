@@ -269,7 +269,7 @@ server.
   Race if none is running), exactly as if the player had chosen it - its
   flags, actions (teleport / encounter) and node completion.
 * The **Simulate** tab's **State** table shows everything the simulation
-  holds: champion race, location, keywords, counters, a battle in progress (Win / Lose / ✕),
+  holds: champion race, location, keywords, counters (editable: set a value, add a name, ✕ removes), a battle in progress (Win / Lose / ✕),
   flags (✕ removes; add any flag, e.g. a `conversation(Name,Ending)`),
   quests (status, step, ✕) and per node/NPC progress (done / retry /
   failed / last battle, ✕ forgets it). **Undo** steps back.

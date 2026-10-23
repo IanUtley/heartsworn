@@ -104,6 +104,7 @@ mod entry: the options whose ``when`` holds are offered; none offered means
 a normal encounter.
     {"type": "set_node", "node": "Node003", "values": {"completed": true}}
     {"type": "set_keyword", "keyword": "Stealth", "present": true|false}
+    {"type": "set_counter", "counter": "answer_score", "value": 2|null}  (null removes)
     {"type": "clear_node", "node": "Node003"}  {"type": "clear_encounter"}
     {"type": "set_current", "node": "Node003", "visited": true}  (editor state edits)
 
@@ -474,6 +475,11 @@ def parse_action(action: str) -> dict[str, Any]:
     if not zone:
         raise RulesError(f"teleport needs a zone: {action!r}")
     return {"teleport": {"zone": zone, "node": node}}
+
+
+def _entry_conversation(entry: dict[str, Any]) -> Any:
+    """The conversation an offer plays: its own, or a battle's pre-battle one."""
+    return entry.get("conversation") or entry.get("pre")
 
 
 def ending_actions(actions: Any, ending: str = "") -> list[str]:
@@ -1211,8 +1217,10 @@ def apply(rules: dict[str, Any], state: dict[str, Any],
         # Every entry for this conversation whose ``when`` held as it ended
         # runs its actions (one conversation can start several quests, e.g.
         # Tamed plus the faction quest), as the server grants every row.
-        ran = [entry] if entry is not None and entry.get("conversation") == (
-            action.get("conversation") or entry.get("conversation")) else []
+        # A battle's pre-battle conversation is the entry's ``pre``; its endings
+        # (and their actions) belong to it just like a conversation entry's.
+        ran = [entry] if entry is not None and _entry_conversation(entry) == (
+            action.get("conversation") or _entry_conversation(entry)) else []
         if not ran and wanted:
             # A conversation no offer covers (e.g. a scene's visit conversation)
             # takes its actions from the zone's conversation_actions override.
@@ -1224,7 +1232,7 @@ def apply(rules: dict[str, Any], state: dict[str, Any],
             ran += [e for e in ((rules.get("nodes") or {}).get(node_id) or {})
                     .get("entries") or ()
                     if e is not entry and e.get("kind") == "conversation"
-                    and e.get("conversation") == entry.get("conversation")
+                    and _entry_conversation(e) == _entry_conversation(entry)
                     and e.get("actions") and evaluate(e.get("when"), state, node_id)]
         for name in action.get("events") or ():
             _dispatch(rules, state, {"type": "script_event", "name": name,
@@ -1406,6 +1414,19 @@ def apply(rules: dict[str, Any], state: dict[str, Any],
         else:
             names.pop(name.casefold(), None)
         state["keywords"] = sorted(names.values(), key=str.casefold)
+    elif kind == "set_counter":
+        # Editor: set a counter to a value; ``value`` None removes it.
+        name = str(action.get("counter") or "").strip()
+        if not name:
+            raise RulesError("set_counter needs a counter name")
+        counters = state.setdefault("counters", {})
+        if action.get("value") is None:
+            counters.pop(name, None)
+        else:
+            try:
+                counters[name] = int(action["value"])
+            except (TypeError, ValueError) as exc:
+                raise RulesError("counter value must be an integer") from exc
     elif kind == "set_quest":
         status = action.get("status", "active")
         if status not in QUEST_STATUSES:
@@ -1595,7 +1616,12 @@ def layout(rules: dict[str, Any], state: dict[str, Any]) -> dict[str, Any]:
         # ``visible`` condition to hold; a node without one is always allowed.
         return "visible" not in (node_rules.get(node_id) or {}) or gate(node_id, "visible")
 
-    for node_id in visited:
+    # A node finished without standing on it (an editor "Win" from a scene
+    # card) still opens its paths, like one the player visited.
+    finished = {n for n, v in (state.get("nodes") or {}).items()
+                if isinstance(v, dict) and (v.get("completed") or v.get("won")
+                                             or v.get("outcome"))}
+    for node_id in visited | finished:
         if _opens_neighbours(rules, state, node_id):
             revealed |= {n for n in neighbours.get(node_id, ())
                          if not (n in blocked and n not in visited)
@@ -1812,11 +1838,15 @@ def validate(rules: dict[str, Any], *, known_conversations=None,
                         continue
                     if parsed.get("set_flag"):
                         flags_set.add(parsed["set_flag"])
-    # Conversation endings set flags too (set_flag(X) ending actions).
+    # Conversation endings set flags too (set_flag(X) ending actions), and a
+    # battle's result conversations carry their own actions.
     for spec in (rules.get("nodes") or {}).values():
         for entry in spec.get("entries") or ():
-            for key in ("actions", "victory_actions"):
-                for listed in (entry.get(key) or {}).values():
+            action_maps = [entry.get(key) for key in ("actions", "victory_actions")]
+            action_maps += [result.get("actions") for result in entry.get("results") or ()
+                            if isinstance(result, dict)]
+            for action_map in action_maps:
+                for listed in (action_map or {}).values():
                     for action in listed or ():
                         try:
                             parsed = parse_action(action)
