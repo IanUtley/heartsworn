@@ -55,13 +55,8 @@ REQUIRED_STATIC_TABLES = (
     "champion_template_data",
     "champion_templates",
     "champion_class_data",
-    "encounter_scenes",
-    "encounter_deck_cards",
     "fra_encounters",
     "fra_challenges",
-    "campaign_node_conversations",
-    "quest_templates",
-    "quest_conversations",
     "chest_templates",
     "inventory_item_templates",
     "pack_set_map",
@@ -69,7 +64,6 @@ REQUIRED_STATIC_TABLES = (
     "tournament_types",
     "chest_probabilities",
     "redeem_codes",
-    "conversation_rewards",
 )
 
 
@@ -323,6 +317,20 @@ def _scalar_count(connection: sqlite3.Connection, query: str) -> int | None:
     return int(row[0] or 0) if row else 0
 
 
+def _fra_decks_without_cards(connection: sqlite3.Connection) -> int | None:
+    """FRA encounters whose deck has no cards in campaign_content (None if unreadable)."""
+    try:
+        decks = [str(row[0]).lower() for row in connection.execute(
+            "SELECT deck_guid FROM fra_encounters")]
+    except sqlite3.Error:
+        return None
+    import campaign_source
+    campaign_source.ensure_campaign_path()
+    import campaign_content
+    have = campaign_content.deck_guids()
+    return sum(1 for deck in decks if deck not in have)
+
+
 def _fra_catalog_needs_population(path: Path) -> tuple[bool, bool]:
     """Return ``(encounters_needed, challenges_needed)`` for *path*.
 
@@ -341,13 +349,7 @@ def _fra_catalog_needs_population(path: Path) -> tuple[bool, bool]:
             "AND COALESCE(max_rank, 19) >= 1 "
             "AND COALESCE(is_elite, 0) = 0",
         )
-        encounters_without_cards = _scalar_count(
-            connection,
-            "SELECT COUNT(*) FROM fra_encounters AS e "
-            "WHERE NOT EXISTS ("
-            "SELECT 1 FROM encounter_deck_cards AS c "
-            "WHERE c.deck_guid=e.deck_guid)",
-        )
+        encounters_without_cards = _fra_decks_without_cards(connection)
         challenge_count = _scalar_count(
             connection,
             "SELECT COUNT(*) FROM fra_challenges WHERE enabled=1",

@@ -148,8 +148,7 @@ def refresh_client_seed(db) -> int:
     Refresh only the columns the seed owns, keyed by the snapshot fingerprint
     so an unchanged snapshot is a no-op. Rows are upserted, never deleted, and
     columns written by other extractors or runtime code (for example
-    ``champion_templates.charge_power``, ``quest_conversations.enabled``,
-    ``encounter_scenes.ai_deck_personality``) are left intact.
+    ``champion_templates.charge_power``) are left intact.
     """
     from AssetExtraction.gamedata_seed import TABLE_COLUMNS, extract
 
@@ -451,7 +450,7 @@ DDL = [
         updated_at     TEXT DEFAULT (datetime('now'))
     )
     """,
-    # The cards of a template, mirroring encounter_deck_cards.
+    # The cards of a template (DeckTemplate m_DeckResources).
     # gem_types_list_json: '[]' when no copy is gemmed, else one EGemTypesNew
     # list per copy (length = quantity).  flags_json: {"extended", "reserves",
     # "foil"} of every copy, plus "copies" (one flag object per copy) when the
@@ -480,32 +479,6 @@ DDL = [
         gold_delta INTEGER DEFAULT 0,
         platinum_delta INTEGER DEFAULT 0,
         max_uses INTEGER DEFAULT 1
-    )
-    """,
-    """
-    CREATE TABLE IF NOT EXISTS encounter_scenes (
-        guid TEXT PRIMARY KEY,
-        name TEXT,
-        title TEXT,
-        gameboard TEXT,
-        ai_deck_guid TEXT,
-        ai_champion_guid TEXT,
-        ai_deck_personality TEXT DEFAULT NULL,
-        mods_json TEXT DEFAULT '[]',
-        rewards_json TEXT DEFAULT '{}',
-        actions_json TEXT DEFAULT '{}',
-        player_champion_guid TEXT DEFAULT '',
-        player_deck_guid TEXT DEFAULT '',
-        origin TEXT NOT NULL DEFAULT 'seed'
-    )
-    """,
-    """
-    CREATE TABLE IF NOT EXISTS encounter_deck_cards (
-        deck_guid TEXT NOT NULL,
-        card_guid TEXT NOT NULL,
-        quantity INTEGER NOT NULL DEFAULT 1,
-        gem_types_new_list_json TEXT NOT NULL DEFAULT '[]',
-        PRIMARY KEY (deck_guid, card_guid)
     )
     """,
     """
@@ -1029,70 +1002,6 @@ DDL = [
     )
     """,
     """
-    CREATE TABLE IF NOT EXISTS campaign_node_edges (
-        campaign_template TEXT NOT NULL,
-        from_node TEXT NOT NULL,
-        to_node TEXT NOT NULL,
-        path_name TEXT DEFAULT '',
-        PRIMARY KEY (campaign_template, from_node, to_node)
-    )
-    """,
-    """
-    CREATE INDEX IF NOT EXISTS idx_campaign_node_edges_to
-        ON campaign_node_edges(campaign_template, to_node)
-    """,
-    """
-    CREATE TABLE IF NOT EXISTS campaign_node_conversations (
-        campaign_template TEXT NOT NULL,
-        node_id TEXT NOT NULL,
-        conversation_guid TEXT NOT NULL,
-        conversation_name TEXT NOT NULL DEFAULT '',
-        trigger_json TEXT NOT NULL DEFAULT '{}',
-        priority INTEGER NOT NULL DEFAULT 0,
-        enabled INTEGER NOT NULL DEFAULT 1,
-        origin TEXT NOT NULL DEFAULT 'seed',
-        PRIMARY KEY (campaign_template, node_id, conversation_guid)
-    )
-    """,
-    """
-    CREATE INDEX IF NOT EXISTS idx_campaign_node_conversations_node
-        ON campaign_node_conversations(campaign_template, node_id, priority)
-    """,
-    """
-    CREATE TABLE IF NOT EXISTS quest_templates (
-        script_name TEXT PRIMARY KEY,
-        name TEXT NOT NULL DEFAULT '',
-        title TEXT NOT NULL DEFAULT '',
-        objectives_json TEXT NOT NULL DEFAULT '[]',
-        campaign_group TEXT NOT NULL DEFAULT 'AREA',
-        start_hook TEXT NOT NULL DEFAULT '',
-        rewards_json TEXT NOT NULL DEFAULT '{}',
-        enabled INTEGER NOT NULL DEFAULT 1
-    )
-    """,
-    """
-    CREATE TABLE IF NOT EXISTS quest_conversations (
-        quest_script TEXT NOT NULL,
-        conversation_guid TEXT NOT NULL,
-        campaign_template TEXT NOT NULL,
-        node_id TEXT NOT NULL,
-        npc TEXT NOT NULL DEFAULT '',
-        role TEXT NOT NULL DEFAULT 'start',
-        faction TEXT NOT NULL DEFAULT '',
-        conversation_name TEXT NOT NULL DEFAULT '',
-        start_hook TEXT NOT NULL DEFAULT '',
-        conditions_json TEXT NOT NULL DEFAULT '{}',
-        priority INTEGER NOT NULL DEFAULT 0,
-        enabled INTEGER NOT NULL DEFAULT 1,
-        origin TEXT NOT NULL DEFAULT 'seed',
-        PRIMARY KEY (quest_script, conversation_guid)
-    )
-    """,
-    """
-    CREATE INDEX IF NOT EXISTS idx_quest_conversations_lookup
-        ON quest_conversations(conversation_guid, campaign_template, node_id, role)
-    """,
-    """
     CREATE TABLE IF NOT EXISTS conversation_rewards (
         conversation_guid TEXT PRIMARY KEY,
         reward_json TEXT NOT NULL DEFAULT '{}',
@@ -1480,44 +1389,12 @@ AZ1_PIRANHA_SWARM_CARD_GUID = "c69b5c92-9692-42c9-bfd9-e2d465fc7a26"
 AZ1_CORRUPT_DRYAD_SCENE_GUID = "879317e1-8b04-486e-a10a-f2d2f1a080bc"
 AZ1_SAVAGE_LORD_SCENE_GUID = "ab77df1e-5f13-471b-80e7-b7b4824ca280"
 
-# A legacy QuestTemplate record omitted the encounter GUID for the first
-# Cross the Zila River objective.  The authored objective text and AZ1 map
-# scene identify the intended encounter, so keep this compatibility link in
-# the server-owned campaign metadata rather than teaching the runtime quest
-# engine about a particular journal string.
-QUEST_OBJECTIVE_ENCOUNTER_LINKS = {
-    ("az01_q_cross_the_river", "Step1"): AZ1_SAVAGE_LORD_SCENE_GUID,
-}
 
-CONVERSATION_REWARD_SEEDS = [
-    # The Find / Cross the Zila / Cross the Zodiac rewards are quest rewards
-    # now (quest_templates.rewards_json, authored in
-    # campaign/campaign_data/quests.json
-    # and edited on the editor's Quests tab); their old conversation rows are
-    # removed in ensure_schema so a quest never pays twice.
-    # Shadowgrove's equipment is shown on the encounter reward panel. The
-    # follow-up conversation only advances the Dryad quest and must not grant
-    # the equipment a second time.
-    ("4000c850-c1f7-45e4-b254-3cb1b0e9bf2b",
-     json.dumps({}, sort_keys=True), 1),
-]
+# No conversation reward is seeded: the rewards are quest rewards
+# (quest_templates.rewards_json, campaign/campaign_data/quests.json) or encounter
+# scene rewards (campaign/campaign_data/encounter_scenes.json).
+CONVERSATION_REWARD_SEEDS = []
 
-# The Crayburn quest's completion reward (granted when the report conversation
-# finishes the quest); each race's Quest End used to carry its own row.
-CRAYBURN_QUEST_SCRIPT = "az01_q_dwarf_crayburn"
-CRAYBURN_QUEST_REWARD = {
-    "gold": 150, "xp": 500,
-    "chest_guid_by_race": {
-        "Coyotle": "c96a6213-69ac-44d2-8b35-32ad6d55b981",
-        "Dwarf": "8b145038-961b-4f1c-93f7-3d81dcb3d39b",
-        "Elf": "2780fa12-7cf5-41bb-a19c-7a8496a33fed",
-        "Human": "5d2fb7e1-702e-424f-afe0-0b1bbb914e7f",
-        "Necrotic": "4f006210-7c29-438c-ad6e-89d43831fa25",
-        "Orc": "e748185d-e993-44a5-bbe3-bb48acb3c96e",
-        "Shin'hare": "26f41860-aa46-418f-bf94-46fdb484160b",
-        "Vennen": "a7f16a72-2975-464d-8d3a-ff6f5bfd7c3b",
-    },
-}
 # Conversations whose reward rows moved to their quest (see
 # campaign/campaign_data/quests.json).
 AZ1_QUEST_REWARD_CONVERSATIONS = (
@@ -1605,90 +1482,6 @@ CRAYBURN_PACK_CARD_SEEDS = {
     ],
 }
 
-# AZ1 map topology.  Node positions and visuals remain client-owned by the
-# NodesPrefab; the server only needs the graph to validate movement and reveal
-# fog-of-war neighbours.  This seed contains the authored opening route and
-# the confirmed direct Dunnwood -> Road of Oaks branch, including the authored
-# path-fork links around the Zila bridge.  Additional extracted edges can be
-# inserted without changing campaign logic.
-_AZ1_PATH_NAMES = """
-Path_Node001_Node002 Path_Node002_Node003 Path_Node003_Node004
-Path_Node003_Node005 Path_Node003_Node007 Path_Node005_Node006
-Path_Node007_Node009 Path_Node007_Node00R Path_Node008_Node025
-Path_Node009_Node010 Path_Node009_Node012 Path_Node00R_Node012
-Path_Node00R_Node025 Path_Fork001_Node012 Path_Fork001_Node013
-Path_Fork001_Node014 Path_Node00X_Node021 Path_Node00Y_Node00Z
-Path_Node00Y_Node048 Path_Node011_Node025 Path_Node012_Node015
-Path_Node013_Node016 Path_Node015_Node016 Path_Node016_Node017
-Path_Node016_Node018 Path_Node016_Node019 Path_Node016_Node030
-Path_Node019_Node021 Path_Node019_Node023 Path_Node019_Node077
-Path_Node020_Node040 Path_Node020_Node042 Path_Node021_Node022
-Path_Node023_Node026 Path_Node024_Node029 Path_Node026_Node027
-Path_Node027_Node028 Path_Node027_Node029 Path_Node030_Node031
-Path_Node030_Node038 Path_Node031_Node032 Path_Node032_Node033
-Path_Node033_Node038 Path_Node034_Node038 Path_Node035_Node057
-Path_Node037_Node064 Path_Node037_Node070 Path_Node038_Node039
-Path_Node038_Node044 Path_Node039_Node040 Path_Node041_Node052
-Path_Node042_Node065 Path_Node044_Node045 Path_Node044_Node046
-Path_Node046_Node047 Path_Node046_Node048 Path_Node048_Node049
-Path_Node048_Node050 Path_Node048_Node064 Path_Node050_Node051
-Path_Node051_Node053 Path_Node051_Node066 Path_Node052_Node064
-Path_Node053_Node054 Path_Node053_Node060 Path_Node053_Node063
-Path_Node054_Node055 Path_Node055_Node056 Path_Node056_Node057
-Path_Node057_Node058 Path_Node057_Node061 Path_Node058_Node059
-Path_Node059_Node060 Path_Node061_Node062 Path_Node062_Node063
-Path_Node064_Node073 Path_Node067_Node068 Path_Node067_Node070
-Path_Node068_Node069 Path_Node071_Node073 Path_Node071_Node074
-Path_Node074_Node075 Path_Node075_Node078
-""".split()
-
-_AZ2_PATH_NAMES = """
-Path_Node001_Node003 Path_Node001_Node005 Path_Node001_Node057
-Path_Node001_Node099 Path_Node002_Node057 Path_Node003_Node057
-Path_Node004_Node008 Path_Node004_Node009 Path_Node005_Node006
-Path_Node005_Node008 Path_Node006_Node007 Path_Node009_Node010
-Path_Node00B_NodeB01 Path_Node00B_NodeB02 Path_Node00B_NodeB03
-Path_Node00Z_Node099 Path_Node010_Node011 Path_Node011_Node012
-Path_Node012_Node013 Path_Node012_Node014 Path_Node013_Node017
-Path_Node014_Node015 Path_Node015_Node016 Path_Node016_Node017
-Path_Node016_Node023 Path_Node017_Node023 Path_Node018_Node022
-Path_Node018_Node024 Path_Node018_Node027 Path_Node018_Node028
-Path_Node019_Node019B Path_Node019_Node023 Path_Node020_Node021
-Path_Node020_Node023 Path_Node021_Node022 Path_Node023_Node025
-Path_Node024_Node025 Path_Node024_Node026 Path_Node028_Node029
-Path_Node029_Node030 Path_Node030_Node031 Path_Node031_Node032
-Path_Node031_Node033 Path_Node032_Node057 Path_Node033_Node034
-Path_Node033_Node042 Path_Node034_Node035 Path_Node035_Node036
-Path_Node035_Node056 Path_Node036_Node037 Path_Node037_Node038
-Path_Node038_Node039 Path_Node039_Node040 Path_Node040_Node041
-Path_Node042_Node043 Path_Node042_Node049 Path_Node043_Node044
-Path_Node044_Node045 Path_Node045_Node046 Path_Node046_Node047
-Path_Node047_Node048 Path_Node049_Node050 Path_Node050_Node051
-Path_Node050_Node052 Path_Node050_Node055 Path_Node051_Node054
-Path_Node052_Node053 Path_NodeB01_NodeB02 Path_NodeB01_NodeB04
-Path_NodeB02_NodeB03 Path_NodeB02_NodeB05 Path_NodeB03_NodeB06
-Path_NodeB03_NodeB07 Path_NodeB04_NodeB08 Path_NodeB04_NodeB09
-Path_NodeB04_NodeB18 Path_NodeB05_NodeB06 Path_NodeB05_NodeB10
-Path_NodeB05_NodeB13 Path_NodeB06_NodeB07 Path_NodeB06_NodeB14
-Path_NodeB08_NodeB11 Path_NodeB09_NodeB10 Path_NodeB09_NodeB11
-Path_NodeB09_NodeB12 Path_NodeB0X_NodeB17 Path_NodeB10_NodeB18
-Path_NodeB11_NodeB15 Path_NodeB12_NodeB15 Path_NodeB13_NodeB14
-Path_NodeB13_NodeB15 Path_NodeB13_NodeB16 Path_NodeB14_NodeB17
-Path_NodeB16_NodeB17
-""".split()
-
-
-def _path_seed_rows(template, path_names):
-    rows = []
-    for path in path_names:
-        parts = path.removeprefix("Path_").split("_")
-        if len(parts) == 2:
-            rows.append((template, parts[0], parts[1], path))
-    return rows
-
-
-AZ1_NODE_EDGE_SEEDS = (_path_seed_rows("AZ1", _AZ1_PATH_NAMES) +
-                       _path_seed_rows("AZ2", _AZ2_PATH_NAMES))
 
 
 # ---------------------------------------------------------------------------
@@ -1740,8 +1533,7 @@ def _migrate_short_tournament_ids(db):
     db.commit()
 
 
-CAMPAIGN_ORIGIN_TABLES = ("encounter_scenes", "campaign_node_conversations",
-                          "quest_conversations", "conversation_rewards")
+CAMPAIGN_ORIGIN_TABLES = ("conversation_rewards",)
 
 
 def ensure_schema(db):
@@ -1773,10 +1565,9 @@ def ensure_schema(db):
                    "INTEGER NOT NULL DEFAULT 1")
     _ensure_column(db, "session_packets", "sent_body", "BLOB")
     _ensure_column(db, "session_packets", "sent_at", "TEXT")
-    # Who created a campaign table row: 'seed' (this module's Records/static
-    # seeds) or 'data' (inserted from campaign/campaign_data/*.json).
-    # campaign_data.apply_all deletes 'data' rows no data file lists any more;
-    # 'seed' rows are never deleted. Existing rows default to 'seed' (kept).
+    # Who created a campaign table row: 'seed' (Records) or 'data' (inserted
+    # from campaign/campaign_data/*.json). Only conversation_rewards is still a
+    # table here; the other campaign tables are built by campaign_content.
     for table in CAMPAIGN_ORIGIN_TABLES:
         _ensure_column(db, table, "origin", "TEXT NOT NULL DEFAULT 'seed'")
     template_columns = {row[1] for row in db.execute(
@@ -1832,53 +1623,6 @@ def ensure_schema(db):
     )
     db.commit()
 
-    # Seed map topology independently of SceneData.  Store both directions so
-    # the campaign handler can perform a simple adjacency lookup regardless of
-    # which endpoint the client reports as the current node.
-    try:
-        edge_rows = []
-        for template, start, end, path_name in AZ1_NODE_EDGE_SEEDS:
-            edge_rows.append((template, start, end, path_name))
-            edge_rows.append((template, end, start, path_name))
-        db.executemany(
-            "INSERT OR IGNORE INTO campaign_node_edges "
-            "(campaign_template,from_node,to_node,path_name) VALUES (?,?,?,?)",
-            edge_rows,
-        )
-        db.commit()
-    except Exception as exc:
-        print(f"Campaign node edge seed skipped: {exc}")
-
-    # ConversationTemplate names retain the AZ1/AZ2 node relationship even
-    # though the extracted SceneData does not retain Unity map path data.
-    # Populate this catalog incrementally so campaign.py can resolve authored
-    # conversations without hard-coding hundreds of GUIDs.
-    try:
-        templates = {
-            row[0] for row in db.execute(
-                "SELECT DISTINCT campaign_template "
-                "FROM campaign_node_conversations"
-            ).fetchall()
-        }
-        if not {"AZ1", "AZ2"}.issubset(templates):
-            from AssetExtraction.gamedata_seed import (
-                extract_campaign_node_conversations,
-            )
-            conversation_rows = extract_campaign_node_conversations()
-            db.executemany(
-                "INSERT OR IGNORE INTO campaign_node_conversations "
-                "(campaign_template,node_id,conversation_guid,"
-                "conversation_name,trigger_json,priority,enabled,origin) "
-                "VALUES (?,?,?,?,?,?,?,'seed')",
-                conversation_rows,
-            )
-            db.commit()
-            print(
-                "Seeded AZ1/AZ2 campaign node conversations: "
-                f"{len(conversation_rows)} authored rows"
-            )
-    except Exception as exc:
-        print(f"Campaign node conversation seed skipped: {exc}")
 
     # Mercenary champions (health, champion abilities, ability effects) were
     # added to the champion catalog after databases already existed.  Fresh
@@ -1903,121 +1647,6 @@ def ensure_schema(db):
             print(f"Seeded mercenary champions: {inserted}")
     except Exception as exc:
         print(f"Mercenary champion seed skipped: {exc}")
-
-    # QuestTemplate records provide the objective definitions while authored
-    # conversation names identify the NPC/node and quest stage.  Keep both in
-    # server-owned tables so campaign.py can grant quests and show !/? markers
-    # without hard-coded quest-specific branches.
-    try:
-        from AssetExtraction.gamedata_seed import (
-            extract_quest_conversations, extract_quest_templates,
-        )
-        qcols = {row[1] for row in db.execute("PRAGMA table_info(quest_templates)")}
-        if "start_hook" not in qcols:
-            db.execute("ALTER TABLE quest_templates ADD COLUMN start_hook TEXT DEFAULT ''")
-        if "rewards_json" not in qcols:
-            db.execute("ALTER TABLE quest_templates ADD COLUMN rewards_json TEXT NOT NULL DEFAULT '{}'")
-        if not db.execute("SELECT 1 FROM quest_templates LIMIT 1").fetchone():
-            quest_rows = extract_quest_templates()
-            db.executemany(
-                "INSERT OR IGNORE INTO quest_templates "
-                "(script_name,name,title,objectives_json,campaign_group,start_hook,enabled) "
-                "VALUES (?,?,?,?,?,?,?)", quest_rows)
-        if not db.execute("SELECT 1 FROM quest_conversations LIMIT 1").fetchone():
-            quest_conversation_rows = extract_quest_conversations()
-            db.executemany(
-                "INSERT OR IGNORE INTO quest_conversations "
-                "(quest_script,conversation_guid,campaign_template,node_id,npc,"
-                "role,faction,conversation_name,start_hook,conditions_json,"
-                "priority,enabled,origin) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,'seed')",
-                quest_conversation_rows,
-            )
-        # Backfill faction metadata for generic Tamed conversations whose
-        # authored names identify the NPC but omit the faction suffix.
-        db.execute(
-            "UPDATE quest_conversations SET faction='Ardent' "
-            "WHERE faction='' AND lower(npc)='belarius'"
-        )
-        db.execute(
-            "UPDATE quest_conversations SET faction='Underworld' "
-            "WHERE faction='' AND lower(npc)='takumi'"
-        )
-        # Map-visibility start hooks are now campaign editor data
-        # (campaign/campaign_rules/AZ1.json); clear the retired names from existing
-        # databases. Smoldering Dead's battle stays in its dungeon (no hook).
-        retired = ("az1_tamed_start", "az1_find_horwich_sea_start",
-                   "az1_find_cave_in_start", "az1_find_ambling_mesa_start",
-                   "az1_cross_zodiac_start", "az1_cross_the_river_start",
-                   "az1_smoldering_dead_start")
-        for table in ("quest_templates", "quest_conversations"):
-            db.execute(f"UPDATE {table} SET start_hook='' WHERE start_hook IN "
-                       f"({','.join('?' * len(retired))})", retired)
-        # The source stores Smoldering Dead's first objective as a dungeon
-        # template ID.  Link it to the AZ1 map scene for that dungeon (Node024,
-        # Tomb of the Rose Knights) so the objective marker resolves to the
-        # dungeon's node; the battle itself stays inside the dungeon.
-        db.execute(
-            "UPDATE quest_templates SET objectives_json=REPLACE("
-            "objectives_json, ?, ?) WHERE script_name=?",
-            ('"dungeon": "a8d2ad0e-306e-4d07-9cd1-e4d7c82cdf1c", '
-             '"id": "Step1"',
-             '"dungeon": "a8d2ad0e-306e-4d07-9cd1-e4d7c82cdf1c", '
-             '"encounter": "1d91ee6d-dd5b-4aaf-af58-7ace873b1a80", '
-             '"id": "Step1"',
-             "q_smoldering_dead"),
-        )
-        # The extracted Cross Zodiac River template historically stored
-        # Warren's ChampionTemplate GUID in its final conversation objective.
-        # Replace it with the authored Warren Step 1a conversation so newly
-        # created and existing quest journals can resolve and complete it.
-        db.execute(
-            "UPDATE quest_templates SET objectives_json=REPLACE("
-            "objectives_json, ?, ?) WHERE script_name=?",
-            ("de519b67-1e3c-4fd1-96a1-909d2b6b3c67",
-             "08b9b8ab-2100-4f8d-87b0-18369eb4ecb4",
-             "az01_q_cross_the_river_part2"),
-        )
-        # Normalize legacy encounter objectives whose source record contains
-        # an all-zero GUID.  This keeps quest markers, encounter retry rules,
-        # reward claims, and journal advancement on the same authored scene.
-        for (quest_script, objective_id), encounter_guid in \
-                QUEST_OBJECTIVE_ENCOUNTER_LINKS.items():
-            row = db.execute(
-                "SELECT objectives_json FROM quest_templates "
-                "WHERE script_name=?", (quest_script,)).fetchone()
-            if not row:
-                continue
-            try:
-                objectives = json.loads(row[0] or "[]")
-            except (TypeError, ValueError, json.JSONDecodeError):
-                continue
-            if not isinstance(objectives, list):
-                continue
-            changed = False
-            for objective in objectives:
-                if not isinstance(objective, dict):
-                    continue
-                if (str(objective.get("id") or "") == objective_id and
-                        str(objective.get("type") or "").lower() in
-                        {"encounter", "dungeon"} and
-                        not objective.get("encounter")):
-                    objective["encounter"] = encounter_guid
-                    changed = True
-            if changed:
-                db.execute(
-                    "UPDATE quest_templates SET objectives_json=? "
-                    "WHERE script_name=?",
-                    (json.dumps(objectives, sort_keys=True), quest_script),
-                )
-        db.commit()
-        print(
-            "Seeded quest metadata: templates={} conversation_links={}".format(
-                db.execute("SELECT COUNT(*) FROM quest_templates").fetchone()[0],
-                db.execute("SELECT COUNT(*) FROM quest_conversations").fetchone()[0],
-            )
-        )
-    except Exception as exc:
-        print(f"Quest metadata seed skipped: {exc}")
 
     # Named promotional chests were added after the original chest table.
     # Keep existing standard chests valid while retaining their generic
@@ -2179,73 +1808,9 @@ def ensure_schema(db):
     # campaign scene resolves to an encounter deck whose card list is absent,
     # and setup falls back to template-less placeholder cards.
     try:
-        # Resolve the Tamed encounter set from the quest objectives rather
-        # than maintaining a second list of encounter names/GUIDs. This keeps
-        # existing databases and freshly extracted seeds aligned if the quest
-        # gains another creature objective.
-        tamed_scene_guids = set()
-        tamed_row = db.execute(
-            "SELECT objectives_json FROM quest_templates "
-            "WHERE script_name='az01_tamed' LIMIT 1"
-        ).fetchone()
-        try:
-            tamed_objectives = json.loads(tamed_row[0] or "[]") if tamed_row else []
-        except (TypeError, ValueError, json.JSONDecodeError):
-            tamed_objectives = []
-        for objective in tamed_objectives if isinstance(tamed_objectives, list) else []:
-            if isinstance(objective, dict) and objective.get("encounter"):
-                tamed_scene_guids.add(str(objective["encounter"]).lower())
-
-        _ensure_column(db, "encounter_scenes", "ai_champion_guid", "TEXT")
         _ensure_column(db, "champions", "last_played_at", "TEXT DEFAULT NULL")
-        _ensure_column(db, "encounter_scenes", "ai_deck_personality",
-                       "TEXT DEFAULT NULL")
-        _ensure_column(db, "encounter_scenes", "mods_json",
-                       "TEXT DEFAULT '[]'")
-        _ensure_column(db, "encounter_scenes", "player_champion_guid",
-                       "TEXT DEFAULT ''")
-        _ensure_column(db, "encounter_scenes", "player_deck_guid",
-                       "TEXT DEFAULT ''")
-        _ensure_column(db, "encounter_scenes", "actions_json",
-                       "TEXT DEFAULT '{}'")
-        ecols = {r[1] for r in db.execute(
-            "PRAGMA table_info(encounter_scenes)")}
-        if "rewards_json" not in ecols:
-            db.execute("ALTER TABLE encounter_scenes ADD COLUMN rewards_json TEXT DEFAULT '{}'")
-            db.commit()
-        # Encounter scenes are owned by the campaign editor: apply its full
-    # definitions (campaign/campaign_data/encounter_scenes.json)
-    # now, so the deck
-        # evaluator below and everything after it sees the rows.
-        import campaign_data
-        campaign_data.apply_encounter_scenes(db)
-        db.commit()
-        # Deck cards still come from the Records snapshot.
-        needs_encounter_seed = not db.execute(
-            "SELECT 1 FROM encounter_deck_cards edc "
-            "JOIN encounter_scenes es ON es.ai_deck_guid=edc.deck_guid "
-            "WHERE es.name LIKE 'Devonshire Keep%' LIMIT 1"
-        ).fetchone() or not db.execute(
-            "SELECT 1 FROM encounter_deck_cards edc "
-            "JOIN encounter_scenes es ON es.ai_deck_guid=edc.deck_guid "
-            "WHERE es.name LIKE '% Tutorial Castle Gatehouse' LIMIT 1"
-        ).fetchone()
-        if needs_encounter_seed:
-            from AssetExtraction.gamedata_seed import extract
-            client_seed = extract()
-            encounter_tables = client_seed["tables"]
-            db.executemany(
-                "INSERT OR IGNORE INTO encounter_deck_cards "
-                "(deck_guid,card_guid,quantity,gem_types_new_list_json) "
-                "VALUES (?,?,?,?)",
-                encounter_tables.get("encounter_deck_cards", []),
-            )
-            db.commit()
-            print("Seeded missing encounter deck cards")
-        db.commit()
     except Exception as exc:
-        print(f"Encounter seed repair skipped: {exc}")
-
+        print(f"Champion column repair skipped: {exc}")
     # Deck strategy is static metadata: calculate missing profiles when the
     # deck catalogue is seeded. The standalone evaluator can force a full
     # refresh after strategy rules or Records metadata change.
@@ -2564,11 +2129,6 @@ def ensure_schema(db):
     db.executemany("DELETE FROM conversation_rewards WHERE conversation_guid=?",
                    [(g,) for g in (*CRAYBURN_QUEST_END_CONVERSATIONS,
                                    *AZ1_QUEST_REWARD_CONVERSATIONS)])
-    db.execute(
-        "UPDATE quest_templates SET rewards_json=? WHERE script_name=? "
-        "AND (rewards_json IS NULL OR rewards_json IN ('', '{}'))",
-        (json.dumps(CRAYBURN_QUEST_REWARD, sort_keys=True),
-         CRAYBURN_QUEST_SCRIPT))
     # Node 10's pack belongs to the encounter result now.  Remove the older
     # conversation-reward seed so completing Snoodley's success dialogue
     # cannot award a second pack.
@@ -2576,12 +2136,11 @@ def ensure_schema(db):
         "DELETE FROM conversation_rewards WHERE conversation_guid=?",
         ("d6018886-03f1-42c4-9f78-0d1dd353380e",))
     # The Dryad equipment is delivered by the encounter reward panel. Remove
-    # the older follow-up-conversation grant from existing databases so the
+    # the older follow-up-conversation row from existing databases so the
     # repaired reward cannot be claimed twice.
     db.execute(
-        "UPDATE conversation_rewards SET reward_json=? "
-        "WHERE conversation_guid=?",
-        (json.dumps({}), "4000c850-c1f7-45e4-b254-3cb1b0e9bf2b"))
+        "DELETE FROM conversation_rewards WHERE conversation_guid=?",
+        ("4000c850-c1f7-45e4-b254-3cb1b0e9bf2b",))
     db.commit()
 
     # Seed stardust for existing users who don't have any (idempotent backfill).
@@ -2617,8 +2176,3 @@ def ensure_schema(db):
     import card_fix
     card_fix.apply_fixes(db)
 
-    # Campaign table data authored in the campaign editor
-    # (campaign/campaign_data/*.json). Applied last so it wins over seed refreshes;
-    # hex-private/Records/ itself is never modified.
-    import campaign_data
-    campaign_data.apply_all(db)

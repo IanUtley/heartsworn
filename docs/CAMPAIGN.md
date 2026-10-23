@@ -247,8 +247,8 @@ NodesPrefab:      campaign/az01/nodes
 The authored `SceneData.m_ItemData` supplies map-node IDs, titles, descriptions,
 terrain types, and node artwork. The server converts those records into
 `VisLocs` and `LocNodes`. The client NodesPrefab supplies the visual paths; the
-server-side `campaign_node_edges` table stores their adjacency for movement
-validation and visibility. Visibility and enabled flags control which
+`campaign/campaign_data/campaign_node_edges.json` (read by `campaign_content`) stores
+their adjacency for movement validation and visibility. Visibility and enabled flags control which
 locations are selectable; `PublicState.Data.visited_paths` records the path
 identifiers reported by the client, while `locked_paths` suppresses an
 individual path even when both endpoint nodes are visible. Fog of war is
@@ -275,12 +275,12 @@ Node004  Sporemist Hollow (Shroom Haus card choice)
 ```
 
 The server resolves AZ1 scene records by matching the authored node number to
-the `encounter_scenes.name` (`AZ 1 - NODE ...`). This keeps the node map data,
+the scene name (`AZ 1 - NODE ...`) in `campaign_content`. This keeps the node map data,
 scene GUID, AI deck, opponent champion, abilities/modifiers, and rewards in
 separate data tables.
 
-`campaign_node_conversations` is the corresponding catalog for authored AZ1
-and AZ2 conversation templates. It is populated from the `AZ1/AZ2 - Node ...`
+The node conversation catalog (`campaign_content`'s `campaign_node_conversations`)
+holds the authored AZ1 and AZ2 conversation templates. It is populated from the `AZ1/AZ2 - Node ...`
 names in `ConversationTemplate.jsonl` and stores the normalized node ID,
 conversation GUID/name, and a small trigger descriptor (first/repeat,
 success/fail where the authored name makes that distinction). It is separate
@@ -786,3 +786,26 @@ For client-visible failures, inspect
 first, then `/tmp/hconnect_log.txt` and `/tmp/hconnect_requests.log`. Changes
 to `campaign.py` require `bash restart.sh`; reload-only modules can use the
 server's `SIGUSR1` hot-reload path.
+
+## Open items
+
+Campaign content is built in memory by `campaign/campaign_content.py` from
+Records and `campaign/campaign_data/*.json`; the database no longer holds it.
+These items are not done and are left as they are:
+
+- **Missing EncounterDecks.** 39 `EncounterDeck` records have no cards in the
+  campaign content. 34 are unused by any scene; 5 are used (3 Ruins of Kukatan
+  player decks, 2 Wild Heist opponent decks).
+- **Unnamed EncounterDecks.** 15 decks have no name: their `m_DeckTemplateId`
+  matches no DeckTemplate, and EncounterDeck has no name field.
+- **Wild Heist.** 41 conversations and 9 scenes are not placed on any node or
+  quest (some are named "CUT"). Three of the scenes (Genesis Pool, Mantodea,
+  Sky'le Griffin) have empty opponent decks. Leave as is until they are wanted.
+- **Ruins of Kukatan player decks.** Scenes use three player decks that have no
+  cards in campaign content; check how the memory scenes use them.
+- **Rules-engine card and ability tables.** `card_templates`, `ability_effects`,
+  `card_abilities_meta`, `target_templates` and the champion tables are still
+  seeded into `hconnect.db` and read per battle; moving them is a separate job.
+- **Simulation tests.** The FRA duel and round-robin tests use two real Arena
+  decks and stop at 0 turns; the tests pass only because they check for a
+  report file.

@@ -1440,6 +1440,13 @@ TABLE_COLUMNS = {
 }
 
 
+# Seed rows that are read from Records instead of stored in the database.
+NOT_STORED_TABLES = frozenset({
+    "encounter_deck_cards", "encounter_scenes", "campaign_node_conversations",
+    "quest_conversations", "quest_templates",
+})
+
+
 def seed_database(db: sqlite3.Connection, seed: dict[str, Any], *, include_pack_map: bool = False) -> dict[str, int]:
     """Insert client-derived rows into an already-created server schema.
 
@@ -1450,6 +1457,8 @@ def seed_database(db: sqlite3.Connection, seed: dict[str, Any], *, include_pack_
     tables = seed["tables"]
     if not include_pack_map:
         tables = {name: rows for name, rows in tables.items() if name != "pack_set_map"}
+    # Served from Records by campaign_content; the table is not created.
+    tables = {name: rows for name, rows in tables.items() if name not in NOT_STORED_TABLES}
     inserted: dict[str, int] = {}
     for table, rows in tables.items():
         columns = TABLE_COLUMNS[table]
