@@ -790,7 +790,9 @@ server's `SIGUSR1` hot-reload path.
 ## Open items
 
 Campaign content is built in memory by `campaign/campaign_content.py` from
-Records and `campaign/campaign_data/*.json`; the database no longer holds it.
+Records and `campaign/campaign_data/*.json`; the database no longer holds it
+(including conversation rewards, which can be added as `conversation_rewards`
+rows in a data file).
 These items are not done and are left as they are:
 
 - **Missing EncounterDecks.** 39 `EncounterDeck` records have no cards in the
@@ -811,6 +813,3 @@ These items are not done and are left as they are:
   This is the same before and after the campaign-content move: the commit before
   it (211cfce) with the same Arena rows stops the same way. The FRA tests now check
   the duel's specs (every authored card is present), not the duel.
-- **`conversation_rewards`.** The table is empty and nothing reads its rows, but
-  `static.py` still writes to it in one-off repairs, so it stays until those
-  repairs are removed.

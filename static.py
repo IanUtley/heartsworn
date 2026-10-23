@@ -1001,16 +1001,6 @@ DDL = [
         PRIMARY KEY (user_id, path)
     )
     """,
-    """
-    CREATE TABLE IF NOT EXISTS conversation_rewards (
-        conversation_guid TEXT PRIMARY KEY,
-        reward_json TEXT NOT NULL DEFAULT '{}',
-        one_time INTEGER NOT NULL DEFAULT 1,
-        enabled INTEGER NOT NULL DEFAULT 1,
-        created_at TEXT DEFAULT (datetime('now')),
-        origin TEXT NOT NULL DEFAULT 'seed'
-    )
-    """,
 
     # --- arena (Frost Ring Arena) -------------------------------------------
     """
@@ -1390,26 +1380,6 @@ AZ1_CORRUPT_DRYAD_SCENE_GUID = "879317e1-8b04-486e-a10a-f2d2f1a080bc"
 AZ1_SAVAGE_LORD_SCENE_GUID = "ab77df1e-5f13-471b-80e7-b7b4824ca280"
 
 
-# No conversation reward is seeded: the rewards are quest rewards
-# (quest_templates.rewards_json, campaign/campaign_data/quests.json) or encounter
-# scene rewards (campaign/campaign_data/encounter_scenes.json).
-CONVERSATION_REWARD_SEEDS = []
-
-# Conversations whose reward rows moved to their quest (see
-# campaign/campaign_data/quests.json).
-AZ1_QUEST_REWARD_CONVERSATIONS = (
-    "02977c4c-803a-465d-ae0c-b5896c3d4012",  # Find The Ambling Mesa (Ardent)
-    "880690b0-0c54-4ab8-a4e2-911b8bf14f64",  # Find The Cave-In (Underworld)
-    "5e5ec1cd-c869-43e8-82d4-417021954440",  # Cross the Zila River
-    "08b9b8ab-2100-4f8d-87b0-18369eb4ecb4",  # Cross the Zodiac River
-)
-CRAYBURN_QUEST_END_CONVERSATIONS = (
-    "9c139a1c-40a4-4ed7-b6ff-378c6f6bc1ea", "21c62741-49c8-4da5-8b8d-440247911027",
-    "bbc4460d-8452-4d49-a6e9-c64216f483b3", "0427b61f-251c-47b5-b89d-a0f2e2f42b1a",
-    "922aa66e-e41c-41ad-94a2-adb84f356430", "463a5ea3-847f-4102-83e4-512eb0ca97ab",
-    "5f119ac9-1018-4161-9b87-2cc23dba9c71", "49eaafb9-6645-4c04-9966-5190c4e8ca3d",
-)
-
 # Fixed contents of the race-specific Crayburn Castle reward chests.  These
 # are keyed by the chest template GUID because these Promo chests do not have
 # a card-set GUID.  The lists contain standard card printings plus the
@@ -1533,9 +1503,6 @@ def _migrate_short_tournament_ids(db):
     db.commit()
 
 
-CAMPAIGN_ORIGIN_TABLES = ("conversation_rewards",)
-
-
 def ensure_schema(db):
     """Create all tables and (re)seed static reference data.
 
@@ -1565,11 +1532,6 @@ def ensure_schema(db):
                    "INTEGER NOT NULL DEFAULT 1")
     _ensure_column(db, "session_packets", "sent_body", "BLOB")
     _ensure_column(db, "session_packets", "sent_at", "TEXT")
-    # Who created a campaign table row: 'seed' (Records) or 'data' (inserted
-    # from campaign/campaign_data/*.json). Only conversation_rewards is still a
-    # table here; the other campaign tables are built by campaign_content.
-    for table in CAMPAIGN_ORIGIN_TABLES:
-        _ensure_column(db, table, "origin", "TEXT NOT NULL DEFAULT 'seed'")
     template_columns = {row[1] for row in db.execute(
         "PRAGMA table_info(card_templates)")}
     added_variable_cost_double = "variable_cost_double" not in template_columns
@@ -2053,94 +2015,6 @@ def ensure_schema(db):
                 "INSERT INTO redeem_codes (code, gold_delta, platinum_delta, max_uses) VALUES (?,?,?,?)",
                 (code, gold, plat, maxu))
 
-    db.executemany(
-        "INSERT OR IGNORE INTO conversation_rewards "
-        "(conversation_guid, reward_json, one_time, origin) VALUES (?,?,?,'seed')",
-        CONVERSATION_REWARD_SEEDS)
-
-    # Upgrade the initial placeholder values seeded by the first version of
-    # conversation rewards.  Only the known 100 gold/100 XP placeholders are
-    # changed; custom reward JSON remains untouched.
-    for conversation_guid, reward_json, _one_time in CONVERSATION_REWARD_SEEDS:
-        existing = db.execute(
-            "SELECT reward_json FROM conversation_rewards WHERE conversation_guid=?",
-            (conversation_guid,)).fetchone()
-        if not existing:
-            continue
-        try:
-            old_reward = json.loads(existing[0] or "{}")
-        except (TypeError, ValueError, json.JSONDecodeError):
-            old_reward = {}
-        if (isinstance(old_reward, dict) and old_reward.get("gold") == 100
-                and old_reward.get("xp") == 100
-                and "chest_guid" not in old_reward):
-            db.execute(
-                "UPDATE conversation_rewards SET reward_json=? WHERE conversation_guid=?",
-                (reward_json, conversation_guid))
-    # Existing databases already contain the Cross Zila equipment reward and
-    # may have recorded its one-time claim.  Merge the newly authored pack
-    # into that row without replacing any local/race-specific item mapping.
-    pack_conversation_guids = {
-        "5e5ec1cd-c869-43e8-82d4-417021954440",  # Cross Zila River
-        "08b9b8ab-2100-4f8d-87b0-18369eb4ecb4",  # Cross Zodiac River
-    }
-    for pack_conversation_guid in pack_conversation_guids:
-        cross_zila_row = db.execute(
-            "SELECT reward_json FROM conversation_rewards WHERE conversation_guid=?",
-            (pack_conversation_guid,)).fetchone()
-        if not cross_zila_row:
-            continue
-        try:
-            cross_zila_reward = json.loads(cross_zila_row[0] or "{}")
-        except (TypeError, ValueError, json.JSONDecodeError):
-            cross_zila_reward = {}
-        if (isinstance(cross_zila_reward, dict) and
-                not cross_zila_reward.get("chest_guid")):
-            cross_zila_reward["chest_guid"] = AZ1_HOWLING_PLAINS_PACK_GUID
-            db.execute(
-                "UPDATE conversation_rewards SET reward_json=? "
-                "WHERE conversation_guid=?",
-                (json.dumps(cross_zila_reward, sort_keys=True),
-                 pack_conversation_guid))
-    # Existing databases already contain the race-specific Find quest card
-    # reward.  Merge the newly authored Howling Plains pack into those rows
-    # without replacing the card mapping or changing their claim state.
-    for find_conversation_guid in AZ1_FIND_QUEST_CARD_REWARDS:
-        find_row = db.execute(
-            "SELECT reward_json FROM conversation_rewards "
-            "WHERE conversation_guid=?",
-            (find_conversation_guid,)).fetchone()
-        if not find_row:
-            continue
-        try:
-            find_reward = json.loads(find_row[0] or "{}")
-        except (TypeError, ValueError, json.JSONDecodeError):
-            find_reward = {}
-        if (isinstance(find_reward, dict)
-                and not find_reward.get("chest_guid")):
-            find_reward["chest_guid"] = AZ1_HOWLING_PLAINS_PACK_GUID
-            db.execute(
-                "UPDATE conversation_rewards SET reward_json=? "
-                "WHERE conversation_guid=?",
-                (json.dumps(find_reward, sort_keys=True),
-                 find_conversation_guid))
-    # The Crayburn reward belongs to the quest, not to each race's Quest End
-    # conversation: move it so finishing the quest pays exactly once.
-    db.executemany("DELETE FROM conversation_rewards WHERE conversation_guid=?",
-                   [(g,) for g in (*CRAYBURN_QUEST_END_CONVERSATIONS,
-                                   *AZ1_QUEST_REWARD_CONVERSATIONS)])
-    # Node 10's pack belongs to the encounter result now.  Remove the older
-    # conversation-reward seed so completing Snoodley's success dialogue
-    # cannot award a second pack.
-    db.execute(
-        "DELETE FROM conversation_rewards WHERE conversation_guid=?",
-        ("d6018886-03f1-42c4-9f78-0d1dd353380e",))
-    # The Dryad equipment is delivered by the encounter reward panel. Remove
-    # the older follow-up-conversation row from existing databases so the
-    # repaired reward cannot be claimed twice.
-    db.execute(
-        "DELETE FROM conversation_rewards WHERE conversation_guid=?",
-        ("4000c850-c1f7-45e4-b254-3cb1b0e9bf2b",))
     db.commit()
 
     # Seed stardust for existing users who don't have any (idempotent backfill).

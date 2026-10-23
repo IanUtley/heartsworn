@@ -1,9 +1,9 @@
-"""What each node offers, derived from the server's table data.
+"""What each node offers, derived from the campaign content.
 
-Offers are content, not rules: they come from ``campaign_node_conversations``,
-``quest_conversations`` and ``encounter_scenes`` (after any startup table
-overrides), and are merged into the rules as ``nodes.<id>.entries`` only for
-evaluation. Only explicit metadata is used; a conversation that the tables
+Offers are content, not rules: they come from the node conversations, quest
+conversations and encounter scenes that campaign_content builds (Records plus the
+campaign data files), and are merged into the rules as ``nodes.<id>.entries`` only
+for evaluation. Only explicit metadata is used; a conversation that the content
 cannot select is kept with ``"when": false`` and a ``review`` note.
 
 Editor tags (``trigger_json.tags``, see ``campaign_rules.parse_tag``) are the
