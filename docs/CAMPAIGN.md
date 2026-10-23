@@ -813,3 +813,9 @@ These items are not done and are left as they are:
   This is the same before and after the campaign-content move: the commit before
   it (211cfce) with the same Arena rows stops the same way. The FRA tests now check
   the duel's specs (every authored card is present), not the duel.
+
+**Acceptance note.** Condition 1 is read as "no SQL": the five table names are not
+created, seeded, written or read by SQL outside tests. The names still appear as
+data-file keys, JSON file names, lookup keys and comments, which the data format
+and the code use. An AST scan of every sqlite call and SQL-shaped literal outside
+tests and hex-private finds none.
