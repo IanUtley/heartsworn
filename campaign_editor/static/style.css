@@ -12,6 +12,7 @@
   --empty: #9aa7b1;
   --hidden: #5b6670;
   --blocked: #ff4d4d;
+  --amber: #ffb020;
   --repeatable: #4da3ff;
   --incomplete: #f2d02e;
   --done: #4fd18b;
@@ -292,6 +293,14 @@ button.play { border-color: var(--encounter); color: var(--encounter); }
 /* ---- Opponent deck dialog: stacked, cost-sorted strips; the full card on hover ---- */
 .deck-icon { background: none; border: 0; padding: 0 2px; cursor: pointer; font-size: 1.05em; color: var(--accent); vertical-align: baseline; }
 .deck-icon:hover { filter: brightness(1.25); }
+.deck-icon-missing { color: var(--blocked); }
+.deck-title-mapped { color: var(--amber); cursor: pointer; }
+.deck-title-missing { color: var(--muted); cursor: pointer; }
+.deck-title[role="button"]:hover, .deck-title[role="button"]:focus { text-decoration: underline; outline: none; }
+.card-map { width: min(420px, 92vw); max-height: 80vh; background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 12px; }
+.card-map-list { list-style: none; margin: 8px 0 0; padding: 0; max-height: 60vh; overflow-y: auto; }
+.card-map-list button { width: 100%; text-align: left; background: none; border: 0; color: var(--text); padding: 4px 6px; cursor: pointer; }
+.card-map-list button:hover, .card-map-list button:focus { background: var(--panel-2); outline: none; }
 #deck { width: min(1400px, 96vw); height: min(840px, 90vh); max-height: 90vh; padding: 0; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--text); }
 #deck::backdrop { background: rgba(0, 0, 0, .55); }
 #deck-body { padding: 10px 14px; height: 100%; box-sizing: border-box; display: flex; flex-direction: column; }

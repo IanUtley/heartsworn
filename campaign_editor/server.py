@@ -426,6 +426,11 @@ class EditorHandler(BaseHTTPRequestHandler):
                         body.get("deck") or None)
                 self._json(chosen)
                 return
+            if url.path == "/api/edit/card-map":
+                chosen = self._with_db(lambda db: editing.save_card_map(
+                    db, body.get("missing"), body.get("card")))
+                self._json(chosen)
+                return
             if url.path == "/api/edit/scene-gameboard":
                 with closing(self._writable()) as db:
                     gameboard = editing.save_scene_gameboard(

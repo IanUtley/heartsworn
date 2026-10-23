@@ -2435,12 +2435,26 @@ def db_gem_templates(conn=None):
 
 
 def db_encounter_deck_cards(deck_guid, conn=None):
-    """Return the authored card rows for an encounter deck."""
+    """Return the authored card rows for an encounter deck.
+
+    A card GUID Records never defines is replaced by its card-map target
+    (campaign/campaign_data/card_map.json). Rows keep their order and count,
+    since callers index each row's gem slots.
+    """
+    import campaign_source
+    campaign_source.ensure_campaign_path()
+    import campaign_data
+
     connection = conn or _db_layer._db
-    return connection.execute(
+    rows = connection.execute(
         "SELECT card_guid, quantity, gem_types_new_list_json "
         "FROM encounter_deck_cards WHERE deck_guid=?", (deck_guid,)
     ).fetchall()
+    card_map = campaign_data.load_card_map()
+    if not card_map:
+        return rows
+    return [(card_map.get(str(card_guid or "").lower(), card_guid), quantity, gems)
+            for card_guid, quantity, gems in rows]
 
 
 def db_scene_mods(scene_guid, conn=None):

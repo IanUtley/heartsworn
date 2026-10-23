@@ -899,8 +899,11 @@ async function playScene(scene, nodeId) {
 // ---- Opponent deck: the encounter champion's cards, stacked by cost ----
 function deckIconButton(e) {
   const name = e.champion_name || e.champion || "opponent";
-  return ` <button type="button" class="deck-icon" data-encounter-deck="${esc(e.guid)}" ` +
-    `title="${esc(name)}'s deck" aria-label="Show ${esc(name)}'s deck">🂠</button>` +
+  // Red: the deck holds a card Records never defines (shown as ?????? or mapped).
+  const unresolved = e.deck_unresolved ? " deck-icon-missing" : "";
+  const note = e.deck_unresolved ? " (has cards Records does not define)" : "";
+  return ` <button type="button" class="deck-icon${unresolved}" data-encounter-deck="${esc(e.guid)}" ` +
+    `title="${esc(name)}'s deck${esc(note)}" aria-label="Show ${esc(name)}'s deck">🂠</button>` +
     ` <span class="ability-icon" tabindex="0" data-encounter-abilities="${esc(e.guid)}" ` +
     `aria-label="${esc(name)}'s powers">⚡</span>`;
 }
@@ -959,13 +962,20 @@ document.addEventListener("focusout", (event) => {
 function deckStrip(card) {
   // Thresholds sit in a vertical stack to the left of the card, as shard counts.
   const thresholds = card.thresholds.map((t) => `<span class="deck-shard shard-${esc(t.shard.toLowerCase())}" title="${esc(t.shard)}">${esc(t.count)}</span>`).join("");
-  const text = ((rewardCatalog && rewardCatalog.cards || []).find((c) => c.guid === card.guid) || {}).text || "";
-  const art = cardIconUrl(card.guid);
+  const shown = card.display_guid || card.guid;
+  const text = ((rewardCatalog && rewardCatalog.cards || []).find((c) => c.guid === shown) || {}).text || "";
+  const art = cardIconUrl(shown);
   const stats = card.card_type === "Troop" ? `<span class="deck-stats">${esc(card.attack)}/${esc(card.defense)}</span>` : "";
+  // A card Records never defines: an amber title (mapped) or ?????? (unmapped) that
+  // opens the card picker. Both can be remapped.
+  const title = card.missing
+    ? `<span class="deck-title ${card.mapped ? "deck-title-mapped" : "deck-title-missing"}" role="button" tabindex="0" ` +
+      `data-remap-card="${esc(card.guid)}" title="Unresolved card: click to choose another card">${esc(card.name)}</span>`
+    : `<span class="deck-title">${esc(card.name)}</span>`;
   return `<div class="deck-slot"><div class="deck-thresh">${thresholds}</div>` +
     `<div class="deck-strip" tabindex="0" data-deck-card="${esc(card.guid)}">` +
     `<div class="deck-row"><span class="deck-badge">${esc(card.cost)}</span>` +
-    `<span class="deck-title">${esc(card.name)}</span></div>` +
+    `${title}</div>` +
     `<div class="deck-face">${art ? `<img src="${art}" alt="${esc(card.name)}">` : ""}` +
     `<div class="deck-face-meta">${esc(card.card_type)} · cost ${esc(card.cost)}${stats ? " · " : ""}${stats}` +
     `${card.thresholds.length ? `<br>requires ${card.thresholds.map((t) => `${esc(t.count)} ${esc(t.shard)}`).join(", ")}` : ""}</div>` +
@@ -1001,9 +1011,64 @@ async function showEncounterDeck(guid) {
 document.addEventListener("click", (event) => {
   const icon = event.target.closest("[data-encounter-deck]");
   if (icon) { showEncounterDeck(icon.dataset.encounterDeck).catch((error) => { els.status.textContent = error.message; }); return; }
+  const remap = event.target.closest("[data-remap-card]");
+  if (remap) { openCardMap(remap.dataset.remapCard).catch((error) => { els.status.textContent = error.message; }); return; }
+  const pick = event.target.closest("[data-card-map-pick]");
+  if (pick) { chooseCardMap(pick.dataset.cardMapPick).catch((error) => { els.status.textContent = error.message; }); return; }
   const deck = document.getElementById("deck");
+  const picker = document.getElementById("card-map");
   if (event.target.closest("[data-deck-close]") || (event.target === deck)) deck.close();
+  if (event.target.closest("[data-card-map-close]") || (event.target === picker)) picker.close();
 });
+
+// ---- Card map: the card an unresolved deck card stands for (campaign_data/card_map.json) ----
+let cardMapTarget = null;   // the unresolved card GUID being remapped
+
+async function openCardMap(missing) {
+  cardMapTarget = missing;
+  await loadRewardCatalog();
+  let dialog = document.getElementById("card-map");
+  if (!dialog) {
+    dialog = document.createElement("dialog");
+    dialog.id = "card-map";
+    dialog.className = "card-map";
+    dialog.addEventListener("input", (event) => {
+      if (event.target.id === "card-map-filter") renderCardMapList();
+    });
+    document.body.appendChild(dialog);
+  }
+  dialog.innerHTML = `<header class="deck-head"><h2>Choose a card</h2>
+      <button type="button" class="deck-close" data-card-map-close>Close</button></header>
+    <input id="card-map-filter" type="search" placeholder="Filter cards" aria-label="Filter cards">
+    <ul id="card-map-list" class="card-map-list"></ul>`;
+  renderCardMapList();
+  if (!dialog.open) dialog.showModal();
+}
+
+function renderCardMapList() {
+  const query = document.getElementById("card-map-filter").value.trim().toLowerCase();
+  const cards = rewardCatalog.cards.filter((c) => !query || c.label.toLowerCase().includes(query)).slice(0, 200);
+  document.getElementById("card-map-list").innerHTML = cards.map((c) =>
+    `<li><button type="button" data-card-map-pick="${esc(c.guid)}">${esc(c.label)} ` +
+    `<span class="muted">${esc(c.rarity)}${c.pve ? " · PvE" : ""}</span></button></li>`).join("") ||
+    `<li class="muted">No card matches.</li>`;
+}
+
+async function chooseCardMap(card) {
+  const result = await postJSON("/api/edit/card-map", { missing: cardMapTarget, card });
+  document.getElementById("card-map").close();
+  await showEncounterDeck(state_deck.scene);
+  // The deck's scenes keep their red icon only while the deck still has an unresolved card.
+  const unresolved = state_deck.unresolved > 0;
+  for (const node of area.nodes) for (const scene of node.encounters) {
+    if (scene.ai_deck !== state_deck.deck_guid) continue;
+    scene.deck_unresolved = unresolved;
+    for (const button of document.querySelectorAll(`[data-encounter-deck="${CSS.escape(scene.guid)}"]`)) {
+      button.classList.toggle("deck-icon-missing", unresolved);
+    }
+  }
+  els.status.textContent = `Card map: ${result.name} saved to campaign_data/card_map.json`;
+}
 
 // The Play panel: the chat command to paste into the game client.
 function showPlayCommand(result) {

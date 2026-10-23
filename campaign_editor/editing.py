@@ -937,6 +937,34 @@ def save_scene_player(db: sqlite3.Connection, scene_guid: str, champion: str | N
     return {"player_champion": champion, "player_deck": deck}
 
 
+def save_card_map(db: sqlite3.Connection, missing: Any, card: Any) -> dict[str, str]:
+    """Point one unresolved encounter-deck card at another base CardTemplate.
+
+    ``missing`` must be a card GUID the card map already lists (see
+    import_card_map.py); the replacement must be a base card with a name.
+    """
+    missing = str(missing or "").strip().lower()
+    card = str(card or "").strip().lower()
+    if not _GUID.match(missing) or not _GUID.match(card):
+        raise ValueError("card GUIDs must be GUIDs")
+    row = db.execute(
+        "SELECT name FROM card_templates WHERE LOWER(guid)=? AND name<>'' "
+        "AND COALESCE(equipment_modified, 0)=0", (card,)).fetchone()
+    if row is None:
+        raise ValueError("the replacement must be a base card from Records")
+    campaign_data = _campaign_data()
+    path = campaign_data.CARD_MAP_PATH
+    with _WRITE_LOCK:
+        data = _read_doc(path, {"schema_version": campaign_data.SCHEMA_VERSION, "cards": {}})
+        cards = data.setdefault("cards", {})
+        key = next((k for k in cards if str(k).lower() == missing), None)
+        if key is None:
+            raise LookupError("this card is not an unresolved encounter-deck card")
+        cards[key] = card
+        _write_json(path, data)
+    return {"missing": missing, "card": card, "name": row[0]}
+
+
 # The client's Game.Shared.GameboardEnums (HexClient GameboardEnums.cs); the
 # editor's Deck panel offers the same list.
 GAMEBOARDS = ("Default", "FrostArena", "Forest", "CastleExterior", "Coastline",

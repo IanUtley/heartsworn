@@ -33,6 +33,7 @@ File format::
 from __future__ import annotations
 
 import json
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -40,6 +41,33 @@ SCHEMA_VERSION = 1
 ORIGIN_SEED = "seed"
 ORIGIN_DATA = "data"
 DATA_DIR = Path(__file__).resolve().parent / "campaign_data"
+# Encounter-deck card GUIDs that Records never defines -> the CardTemplate GUID
+# the editor shows for them (campaign_editor/import_card_map.py writes this).
+CARD_MAP_PATH = DATA_DIR / "card_map.json"
+
+
+_CARD_MAP_LOCK = threading.Lock()
+_CARD_MAP_CACHE: tuple[int, dict[str, str]] | None = None   # (mtime_ns, map)
+
+
+def load_card_map() -> dict[str, str]:
+    """The card map as ``{unresolved GUID: CardTemplate GUID}``, lower-cased.
+
+    Re-read when the file changes, so an editor save takes effect on the next
+    battle without a restart. Returns a copy; callers may keep it.
+    """
+    global _CARD_MAP_CACHE
+    try:
+        mtime = CARD_MAP_PATH.stat().st_mtime_ns
+    except FileNotFoundError:
+        return {}
+    with _CARD_MAP_LOCK:
+        if _CARD_MAP_CACHE is None or _CARD_MAP_CACHE[0] != mtime:
+            data = json.loads(CARD_MAP_PATH.read_text(encoding="utf-8"))
+            mapping = {str(key).lower(): str(value).lower()
+                       for key, value in (data.get("cards") or {}).items()}
+            _CARD_MAP_CACHE = (mtime, mapping)
+        return dict(_CARD_MAP_CACHE[1])
 
 # table -> natural key, whether new rows may be inserted, writable columns.
 # encounter_scenes is owned by the editor (full definitions in

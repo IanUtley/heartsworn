@@ -54,6 +54,7 @@ from campaign_runtime.catalog_data import (  # noqa: E402,F401
     item_title, match_item, quest_actions, scene_node_id, zone, zones,
     DATA_DIR, SCENE_NODE_LINKS)
 from campaign_runtime import catalog_data as _catalog_data  # noqa: E402
+import campaign_data  # noqa: E402
 from campaign_runtime.catalog_data import server_catalog as _server_catalog  # noqa: E402
 from campaign_runtime.records import (  # noqa: E402,F401
     _endings_of, _events, _guid, _qualifiers, _records_encounters,
@@ -279,14 +280,32 @@ def _card_thresholds(threshold_json: Any) -> list[dict[str, Any]]:
     return result
 
 
+def unresolved_decks(db: sqlite3.Connection) -> set[str]:
+    """Encounter decks that hold a card GUID Records never defines.
+
+    The join compares the stored GUIDs as they are (all lowercase, so the
+    card_templates primary key is used); LOWER() here made it a full scan.
+    """
+    return {str(row[0]).lower() for row in db.execute(
+        "SELECT DISTINCT d.deck_guid FROM encounter_deck_cards d "
+        "LEFT JOIN card_templates c ON c.guid=d.card_guid "
+        "WHERE c.guid IS NULL")}
+
+
 def encounter_deck(db: sqlite3.Connection, scene_guid: str) -> dict[str, Any]:
-    """The opposing champion's deck for one encounter scene, one entry per card."""
+    """The opposing champion's deck for one encounter scene, one entry per card.
+
+    A card Records never defines shows as ``??????`` unless the card map sends
+    it to a CardTemplate (``mapped``), which then supplies its name and stats.
+    ``display_guid`` is the card whose art and text the editor shows.
+    """
     row = db.execute(
         "SELECT name, title, ai_deck_guid FROM encounter_scenes WHERE LOWER(guid)=?",
         (str(scene_guid or "").lower(),)).fetchone()
     if row is None:
         raise LookupError("no such encounter scene")
     deck_guid = str(row[2] or "").lower()
+    card_map = campaign_data.load_card_map()
     cards = []
     if deck_guid:
         for card_guid, quantity, name, cost, card_type, attack, defense, thresholds in db.execute(
@@ -296,8 +315,9 @@ def encounter_deck(db: sqlite3.Connection, scene_guid: str) -> dict[str, Any]:
                 "LEFT JOIN card_templates c ON LOWER(c.guid)=LOWER(d.card_guid) "
                 "WHERE LOWER(d.deck_guid)=? ORDER BY c.cost, c.name",
                 (deck_guid,)).fetchall():
-            cards.append({
-                "guid": str(card_guid or "").lower(),
+            guid = str(card_guid or "").lower()
+            entry = {
+                "guid": guid,
                 "quantity": int(quantity or 0),
                 "name": name or "",
                 "cost": int(cost or 0),
@@ -305,9 +325,27 @@ def encounter_deck(db: sqlite3.Connection, scene_guid: str) -> dict[str, Any]:
                 "attack": attack,
                 "defense": defense,
                 "thresholds": _card_thresholds(thresholds),
-            })
+                "missing": name is None,
+                "mapped": False,
+                "display_guid": guid,
+            }
+            if name is None:
+                entry["name"] = "??????"
+                target = card_map.get(guid)
+                mapped = db.execute(
+                    "SELECT name, cost, card_type, attack, defense, threshold_json "
+                    "FROM card_templates WHERE LOWER(guid)=?",
+                    (target or "",)).fetchone() if target else None
+                if mapped is not None:
+                    entry.update(name=mapped[0] or "??????", cost=int(mapped[1] or 0),
+                                 card_type=mapped[2] or "", attack=mapped[3],
+                                 defense=mapped[4],
+                                 thresholds=_card_thresholds(mapped[5]),
+                                 mapped=True, display_guid=target)
+            cards.append(entry)
     return {"scene": str(scene_guid).lower(), "name": row[1] or row[0] or "",
             "deck_guid": deck_guid or None, "card_count": sum(c["quantity"] for c in cards),
+            "unresolved": sum(c["quantity"] for c in cards if c["missing"]),
             "cards": cards}
 
 
@@ -554,6 +592,11 @@ def area_payload(db: sqlite3.Connection | None, zone_id: str = AREA_TEMPLATE
                 "art": variant["art"], "visit_events": [],
                 "descriptions": list(variant["descriptions"])}
     data = zone_catalog(db, entry, authored)
+    # The red deck icon: a scene whose opponent deck holds an unresolved card.
+    unresolved = unresolved_decks(db) if db is not None else set()
+    for scenes in (data.get("encounters") or {}).values():
+        for scene in scenes:
+            scene["deck_unresolved"] = str(scene.get("ai_deck") or "").lower() in unresolved
 
     # NodeR -> Node00R is the overworld's spelling only (dungeons use NodeA..).
     # The same mapping the offers use, so a panel row sits on the node it is offered on
