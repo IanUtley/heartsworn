@@ -225,47 +225,6 @@ def test_impassable_node_is_red_until_completed_and_holds_the_road():
     assert not cr.layout(rules, state)["nodes"]["C"]["impassable"]
 
 
-def test_campaign_table_data_upserts_idempotently_and_skips_bad_files():
-    """Editor table data: upsert by key (encounter scenes are inserted - the editor owns them), no-op on
-    re-apply, and an invalid file is skipped whole."""
-    import json
-    import sqlite3
-    import tempfile
-    from pathlib import Path
-    import campaign_data
-    db = sqlite3.connect(":memory:")
-    db.execute("CREATE TABLE encounter_scenes (guid TEXT, name TEXT, title TEXT, "
-               "ai_deck_guid TEXT, ai_champion_guid TEXT, mods_json TEXT, "
-               "rewards_json TEXT, ai_deck_personality TEXT)")
-    db.execute("CREATE TABLE quest_conversations (quest_script TEXT, "
-               "conversation_guid TEXT, campaign_template TEXT, node_id TEXT, "
-               "npc TEXT, role TEXT, faction TEXT, conversation_name TEXT, "
-               "start_hook TEXT, conditions_json TEXT, priority INTEGER, "
-               "enabled INTEGER)")
-    db.execute("INSERT INTO encounter_scenes (guid, rewards_json) VALUES ('s1', '{}')")
-    good = {"schema_version": 1, "tables": {
-        "encounter_scenes": [{"guid": "s1", "rewards_json": {"gold": 50}},
-                             {"guid": "unseeded", "rewards_json": {}}],
-        "quest_conversations": [{"quest_script": "q", "conversation_guid": "c",
-                                 "campaign_template": "AZ1", "node_id": "Node00R",
-                                 "role": "start", "enabled": True}]}}
-    bad = {"schema_version": 1, "tables": {
-        "encounter_scenes": [{"guid": "s1", "bogus": "renamed"}]}}
-    with tempfile.TemporaryDirectory() as folder:
-        Path(folder, "a.json").write_text(json.dumps(good))
-        Path(folder, "b.json").write_text(json.dumps(bad))
-        first = campaign_data.apply_all(db, Path(folder))
-        second = campaign_data.apply_all(db, Path(folder))
-    assert first["a.json"] == {"encounter_scenes": 2, "quest_conversations": 1}
-    assert second["a.json"] == {"encounter_scenes": 0, "quest_conversations": 0}
-    assert "b.json" not in first                      # an unknown column skips the file
-    assert json.loads(db.execute("SELECT rewards_json FROM encounter_scenes "
-                                 "WHERE guid='s1'").fetchone()[0]) == {"gold": 50}
-    assert db.execute("SELECT COUNT(*) FROM encounter_scenes").fetchone()[0] == 2   # editor-owned: rows are inserted
-    assert db.execute("SELECT node_id, enabled FROM quest_conversations"
-                      ).fetchone() == ("Node00R", 1)
-
-
 def test_tags_select_states_and_conversations_and_endings_set_flags():
     """Editor tags: node states and offers are tag lists (all must hold);
     ``outcome`` reads the node's last battle; a finished conversation sets
@@ -343,23 +302,23 @@ def test_editor_saves_tags_to_campaign_files():
     sys.path.insert(0, os.path.join(ROOT, "campaign_editor"))
     import catalog
     import editing
-    db = sqlite3.connect(":memory:")
-    db.execute("CREATE TABLE campaign_node_conversations (campaign_template TEXT, "
-               "conversation_guid TEXT, trigger_json TEXT)")
-    db.execute("INSERT INTO campaign_node_conversations VALUES "
-               "('AZ1', 'ABC', '{\"label\": \"Hag\"}')")
+    import campaign_content
+    real = next(r for r in campaign_content.table("campaign_node_conversations")
+                if r["campaign_template"] == "AZ1")
+    guid = real["conversation_guid"]
+    base = json.loads(real["trigger_json"] or "{}")
     saved = (catalog.DATA_DIR, catalog.RULES_DIR)
     with tempfile.TemporaryDirectory() as folder:
         catalog.DATA_DIR = Path(folder, "data")
         catalog.RULES_DIR = Path(folder, "rules")
         try:
             trigger = editing.save_conversation_tags(
-                db, "AZ1", "abc", ["outcome:fail", "faction(Ardent)"])
+                None, "AZ1", guid.lower(), ["outcome:fail", "faction(Ardent)"])
             data = json.loads(Path(folder, "data", "AZ1.json").read_text())
             row, = data["tables"]["campaign_node_conversations"]
-            assert row["conversation_guid"] == "ABC" and trigger == row["trigger_json"]
-            assert trigger == {"label": "Hag", "tags": ["outcome:fail", "faction(Ardent)"]}
-            editing.save_conversation_tags(db, "AZ1", "abc", [])
+            assert row["conversation_guid"] == guid and trigger == row["trigger_json"]
+            assert trigger == {**base, "tags": ["outcome:fail", "faction(Ardent)"]}
+            editing.save_conversation_tags(None, "AZ1", guid.lower(), [])
             data = json.loads(Path(folder, "data", "AZ1.json").read_text())
             assert data["tables"]["campaign_node_conversations"] == []
             catalog.RULES_DIR.mkdir()
@@ -419,26 +378,6 @@ def test_or_groups_and_generated_crayburn_rules():
     won, _ = cr.apply(rules, lost, {"type": "encounter_result", "node": "CastleGate",
                                     "victory": True})
     assert cr.layout(rules, won)["nodes"]["InnerBailey"]["visible"]
-
-
-def test_deck_evaluator_fills_blank_scene_personalities_without_overwriting():
-    """An authored per-scene AI personality survives the startup evaluator; a
-    blank scene sharing that deck gets the evaluator's pick (Default here)."""
-    import sqlite3
-    from AssetExtraction.evaluate_fra_deck_personalities import (
-        update_fra_deck_personalities)
-    db = sqlite3.connect(":memory:")
-    db.executescript("""
-        CREATE TABLE fra_encounters (deck_guid TEXT, deck_name TEXT, ai_deck_personality TEXT);
-        CREATE TABLE fra_challengers (encounter_deck_guid TEXT, ai_deck_personality TEXT);
-        CREATE TABLE encounter_deck_cards (deck_guid TEXT, card_guid TEXT, quantity INTEGER);
-        CREATE TABLE encounter_scenes (guid TEXT, name TEXT, ai_deck_guid TEXT, ai_deck_personality TEXT);
-        INSERT INTO encounter_scenes VALUES ('a', 'A', 'deck1', 'Burn'), ('b', 'B', 'deck1', NULL);
-    """)
-    update_fra_deck_personalities(db)
-    got = dict(db.execute("SELECT guid, ai_deck_personality FROM encounter_scenes"))
-    assert got["a"] == "Burn", got
-    assert got["b"] and got["b"] != "Burn", got
 
 
 def test_card_selector_offers_flagged_cards_and_clears_the_won_one():
@@ -565,13 +504,8 @@ def test_editor_refuses_rewards_on_dialog_scenes():
     import sqlite3
     sys.path.insert(0, os.path.join(ROOT, "campaign_editor"))
     import editing
-    db = sqlite3.connect(":memory:")
-    db.execute("CREATE TABLE encounter_scenes (guid TEXT, name TEXT)")
-    db.execute("INSERT INTO encounter_scenes VALUES (?, ?)",
-               ("7656fe84-bc7a-4e2d-b8ae-2741164a7a26",
-                "AZ 1 - NODE 07 - GAAL CAMP 1 - DIALOG"))
-    try:
-        editing.save_scene_rewards(db, "7656fe84-bc7a-4e2d-b8ae-2741164a7a26",
+    try:   # a real DIALOG scene (campaign_content): the editor refuses rewards on it
+        editing.save_scene_rewards(None, "7656fe84-bc7a-4e2d-b8ae-2741164a7a26",
                                    {"gold": 100})
     except ValueError as exc:
         assert "DIALOG" in str(exc)

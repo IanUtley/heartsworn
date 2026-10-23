@@ -68,6 +68,57 @@ def clean_tags(tags: Any) -> list:
     return cleaned
 
 
+def _content():
+    """campaign_content (campaign/ on the import path)."""
+    import campaign_source
+    campaign_source.ensure_campaign_path()
+    import campaign_content
+    return campaign_content
+
+
+def _node_row(template, conversation_guid):
+    """``(conversation_guid, trigger_json)`` of the first node conversation row, or None."""
+    guid = str(conversation_guid).lower()
+    for r in _content().table("campaign_node_conversations"):
+        if (str(r.get("campaign_template")) == str(template)
+                and str(r.get("conversation_guid") or "").lower() == guid):
+            return (r.get("conversation_guid"), r.get("trigger_json"))
+    return None
+
+
+def _quest_row(template, quest_script, conversation_guid):
+    """``(conversation_guid, conditions_json, role)`` of the first quest row, or None."""
+    guid = str(conversation_guid).lower()
+    for r in _content().quest_conversations():
+        if (str(r.get("campaign_template")) == str(template)
+                and str(r.get("quest_script")) == str(quest_script)
+                and str(r.get("conversation_guid") or "").lower() == guid):
+            return (r.get("conversation_guid"), r.get("conditions_json"), r.get("role"))
+    return None
+
+
+def _quest_full(template, quest_script, conversation_guid):
+    """The quest row's other columns (node, NPC, role, faction, name, hook, priority, enabled)."""
+    guid = str(conversation_guid).lower()
+    fields = ("node_id", "npc", "role", "faction", "conversation_name", "start_hook",
+              "priority", "enabled")
+    for r in _content().quest_conversations():
+        if (str(r.get("campaign_template")) == str(template)
+                and str(r.get("quest_script")) == str(quest_script)
+                and str(r.get("conversation_guid") or "").lower() == guid):
+            return {k: r.get(k) for k in fields}
+    return None
+
+
+def _quest_exists(script_name) -> bool:
+    return any(r.get("script_name") == script_name for r in _content().quest_templates())
+
+
+def _scene(scene_guid):
+    """The encounter scene (merged: Records plus the data files), or None."""
+    return _content().scene(str(scene_guid))
+
+
 def _update_trigger(db: sqlite3.Connection, template: str,
                     conversation_guid: str, change) -> dict[str, Any]:
     """Apply ``change(trigger)`` to one node conversation's trigger and save
@@ -76,10 +127,7 @@ def _update_trigger(db: sqlite3.Connection, template: str,
     The row may be in the database or only in a data file (rows a data file
     inserts reach the database at the next start).
     """
-    row = db.execute(
-        "SELECT conversation_guid, trigger_json FROM campaign_node_conversations "
-        "WHERE campaign_template=? AND LOWER(conversation_guid)=?",
-        (str(template), str(conversation_guid).lower())).fetchone()
+    row = _node_row(template, conversation_guid)
     campaign_data = _campaign_data()
     with _WRITE_LOCK:
         files = sorted(catalog.DATA_DIR.glob("*.json"))
@@ -240,10 +288,7 @@ def _update_quest_conditions(db: sqlite3.Connection, template: str,
                              change) -> dict[str, Any]:
     """Apply ``change(conditions)`` to a quest_conversations row's
     ``conditions_json`` and save it to ``campaign_data/<template>.json``."""
-    row = db.execute(
-        "SELECT conversation_guid, conditions_json FROM quest_conversations "
-        "WHERE campaign_template=? AND quest_script=? AND LOWER(conversation_guid)=?",
-        (template, quest_script, str(conversation_guid).lower())).fetchone()
+    row = _quest_row(template, quest_script, conversation_guid)
     if row is None:
         raise LookupError(f"no {template} quest row {quest_script} {conversation_guid}")
     guid = row[0]
@@ -266,18 +311,11 @@ def _update_quest_conditions(db: sqlite3.Connection, template: str,
         if existing is None:
             # Carry the row's other columns so a fresh database (where the
             # seed may lack it) can insert it, not only update it.
-            full = db.execute(
-                "SELECT node_id, npc, role, faction, conversation_name, "
-                "start_hook, priority, enabled FROM quest_conversations "
-                "WHERE campaign_template=? AND quest_script=? "
-                "AND LOWER(conversation_guid)=?",
-                (template, quest_script, guid.lower())).fetchone()
+            full = _quest_full(template, quest_script, guid)
             existing = {"quest_script": quest_script, "conversation_guid": guid,
                         "campaign_template": template}
             if full is not None:
-                existing.update(dict(zip(
-                    ("node_id", "npc", "role", "faction", "conversation_name",
-                     "start_hook", "priority", "enabled"), full)))
+                existing.update(full)
                 existing["enabled"] = bool(existing["enabled"])
             rows.append(existing)
         existing["conditions_json"] = conditions
@@ -312,15 +350,11 @@ def quest_step_ids(script: str) -> list[str]:
 def _check_quest_refs(db: sqlite3.Connection, parsed: dict[str, Any]) -> None:
     """An action's quest must exist; complete_step's step must be on it."""
     quest = parsed.get("start_quest") or parsed.get("complete_quest")
-    if quest and not db.execute(
-            "SELECT 1 FROM quest_templates WHERE script_name=?",
-            (quest,)).fetchone():
+    if quest and not _quest_exists(quest):
         raise LookupError(f"unknown quest {quest!r}")
     if "complete_step" in parsed:
         script, step_id = parsed["complete_step"]
-        if not db.execute(
-                "SELECT 1 FROM quest_templates WHERE script_name=?",
-                (script,)).fetchone():
+        if not _quest_exists(script):
             raise LookupError(f"unknown quest {script!r}")
         if step_id not in quest_step_ids(script):
             raise LookupError(f"quest {script!r} has no step {step_id!r}")
@@ -363,11 +397,8 @@ def save_quest_actions(db: sqlite3.Connection, template: str, quest_script: str,
 
 
 def _default_quest_table(db, template, quest_script, conversation_guid):
-    row = db.execute(
-        "SELECT role FROM quest_conversations WHERE campaign_template=? "
-        "AND quest_script=? AND LOWER(conversation_guid)=?",
-        (template, quest_script, str(conversation_guid).lower())).fetchone()
-    return catalog.quest_actions(row[0] if row else "", quest_script, {})[0]
+    row = _quest_row(template, quest_script, conversation_guid)
+    return catalog.quest_actions(row[2] if row else "", quest_script, {})[0]
 
 
 def _new_rules(zone_id: str) -> dict[str, Any]:
@@ -604,8 +635,7 @@ def save_quest_rewards(db: sqlite3.Connection, quest_script: str,
     """
     campaign_data = _campaign_data()
     rewards = clean_rewards(rewards)
-    if not db.execute("SELECT 1 FROM quest_templates WHERE script_name=?",
-                      (quest_script,)).fetchone():
+    if not _quest_exists(quest_script):
         raise LookupError(f"unknown quest {quest_script!r}")
     path = campaign_data.DATA_DIR / "quests.json"
     with _WRITE_LOCK:
@@ -737,11 +767,10 @@ def save_scene_rewards(db: sqlite3.Connection, scene_guid: str,
     """
     campaign_data = _campaign_data()
     rewards = clean_scene_rewards(rewards)
-    row = db.execute("SELECT guid, name FROM encounter_scenes WHERE LOWER(guid)=?",
-                     (str(scene_guid).lower(),)).fetchone()
+    row = _scene(scene_guid)
     if row is None:
         raise LookupError("this scene is not in the server's encounter_scenes table")
-    if _is_dialog(row[1]):
+    if _is_dialog(row.get("name")):
         raise ValueError("DIALOG scenes have no rewards")
     path = campaign_data.DATA_DIR / "encounter_scenes.json"
     with _WRITE_LOCK:
@@ -750,7 +779,7 @@ def save_scene_rewards(db: sqlite3.Connection, scene_guid: str,
         existing = next((r for r in rows
                          if str(r.get("guid")).lower() == str(scene_guid).lower()), None)
         if existing is None:
-            existing = {"guid": row[0]}
+            existing = {"guid": row["guid"]}
             rows.append(existing)
         existing["rewards_json"] = rewards
         problems = campaign_data.validate(data)
@@ -792,8 +821,7 @@ def save_scene_actions(db: sqlite3.Connection, scene_guid: str,
     """Set what a scene does before the battle and on victory / defeat."""
     campaign_data = _campaign_data()
     actions = clean_scene_actions(actions)
-    row = db.execute("SELECT guid FROM encounter_scenes WHERE LOWER(guid)=?",
-                     (str(scene_guid).lower(),)).fetchone()
+    row = _scene(scene_guid)
     if row is None:
         raise LookupError("this scene is not in the server's encounter_scenes table")
     path = campaign_data.DATA_DIR / "encounter_scenes.json"
@@ -803,7 +831,7 @@ def save_scene_actions(db: sqlite3.Connection, scene_guid: str,
         existing = next((r for r in rows
                          if str(r.get("guid")).lower() == str(scene_guid).lower()), None)
         if existing is None:
-            existing = {"guid": row[0]}
+            existing = {"guid": row["guid"]}
             rows.append(existing)
         existing["actions_json"] = actions
         problems = campaign_data.validate(data)
@@ -844,8 +872,7 @@ def save_scene_tags(db: sqlite3.Connection, scene_guid: str,
     untagged, which makes it the node's default battle."""
     campaign_data = _campaign_data()
     cleaned = clean_battle_tags(tags)
-    row = db.execute("SELECT guid FROM encounter_scenes WHERE LOWER(guid)=?",
-                     (str(scene_guid).lower(),)).fetchone()
+    row = _scene(scene_guid)
     if row is None:
         raise LookupError("this scene is not in the server's encounter_scenes table")
     path = campaign_data.DATA_DIR / "encounter_scenes.json"
@@ -855,7 +882,7 @@ def save_scene_tags(db: sqlite3.Connection, scene_guid: str,
         existing = next((r for r in rows
                          if str(r.get("guid")).lower() == str(scene_guid).lower()), None)
         if existing is None:
-            existing = {"guid": row[0]}
+            existing = {"guid": row["guid"]}
             rows.append(existing)
         existing["scene_tags"] = cleaned
         problems = campaign_data.validate(data)
@@ -871,9 +898,7 @@ def save_scene_personality(db: sqlite3.Connection, scene_guid: str,
     campaign_data = _campaign_data()
     if personality is not None and personality not in catalog.DECK_PERSONALITIES:
         raise ValueError(f"personality must be one of {', '.join(catalog.DECK_PERSONALITIES)}")
-    row = db.execute(
-        "SELECT guid, ai_deck_guid, ai_deck_personality FROM encounter_scenes "
-        "WHERE LOWER(guid)=?", (str(scene_guid).lower(),)).fetchone()
+    row = _scene(scene_guid)
     if row is None:
         raise LookupError("this scene is not in the server's encounter_scenes table")
     path = campaign_data.DATA_DIR / "encounter_scenes.json"
@@ -884,8 +909,9 @@ def save_scene_personality(db: sqlite3.Connection, scene_guid: str,
                          if str(r.get("guid")).lower() == str(scene_guid).lower()), None)
         if existing is None:
             existing = {
-                "guid": row[0],
-                "ai_deck_personality": str(row[2] or ("Default" if row[1] else "")),
+                "guid": row["guid"],
+                "ai_deck_personality": str(row.get("ai_deck_personality") or (
+                    "Default" if row.get("ai_deck_guid") else "")),
             }
             rows.append(existing)
         existing["ai_deck_personality_override"] = personality or ""
@@ -911,8 +937,7 @@ def save_scene_player(db: sqlite3.Connection, scene_guid: str, champion: str | N
         raise ValueError("the player champion must be a ChampionTemplate")
     if deck and deck not in {d["guid"] for d in options["decks"]}:
         raise ValueError("the player deck must be an encounter deck from Records")
-    row = db.execute("SELECT guid FROM encounter_scenes WHERE LOWER(guid)=?",
-                     (str(scene_guid).lower(),)).fetchone()
+    row = _scene(scene_guid)
     if row is None:
         raise LookupError("this scene is not in the server's encounter_scenes table")
     campaign_data = _campaign_data()
@@ -923,7 +948,7 @@ def save_scene_player(db: sqlite3.Connection, scene_guid: str, champion: str | N
         existing = next((r for r in rows
                          if str(r.get("guid")).lower() == str(scene_guid).lower()), None)
         if existing is None:
-            existing = {"guid": row[0]}
+            existing = {"guid": row["guid"]}
             rows.append(existing)
         existing["player_champion_guid"] = champion
         existing["player_deck_guid"] = deck
@@ -931,9 +956,6 @@ def save_scene_player(db: sqlite3.Connection, scene_guid: str, champion: str | N
         if problems:
             raise ValueError("; ".join(problems[:5]))
         _write_json(path, data)
-    db.execute("UPDATE encounter_scenes SET player_champion_guid=?, player_deck_guid=? "
-               "WHERE LOWER(guid)=?", (champion, deck, str(scene_guid).lower()))
-    db.commit()
     return {"player_champion": champion, "player_deck": deck}
 
 
@@ -984,8 +1006,7 @@ def save_scene_gameboard(db: sqlite3.Connection, scene_guid: str, gameboard: Any
         raise ValueError("the gameboard must be a non-empty name of letters and digits")
     if gameboard not in GAMEBOARDS:
         raise ValueError(f"gameboard must be one of {', '.join(GAMEBOARDS)}")
-    row = db.execute("SELECT guid FROM encounter_scenes WHERE LOWER(guid)=?",
-                     (str(scene_guid).lower(),)).fetchone()
+    row = _scene(scene_guid)
     if row is None:
         raise LookupError("this scene is not in the server's encounter_scenes table")
     campaign_data = _campaign_data()
@@ -996,16 +1017,13 @@ def save_scene_gameboard(db: sqlite3.Connection, scene_guid: str, gameboard: Any
         existing = next((r for r in rows
                          if str(r.get("guid")).lower() == str(scene_guid).lower()), None)
         if existing is None:
-            existing = {"guid": row[0]}
+            existing = {"guid": row["guid"]}
             rows.append(existing)
         existing["gameboard"] = gameboard
         problems = campaign_data.validate(data)
         if problems:
             raise ValueError("; ".join(problems[:5]))
         _write_json(path, data)
-        db.execute("UPDATE encounter_scenes SET gameboard=? WHERE LOWER(guid)=?",
-                   (gameboard, str(scene_guid).lower()))
-        db.commit()
     return gameboard
 
 
@@ -1076,8 +1094,7 @@ def save_scene_mods(db: sqlite3.Connection, scene_guid: str,
     """Set an encounter scene's modifiers in ``campaign_data/encounter_scenes.json``."""
     campaign_data = _campaign_data()
     mods = clean_scene_mods(mods)
-    row = db.execute("SELECT guid FROM encounter_scenes WHERE LOWER(guid)=?",
-                     (str(scene_guid).lower(),)).fetchone()
+    row = _scene(scene_guid)
     if row is None:
         raise LookupError("this scene is not in the server's encounter_scenes table")
     path = campaign_data.DATA_DIR / "encounter_scenes.json"
@@ -1087,7 +1104,7 @@ def save_scene_mods(db: sqlite3.Connection, scene_guid: str,
         existing = next((r for r in rows
                          if str(r.get("guid")).lower() == str(scene_guid).lower()), None)
         if existing is None:
-            existing = {"guid": row[0]}
+            existing = {"guid": row["guid"]}
             rows.append(existing)
         existing["mods_json"] = mods
         problems = campaign_data.validate(data)
@@ -1096,7 +1113,4 @@ def save_scene_mods(db: sqlite3.Connection, scene_guid: str,
         _write_json(path, data)
         # Battle setup reads mods_json from the database, so write the row
         # as well; otherwise the change waits for the next server start.
-        db.execute("UPDATE encounter_scenes SET mods_json=? WHERE LOWER(guid)=?",
-                   (json.dumps(mods), str(scene_guid).lower()))
-        db.commit()
     return mods

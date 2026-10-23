@@ -1,32 +1,20 @@
-#!/usr/bin/env python3
 """Write ``campaign/campaign_data/encounter_scenes.json``: the campaign editor's full
-definition of every encounter scene (the editor, not the Records seed, owns the
-server's ``encounter_scenes`` table).
+definition of every encounter scene. The scene identity and default rewards come from
+Records (the GUID list is the Records SceneData encounter scenes); the authored fields
+(rewards, actions, mods, personality override, player champion and deck) are kept from
+the existing file, so a re-run reproduces it.
 
-    python3 campaign_editor/import_encounter_scenes.py            # snapshot hconnect.db
-    python3 campaign_editor/import_encounter_scenes.py --from-records
+    python3 campaign_editor/import_encounter_scenes.py            # write the file
+    python3 campaign_editor/import_encounter_scenes.py --dry-run  # report only
 
-``--from-db`` (default) snapshots the table as it stands, so it captures the
-authored rewards, actions, mods and personalities exactly. ``--from-records``
-rebuilds the file from the Records seed (name, title, gameboard, deck,
-champion, mods, default rewards); use it to start over or after a Records
-refresh - existing editor edits are re-applied from the old file by guid.
-
-The stored AI personality is copied as-is. These values are precomputed and
-belong in the JSON snapshot; this importer does not evaluate decks.
-
-Fields only the editor writes (``EDITOR_KEYS``: battle tags, the player
-champion/deck, the personality override, and - with ``--from-records`` - the
-gameboard, mods, rewards and actions) are kept from the existing file, so a
-re-run reproduces it. ``--dry-run`` reports whether the file would change;
-``--out-dir DIR`` writes it into DIR instead (to diff against the live file).
+``--dry-run`` reports whether the file would change; ``--out-dir DIR`` writes it
+into DIR instead (to diff against the live file).
 """
 
 from __future__ import annotations
 
 import argparse
 import json
-import sqlite3
 import sys
 from pathlib import Path
 
@@ -66,43 +54,7 @@ def _like_old(row: dict, old: dict) -> dict:
     return {k: (old[k] if old.get(k) == row[k] else row[k]) for k in keys}
 
 
-def rows_from_db(db) -> list[dict]:
-    previous = {}
-    if OUT.exists():
-        previous = {
-            row["guid"].lower(): row
-            for row in json.loads(OUT.read_text(encoding="utf-8"))["tables"]["encounter_scenes"]
-        }
-    rows = []
-    for r in db.execute(f"SELECT {', '.join(COLUMNS)} FROM encounter_scenes "
-                        "ORDER BY name, guid"):
-        row = dict(zip(COLUMNS, r))
-        guid = str(row["guid"]).lower()
-        stored = str(row["ai_deck_personality"] or "").strip()
-        old = previous.get(guid, {})
-        default = str(old.get("ai_deck_personality") or stored or
-                      ("Default" if row["ai_deck_guid"] else "")).strip()
-        override = str(old.get("ai_deck_personality_override") or "").strip()
-        if not override and stored and stored != default:
-            override = stored
-        out = {"guid": guid, "name": row["name"] or "",
-               "title": row["title"] or "", "gameboard": row["gameboard"] or "",
-               "ai_deck_guid": row["ai_deck_guid"] or "",
-               "ai_champion_guid": row["ai_champion_guid"] or "",
-               "mods_json": _loads(row["mods_json"], []),
-               "rewards_json": _loads(row["rewards_json"], {})}
-        actions = _loads(row["actions_json"], {})
-        if actions or "actions_json" in old:
-            out["actions_json"] = actions
-        out["ai_deck_personality"] = default
-        if override:
-            out["ai_deck_personality_override"] = override
-        for key in EDITOR_KEYS:
-            if key in old:
-                out[key] = old[key]
-        rows.append(_like_old(out, old))
-    return rows
-def rows_from_records(db) -> list[dict]:
+def rows_from_records() -> list[dict]:
     from AssetExtraction.gamedata_seed import extract
     previous = {}
     if OUT.exists():
@@ -128,13 +80,10 @@ def rows_from_records(db) -> list[dict]:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--db", default=str(ROOT / "hconnect.db"))
-    parser.add_argument("--from-records", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--out-dir", type=Path)
     args = parser.parse_args()
-    db = sqlite3.connect(args.db)
-    rows = rows_from_records(db) if args.from_records else rows_from_db(db)
+    rows = rows_from_records()
     data = {"schema_version": campaign_data.SCHEMA_VERSION,
             "description": "Encounter scenes (full definitions) - owned by the campaign editor; "
                            "applied to encounter_scenes at every start",
