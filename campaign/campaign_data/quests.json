@@ -146,6 +146,23 @@
      "xp": 500,
      "chest_guid": "7b8390fd-7d3d-44d4-b285-1aeae3aef98b"
     }
+   },
+   {
+    "script_name": "az01_q_dwarf_crayburn",
+    "rewards_json": {
+     "chest_guid_by_race": {
+      "Coyotle": "c96a6213-69ac-44d2-8b35-32ad6d55b981",
+      "Dwarf": "8b145038-961b-4f1c-93f7-3d81dcb3d39b",
+      "Elf": "2780fa12-7cf5-41bb-a19c-7a8496a33fed",
+      "Human": "5d2fb7e1-702e-424f-afe0-0b1bbb914e7f",
+      "Necrotic": "4f006210-7c29-438c-ad6e-89d43831fa25",
+      "Orc": "e748185d-e993-44a5-bbe3-bb48acb3c96e",
+      "Shin'hare": "26f41860-aa46-418f-bf94-46fdb484160b",
+      "Vennen": "a7f16a72-2975-464d-8d3a-ff6f5bfd7c3b"
+     },
+     "gold": 150,
+     "xp": 500
+    }
    }
   ]
  }

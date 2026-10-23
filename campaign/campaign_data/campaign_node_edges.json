@@ -1,0 +1,2129 @@
+{
+ "schema_version": 1,
+ "edges": [
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node001",
+   "to_node": "Node002",
+   "path_name": ""
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node002",
+   "to_node": "Node001",
+   "path_name": ""
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node002",
+   "to_node": "Node003",
+   "path_name": ""
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node003",
+   "to_node": "Node002",
+   "path_name": ""
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node003",
+   "to_node": "Node004",
+   "path_name": ""
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node004",
+   "to_node": "Node003",
+   "path_name": ""
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node003",
+   "to_node": "Node007",
+   "path_name": ""
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node007",
+   "to_node": "Node003",
+   "path_name": ""
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node003",
+   "to_node": "Node005",
+   "path_name": "Path_Node003_Node005"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node005",
+   "to_node": "Node003",
+   "path_name": "Path_Node003_Node005"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node005",
+   "to_node": "Node006",
+   "path_name": "Path_Node005_Node006"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node006",
+   "to_node": "Node005",
+   "path_name": "Path_Node005_Node006"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node007",
+   "to_node": "Node009",
+   "path_name": "Path_Node007_Node009"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node009",
+   "to_node": "Node007",
+   "path_name": "Path_Node007_Node009"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node007",
+   "to_node": "Node00R",
+   "path_name": "Path_Node007_Node00R"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node00R",
+   "to_node": "Node007",
+   "path_name": "Path_Node007_Node00R"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node008",
+   "to_node": "Node025",
+   "path_name": "Path_Node008_Node025"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node025",
+   "to_node": "Node008",
+   "path_name": "Path_Node008_Node025"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node009",
+   "to_node": "Node010",
+   "path_name": "Path_Node009_Node010"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node010",
+   "to_node": "Node009",
+   "path_name": "Path_Node009_Node010"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node009",
+   "to_node": "Node012",
+   "path_name": "Path_Node009_Node012"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node012",
+   "to_node": "Node009",
+   "path_name": "Path_Node009_Node012"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node00R",
+   "to_node": "Node012",
+   "path_name": "Path_Node00R_Node012"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node012",
+   "to_node": "Node00R",
+   "path_name": "Path_Node00R_Node012"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node00R",
+   "to_node": "Node025",
+   "path_name": "Path_Node00R_Node025"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node025",
+   "to_node": "Node00R",
+   "path_name": "Path_Node00R_Node025"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node00X",
+   "to_node": "Node021",
+   "path_name": "Path_Node00X_Node021"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node021",
+   "to_node": "Node00X",
+   "path_name": "Path_Node00X_Node021"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node00Y",
+   "to_node": "Node00Z",
+   "path_name": "Path_Node00Y_Node00Z"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node00Z",
+   "to_node": "Node00Y",
+   "path_name": "Path_Node00Y_Node00Z"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node00Y",
+   "to_node": "Node048",
+   "path_name": "Path_Node00Y_Node048"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node048",
+   "to_node": "Node00Y",
+   "path_name": "Path_Node00Y_Node048"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node011",
+   "to_node": "Node025",
+   "path_name": "Path_Node011_Node025"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node025",
+   "to_node": "Node011",
+   "path_name": "Path_Node011_Node025"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node012",
+   "to_node": "Node015",
+   "path_name": "Path_Node012_Node015"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node015",
+   "to_node": "Node012",
+   "path_name": "Path_Node012_Node015"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node013",
+   "to_node": "Node016",
+   "path_name": "Path_Node013_Node016"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node016",
+   "to_node": "Node013",
+   "path_name": "Path_Node013_Node016"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node015",
+   "to_node": "Node016",
+   "path_name": "Path_Node015_Node016"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node016",
+   "to_node": "Node015",
+   "path_name": "Path_Node015_Node016"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node016",
+   "to_node": "Node017",
+   "path_name": "Path_Node016_Node017"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node017",
+   "to_node": "Node016",
+   "path_name": "Path_Node016_Node017"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node016",
+   "to_node": "Node018",
+   "path_name": "Path_Node016_Node018"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node018",
+   "to_node": "Node016",
+   "path_name": "Path_Node016_Node018"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node016",
+   "to_node": "Node019",
+   "path_name": "Path_Node016_Node019"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node019",
+   "to_node": "Node016",
+   "path_name": "Path_Node016_Node019"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node016",
+   "to_node": "Node030",
+   "path_name": "Path_Node016_Node030"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node030",
+   "to_node": "Node016",
+   "path_name": "Path_Node016_Node030"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node019",
+   "to_node": "Node021",
+   "path_name": "Path_Node019_Node021"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node021",
+   "to_node": "Node019",
+   "path_name": "Path_Node019_Node021"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node019",
+   "to_node": "Node023",
+   "path_name": "Path_Node019_Node023"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node023",
+   "to_node": "Node019",
+   "path_name": "Path_Node019_Node023"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node019",
+   "to_node": "Node077",
+   "path_name": "Path_Node019_Node077"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node077",
+   "to_node": "Node019",
+   "path_name": "Path_Node019_Node077"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node020",
+   "to_node": "Node040",
+   "path_name": "Path_Node020_Node040"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node040",
+   "to_node": "Node020",
+   "path_name": "Path_Node020_Node040"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node020",
+   "to_node": "Node042",
+   "path_name": "Path_Node020_Node042"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node042",
+   "to_node": "Node020",
+   "path_name": "Path_Node020_Node042"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node021",
+   "to_node": "Node022",
+   "path_name": "Path_Node021_Node022"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node022",
+   "to_node": "Node021",
+   "path_name": "Path_Node021_Node022"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node023",
+   "to_node": "Node026",
+   "path_name": "Path_Node023_Node026"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node026",
+   "to_node": "Node023",
+   "path_name": "Path_Node023_Node026"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node024",
+   "to_node": "Node029",
+   "path_name": "Path_Node024_Node029"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node029",
+   "to_node": "Node024",
+   "path_name": "Path_Node024_Node029"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node026",
+   "to_node": "Node027",
+   "path_name": "Path_Node026_Node027"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node027",
+   "to_node": "Node026",
+   "path_name": "Path_Node026_Node027"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node027",
+   "to_node": "Node028",
+   "path_name": "Path_Node027_Node028"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node028",
+   "to_node": "Node027",
+   "path_name": "Path_Node027_Node028"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node027",
+   "to_node": "Node029",
+   "path_name": "Path_Node027_Node029"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node029",
+   "to_node": "Node027",
+   "path_name": "Path_Node027_Node029"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node030",
+   "to_node": "Node031",
+   "path_name": "Path_Node030_Node031"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node031",
+   "to_node": "Node030",
+   "path_name": "Path_Node030_Node031"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node030",
+   "to_node": "Node038",
+   "path_name": "Path_Node030_Node038"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node038",
+   "to_node": "Node030",
+   "path_name": "Path_Node030_Node038"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node031",
+   "to_node": "Node032",
+   "path_name": "Path_Node031_Node032"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node032",
+   "to_node": "Node031",
+   "path_name": "Path_Node031_Node032"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node032",
+   "to_node": "Node033",
+   "path_name": "Path_Node032_Node033"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node033",
+   "to_node": "Node032",
+   "path_name": "Path_Node032_Node033"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node033",
+   "to_node": "Node038",
+   "path_name": "Path_Node033_Node038"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node038",
+   "to_node": "Node033",
+   "path_name": "Path_Node033_Node038"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node034",
+   "to_node": "Node038",
+   "path_name": "Path_Node034_Node038"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node038",
+   "to_node": "Node034",
+   "path_name": "Path_Node034_Node038"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node035",
+   "to_node": "Node057",
+   "path_name": "Path_Node035_Node057"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node057",
+   "to_node": "Node035",
+   "path_name": "Path_Node035_Node057"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node037",
+   "to_node": "Node064",
+   "path_name": "Path_Node037_Node064"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node064",
+   "to_node": "Node037",
+   "path_name": "Path_Node037_Node064"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node037",
+   "to_node": "Node070",
+   "path_name": "Path_Node037_Node070"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node070",
+   "to_node": "Node037",
+   "path_name": "Path_Node037_Node070"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node038",
+   "to_node": "Node039",
+   "path_name": "Path_Node038_Node039"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node039",
+   "to_node": "Node038",
+   "path_name": "Path_Node038_Node039"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node038",
+   "to_node": "Node044",
+   "path_name": "Path_Node038_Node044"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node044",
+   "to_node": "Node038",
+   "path_name": "Path_Node038_Node044"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node039",
+   "to_node": "Node040",
+   "path_name": "Path_Node039_Node040"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node040",
+   "to_node": "Node039",
+   "path_name": "Path_Node039_Node040"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node041",
+   "to_node": "Node052",
+   "path_name": "Path_Node041_Node052"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node052",
+   "to_node": "Node041",
+   "path_name": "Path_Node041_Node052"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node042",
+   "to_node": "Node065",
+   "path_name": "Path_Node042_Node065"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node065",
+   "to_node": "Node042",
+   "path_name": "Path_Node042_Node065"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node044",
+   "to_node": "Node045",
+   "path_name": "Path_Node044_Node045"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node045",
+   "to_node": "Node044",
+   "path_name": "Path_Node044_Node045"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node044",
+   "to_node": "Node046",
+   "path_name": "Path_Node044_Node046"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node046",
+   "to_node": "Node044",
+   "path_name": "Path_Node044_Node046"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node046",
+   "to_node": "Node047",
+   "path_name": "Path_Node046_Node047"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node047",
+   "to_node": "Node046",
+   "path_name": "Path_Node046_Node047"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node046",
+   "to_node": "Node048",
+   "path_name": "Path_Node046_Node048"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node048",
+   "to_node": "Node046",
+   "path_name": "Path_Node046_Node048"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node048",
+   "to_node": "Node049",
+   "path_name": "Path_Node048_Node049"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node049",
+   "to_node": "Node048",
+   "path_name": "Path_Node048_Node049"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node048",
+   "to_node": "Node050",
+   "path_name": "Path_Node048_Node050"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node050",
+   "to_node": "Node048",
+   "path_name": "Path_Node048_Node050"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node048",
+   "to_node": "Node064",
+   "path_name": "Path_Node048_Node064"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node064",
+   "to_node": "Node048",
+   "path_name": "Path_Node048_Node064"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node050",
+   "to_node": "Node051",
+   "path_name": "Path_Node050_Node051"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node051",
+   "to_node": "Node050",
+   "path_name": "Path_Node050_Node051"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node051",
+   "to_node": "Node053",
+   "path_name": "Path_Node051_Node053"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node053",
+   "to_node": "Node051",
+   "path_name": "Path_Node051_Node053"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node051",
+   "to_node": "Node066",
+   "path_name": "Path_Node051_Node066"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node066",
+   "to_node": "Node051",
+   "path_name": "Path_Node051_Node066"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node052",
+   "to_node": "Node064",
+   "path_name": "Path_Node052_Node064"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node064",
+   "to_node": "Node052",
+   "path_name": "Path_Node052_Node064"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node053",
+   "to_node": "Node054",
+   "path_name": "Path_Node053_Node054"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node054",
+   "to_node": "Node053",
+   "path_name": "Path_Node053_Node054"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node053",
+   "to_node": "Node060",
+   "path_name": "Path_Node053_Node060"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node060",
+   "to_node": "Node053",
+   "path_name": "Path_Node053_Node060"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node053",
+   "to_node": "Node063",
+   "path_name": "Path_Node053_Node063"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node063",
+   "to_node": "Node053",
+   "path_name": "Path_Node053_Node063"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node054",
+   "to_node": "Node055",
+   "path_name": "Path_Node054_Node055"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node055",
+   "to_node": "Node054",
+   "path_name": "Path_Node054_Node055"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node055",
+   "to_node": "Node056",
+   "path_name": "Path_Node055_Node056"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node056",
+   "to_node": "Node055",
+   "path_name": "Path_Node055_Node056"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node056",
+   "to_node": "Node057",
+   "path_name": "Path_Node056_Node057"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node057",
+   "to_node": "Node056",
+   "path_name": "Path_Node056_Node057"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node057",
+   "to_node": "Node058",
+   "path_name": "Path_Node057_Node058"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node058",
+   "to_node": "Node057",
+   "path_name": "Path_Node057_Node058"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node057",
+   "to_node": "Node061",
+   "path_name": "Path_Node057_Node061"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node061",
+   "to_node": "Node057",
+   "path_name": "Path_Node057_Node061"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node058",
+   "to_node": "Node059",
+   "path_name": "Path_Node058_Node059"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node059",
+   "to_node": "Node058",
+   "path_name": "Path_Node058_Node059"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node059",
+   "to_node": "Node060",
+   "path_name": "Path_Node059_Node060"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node060",
+   "to_node": "Node059",
+   "path_name": "Path_Node059_Node060"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node061",
+   "to_node": "Node062",
+   "path_name": "Path_Node061_Node062"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node062",
+   "to_node": "Node061",
+   "path_name": "Path_Node061_Node062"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node062",
+   "to_node": "Node063",
+   "path_name": "Path_Node062_Node063"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node063",
+   "to_node": "Node062",
+   "path_name": "Path_Node062_Node063"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node064",
+   "to_node": "Node073",
+   "path_name": "Path_Node064_Node073"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node073",
+   "to_node": "Node064",
+   "path_name": "Path_Node064_Node073"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node067",
+   "to_node": "Node068",
+   "path_name": "Path_Node067_Node068"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node068",
+   "to_node": "Node067",
+   "path_name": "Path_Node067_Node068"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node067",
+   "to_node": "Node070",
+   "path_name": "Path_Node067_Node070"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node070",
+   "to_node": "Node067",
+   "path_name": "Path_Node067_Node070"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node068",
+   "to_node": "Node069",
+   "path_name": "Path_Node068_Node069"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node069",
+   "to_node": "Node068",
+   "path_name": "Path_Node068_Node069"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node071",
+   "to_node": "Node073",
+   "path_name": "Path_Node071_Node073"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node073",
+   "to_node": "Node071",
+   "path_name": "Path_Node071_Node073"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node071",
+   "to_node": "Node074",
+   "path_name": "Path_Node071_Node074"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node074",
+   "to_node": "Node071",
+   "path_name": "Path_Node071_Node074"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node074",
+   "to_node": "Node075",
+   "path_name": "Path_Node074_Node075"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node075",
+   "to_node": "Node074",
+   "path_name": "Path_Node074_Node075"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node075",
+   "to_node": "Node078",
+   "path_name": "Path_Node075_Node078"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node078",
+   "to_node": "Node075",
+   "path_name": "Path_Node075_Node078"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "Node001",
+   "to_node": "Node003",
+   "path_name": "Path_Node001_Node003"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "Node003",
+   "to_node": "Node001",
+   "path_name": "Path_Node001_Node003"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "Node001",
+   "to_node": "Node005",
+   "path_name": "Path_Node001_Node005"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "Node005",
+   "to_node": "Node001",
+   "path_name": "Path_Node001_Node005"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "Node001",
+   "to_node": "Node057",
+   "path_name": "Path_Node001_Node057"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "Node057",
+   "to_node": "Node001",
+   "path_name": "Path_Node001_Node057"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "Node001",
+   "to_node": "Node099",
+   "path_name": "Path_Node001_Node099"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "Node099",
+   "to_node": "Node001",
+   "path_name": "Path_Node001_Node099"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "Node002",
+   "to_node": "Node057",
+   "path_name": "Path_Node002_Node057"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "Node057",
+   "to_node": "Node002",
+   "path_name": "Path_Node002_Node057"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "Node003",
+   "to_node": "Node057",
+   "path_name": "Path_Node003_Node057"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "Node057",
+   "to_node": "Node003",
+   "path_name": "Path_Node003_Node057"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "Node004",
+   "to_node": "Node008",
+   "path_name": "Path_Node004_Node008"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "Node008",
+   "to_node": "Node004",
+   "path_name": "Path_Node004_Node008"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "Node004",
+   "to_node": "Node009",
+   "path_name": "Path_Node004_Node009"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "Node009",
+   "to_node": "Node004",
+   "path_name": "Path_Node004_Node009"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "Node005",
+   "to_node": "Node006",
+   "path_name": "Path_Node005_Node006"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "Node006",
+   "to_node": "Node005",
+   "path_name": "Path_Node005_Node006"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "Node005",
+   "to_node": "Node008",
+   "path_name": "Path_Node005_Node008"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "Node008",
+   "to_node": "Node005",
+   "path_name": "Path_Node005_Node008"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "Node006",
+   "to_node": "Node007",
+   "path_name": "Path_Node006_Node007"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "Node007",
+   "to_node": "Node006",
+   "path_name": "Path_Node006_Node007"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "Node009",
+   "to_node": "Node010",
+   "path_name": "Path_Node009_Node010"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "Node010",
+   "to_node": "Node009",
+   "path_name": "Path_Node009_Node010"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "Node00B",
+   "to_node": "NodeB01",
+   "path_name": "Path_Node00B_NodeB01"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "NodeB01",
+   "to_node": "Node00B",
+   "path_name": "Path_Node00B_NodeB01"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "Node00B",
+   "to_node": "NodeB02",
+   "path_name": "Path_Node00B_NodeB02"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "NodeB02",
+   "to_node": "Node00B",
+   "path_name": "Path_Node00B_NodeB02"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "Node00B",
+   "to_node": "NodeB03",
+   "path_name": "Path_Node00B_NodeB03"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "NodeB03",
+   "to_node": "Node00B",
+   "path_name": "Path_Node00B_NodeB03"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "Node00Z",
+   "to_node": "Node099",
+   "path_name": "Path_Node00Z_Node099"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "Node099",
+   "to_node": "Node00Z",
+   "path_name": "Path_Node00Z_Node099"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "Node010",
+   "to_node": "Node011",
+   "path_name": "Path_Node010_Node011"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "Node011",
+   "to_node": "Node010",
+   "path_name": "Path_Node010_Node011"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "Node011",
+   "to_node": "Node012",
+   "path_name": "Path_Node011_Node012"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "Node012",
+   "to_node": "Node011",
+   "path_name": "Path_Node011_Node012"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "Node012",
+   "to_node": "Node013",
+   "path_name": "Path_Node012_Node013"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "Node013",
+   "to_node": "Node012",
+   "path_name": "Path_Node012_Node013"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "Node012",
+   "to_node": "Node014",
+   "path_name": "Path_Node012_Node014"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "Node014",
+   "to_node": "Node012",
+   "path_name": "Path_Node012_Node014"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "Node013",
+   "to_node": "Node017",
+   "path_name": "Path_Node013_Node017"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "Node017",
+   "to_node": "Node013",
+   "path_name": "Path_Node013_Node017"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "Node014",
+   "to_node": "Node015",
+   "path_name": "Path_Node014_Node015"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "Node015",
+   "to_node": "Node014",
+   "path_name": "Path_Node014_Node015"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "Node015",
+   "to_node": "Node016",
+   "path_name": "Path_Node015_Node016"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "Node016",
+   "to_node": "Node015",
+   "path_name": "Path_Node015_Node016"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "Node016",
+   "to_node": "Node017",
+   "path_name": "Path_Node016_Node017"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "Node017",
+   "to_node": "Node016",
+   "path_name": "Path_Node016_Node017"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "Node016",
+   "to_node": "Node023",
+   "path_name": "Path_Node016_Node023"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "Node023",
+   "to_node": "Node016",
+   "path_name": "Path_Node016_Node023"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "Node017",
+   "to_node": "Node023",
+   "path_name": "Path_Node017_Node023"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "Node023",
+   "to_node": "Node017",
+   "path_name": "Path_Node017_Node023"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "Node018",
+   "to_node": "Node022",
+   "path_name": "Path_Node018_Node022"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "Node022",
+   "to_node": "Node018",
+   "path_name": "Path_Node018_Node022"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "Node018",
+   "to_node": "Node024",
+   "path_name": "Path_Node018_Node024"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "Node024",
+   "to_node": "Node018",
+   "path_name": "Path_Node018_Node024"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "Node018",
+   "to_node": "Node027",
+   "path_name": "Path_Node018_Node027"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "Node027",
+   "to_node": "Node018",
+   "path_name": "Path_Node018_Node027"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "Node018",
+   "to_node": "Node028",
+   "path_name": "Path_Node018_Node028"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "Node028",
+   "to_node": "Node018",
+   "path_name": "Path_Node018_Node028"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "Node019",
+   "to_node": "Node019B",
+   "path_name": "Path_Node019_Node019B"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "Node019B",
+   "to_node": "Node019",
+   "path_name": "Path_Node019_Node019B"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "Node019",
+   "to_node": "Node023",
+   "path_name": "Path_Node019_Node023"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "Node023",
+   "to_node": "Node019",
+   "path_name": "Path_Node019_Node023"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "Node020",
+   "to_node": "Node021",
+   "path_name": "Path_Node020_Node021"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "Node021",
+   "to_node": "Node020",
+   "path_name": "Path_Node020_Node021"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "Node020",
+   "to_node": "Node023",
+   "path_name": "Path_Node020_Node023"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "Node023",
+   "to_node": "Node020",
+   "path_name": "Path_Node020_Node023"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "Node021",
+   "to_node": "Node022",
+   "path_name": "Path_Node021_Node022"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "Node022",
+   "to_node": "Node021",
+   "path_name": "Path_Node021_Node022"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "Node023",
+   "to_node": "Node025",
+   "path_name": "Path_Node023_Node025"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "Node025",
+   "to_node": "Node023",
+   "path_name": "Path_Node023_Node025"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "Node024",
+   "to_node": "Node025",
+   "path_name": "Path_Node024_Node025"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "Node025",
+   "to_node": "Node024",
+   "path_name": "Path_Node024_Node025"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "Node024",
+   "to_node": "Node026",
+   "path_name": "Path_Node024_Node026"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "Node026",
+   "to_node": "Node024",
+   "path_name": "Path_Node024_Node026"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "Node028",
+   "to_node": "Node029",
+   "path_name": "Path_Node028_Node029"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "Node029",
+   "to_node": "Node028",
+   "path_name": "Path_Node028_Node029"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "Node029",
+   "to_node": "Node030",
+   "path_name": "Path_Node029_Node030"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "Node030",
+   "to_node": "Node029",
+   "path_name": "Path_Node029_Node030"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "Node030",
+   "to_node": "Node031",
+   "path_name": "Path_Node030_Node031"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "Node031",
+   "to_node": "Node030",
+   "path_name": "Path_Node030_Node031"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "Node031",
+   "to_node": "Node032",
+   "path_name": "Path_Node031_Node032"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "Node032",
+   "to_node": "Node031",
+   "path_name": "Path_Node031_Node032"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "Node031",
+   "to_node": "Node033",
+   "path_name": "Path_Node031_Node033"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "Node033",
+   "to_node": "Node031",
+   "path_name": "Path_Node031_Node033"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "Node032",
+   "to_node": "Node057",
+   "path_name": "Path_Node032_Node057"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "Node057",
+   "to_node": "Node032",
+   "path_name": "Path_Node032_Node057"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "Node033",
+   "to_node": "Node034",
+   "path_name": "Path_Node033_Node034"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "Node034",
+   "to_node": "Node033",
+   "path_name": "Path_Node033_Node034"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "Node033",
+   "to_node": "Node042",
+   "path_name": "Path_Node033_Node042"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "Node042",
+   "to_node": "Node033",
+   "path_name": "Path_Node033_Node042"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "Node034",
+   "to_node": "Node035",
+   "path_name": "Path_Node034_Node035"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "Node035",
+   "to_node": "Node034",
+   "path_name": "Path_Node034_Node035"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "Node035",
+   "to_node": "Node036",
+   "path_name": "Path_Node035_Node036"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "Node036",
+   "to_node": "Node035",
+   "path_name": "Path_Node035_Node036"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "Node035",
+   "to_node": "Node056",
+   "path_name": "Path_Node035_Node056"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "Node056",
+   "to_node": "Node035",
+   "path_name": "Path_Node035_Node056"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "Node036",
+   "to_node": "Node037",
+   "path_name": "Path_Node036_Node037"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "Node037",
+   "to_node": "Node036",
+   "path_name": "Path_Node036_Node037"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "Node037",
+   "to_node": "Node038",
+   "path_name": "Path_Node037_Node038"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "Node038",
+   "to_node": "Node037",
+   "path_name": "Path_Node037_Node038"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "Node038",
+   "to_node": "Node039",
+   "path_name": "Path_Node038_Node039"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "Node039",
+   "to_node": "Node038",
+   "path_name": "Path_Node038_Node039"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "Node039",
+   "to_node": "Node040",
+   "path_name": "Path_Node039_Node040"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "Node040",
+   "to_node": "Node039",
+   "path_name": "Path_Node039_Node040"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "Node040",
+   "to_node": "Node041",
+   "path_name": "Path_Node040_Node041"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "Node041",
+   "to_node": "Node040",
+   "path_name": "Path_Node040_Node041"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "Node042",
+   "to_node": "Node043",
+   "path_name": "Path_Node042_Node043"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "Node043",
+   "to_node": "Node042",
+   "path_name": "Path_Node042_Node043"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "Node042",
+   "to_node": "Node049",
+   "path_name": "Path_Node042_Node049"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "Node049",
+   "to_node": "Node042",
+   "path_name": "Path_Node042_Node049"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "Node043",
+   "to_node": "Node044",
+   "path_name": "Path_Node043_Node044"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "Node044",
+   "to_node": "Node043",
+   "path_name": "Path_Node043_Node044"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "Node044",
+   "to_node": "Node045",
+   "path_name": "Path_Node044_Node045"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "Node045",
+   "to_node": "Node044",
+   "path_name": "Path_Node044_Node045"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "Node045",
+   "to_node": "Node046",
+   "path_name": "Path_Node045_Node046"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "Node046",
+   "to_node": "Node045",
+   "path_name": "Path_Node045_Node046"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "Node046",
+   "to_node": "Node047",
+   "path_name": "Path_Node046_Node047"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "Node047",
+   "to_node": "Node046",
+   "path_name": "Path_Node046_Node047"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "Node047",
+   "to_node": "Node048",
+   "path_name": "Path_Node047_Node048"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "Node048",
+   "to_node": "Node047",
+   "path_name": "Path_Node047_Node048"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "Node049",
+   "to_node": "Node050",
+   "path_name": "Path_Node049_Node050"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "Node050",
+   "to_node": "Node049",
+   "path_name": "Path_Node049_Node050"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "Node050",
+   "to_node": "Node051",
+   "path_name": "Path_Node050_Node051"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "Node051",
+   "to_node": "Node050",
+   "path_name": "Path_Node050_Node051"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "Node050",
+   "to_node": "Node052",
+   "path_name": "Path_Node050_Node052"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "Node052",
+   "to_node": "Node050",
+   "path_name": "Path_Node050_Node052"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "Node050",
+   "to_node": "Node055",
+   "path_name": "Path_Node050_Node055"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "Node055",
+   "to_node": "Node050",
+   "path_name": "Path_Node050_Node055"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "Node051",
+   "to_node": "Node054",
+   "path_name": "Path_Node051_Node054"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "Node054",
+   "to_node": "Node051",
+   "path_name": "Path_Node051_Node054"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "Node052",
+   "to_node": "Node053",
+   "path_name": "Path_Node052_Node053"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "Node053",
+   "to_node": "Node052",
+   "path_name": "Path_Node052_Node053"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "NodeB01",
+   "to_node": "NodeB02",
+   "path_name": "Path_NodeB01_NodeB02"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "NodeB02",
+   "to_node": "NodeB01",
+   "path_name": "Path_NodeB01_NodeB02"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "NodeB01",
+   "to_node": "NodeB04",
+   "path_name": "Path_NodeB01_NodeB04"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "NodeB04",
+   "to_node": "NodeB01",
+   "path_name": "Path_NodeB01_NodeB04"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "NodeB02",
+   "to_node": "NodeB03",
+   "path_name": "Path_NodeB02_NodeB03"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "NodeB03",
+   "to_node": "NodeB02",
+   "path_name": "Path_NodeB02_NodeB03"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "NodeB02",
+   "to_node": "NodeB05",
+   "path_name": "Path_NodeB02_NodeB05"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "NodeB05",
+   "to_node": "NodeB02",
+   "path_name": "Path_NodeB02_NodeB05"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "NodeB03",
+   "to_node": "NodeB06",
+   "path_name": "Path_NodeB03_NodeB06"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "NodeB06",
+   "to_node": "NodeB03",
+   "path_name": "Path_NodeB03_NodeB06"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "NodeB03",
+   "to_node": "NodeB07",
+   "path_name": "Path_NodeB03_NodeB07"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "NodeB07",
+   "to_node": "NodeB03",
+   "path_name": "Path_NodeB03_NodeB07"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "NodeB04",
+   "to_node": "NodeB08",
+   "path_name": "Path_NodeB04_NodeB08"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "NodeB08",
+   "to_node": "NodeB04",
+   "path_name": "Path_NodeB04_NodeB08"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "NodeB04",
+   "to_node": "NodeB09",
+   "path_name": "Path_NodeB04_NodeB09"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "NodeB09",
+   "to_node": "NodeB04",
+   "path_name": "Path_NodeB04_NodeB09"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "NodeB04",
+   "to_node": "NodeB18",
+   "path_name": "Path_NodeB04_NodeB18"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "NodeB18",
+   "to_node": "NodeB04",
+   "path_name": "Path_NodeB04_NodeB18"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "NodeB05",
+   "to_node": "NodeB06",
+   "path_name": "Path_NodeB05_NodeB06"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "NodeB06",
+   "to_node": "NodeB05",
+   "path_name": "Path_NodeB05_NodeB06"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "NodeB05",
+   "to_node": "NodeB10",
+   "path_name": "Path_NodeB05_NodeB10"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "NodeB10",
+   "to_node": "NodeB05",
+   "path_name": "Path_NodeB05_NodeB10"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "NodeB05",
+   "to_node": "NodeB13",
+   "path_name": "Path_NodeB05_NodeB13"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "NodeB13",
+   "to_node": "NodeB05",
+   "path_name": "Path_NodeB05_NodeB13"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "NodeB06",
+   "to_node": "NodeB07",
+   "path_name": "Path_NodeB06_NodeB07"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "NodeB07",
+   "to_node": "NodeB06",
+   "path_name": "Path_NodeB06_NodeB07"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "NodeB06",
+   "to_node": "NodeB14",
+   "path_name": "Path_NodeB06_NodeB14"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "NodeB14",
+   "to_node": "NodeB06",
+   "path_name": "Path_NodeB06_NodeB14"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "NodeB08",
+   "to_node": "NodeB11",
+   "path_name": "Path_NodeB08_NodeB11"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "NodeB11",
+   "to_node": "NodeB08",
+   "path_name": "Path_NodeB08_NodeB11"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "NodeB09",
+   "to_node": "NodeB10",
+   "path_name": "Path_NodeB09_NodeB10"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "NodeB10",
+   "to_node": "NodeB09",
+   "path_name": "Path_NodeB09_NodeB10"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "NodeB09",
+   "to_node": "NodeB11",
+   "path_name": "Path_NodeB09_NodeB11"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "NodeB11",
+   "to_node": "NodeB09",
+   "path_name": "Path_NodeB09_NodeB11"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "NodeB09",
+   "to_node": "NodeB12",
+   "path_name": "Path_NodeB09_NodeB12"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "NodeB12",
+   "to_node": "NodeB09",
+   "path_name": "Path_NodeB09_NodeB12"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "NodeB0X",
+   "to_node": "NodeB17",
+   "path_name": "Path_NodeB0X_NodeB17"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "NodeB17",
+   "to_node": "NodeB0X",
+   "path_name": "Path_NodeB0X_NodeB17"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "NodeB10",
+   "to_node": "NodeB18",
+   "path_name": "Path_NodeB10_NodeB18"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "NodeB18",
+   "to_node": "NodeB10",
+   "path_name": "Path_NodeB10_NodeB18"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "NodeB11",
+   "to_node": "NodeB15",
+   "path_name": "Path_NodeB11_NodeB15"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "NodeB15",
+   "to_node": "NodeB11",
+   "path_name": "Path_NodeB11_NodeB15"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "NodeB12",
+   "to_node": "NodeB15",
+   "path_name": "Path_NodeB12_NodeB15"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "NodeB15",
+   "to_node": "NodeB12",
+   "path_name": "Path_NodeB12_NodeB15"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "NodeB13",
+   "to_node": "NodeB14",
+   "path_name": "Path_NodeB13_NodeB14"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "NodeB14",
+   "to_node": "NodeB13",
+   "path_name": "Path_NodeB13_NodeB14"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "NodeB13",
+   "to_node": "NodeB15",
+   "path_name": "Path_NodeB13_NodeB15"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "NodeB15",
+   "to_node": "NodeB13",
+   "path_name": "Path_NodeB13_NodeB15"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "NodeB13",
+   "to_node": "NodeB16",
+   "path_name": "Path_NodeB13_NodeB16"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "NodeB16",
+   "to_node": "NodeB13",
+   "path_name": "Path_NodeB13_NodeB16"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "NodeB14",
+   "to_node": "NodeB17",
+   "path_name": "Path_NodeB14_NodeB17"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "NodeB17",
+   "to_node": "NodeB14",
+   "path_name": "Path_NodeB14_NodeB17"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "NodeB16",
+   "to_node": "NodeB17",
+   "path_name": "Path_NodeB16_NodeB17"
+  },
+  {
+   "campaign_template": "AZ2",
+   "from_node": "NodeB17",
+   "to_node": "NodeB16",
+   "path_name": "Path_NodeB16_NodeB17"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Fork001",
+   "to_node": "Node012",
+   "path_name": "Path_Fork001_Node012"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node012",
+   "to_node": "Fork001",
+   "path_name": "Path_Fork001_Node012"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Fork001",
+   "to_node": "Node013",
+   "path_name": "Path_Fork001_Node013"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node013",
+   "to_node": "Fork001",
+   "path_name": "Path_Fork001_Node013"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Fork001",
+   "to_node": "Node014",
+   "path_name": "Path_Fork001_Node014"
+  },
+  {
+   "campaign_template": "AZ1",
+   "from_node": "Node014",
+   "to_node": "Fork001",
+   "path_name": "Path_Fork001_Node014"
+  }
+ ]
+}

@@ -2434,17 +2434,32 @@
    {
     "campaign_template": "AZ1",
     "conversation_guid": "fa671218-aa6a-4d19-94db-38bf3f5f10af",
-    "node_id": "DuskDaughter"
+    "node_id": "DuskDaughter",
+    "trigger_json": {
+     "label": "Thunderfield - Dusk Daughter",
+     "source": "conversation_name"
+    },
+    "priority": 0
    },
    {
     "campaign_template": "AZ1",
     "conversation_guid": "c9456610-0902-42fd-881d-784286e7eef4",
-    "node_id": "ShortBuffalo"
+    "node_id": "ShortBuffalo",
+    "trigger_json": {
+     "label": "Thunderfield - Short Buffalo",
+     "source": "conversation_name"
+    },
+    "priority": 0
    },
    {
     "campaign_template": "AZ1",
     "conversation_guid": "db4b92a2-1a03-4733-92cb-ba36c1ea5f7e",
-    "node_id": "WhisperingBreeze"
+    "node_id": "WhisperingBreeze",
+    "trigger_json": {
+     "label": "Thunderfield - Whispering Breeze",
+     "source": "conversation_name"
+    },
+    "priority": 0
    },
    {
     "campaign_template": "AZ1",

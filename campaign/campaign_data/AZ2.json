@@ -2822,17 +2822,32 @@
    {
     "campaign_template": "AZ2",
     "conversation_guid": "083afeb8-7a00-46b7-a348-d0d31c89bbd5",
-    "node_id": "Margugram"
+    "node_id": "Margugram",
+    "trigger_json": {
+     "label": "Return to Necropolis - Margugram",
+     "source": "conversation_name"
+    },
+    "priority": 0
    },
    {
     "campaign_template": "AZ2",
     "conversation_guid": "cdf280f6-acf1-492d-ad72-8fb3e8fc4f1c",
-    "node_id": "Drokkord"
+    "node_id": "Drokkord",
+    "trigger_json": {
+     "label": "Return to Necropolis - Drokkord",
+     "source": "conversation_name"
+    },
+    "priority": 0
    },
    {
     "campaign_template": "AZ2",
     "conversation_guid": "83f1123f-af7e-4798-86b3-2834fe95d383",
-    "node_id": "Iddi"
+    "node_id": "Iddi",
+    "trigger_json": {
+     "label": "Return to Necropolis - Iddi",
+     "source": "conversation_name"
+    },
+    "priority": 0
    }
   ],
   "quest_conversations": [

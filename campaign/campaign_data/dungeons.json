@@ -567,7 +567,14 @@
     "node_id": "NodeC",
     "conversation_name": "Fort Romor - Barracks Success",
     "priority": 3,
-    "enabled": true
+    "enabled": true,
+    "trigger_json": {
+     "label": "Barracks - success",
+     "source": "import_dungeons.py",
+     "tags": [
+      "outcome:success"
+     ]
+    }
    },
    {
     "campaign_template": "Fort Romor",
@@ -602,7 +609,14 @@
     "node_id": "NodeD",
     "conversation_name": "Fort Romor - Command Post Success",
     "priority": 3,
-    "enabled": true
+    "enabled": true,
+    "trigger_json": {
+     "label": "Command Post - success",
+     "source": "import_dungeons.py",
+     "tags": [
+      "outcome:success"
+     ]
+    }
    },
    {
     "campaign_template": "Fort Romor",
@@ -856,7 +870,14 @@
     "node_id": "NodeB",
     "conversation_name": "Fort Romor - Stables Success",
     "priority": 3,
-    "enabled": true
+    "enabled": true,
+    "trigger_json": {
+     "label": "Stables - success",
+     "source": "import_dungeons.py",
+     "tags": [
+      "outcome:success"
+     ]
+    }
    },
    {
     "campaign_template": "The Smoldering Dead",
