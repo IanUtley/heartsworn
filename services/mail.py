@@ -541,3 +541,33 @@ def handle_delete(handler, target, instance, reqid, comp, session_id,
                         reqid, target, instance, conh, "ServiceMail",
                         SERVICE_MAIL_UID)
     log_req(f"    Sent Mail.Claim response ({sz}b)")
+
+
+def _ping_mail_server(handler, target, instance, data_type, reqid, comp, session_id,
+                      conh, inner_obj, inner_bytes, raw_data_wrapper_bytes):
+    import hconnect_server as _hc
+    _hc.log_req(">>> Respond PingMailServer (dt=9001)")
+    timestamp = time.strftime("%m/%d/%Y %H:%M:%S", time.gmtime())
+    resp_inner = _hc.encode_ping_mail_server_response(timestamp)
+    resp_body = _hc.compress_gzip(resp_inner) if comp else resp_inner
+    resp_reqid = reqid | 1
+    dw_bytes = _hc.encode_datawrapper(resp_reqid, data_type, resp_body, comp, session_id)
+    issuer_str = f"0.0.0.0.ServiceMail.{_hc.SERVICE_MAIL_UID}.ServicePlayer.{handler.client_uid}.{resp_reqid}"
+    handler.scnt += 1
+    handler.send({
+        "issuer": issuer_str,
+        "target": target,
+        "instance": instance,
+        "reqid": resp_reqid,
+        "c": comp,
+        "conh": conh,
+        "sid": handler.sid,
+    }, dw_bytes)
+    _hc.log_req(f"    Sent PingMailServer response ({len(dw_bytes)}b)")
+
+
+def handle_ping_mail_server(handler, target, instance, reqid, comp, session_id, conh,
+                             *, inner_obj, inner_bytes, **_kw):
+    """PingMailServer (9001): reply with the server timestamp."""
+    return _ping_mail_server(handler, target, instance, 9001, reqid, comp,
+                             session_id, conh, inner_obj, inner_bytes, b"")

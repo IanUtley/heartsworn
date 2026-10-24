@@ -1,13 +1,8 @@
-"""ServiceProfile requests.
+"""ServiceProfile requests (client envelopes, replay lists, deck templates).
 
-Moved out of hconnect_server.HCPHandler._handle_service_request_legacy.
+Registered in ``services/__init__.py``; routed by ``data_type``.
 """
 
-from application.response_encoding import compress_gzip
-from application.response_encoding import encode_datawrapper
-from application.response_encoding import encode_profile_response
-from db import hexdump
-from db import log_req
 import json
 
 
@@ -66,6 +61,14 @@ def handle_serviceprofile_80000(handler, target, instance, data_type, reqid, com
 
 
 
-LEGACY_HANDLERS = {
+PROFILE_REQUEST_HANDLERS = {
     80000: handle_serviceprofile_80000,
 }
+
+
+def handle_profile_request(handler, target, instance, reqid, comp, session_id, conh,
+                           *, inner_obj, inner_bytes, data_type, **_kw):
+    """Route one ServiceProfile request to its handler by ``data_type``."""
+    return PROFILE_REQUEST_HANDLERS[data_type](
+        handler, target, instance, data_type, reqid, comp, session_id, conh,
+        inner_obj, inner_bytes, b"")

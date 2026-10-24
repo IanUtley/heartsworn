@@ -1,14 +1,8 @@
 """ServiceCampaign requests (Siege, Main campaign, cluster picks).
 
-Moved out of hconnect_server.HCPHandler._handle_service_request_legacy.
+Registered in ``services/__init__.py``; routed by ``data_type``.
 """
 
-from application.response_encoding import compress_gzip
-from application.response_encoding import encode_datawrapper
-from application.response_encoding import encode_objfmt_response
-from db import _db
-from db import log_req
-import campaign
 import json
 
 
@@ -82,8 +76,17 @@ def handle_resolve_service_uids_140000(handler, target, instance, data_type, req
 
 
 
-LEGACY_HANDLERS = {
+CAMPAIGN_REQUEST_HANDLERS = {
     150000: handle_servicecampaign_siege_150000,
     110000: handle_campaign_adventure_system_110000,
     140000: handle_resolve_service_uids_140000,
 }
+
+
+def handle_campaign_service_request(handler, target, instance, reqid, comp,
+                                    session_id, conh, *, inner_obj, inner_bytes,
+                                    data_type, **_kw):
+    """Route one ServiceCampaign request to its handler by ``data_type``."""
+    return CAMPAIGN_REQUEST_HANDLERS[data_type](
+        handler, target, instance, data_type, reqid, comp, session_id, conh,
+        inner_obj, inner_bytes, b"")

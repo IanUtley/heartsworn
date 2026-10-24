@@ -1,6 +1,7 @@
 """Deck and champion profile requests (create, update, delete, talents).
 
-Moved out of hconnect_server.HCPHandler._handle_service_request_legacy.
+Registered in ``services/__init__.py``; each request type is routed to its
+handler by ``data_type`` through :data:`DECK_EDIT_HANDLERS`.
 """
 
 from application.champion_defaults import _RACE_DECK_MAP
@@ -1219,7 +1220,7 @@ def handle_upgradeextendedartoncard_2185(handler, target, instance, data_type, r
     }, dw_bytes)
     _hc.log_req(f"    Sent UpgradeExtendedArtOnCard ({len(dw_bytes)}b, error={error})")
 
-LEGACY_HANDLERS = {
+DECK_EDIT_HANDLERS = {
     2091: handle_createnewdeckfromtemplate_2091,
     2089: handle_addnewdeck_2089,
     2095: handle_updatedeck_2095,
@@ -1230,3 +1231,11 @@ LEGACY_HANDLERS = {
     2037: handle_updatechampiontalents_2037,
     2185: handle_upgradeextendedartoncard_2185,
 }
+
+
+def handle_deck_edit(handler, target, instance, reqid, comp, session_id, conh,
+                     *, inner_obj, inner_bytes, data_type, **_kw):
+    """Route one deck-edit request to its handler by ``data_type``."""
+    return DECK_EDIT_HANDLERS[data_type](
+        handler, target, instance, data_type, reqid, comp, session_id, conh,
+        inner_obj, inner_bytes, b"")

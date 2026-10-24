@@ -464,7 +464,7 @@ def test_advance_to_priority_stops_when_a_champion_has_fallen():
 
 
 def test_add_deck_without_a_logged_in_user_is_rejected_with_an_error_reply():
-    from services.legacy_decks import handle_addnewdeck_2089
+    from services.deck_editing import handle_addnewdeck_2089
     from tests.tests_combat import HandlerStub
 
     class _Handler(HandlerStub):
@@ -788,7 +788,7 @@ def test_legal_targets_offers_the_ability_source_for_a_self_target_template():
 
 def test_add_deck_saves_the_named_deck_and_replies_with_it():
     import hconnect_server
-    from services.legacy_decks import handle_addnewdeck_2089
+    from services.deck_editing import handle_addnewdeck_2089
     db = make_db()
     db.execute("INSERT OR IGNORE INTO users (id, name, gold, platinum) VALUES (5, 'deck', 0, 0)")
     db.commit()
@@ -1721,7 +1721,7 @@ def test_fra_specs_carry_every_card_of_the_arena_decks(tmp_path):
 def test_opening_a_starter_pack_consumes_it_and_replies_to_the_client():
     import db as shared
     from profile_db import db_add_inventory, db_inventory_item
-    from services.legacy_store import handle_opencardpack_2127
+    from services.chest_requests import handle_opencardpack_2127
     import hconnect_server
     db = make_db()
     previous = shared._db
@@ -2278,7 +2278,7 @@ def test_equipment_filter_matches_a_card_that_requires_equipment_only():
 def test_adding_a_champion_saves_it_for_the_user_and_replies():
     import db as shared
     import hconnect_server
-    from services.legacy_decks import handle_addchampion_2033
+    from services.deck_editing import handle_addchampion_2033
     db = make_db()
     previous = shared._db
     shared._db = db

@@ -3,14 +3,7 @@
 Moved out of hconnect_server.HCPHandler._handle_service_request_legacy.
 """
 
-from application.response_encoding import compress_gzip
-from application.response_encoding import encode_datawrapper
-from application.response_encoding import encode_get_unread_mail_count_response
-from application.response_encoding import encode_objfmt_response
-from application.response_encoding import encode_ping_mail_server_response
 from binascii import hexlify
-from db import log_req
-from profile_db import db_claim_mail_for_user
 import io
 import struct
 import time
@@ -352,30 +345,6 @@ def handle_claim_attachments_from_a_mail_60003(handler, target, instance, data_t
 
 
 # PingMailServer (9001)
-def handle_pingmailserver_9001(handler, target, instance, data_type, reqid, comp, session_id,
-                               conh, inner_obj, inner_bytes, raw_data_wrapper_bytes):
-    import hconnect_server as _hc
-    _hc.log_req(">>> Respond PingMailServer (dt=9001)")
-    timestamp = time.strftime("%m/%d/%Y %H:%M:%S", time.gmtime())
-    resp_inner = _hc.encode_ping_mail_server_response(timestamp)
-    resp_body = _hc.compress_gzip(resp_inner) if comp else resp_inner
-    resp_reqid = reqid | 1
-    dw_bytes = _hc.encode_datawrapper(resp_reqid, data_type, resp_body, comp, session_id)
-    issuer_str = f"0.0.0.0.ServiceMail.{_hc.SERVICE_MAIL_UID}.ServicePlayer.{handler.client_uid}.{resp_reqid}"
-    handler.scnt += 1
-    handler.send({
-        "issuer": issuer_str,
-        "target": target,
-        "instance": instance,
-        "reqid": resp_reqid,
-        "c": comp,
-        "conh": conh,
-        "sid": handler.sid,
-    }, dw_bytes)
-    _hc.log_req(f"    Sent PingMailServer response ({len(dw_bytes)}b)")
-
-
-
 LEGACY_HANDLERS = {
     60007: handle_getunreadmailcount_60007,
     60002: handle_get_mail_list_60002,
@@ -383,5 +352,4 @@ LEGACY_HANDLERS = {
     60004: handle_mail_markread_60004,
     60006: handle_mail_markdelete_60006,
     60003: handle_claim_attachments_from_a_mail_60003,
-    9001: handle_pingmailserver_9001,
 }

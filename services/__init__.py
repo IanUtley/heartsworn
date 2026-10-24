@@ -15,6 +15,15 @@ _SERVICE_TABLE = {
     # Decks
     2081: ("services.decks", "handle_get_player_decks", {}),
     2083: ("services.decks", "handle_get_deck_info", {}),
+    2033: ("services.deck_editing", "handle_deck_edit", {"data_type": 2033}),
+    2035: ("services.deck_editing", "handle_deck_edit", {"data_type": 2035}),
+    2037: ("services.deck_editing", "handle_deck_edit", {"data_type": 2037}),
+    2043: ("services.deck_editing", "handle_deck_edit", {"data_type": 2043}),
+    2089: ("services.deck_editing", "handle_deck_edit", {"data_type": 2089}),
+    2091: ("services.deck_editing", "handle_deck_edit", {"data_type": 2091}),
+    2095: ("services.deck_editing", "handle_deck_edit", {"data_type": 2095}),
+    2185: ("services.deck_editing", "handle_deck_edit", {"data_type": 2185}),
+    2187: ("services.deck_editing", "handle_deck_edit", {"data_type": 2187}),
 
     # Mail
     60001: ("services.mail", "handle_send_mail", {}),
@@ -25,6 +34,7 @@ _SERVICE_TABLE = {
     60006: ("services.mail", "handle_claim", {}),
     60007: ("services.mail", "handle_get_unread", {}),
     60008: ("services.mail", "handle_mark_sent_delete", {}),
+    9001: ("services.mail", "handle_ping_mail_server", {}),
 
     # Social / friends
     2149: ("services.social", "handle_add_friend", {}),
@@ -48,6 +58,13 @@ _SERVICE_TABLE = {
     6009: ("services.store", "handle_get_items", {}),
     6011: ("services.store", "handle_purchase", {}),
     6013: ("services.store", "handle_redeem", {}),
+    80000: ("services.profile_requests", "handle_profile_request", {"data_type": 80000}),
+    110000: ("services.campaign_requests", "handle_campaign_service_request", {"data_type": 110000}),
+    140000: ("services.campaign_requests", "handle_campaign_service_request", {"data_type": 140000}),
+    150000: ("services.campaign_requests", "handle_campaign_service_request", {"data_type": 150000}),
+    2049: ("services.chest_requests", "handle_chest_request", {"data_type": 2049}),
+    2127: ("services.chest_requests", "handle_chest_request", {"data_type": 2127}),
+    2129: ("services.chest_requests", "handle_chest_request", {"data_type": 2129}),
 
     # Auction House. The implementation is intentionally still a stub, but
     # its API surface belongs in the live request registry.
