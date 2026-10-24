@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Card Editor</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body class="cards-page">
+<header class="toolbar">
+  <strong>Card Editor</strong>
+  <span id="status" class="status">Loading…</span>
+</header>
+<main class="cards-main">
+  <div id="tab-cards" class="tab-body"></div>
+</main>
+<script type="module">
+  // The client's card painter and atlas reader (web_client/static), loaded as modules.
+  import "/shared/hex_assets.js";
+  import * as CardFace from "/shared/card_face.js";
+  window.CardFace = CardFace;
+</script>
+<script src="/static/cards.js"></script>
+</body>
+</html>
