@@ -24,15 +24,11 @@ from typing import Any
 
 import ability_ir
 import ability_ir_clauses as irc
+import ability_ir_conditions
 import ability_ir_filters as irf
 from ability_ir_effects import Node, Raw
 
 ROOT_KEY_EFFECT_LIST = "m_AbilityEffectList"
-
-
-def _is_condition(record_type: str) -> bool:
-    return record_type.startswith("Game.Shared.Mechanics.") and (
-        ".Conditions." in record_type or record_type.endswith("Condition"))
 
 
 def _value_from_record(key: str, value: Any) -> Any:
@@ -52,8 +48,8 @@ def _value_from_record(key: str, value: Any) -> Any:
     if record_type.startswith(ability_ir.RECORD_PREFIX) and \
             record_type.rsplit(".", 1)[-1] in ability_ir._KIND_BY_CLASS:
         return ability_ir.from_record(value)
-    if _is_condition(record_type):
-        return node_from_record(value)
+    if ability_ir_conditions.is_condition_type(record_type):
+        return ability_ir_conditions.node_from_record(value)
     return Raw(value)
 
 

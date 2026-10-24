@@ -206,6 +206,15 @@ An ability root is one `AbilityTemplate` record: its costs, options, trigger, co
 
 The condition glossary is in `docs/ABILITY_CONDITION_GLOSSARY.md`. Conditions have names but almost no descriptions in the client, so most of their meaning still has to be confirmed from the code.
 
+## Condition layer
+
+`campaign_editor/ability_ir_conditions.py` owns conditions. The ability root hands its conditions to it.
+
+- **What it covers:** ability and trigger conditions (`Abilities.Conditions`, `Triggers.Conditions`, And/Or/Not), wherever they appear, and the 538 `AbilityEffectConditionTemplate` wrappers, each of which names one condition.
+- **Shape:** each condition is a `Node` with its Records class kept in `record_type`. Trigger selectors such as `TriggerSource` stay as the stored strings.
+- **Nested values:** conditions recurse, filters go to the filter layer, variables and targets to their layers, and GUID wrappers to `Ref` or `NoRef`. Serialized TACs stay `Raw`.
+- **Coverage:** every wrapper round-trips, and every condition in the ability roots round-trips (through the root test). No effect or target template contains a condition, so those layers do not need one.
+
 ## Condition meanings from the client code
 
 Read from `hex-private/HexClient/Assembly-CSharp-firstpass/Game/Shared/Mechanics/Triggers/Conditions/` and `.../Abilities/Conditions/`. These cover the fields the condition glossary lists as unknown, because their annotations sit on a differently named member (for example, `m_TriggerTest` is annotated on the property `TestTriggerOn`).
