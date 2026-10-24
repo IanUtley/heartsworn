@@ -204,7 +204,7 @@ An ability root is one `AbilityTemplate` record: its costs, options, trigger, co
 - **Field names:** the filter layer's conversion. Every key in the ability records, including nested ones, inverts exactly. The conversion now splits a run of capitals before a lowercase word, so `m_AIHints` becomes `ai_hints`.
 - **Coverage:** all 8,995 decodable ability roots round-trip exactly.
 
-Not covered yet: a glossary for the condition fields (the effect glossary covers only effects and modifiers), and the semantic meaning of each condition class.
+The condition glossary is in `docs/ABILITY_CONDITION_GLOSSARY.md`. Conditions have names but almost no descriptions in the client, so most of their meaning still has to be confirmed from the code.
 
 ## Per-copy values (`CardStats`)
 
