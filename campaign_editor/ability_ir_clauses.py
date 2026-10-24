@@ -22,14 +22,18 @@ NULL_GUID = "00000000-0000-0000-0000-000000000000"
 
 @dataclass(frozen=True)
 class Ref:
-    """A reference to a Records object by GUID."""
+    """A reference to a Records object by GUID. ``record_type`` is the stored ``_t``
+    when the reference carries one (the ability root's ResourceIds do)."""
 
     guid: str
+    record_type: str | None = None
 
 
 @dataclass(frozen=True)
 class NoRef:
     """The null GUID: a reference to nothing (for example, no condition)."""
+
+    record_type: str | None = None
 
 
 @dataclass
@@ -40,21 +44,26 @@ class Clause:
 
 
 def _is_guid_wrapper(value: Any) -> bool:
-    return isinstance(value, dict) and set(value) == {"m_Guid"}
+    return isinstance(value, dict) and set(value) in ({"m_Guid"}, {"_t", "m_Guid"})
 
 
 def _value_from_record(value: Any) -> Any:
     if _is_guid_wrapper(value):
         guid = str(value["m_Guid"] or "")
-        return NoRef() if guid in ("", NULL_GUID) else Ref(guid)
+        record_type = value.get("_t")
+        if guid in ("", NULL_GUID):
+            return NoRef(record_type)
+        return Ref(guid, record_type)
     return value
 
 
 def _value_to_record(value: Any) -> Any:
-    if isinstance(value, NoRef):
-        return {"m_Guid": NULL_GUID}
-    if isinstance(value, Ref):
-        return {"m_Guid": value.guid}
+    if isinstance(value, (Ref, NoRef)):
+        guid = value.guid if isinstance(value, Ref) else NULL_GUID
+        wrapper = {"m_Guid": guid}
+        if value.record_type is not None:
+            wrapper = {"_t": value.record_type, **wrapper}
+        return wrapper
     return value
 
 

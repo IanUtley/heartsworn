@@ -115,6 +115,9 @@ def _snake(key: str) -> str:
     # A stored underscore becomes a double underscore, so the inverse can tell it
     # from the word breaks that snake_case adds.
     stem = stem.replace("_", "__")
+    # Split a run of capitals from the word after it (AIHints -> AI_Hints), then
+    # split a lowercase letter or digit from the capital after it.
+    stem = re.sub(r"(?<=[A-Z])(?=[A-Z][a-z])", "_", stem)
     return re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", stem).lower()
 
 

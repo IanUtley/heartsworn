@@ -194,6 +194,18 @@ A clause is one entry of an ability's `m_AbilityEffectList`: it applies one effe
 
 Not covered yet: the ability root (triggers, costs, options and the rest of `AbilityTemplate`).
 
+## Ability roots and conditions
+
+An ability root is one `AbilityTemplate` record: its costs, options, trigger, conditions, and the lists that link to its targets, variables and clauses. `campaign_editor/ability_ir_root.py` converts it.
+
+- **Shape:** the root and every condition are `Node` objects, with the Records class kept in `record_type`. Clauses (`m_AbilityEffectList`) go through the clause layer.
+- **Conditions:** two families. Ability conditions (`Abilities.Conditions.*`, `AndAbilityCondition`, `OrAbilityCondition`) and trigger conditions (`Triggers.Conditions.*`, including `AndTriggerCondition`, `OrTriggerCondition`, `NotTriggerCondition`). Each class is a kind named from the class.
+- **References:** a `ResourceId` may carry its own type tag. It becomes a `Ref` with that tag, so it round-trips.
+- **Field names:** the filter layer's conversion. Every key in the ability records, including nested ones, inverts exactly. The conversion now splits a run of capitals before a lowercase word, so `m_AIHints` becomes `ai_hints`.
+- **Coverage:** all 8,995 decodable ability roots round-trip exactly.
+
+Not covered yet: a glossary for the condition fields (the effect glossary covers only effects and modifiers), and the semantic meaning of each condition class.
+
 ## Per-copy values (`CardStats`)
 
 `card_instance_bits.CardStats` is `Dictionary<ECardStatType, int>`, one entry per owned card. The client never displays it, and the card-back panel that would show it (`GoCardDoubleBack`) has empty build methods. The server sends it as an empty dictionary (`encoder.py`) and handles neither `IncrementCardStats` nor `GetCardInstanceInfo`, so the client's increments are dropped today.

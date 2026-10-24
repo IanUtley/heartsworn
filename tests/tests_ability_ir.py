@@ -17,6 +17,7 @@ import ability_ir as ir  # noqa: E402
 import ability_ir_filters as irf  # noqa: E402
 import ability_ir_effects as ire  # noqa: E402
 import ability_ir_clauses as irc  # noqa: E402
+import ability_ir_root as irr  # noqa: E402
 
 
 def _abilities():
@@ -152,6 +153,27 @@ class AbilityIRClauses(unittest.TestCase):
                     self.assertEqual(irc.clause_to_record(irc.clause_from_record(stored)), stored)
                     checked += 1
         self.assertGreater(checked, 16000)
+
+
+class AbilityIRRoots(unittest.TestCase):
+    def test_every_ability_root_round_trips(self):
+        from gamedata.records import deserialize_line  # noqa: E402
+        from paths import RECORDS
+        if not RECORDS.exists():
+            raise unittest.SkipTest("Records not present")
+        checked = 0
+        with (RECORDS / "AbilityTemplate.jsonl").open(encoding="utf-8") as stream:
+            for line in stream:
+                if not line.strip():
+                    continue
+                try:
+                    record = deserialize_line(line).to_dict()
+                except Exception:
+                    continue  # the editor's loader skips these too
+                self.assertEqual(irr.node_to_record(irr.node_from_record(record)), record,
+                                 record.get("m_Name"))
+                checked += 1
+        self.assertGreater(checked, 8900)
 
 
 if __name__ == "__main__":
