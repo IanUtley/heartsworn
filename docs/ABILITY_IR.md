@@ -161,6 +161,32 @@ Every variable also carries `m_Name` and `m_DefaultValue`. `m_RequiresPlayerInpu
 4. **Expression grammar:** the parser needs the operators that appear in `m_ExpressionText` across the data. That has not been counted yet.
 5. **Coverage:** each mapping above should be checked against the Records. Every class in the table should map to exactly one IR form, and every ability using the class should compile.
 
+## Card filters
+
+Filters are the `Game.Shared.Mechanics.Cards.Filters.*` classes: combinators (`all_of`, `any_of`, `not`) over leaf tests such as `troop` or `in_zone`. Each class is one IR kind in `campaign_editor/ability_ir_filters.py` (65 kinds).
+
+- **Field names** are the stored names with `m_` dropped and CamelCase turned into snake_case (`m_TargetFilters` → `target_filters`). Two acronyms (`AI`, `TAC`) are restored on the way back. Every stored key is checked to invert exactly.
+- **Nested values** keep their shape: a filter becomes a `Filter` node, an ability variable goes through the variable layer, and any other object (serialized TACs, counter types) is kept as `Raw`.
+- **Coverage:** all 5,228 top-level filters in the Records round-trip exactly. Filters nested inside other filters are checked as part of their parent.
+
+## Per-copy values (`CardStats`)
+
+`card_instance_bits.CardStats` is `Dictionary<ECardStatType, int>`, one entry per owned card. The client never displays it, and the card-back panel that would show it (`GoCardDoubleBack`) has empty build methods. The server sends it as an empty dictionary (`encoder.py`) and handles neither `IncrementCardStats` nor `GetCardInstanceInfo`, so the client's increments are dropped today.
+
+| Key | Name in client | Meaning in the IR (to confirm) |
+|---|---|---|
+| 1 | `MatchesPlayed` | matches the copy has been in |
+| 2 | `MatchesWon` | matches won with the copy |
+| 3 | `MatchesLost` | matches lost with the copy |
+| 4 | `Experience` | experience for the card-back XP bar |
+| 5 | `MaxDamageDealt` | highest damage the copy has dealt |
+| 6 | `MaxDamageRecieved` | highest damage the copy has taken |
+| 7 and up | none | custom slots, IR name `custom.N` |
+
+- **Keys 1 to 6** keep their client names, so the card back would show real values if it were ever built. Changing a meaning is a design choice.
+- **Keys 7 and up** have no name in the client. The client's enum reader decodes a number straight into the enum's value, so an unnamed key should load without error. This is from reading the decoder, not from running the client, so it stays unverified until a client log shows a copy with a custom key.
+- **Client increments** are dropped by the server today. If the server starts recording these values, it must ignore increments for keys it owns.
+
 ## Non-goals
 
 - Card-specific variable classes are not mapped one-to-one. They become generic stat reads, so no card name appears in the IR (per AGENTS.md).

@@ -14,6 +14,7 @@ from tests.test_db import fresh_database  # noqa: E402
 SRC = fresh_database()
 
 import ability_ir as ir  # noqa: E402
+import ability_ir_filters as irf  # noqa: E402
 
 
 def _abilities():
@@ -35,6 +36,23 @@ def _target_records():
     if not (RECORDS / "AbilityTargetTemplate.jsonl").exists():
         raise unittest.SkipTest("Records not present")
     return list(card_abilities._iter_records("AbilityTargetTemplate"))
+
+
+FILTER_SECTIONS = ("AbilityTemplate", "AbilityTargetTemplate",
+                   "AbilityEffectTemplate", "AbilityEffectConditionTemplate")
+
+
+def _top_level_filters(node):
+    """Filter records under ``node``, not descending into a filter once found."""
+    if isinstance(node, dict):
+        if str(node.get("_t") or "").startswith(irf.FILTER_PREFIX):
+            yield node
+            return
+        for value in node.values():
+            yield from _top_level_filters(value)
+    elif isinstance(node, list):
+        for item in node:
+            yield from _top_level_filters(item)
 
 
 class AbilityIRVariables(unittest.TestCase):
@@ -67,6 +85,29 @@ class AbilityIRTargets(unittest.TestCase):
             kinds.add(target.kind)
             self.assertEqual(ir.target_to_record(target), record, record.get("m_TemplateId"))
         self.assertEqual(kinds, set(ir.TARGET_KINDS))
+
+
+class AbilityIRFilters(unittest.TestCase):
+    def test_every_filter_in_the_ability_sections_round_trips(self):
+        from gamedata.records import deserialize_line  # noqa: E402
+        from paths import RECORDS
+        if not RECORDS.exists():
+            raise unittest.SkipTest("Records not present")
+        checked = set()
+        for section in FILTER_SECTIONS:
+            with (RECORDS / f"{section}.jsonl").open(encoding="utf-8") as stream:
+                for line in stream:
+                    if not line.strip():
+                        continue
+                    try:
+                        record = deserialize_line(line).to_dict()
+                    except Exception:
+                        continue  # the editor's loader skips these too
+                    for filt in _top_level_filters(record):
+                        self.assertEqual(irf.filter_to_record(irf.filter_from_record(filt)), filt,
+                                         f"{section}: {filt.get('_t')}")
+                        checked.add(filt["_t"])
+        self.assertTrue(checked)
 
 
 if __name__ == "__main__":

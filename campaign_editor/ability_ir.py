@@ -84,6 +84,8 @@ KINDS: dict[str, tuple[str, dict[str, str], dict[str, Any]]] = {
     "resources": ("SourcePlayerResourceAbilityVariable", {
         "temporary": "m_LookUpTemporaryResources"}, {}),
     "charges": ("SourcePlayerChargeVariable", {}, {}),
+    # A reference to a root variable by name (the spec's ``$name``).
+    "input_ref": ("EffectInputVariable", {"name": "m_InputVariableName"}, {}),
 }
 
 _KIND_BY_CLASS = {cls: kind for kind, (cls, _, _) in KINDS.items()}
