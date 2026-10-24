@@ -20,6 +20,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import ability_ir
+from ability_ir import Raw
 
 FILTER_PREFIX = "Game.Shared.Mechanics.Cards.Filters."
 
@@ -93,13 +94,6 @@ FILTER_KINDS: dict[str, str] = {
 }
 
 _KIND_BY_CLASS = {cls: kind for kind, cls in FILTER_KINDS.items()}
-
-
-@dataclass(frozen=True)
-class Raw:
-    """A nested object that is neither a filter nor a variable, kept verbatim."""
-
-    value: dict[str, Any]
 
 
 @dataclass

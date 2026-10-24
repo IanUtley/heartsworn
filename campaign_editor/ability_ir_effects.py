@@ -21,19 +21,13 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import ability_ir
+from ability_ir import Raw
 import ability_ir_filters as irf
 
 ABILITY_PREFIX = ability_ir.RECORD_PREFIX
 MODIFIER_PREFIX = "Game.Shared.Mechanics.Modifiers."
 EFFECT_SUFFIX = "EffectTemplate"
 _EFFECT_STEMS = ("AbilityEffectTemplate", "EffectTemplate")
-
-
-@dataclass(frozen=True)
-class Raw:
-    """A nested object the IR does not model, kept verbatim."""
-
-    value: dict[str, Any]
 
 
 @dataclass

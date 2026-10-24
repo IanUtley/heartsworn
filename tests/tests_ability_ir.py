@@ -19,6 +19,7 @@ import ability_ir_effects as ire  # noqa: E402
 import ability_ir_clauses as irc  # noqa: E402
 import ability_ir_root as irr  # noqa: E402
 import ability_ir_conditions as irk  # noqa: E402
+import ability_ir_json as irj  # noqa: E402
 
 
 def _abilities():
@@ -196,6 +197,28 @@ class AbilityIRConditions(unittest.TestCase):
                                  record.get("m_Name"))
                 checked += 1
         self.assertGreater(checked, 500)
+
+
+class AbilityIRJson(unittest.TestCase):
+    def test_every_ability_root_survives_json_text(self):
+        from gamedata.records import deserialize_line  # noqa: E402
+        from paths import RECORDS
+        if not RECORDS.exists():
+            raise unittest.SkipTest("Records not present")
+        checked = 0
+        with (RECORDS / "AbilityTemplate.jsonl").open(encoding="utf-8") as stream:
+            for line in stream:
+                if not line.strip():
+                    continue
+                try:
+                    record = deserialize_line(line).to_dict()
+                except Exception:
+                    continue  # the editor's loader skips these too
+                text = json.dumps(irj.to_json(irr.node_from_record(record)))
+                rebuilt = irr.node_to_record(irj.from_json(json.loads(text)))
+                self.assertEqual(rebuilt, record, record.get("m_Name"))
+                checked += 1
+        self.assertGreater(checked, 8900)
 
 
 if __name__ == "__main__":

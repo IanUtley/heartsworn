@@ -1155,10 +1155,15 @@ def decompile(guid: str) -> dict[str, Any]:
     """An ability's sentences, the structure the form shows, and whether compiling the
     sentences gives the same records back (``exact``)."""
     guid = abilities._guid(guid)
-    overlay = campaign_data.load_ability_overlay()
-    root = _record("AbilityTemplate", guid, overlay=overlay)
+    root = _record("AbilityTemplate", guid, overlay=campaign_data.load_ability_overlay())
     if root is None:
         raise LookupError(f"no ability {guid}")
+    return describe_root(guid, root)
+
+
+def describe_root(guid: str, root: dict[str, Any]) -> dict[str, Any]:
+    """``decompile`` for a root record already in hand (the editor's tree, unsaved)."""
+    overlay = campaign_data.load_ability_overlay()
     try:
         parsed = _read_root(root, overlay)
     except Unsupported as error:

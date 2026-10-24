@@ -95,6 +95,13 @@ KINDS: dict[str, tuple[str, dict[str, str], dict[str, Any]]] = {
 _KIND_BY_CLASS = {cls: kind for kind, (cls, _, _) in KINDS.items()}
 
 
+@dataclass(frozen=True)
+class Raw:
+    """A nested object the IR does not model, kept verbatim (for example a serialized TAC)."""
+
+    value: dict[str, Any]
+
+
 class UnknownVariable(ValueError):
     """A Records variable whose class or fields the IR does not describe."""
 

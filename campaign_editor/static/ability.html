@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ability Editor</title>
+<style>
+  :root { --bg: #f7f5f0; --fg: #1d1b18; --muted: #6d675e; --line: #d9d3c7; --accent: #6b4e2e; --bad: #9b2c1f; --ok: #2f6b3a; }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) { --bg: #1d1b18; --fg: #efeae0; --muted: #a39c8f; --line: #433e36; --accent: #d1a86f; --bad: #e07a6c; --ok: #7fc08e; }
+  }
+  :root[data-theme="dark"] { --bg: #1d1b18; --fg: #efeae0; --muted: #a39c8f; --line: #433e36; --accent: #d1a86f; --bad: #e07a6c; --ok: #7fc08e; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.45 system-ui, sans-serif; }
+  header { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 12px 16px; border-bottom: 1px solid var(--line); }
+  header h1 { font-size: 17px; margin: 0 12px 0 0; }
+  main { display: grid; grid-template-columns: minmax(260px, 1fr) minmax(320px, 1.3fr); gap: 16px; padding: 16px; }
+  @media (max-width: 760px) { main { grid-template-columns: 1fr; } }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 0 0 8px; }
+  textarea, input, select { font: inherit; color: var(--fg); background: transparent; border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; box-sizing: border-box; }
+  textarea { width: 100%; min-height: 260px; resize: vertical; }
+  input[type=text], input[type=number], select { width: 100%; }
+  button { font: inherit; color: var(--fg); background: transparent; border: 1px solid var(--line); border-radius: 6px; padding: 5px 10px; cursor: pointer; }
+  button.primary { border-color: var(--accent); color: var(--accent); }
+  button:disabled { opacity: .45; cursor: default; }
+  .row { display: grid; grid-template-columns: 110px 1fr; gap: 8px; align-items: center; margin-bottom: 8px; }
+  .clause { border: 1px solid var(--line); border-radius: 8px; padding: 10px; margin-bottom: 10px; }
+  .clause header { border: 0; padding: 0 0 8px; justify-content: space-between; }
+  .clause .tools button { padding: 2px 7px; }
+  .problems { margin: 8px 0 0; padding-left: 18px; color: var(--bad); }
+  .problems:empty { display: none; }
+  .status { color: var(--muted); margin-left: auto; }
+  .status.ok { color: var(--ok); }
+  .status.bad { color: var(--bad); }
+  .hidden { display: none; }
+  .note { color: var(--muted); }
+  .reasons li { color: var(--bad); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Ability Editor</h1>
+  <input id="guid" type="text" placeholder="ability GUID" style="width: 340px;">
+  <button id="open">Open</button>
+  <button id="new">New</button>
+  <button id="save" class="primary" disabled>Save</button>
+  <span id="status" class="status">Enter an ability GUID, or start a new one.</span>
+</header>
+
+<main>
+  <section>
+    <h2>Sentences</h2>
+    <textarea id="sentences" spellcheck="false" placeholder="When this enters play, draw a card."></textarea>
+    <ul id="problems" class="problems"></ul>
+  </section>
+
+  <section>
+    <h2>Form</h2>
+    <div id="form-empty" class="note hidden">This ability has no form: the sentences cannot show all of it, so it can only be edited in the field editor.<ul id="reasons" class="reasons"></ul></div>
+    <div id="form">
+      <div class="row"><label for="trigger">Trigger</label>
+        <select id="trigger"></select></div>
+      <div class="row"><label for="settings">Settings</label>
+        <input id="settings" type="text" placeholder="charge cost 2, manual, 1 per game"></div>
+      <div class="row"><label for="requires">Requires</label>
+        <input id="requires" type="text" placeholder="you have 1 ruby threshold"></div>
+      <div id="clauses"></div>
+      <button id="add-clause">Add clause</button>
+    </div>
+  </section>
+</main>
+
+<script src="/static/ability.js"></script>
+</body>
+</html>
