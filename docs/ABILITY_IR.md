@@ -182,6 +182,18 @@ An effect template is one `...EffectTemplate` class (73 in the Records), and its
 
 Not covered yet: the clauses that apply an effect (`m_AbilityEffectList` in the ability root), and the effect conditions (`AbilityEffectConditionTemplate`).
 
+## Clauses
+
+A clause is one entry of an ability's `m_AbilityEffectList`: it applies one effect template to one of the ability's targets. Clauses have no type tag. `campaign_editor/ability_ir_clauses.py` converts them, with the filter layer's field names.
+
+- **References** are `Ref(guid)`. The null GUID is `NoRef`, so "no condition" is explicit.
+- **Used fields:** `effect_template` (a `Ref`), `target_index` and `secondary_target_index` (the ability's targets), `effect_instance_id`, `effect_group_id` and `contingent_effect_instance_id` (links between clauses), `layer`, `condition_id` (a `Ref` on 1,972 of the 16,409 clauses, `NoRef` otherwise), `duration` (`Instant`, `Permanent`, `EndOfTurn`, `WhileCardInPlay`, `BeginningOfOwnersTurn`, `AfterCardsReadyOnPlayersTurn`), and `recalculate_targets`.
+- **Unused in the Records** (always the same value): `output_variables` (always empty), `is_optional` (always 0), `vfx_event_type` (always `None`), `vfx_projectile_type` (always `None`) and `vfx_target_selection_type` (always `Targetable`). They round-trip, but nothing varies.
+- **`recalculate_targets`** is `True` or `UseDefault`. The client describes `True` as "forces the system to regenerate auto targets before running this for the first time". See `docs/ABILITY_EFFECT_GLOSSARY.md` for the other glossary entries.
+- **Coverage:** all 16,409 clauses across the ability records round-trip.
+
+Not covered yet: the ability root (triggers, costs, options and the rest of `AbilityTemplate`).
+
 ## Per-copy values (`CardStats`)
 
 `card_instance_bits.CardStats` is `Dictionary<ECardStatType, int>`, one entry per owned card. The client never displays it, and the card-back panel that would show it (`GoCardDoubleBack`) has empty build methods. The server sends it as an empty dictionary (`encoder.py`) and handles neither `IncrementCardStats` nor `GetCardInstanceInfo`, so the client's increments are dropped today.
