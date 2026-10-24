@@ -723,9 +723,13 @@ def deal_damage(context, target, amount, *, outcome=None, only_minimum=False):
                     add_card_stat(context.bstate, int(dealer), dealer_owner,
                                   "ExcessDamageDealt", excess)
         if dealer is not None:
+            # TargetPlayerId is the damaged card's controlling player
+            # (Session.cs: targetCard.m_ControllingPlayer). Champion abilities
+            # such as "When you are dealt damage" read it through
+            # TriggerPlayerControlsTarget.
             context._emit_trigger(
                 "CardDealtDamageEvent", int(dealer), int(dealer_owner),
-                target_card_id=target,
+                target_card_id=target, target_player_id=int(owner),
                 event_tac={"damage": int(amount),
                            "DamageDealt": int(amount),
                            "is_combat_damage": int(combat)})

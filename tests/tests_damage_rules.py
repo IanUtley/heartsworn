@@ -99,6 +99,13 @@ class DamageRules(unittest.TestCase):
         self.assertEqual(self.events[1][2]['event_tac']['damage'], 5)
         self.assertEqual(self.events[3], ('heal', 5, 5))
 
+    def test_card_dealt_damage_carries_damaged_cards_controller(self):
+        # Champion "When you are dealt damage" abilities match through
+        # TriggerPlayerControlsTarget, which reads the event's TargetPlayerId.
+        deal_damage(self.ctx, 1025, 2)
+        dealt = [event for event in self.events if event[0] == 'CardDealtDamageEvent']
+        self.assertEqual(dealt[0][2]['target_player_id'], 0)
+
     def test_damage_shield_add_order_spans_duration_stores(self):
         from rules_port.context import EffectContext
         effect_context = EffectContext.from_rules_port(

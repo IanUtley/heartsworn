@@ -1843,9 +1843,19 @@ def _dispatch(handler, action, args, session, pl_t, ai_t, room, username):
             target = "me"
             val = int(args[0]) if args else 0
         uid = pl_t if target == "me" else ai_t
+        # Write the authoritative battle state first, as the resource branch
+        # does; a transient event alone is overwritten by the next damage.
+        import battle_engine as _be
+        from rules_port.runtime_helpers import set_game_champion_health
+        bstate = _be.load_state(session)
+        key = "player_health" if target == "me" else "ai_health"
+        old_val = int(bstate.get(key, 20) or 0)
+        bstate[key] = val
+        _be.save_state(session, bstate)
         game = game_engine.Game(session.session_id, pl_t, ai_t)
+        set_game_champion_health(game, bstate, uid, key, val)
         ev = game_engine.ChampionHealthChangedSessionEventArgs()
-        ev.player_id = uid; ev.old_damage_value = val; ev.new_damage_value = val
+        ev.player_id = uid; ev.old_damage_value = old_val; ev.new_damage_value = val
         game._push(ev)
         _send_game_events(handler, game, session, pl_t)
         return f"Health set to {val} for {target}"

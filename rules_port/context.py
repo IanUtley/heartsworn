@@ -189,13 +189,14 @@ class EffectContext:
         return default
 
     def _emit_trigger(self, event_type, source_card_id, source_owner_id=None,
-                      target_card_id=None, **data):
+                      target_card_id=None, target_player_id=None, **data):
         """Emit one event through the active RulesPort trigger boundary."""
         if self.native_context or self.bstate.get("_rules_port_native_effect"):
             from rules_port.triggers import dispatch_trigger
             return dispatch_trigger(
                 self, str(event_type).rsplit(".", 1)[-1], source_card_id,
-                source_owner_id, target_card_id, data=data)
+                source_owner_id, target_card_id,
+                target_player_id=target_player_id, data=data)
         from abilities.framework.triggers import resolve_triggers
         return resolve_triggers(
             self.db, self.handler, self.game, self.session,
