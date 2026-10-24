@@ -15,6 +15,7 @@ SRC = fresh_database()
 
 import ability_ir as ir  # noqa: E402
 import ability_ir_filters as irf  # noqa: E402
+import ability_ir_effects as ire  # noqa: E402
 
 
 def _abilities():
@@ -108,6 +109,27 @@ class AbilityIRFilters(unittest.TestCase):
                                          f"{section}: {filt.get('_t')}")
                         checked.add(filt["_t"])
         self.assertTrue(checked)
+
+
+class AbilityIREffects(unittest.TestCase):
+    def test_every_effect_template_round_trips(self):
+        from gamedata.records import deserialize_line  # noqa: E402
+        from paths import RECORDS
+        if not RECORDS.exists():
+            raise unittest.SkipTest("Records not present")
+        checked = 0
+        with (RECORDS / "AbilityEffectTemplate.jsonl").open(encoding="utf-8") as stream:
+            for line in stream:
+                if not line.strip():
+                    continue
+                try:
+                    record = deserialize_line(line).to_dict()
+                except Exception:
+                    continue  # the editor's loader skips these too
+                self.assertEqual(ire.node_to_record(ire.node_from_record(record)), record,
+                                 record.get("_t"))
+                checked += 1
+        self.assertGreater(checked, 5000)
 
 
 if __name__ == "__main__":

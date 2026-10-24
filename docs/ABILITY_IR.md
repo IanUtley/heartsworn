@@ -169,6 +169,19 @@ Filters are the `Game.Shared.Mechanics.Cards.Filters.*` classes: combinators (`a
 - **Nested values** keep their shape: a filter becomes a `Filter` node, an ability variable goes through the variable layer, and any other object (serialized TACs, counter types) is kept as `Raw`.
 - **Coverage:** all 5,228 top-level filters in the Records round-trip exactly. Filters nested inside other filters are checked as part of their parent.
 
+## Effect templates
+
+An effect template is one `...EffectTemplate` class (73 in the Records), and its `m_Modifier` is one of 25 `Game.Shared.Mechanics.Modifiers` classes. They live in `campaign_editor/ability_ir_effects.py`.
+
+- **Kinds:** a node's `kind` is its class name with the effect suffix dropped and snake_cased (`SummonTokenTroopAbilityEffectTemplate` → `summon_token_troop`). The Records class is kept in `record_type`, so the round trip is exact.
+- **Fields** use the filter layer's names (`m_` dropped, snake_case, with `DEPRECATED` and `TAC` kept as acronyms).
+- **Nested values** dispatch by what they are: filters to the filter layer, variables and targets to their layers, modifiers and nested effects to nodes, and anything else to `Raw`. A stored double underscore (as in `m_Amount_DEPRECATED`) is written as `amount__deprecated`, so it inverts.
+- **Serialized TACs** are `Raw` for now.
+- **Coverage:** all 5,850 effect templates round-trip (one undecodable line is skipped, as the editor does).
+- **Variables added for effects:** `effect_constant` (`EffectConstant`, a literal) and `effect_variable` (`EffectAbilityVariable`, a reference to an ability variable by name).
+
+Not covered yet: the clauses that apply an effect (`m_AbilityEffectList` in the ability root), and the effect conditions (`AbilityEffectConditionTemplate`).
+
 ## Per-copy values (`CardStats`)
 
 `card_instance_bits.CardStats` is `Dictionary<ECardStatType, int>`, one entry per owned card. The client never displays it, and the card-back panel that would show it (`GoCardDoubleBack`) has empty build methods. The server sends it as an empty dictionary (`encoder.py`) and handles neither `IncrementCardStats` nor `GetCardInstanceInfo`, so the client's increments are dropped today.

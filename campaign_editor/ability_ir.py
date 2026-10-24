@@ -86,6 +86,10 @@ KINDS: dict[str, tuple[str, dict[str, str], dict[str, Any]]] = {
     "charges": ("SourcePlayerChargeVariable", {}, {}),
     # A reference to a root variable by name (the spec's ``$name``).
     "input_ref": ("EffectInputVariable", {"name": "m_InputVariableName"}, {}),
+    # A literal value used by an effect (the spec's plain number).
+    "effect_constant": ("EffectConstant", {"value": "m_Value"}, {}),
+    # A reference to an ability variable by name, used by an effect.
+    "effect_variable": ("EffectAbilityVariable", {"name": "m_AbilityVariableName"}, {}),
 }
 
 _KIND_BY_CLASS = {cls: kind for kind, (cls, _, _) in KINDS.items()}

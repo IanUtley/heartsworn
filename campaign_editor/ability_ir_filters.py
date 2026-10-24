@@ -112,16 +112,25 @@ class Filter:
 
 def _snake(key: str) -> str:
     stem = key[2:] if key.startswith("m_") else key
+    # A stored underscore becomes a double underscore, so the inverse can tell it
+    # from the word breaks that snake_case adds.
+    stem = stem.replace("_", "__")
     return re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", stem).lower()
 
 
 # Stored names that are acronyms, so the snake_case inverse can restore them.
-ACRONYMS = frozenset({"ai", "tac"})
+ACRONYMS = frozenset({"ai", "tac", "deprecated"})
 
 
 def _pascal(name: str) -> str:
-    parts = [part.upper() if part in ACRONYMS else part[:1].upper() + part[1:]
-             for part in name.split("_")]
+    parts: list[str] = []
+    for part in name.split("_"):
+        if part == "":
+            parts.append("_")  # the second half of a stored double underscore
+        elif part in ACRONYMS:
+            parts.append(part.upper())
+        else:
+            parts.append(part[:1].upper() + part[1:])
     return "m_" + "".join(parts)
 
 
