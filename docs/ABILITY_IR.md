@@ -206,6 +206,18 @@ An ability root is one `AbilityTemplate` record: its costs, options, trigger, co
 
 The condition glossary is in `docs/ABILITY_CONDITION_GLOSSARY.md`. Conditions have names but almost no descriptions in the client, so most of their meaning still has to be confirmed from the code.
 
+## Condition meanings from the client code
+
+Read from `hex-private/HexClient/Assembly-CSharp-firstpass/Game/Shared/Mechanics/Triggers/Conditions/` and `.../Abilities/Conditions/`. These cover the fields the condition glossary lists as unknown, because their annotations sit on a differently named member (for example, `m_TriggerTest` is annotated on the property `TestTriggerOn`).
+
+- **`m_TriggerTest`** (every trigger condition): which side of the event is tested. `TriggerSource` is the event's source card or player, `TriggerTarget` is its target, and `TriggerSourcePlayer` is the source card's controller. The client's annotation is "Test On".
+- **`m_SerializedTAC`** (every trigger condition): the condition's own attribute bag (`conditionTac`). Only `TriggerPlayerControlsCard` reads it in the code, using the `ActiveCollections` and `AmountIsNumMatchingCost` flags. Other conditions don't read it.
+- **`m_SourceCollection` and `m_DestinationCollection`** (`TriggerCardEnteredZone`): the zone flags the event's source and destination must match. `None` means any zone.
+- **`m_Your`** (`TriggerCardEnteredZone`): the entering card must be controlled by the trigger source's controller, both now and before the move.
+- **`m_Opposing`** (`TriggerCardEnteredZone`): the event's source player must not be the trigger source's controller.
+- **`m_MinimumAmount`** (`TriggerPlayerControlsCard`): the number the player's matching cards are compared against, with `m_ComparisonOp` (default: greater than or equal, with 1). The matching cards are controlled by the player and match the card filter.
+- **`m_RequiredCounters`** (`SourceCardHasCounters`): the number the source card's counters (of `m_CardCounterTemplateId`) are compared against, with `m_ComparisonOp`. The client's annotation is on `CardCounterTemplateId`, not on this field.
+
 ## Per-copy values (`CardStats`)
 
 `card_instance_bits.CardStats` is `Dictionary<ECardStatType, int>`, one entry per owned card. The client never displays it, and the card-back panel that would show it (`GoCardDoubleBack`) has empty build methods. The server sends it as an empty dictionary (`encoder.py`) and handles neither `IncrementCardStats` nor `GetCardInstanceInfo`, so the client's increments are dropped today.
