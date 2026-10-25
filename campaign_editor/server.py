@@ -28,6 +28,8 @@ from urllib.parse import parse_qs, unquote, urlparse
 
 import ability_dsl
 import ability_ir_semantic
+import ability_ir_text
+import ability_ir_vocab
 import auth
 import card_abilities as abilities
 import cards
@@ -261,6 +263,12 @@ class EditorHandler(BaseHTTPRequestHandler):
                 self._file(STATIC, "index.html")
             elif path in ("/cards", "/cards.html"):
                 self._file(STATIC, "cards.html")
+            elif path in ("/ir", "/ir.html"):
+                # The IR editor: the IR as JSON, with completions from /api/ability-ir-kinds (static/ir.js).
+                self._file(STATIC, "ir.html")
+            elif path in ("/ability", "/ability.html"):
+                # The ability editor: sentences beside the IR form (static/ability.js).
+                self._file(STATIC, "ability.html")
             elif path.startswith("/static/"):
                 self._file(STATIC, path[len("/static/"):])
             elif path.startswith("/generated/"):
@@ -375,6 +383,18 @@ class EditorHandler(BaseHTTPRequestHandler):
                     query.get("kind", [""])[0], query.get("q", [""])[0])})
             elif path == "/api/ability-ir-vocab":
                 self._json(ability_ir_semantic.vocab())
+            elif path == "/api/ability-ir-code":
+                # An ability root as code (ability_ir_text.py), read by GUID.
+                try:
+                    self._json({"text": ability_ir_text.code_for(query.get("guid", [""])[0])})
+                except ability_ir_text.TextError as error:
+                    self._json({"error": str(error)}, 404)
+            elif path == "/api/ability-ir-code-names":
+                self._json({"names": ability_ir_text.names()})
+            elif path == "/api/ability-ir-kinds":
+                # The IR's node kinds and fields, from the Records; with q, the completions for that prefix.
+                q = query.get("q", [""])[0]
+                self._json({"completions": ability_ir_vocab.completions(q)} if q else ability_ir_vocab.vocab())
             elif path == "/api/ability-ir":
                 # The semantic form of an ability (ability_ir_semantic.py), or why it has none.
                 self._json(ability_ir_semantic.read(query.get("guid", [""])[0]))
@@ -544,6 +564,15 @@ class EditorHandler(BaseHTTPRequestHandler):
             if url.path == "/api/ability-ir-from-text":
                 # The semantic form for sentence text.
                 self._json(ability_ir_semantic.from_text(body.get("text") or ""))
+                return
+            if url.path == "/api/ability-ir-code-parse":
+                # The Records an ability's code declares (root first), or why the code is not valid.
+                try:
+                    self._json({"records": ability_ir_text.loads_ability(body.get("text") or "")["records"]})
+                except ability_ir_text.TextError as error:
+                    self._json({"error": str(error)}, 400)
+                except (ValueError, KeyError, IndexError) as error:
+                    self._json({"error": f"{type(error).__name__}: {error}"}, 400)
                 return
             if url.path == "/api/ability-ir-check":
                 # Read-only: what the DSL would refuse in this semantic form.
