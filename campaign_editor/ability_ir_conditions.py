@@ -54,7 +54,7 @@ def value_from_record(value: Any) -> Any:
         return ability_ir.from_record(value)
     if is_condition_type(record_type):
         return node_from_record(value)
-    return Raw(value)
+    return ability_ir.tac_from_record(value) or Raw(value)
 
 
 def value_to_record(value: Any) -> Any:
@@ -71,6 +71,8 @@ def value_to_record(value: Any) -> Any:
         return ability_ir.target_to_record(value)
     if isinstance(value, (irc.Ref, irc.NoRef)):
         return irc._value_to_record(value)
+    if isinstance(value, ability_ir.Tac):
+        return ability_ir.tac_to_record(value)
     if isinstance(value, Raw):
         return value.value
     return value

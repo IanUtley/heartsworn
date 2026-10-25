@@ -2,7 +2,7 @@
 
 Every IR object becomes a JSON object with one tag key, so ``from_json`` knows what it
 is without guessing: ``$node``, ``$clause``, ``$ref``, ``$noref``, ``$filter``, ``$var``,
-``$target``, ``$raw`` or ``$dict``. Plain values (numbers, strings, booleans, null, lists) pass
+``$target``, ``$tac``, ``$raw`` or ``$dict``. Plain values (numbers, strings, booleans, null, lists) pass
 through unchanged. A ``$raw`` object is the stored Records object, kept verbatim.
 
 ``from_json(to_json(x)) == x`` for every ability root, which the tests check, so the
@@ -60,6 +60,8 @@ def to_json(value: Any) -> Any:
     if isinstance(value, ability_ir.Target):
         return {"$target": value.kind, "fields": _fields_to_json(value.fields),
                 "meta": _meta_to_json(value.meta)}
+    if isinstance(value, ability_ir.Tac):
+        return {"$tac": value.attributes, **({"$type": value.type_tag} if value.type_tag else {})}
     if isinstance(value, Raw):
         return {"$raw": value.value}
     if isinstance(value, dict):   # a plain dict a clause or variable stores as it is
@@ -91,6 +93,8 @@ def from_json(value: Any) -> Any:
     if "$target" in value:
         return ability_ir.Target(kind=value["$target"], fields=_fields_from_json(value["fields"]),
                                  meta=_meta_from_json(value.get("meta", {})))
+    if "$tac" in value:
+        return ability_ir.Tac(value["$tac"], value.get("$type", ""))
     if "$raw" in value:
         return Raw(value["$raw"])
     if "$dict" in value:

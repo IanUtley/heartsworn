@@ -17,8 +17,11 @@ of the static identifiers the client resolves from the source card
 from __future__ import annotations
 
 import re
+import struct
 from dataclasses import dataclass, field
 from typing import Any, Union
+
+import ability_ir_tac
 
 RECORD_PREFIX = "Game.Shared.Mechanics.Abilities."
 
@@ -100,6 +103,38 @@ class Raw:
     """A nested object the IR does not model, kept verbatim (for example a serialized TAC)."""
 
     value: dict[str, Any]
+
+
+@dataclass
+class Tac:
+    """A serialized TAC (``{"data": payload}``) read into its attributes. ``ability_ir_tac``
+    does the codec; a payload that does not decode back to the same bytes stays ``Raw``."""
+
+    attributes: dict[str, Any]
+    # The Records class of the object, when it has one (a SerializableTAC); "" for a bare payload.
+    type_tag: str = ""
+
+
+def tac_from_record(value: Any) -> Tac | None:
+    """A ``Tac`` for a stored serialized TAC (``{"data": payload}``, with an optional ``_t``),
+    or None when the object is not one or its payload would not write back exactly."""
+    if not isinstance(value, dict) or not isinstance(value.get("data"), str):
+        return None
+    if set(value) - {"_t", "data"}:
+        return None
+    try:
+        attributes = ability_ir_tac.decode(value["data"])
+        if ability_ir_tac.encode(attributes) != value["data"]:
+            return None
+    except (ValueError, KeyError, IndexError, struct.error):
+        return None
+    return Tac(attributes, str(value.get("_t") or ""))
+
+
+def tac_to_record(tac: Tac) -> dict[str, str]:
+    """The stored object for a ``Tac``: its payload, with its type tag when it has one."""
+    record = {"data": ability_ir_tac.encode(tac.attributes)}
+    return {"_t": tac.type_tag, **record} if tac.type_tag else record
 
 
 class UnknownVariable(ValueError):

@@ -4241,7 +4241,8 @@ class EffectContext:
                 self.handler, self.game, self.session, self.db,
                 self.player_uid, self.ai_uid, self.bstate, child_guid,
                 source_uid, owner_id, target_map=target_map,
-                variables=self.bstate.get("ability_variables") or {})
+                # A child binds its own variables, as the client's ActivateAbility does.
+                variables={})
         finally:
             if previous is None:
                 self.bstate.pop("_choice_parent", None)
@@ -4374,8 +4375,7 @@ class EffectContext:
                         "source_uid": int(source_uid or 0),
                         "owner_id": int(owner_id or 0),
                         "target_map": {},
-                        "variables": dict(
-                            self.bstate.get("ability_variables") or {}),
+                        "variables": {},
                         "resume_effect_order": 0,
                         "target_index": int(target_index),
                         "parent": self.continuation(),
@@ -4406,8 +4406,7 @@ class EffectContext:
                         "source_uid": int(source_uid or 0),
                         "owner_id": int(owner_id or 0),
                         "target_map": {},
-                        "variables": dict(
-                            self.bstate.get("ability_variables") or {}),
+                        "variables": {},
                         "resume_effect_order": 0,
                         "target_index": int(target_index),
                     },
@@ -4446,7 +4445,7 @@ class EffectContext:
             self.handler, self.game, self.session, self.db,
             self.player_uid, self.ai_uid, self.bstate, child_guid,
             source_uid, owner_id, target_map={},
-            variables=self.bstate.get("ability_variables") or {})
+            variables={})
 
     def tac(self):
         """Apply one metadata-defined TAC operation.

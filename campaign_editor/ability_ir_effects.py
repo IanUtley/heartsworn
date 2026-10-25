@@ -72,7 +72,7 @@ def _value_from_record(value: Any) -> Any:
         return node_from_record(value)
     if stored_type.startswith(ABILITY_PREFIX):
         return ability_ir.from_record(value)
-    return Raw(value)
+    return ability_ir.tac_from_record(value) or Raw(value)
 
 
 def _value_to_record(value: Any) -> Any:
@@ -86,6 +86,8 @@ def _value_to_record(value: Any) -> Any:
         return ability_ir.to_record(value)
     if isinstance(value, ability_ir.Target):
         return ability_ir.target_to_record(value)
+    if isinstance(value, ability_ir.Tac):
+        return ability_ir.tac_to_record(value)
     if isinstance(value, Raw):
         return value.value
     return value
