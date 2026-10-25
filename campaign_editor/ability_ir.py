@@ -137,6 +137,31 @@ def tac_to_record(tac: Tac) -> dict[str, str]:
     return {"_t": tac.type_tag, **record} if tac.type_tag else record
 
 
+@dataclass
+class TriggerEvent:
+    """A trigger's event: ``m_TriggerEventType``, the full Records class name of the event."""
+
+    class_name: str
+
+
+EVENT_PREFIX = "Game.Shared.Mechanics."
+
+
+def trigger_event_from_record(value: Any) -> TriggerEvent | None:
+    """A ``TriggerEvent`` for a stored ``{"m_InternalType": class}`` object, or None."""
+    if not (isinstance(value, dict) and set(value) == {"m_InternalType"}):
+        return None
+    name = value["m_InternalType"]
+    if not (isinstance(name, str) and name.startswith(EVENT_PREFIX)):
+        return None
+    return TriggerEvent(name)
+
+
+def trigger_event_to_record(event: TriggerEvent) -> dict[str, str]:
+    """The stored ``{"m_InternalType": class}`` object for a ``TriggerEvent``."""
+    return {"m_InternalType": event.class_name}
+
+
 class UnknownVariable(ValueError):
     """A Records variable whose class or fields the IR does not describe."""
 

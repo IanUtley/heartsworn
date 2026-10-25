@@ -22,6 +22,7 @@ from typing import Any
 
 import ability_ir
 from ability_ir import Raw
+import ability_ir_clauses as irc
 import ability_ir_filters as irf
 
 ABILITY_PREFIX = ability_ir.RECORD_PREFIX
@@ -72,6 +73,8 @@ def _value_from_record(value: Any) -> Any:
         return node_from_record(value)
     if stored_type.startswith(ABILITY_PREFIX):
         return ability_ir.from_record(value)
+    if irc._is_guid_wrapper(value):
+        return irc._value_from_record(value)
     return ability_ir.tac_from_record(value) or Raw(value)
 
 
@@ -88,6 +91,8 @@ def _value_to_record(value: Any) -> Any:
         return ability_ir.target_to_record(value)
     if isinstance(value, ability_ir.Tac):
         return ability_ir.tac_to_record(value)
+    if isinstance(value, (irc.Ref, irc.NoRef)):
+        return irc._value_to_record(value)
     if isinstance(value, Raw):
         return value.value
     return value

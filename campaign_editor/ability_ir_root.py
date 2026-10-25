@@ -40,6 +40,8 @@ def _value_from_record(key: str, value: Any) -> Any:
         return value
     if irc._is_guid_wrapper(value):
         return irc._value_from_record(value)
+    if key == "m_TriggerEventType":
+        return ability_ir.trigger_event_from_record(value) or Raw(value)
     record_type = str(value.get("_t") or "")
     if record_type.startswith(irf.FILTER_PREFIX):
         return irf.filter_from_record(value)
@@ -89,6 +91,8 @@ def _value_to_record(value: Any) -> Any:
         return irc._value_to_record(value)
     if isinstance(value, ability_ir.Tac):
         return ability_ir.tac_to_record(value)
+    if isinstance(value, ability_ir.TriggerEvent):
+        return ability_ir.trigger_event_to_record(value)
     if isinstance(value, Raw):
         return value.value
     return value
