@@ -228,8 +228,46 @@ def _emit_counter_added(context, target, name, old, new, owner):
         event_tac={_tac_attr_hash("GainedCounterType"): name})
 
 
+_REMOVING_OPERATIONS = ("remove", "subtract")
+_CLEARING_OPERATIONS = ("clear", "removeall")
+
+
+def next_counter_value(old, operation, amount):
+    """The value a counter takes after one operation, as C# CounterModifier.Apply computes it: a count
+    never goes below zero, and clearing takes it to zero."""
+    amount = int(amount or 0)
+    if operation == "set":
+        return amount
+    if operation in _CLEARING_OPERATIONS:
+        return 0
+    if operation in _REMOVING_OPERATIONS:
+        return max(0, old - amount)
+    return max(0, old + amount)
+
+
+def _dazed_change_blocked(context, target, name, operation):
+    """Whether the target's CantAddDazedCounters or CantRemoveDazedCounters int attribute blocks this change.
+
+    C# CounterModifier.Apply returns before a Dazed add or remove when the card context has the attribute.
+    Clearing and setting are not blocked there, so they are not here either."""
+    if name != "dazed":
+        return False
+    if operation in _REMOVING_OPERATIONS:
+        attribute = "CantRemoveDazedCounters"
+    elif operation in _CLEARING_OPERATIONS or operation == "set":
+        return False
+    else:
+        attribute = "CantAddDazedCounters"
+    from .damage_effects import _int_attr
+    return _int_attr(context, target, attribute) > 0
+
+
 def change_counter(context, target, name, counter_guid, amount, operation):
-    """Apply one typed counter operation and emit its client projection."""
+    """Apply one typed counter operation and emit its client projection.
+
+    The change follows C# CounterModifier.Apply: an operation that leaves the count where it is is a
+    no-op (nothing is written, projected or emitted), a Dazed add or remove the card blocks is a no-op,
+    and the count never goes below zero. Returns ``(old, new)``."""
     from pvp_db import db_card_mutation_field, db_set_card_mutation_field
     target = int(target)
     from .statistics import add_ability_stat
@@ -237,14 +275,22 @@ def change_counter(context, target, name, counter_guid, amount, operation):
     guid = str(counter_guid or _counter_guid(context.db, name)).lower()
     champion_owner = _champion_owner(context, target)
     if champion_owner is not None:
-        values = context.bstate.setdefault("champion_counters", {}).setdefault(str(target), {})
+        values = context.bstate.get("champion_counters", {}).get(str(target), {})
         old = int(values.get(guid, 0) or 0)
-        if operation == "set":
-            new = int(amount or 0)
-        elif operation in ("remove", "subtract", "clear", "removeall"):
-            new = 0 if operation in ("clear", "removeall") else max(0, old - int(amount or 0))
-        else:
-            new = old + int(amount or 0)
+    else:
+        raw = db_card_mutation_field(context.session.session_id, target,
+                                     "permanent_buffs", conn=context.db)
+        try:
+            data = json.loads(raw or "{}")
+        except (TypeError, ValueError, json.JSONDecodeError):
+            data = {}
+        counters = data.setdefault("counters", {})
+        old = int(counters.get(name, 0) or 0)
+    new = next_counter_value(old, operation, amount)
+    if new == old or _dazed_change_blocked(context, target, name, operation):
+        return old, old
+    if champion_owner is not None:
+        values = context.bstate.setdefault("champion_counters", {}).setdefault(str(target), {})
         if new:
             values[guid] = new
         else:
@@ -254,20 +300,6 @@ def change_counter(context, target, name, counter_guid, amount, operation):
             add_ability_stat(context.bstate, "CountersRemoved", old - new)
         _emit_counter_added(context, target, name, old, new, champion_owner)
         return old, new
-    raw = db_card_mutation_field(context.session.session_id, target,
-                                 "permanent_buffs", conn=context.db)
-    try:
-        data = json.loads(raw or "{}")
-    except (TypeError, ValueError, json.JSONDecodeError):
-        data = {}
-    counters = data.setdefault("counters", {})
-    old = int(counters.get(name, 0) or 0)
-    if operation == "set":
-        new = int(amount or 0)
-    elif operation in ("remove", "subtract", "clear", "removeall"):
-        new = 0 if operation in ("clear", "removeall") else max(0, old - int(amount or 0))
-    else:
-        new = old + int(amount or 0)
     if new:
         counters[name] = new
     else:
