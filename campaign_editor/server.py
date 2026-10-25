@@ -26,15 +26,25 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
+import ability_dsl
+import ability_ir_semantic
 import auth
+import card_abilities as abilities
+import cards
 import catalog
 import editing
+import effect_reference
+import incdata
+import set_icons
+import store_listing
 from campaign_runtime import catalog_data, overlay
 
 HERE = Path(__file__).resolve().parent
 STATIC = HERE / "static"
 
 
+SHARED_ROOT = catalog.REPO / "web_client" / "static"
+SHARED_FILE = re.compile(r"(hex_assets|cache|card_face)\.js|unity/[a-z_]+\.js")
 PUBLIC_API = {"/api/me", "/api/login", "/api/logout"}
 
 
@@ -45,9 +55,11 @@ class EditorHandler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):  # keep the terminal quiet
         pass
 
-    def _send(self, status: int, body: bytes, content_type: str):
+    def _send(self, status: int, body: bytes, content_type: str, headers: dict | None = None):
         self.send_response(status)
         self.send_header("Content-Type", content_type)
+        for name, value in (headers or {}).items():
+            self.send_header(name, value)
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
         self.end_headers()
@@ -247,6 +259,8 @@ class EditorHandler(BaseHTTPRequestHandler):
                 self._export()
             elif path in ("/", "/index.html"):
                 self._file(STATIC, "index.html")
+            elif path in ("/cards", "/cards.html"):
+                self._file(STATIC, "cards.html")
             elif path.startswith("/static/"):
                 self._file(STATIC, path[len("/static/"):])
             elif path.startswith("/generated/"):
@@ -256,6 +270,17 @@ class EditorHandler(BaseHTTPRequestHandler):
                     # Decoded from the client the first time it is shown.
                     catalog.card_art_on_demand(card.group(1))
                 self._file(catalog.GENERATED, relative)
+            elif path.startswith("/shared/"):
+                # The web client's own modules (hex_assets.js and its unity/ readers, card_face.js):
+                # the editor draws card frames with the same code the battle board uses.
+                relative = path[len("/shared/"):]
+                if SHARED_FILE.fullmatch(relative):
+                    self._file(SHARED_ROOT, relative)
+                else:
+                    self._json({"error": "not found"}, 404)
+            elif path.startswith("/custom/"):
+                # Custom card art from custom_sets/ (see cards._custom_art_url).
+                self._file(cards.CUSTOM_DIR, path[len("/custom/"):])
             elif path == "/api/zones":
                 self._json(catalog.zones())
             elif path == "/api/area":
@@ -296,6 +321,66 @@ class EditorHandler(BaseHTTPRequestHandler):
                     self._json(self._with_db(lambda db: catalog.encounter_deck(db, scene)))
                 except LookupError as exc:
                     self._json({"error": str(exc)}, status=404)
+            elif path == "/api/cards":
+                text = query.get("q", [""])[0]
+                set_guid = query.get("set", [""])[0]
+                limit = min(max(int(query.get("limit", ["200"])[0]), 1), 2000)
+                self._json(self._with_db(lambda db: cards.list_cards(db, text, limit, set_guid)))
+            elif path == "/api/set-icon":
+                self._json(set_icons.set_icon(query.get("set", [""])[0]))
+            elif path == "/api/pack-art-reference":
+                self._json({"icons": store_listing.art_reference()})
+            elif path == "/api/effect-reference":
+                self._json({"effects": effect_reference.summary()})
+            elif path == "/api/store-listing":
+                set_guid = query.get("set", [""])[0]
+                self._json(store_listing.store_listing(set_guid))
+            elif path == "/api/card":
+                guid = query.get("guid", [""])[0]
+                self._json(self._with_db(lambda db: cards.get_card(db, guid)))
+            elif path == "/api/card-incdata":
+                # Read-only: the set's finished cards and their abilities as a client
+                # .incdata download; the summary rides in a header.
+                built = self._with_db(lambda db: incdata.build(db, query.get("set", [""])[0]))
+                self._send(200, built["data"], "application/gzip", {
+                    "Content-Disposition": f'attachment; filename="{built["filename"]}"',
+                    "X-Incdata-Summary": json.dumps(built["summary"])})
+            elif path == "/api/abilities":
+                self._json({"results": abilities.search(
+                    query.get("section", ["AbilityTemplate"])[0], query.get("q", [""])[0],
+                    min(max(int(query.get("limit", ["40"])[0]), 1), 200))})
+            elif path == "/api/ability":
+                self._json(abilities.get_ability(query.get("guid", [""])[0]))
+            elif path == "/api/ability-record":
+                self._json(abilities.get_record(query.get("section", [""])[0],
+                                                query.get("guid", [""])[0]))
+            elif path == "/api/ability-new":
+                # A blank record to fill in; nothing is stored until it is saved.
+                self._json(abilities.new_record(query.get("section", [""])[0],
+                                                query.get("type", [""])[0]))
+            elif path == "/api/ability-options":
+                self._json(abilities.options())
+            elif path == "/api/ability-dsl-options":
+                # The sentence form's dropdowns (ability_dsl.py).
+                self._json(ability_dsl.options())
+            elif path == "/api/ability-dsl-builder":
+                # The guided builder's steps and templates, each checked to read back.
+                self._json(ability_dsl.builder())
+            elif path == "/api/ability-dsl-targets":
+                # The targets one effect shape reads back with, its Records favourites first.
+                self._json({"targets": ability_dsl.builder_targets(query.get("shape", [""])[0])})
+            elif path == "/api/ability-dsl-names":
+                # Card, counter or ability names for a builder slot.
+                self._json({"names": ability_dsl.builder_names(
+                    query.get("kind", [""])[0], query.get("q", [""])[0])})
+            elif path == "/api/ability-ir-vocab":
+                self._json(ability_ir_semantic.vocab())
+            elif path == "/api/ability-ir":
+                # The semantic form of an ability (ability_ir_semantic.py), or why it has none.
+                self._json(ability_ir_semantic.read(query.get("guid", [""])[0]))
+            elif path == "/api/ability-dsl":
+                # An ability as sentences, and whether they compile back to it exactly.
+                self._json(ability_dsl.decompile(query.get("guid", [""])[0]))
             elif path == "/api/rules":
                 loaded, problems = self._with_db(
                     lambda db: catalog.rules(db, zone_id))
@@ -425,6 +510,89 @@ class EditorHandler(BaseHTTPRequestHandler):
                         db, str(body["scene"]), body.get("champion") or None,
                         body.get("deck") or None)
                 self._json(chosen)
+                return
+            if url.path == "/api/card-text":
+                self._json(self._with_db(lambda db: cards.preview_text(
+                    db, str(body.get("guid") or ""), body.get("fields") or {})))
+                return
+            if url.path == "/api/card-frame":
+                self._json(cards.preview_frame(body.get("fields"), body.get("faction") or "None",
+                                               bool(body.get("pve"))))
+                return
+            if url.path == "/api/edit/card":
+                saved = self._with_db(lambda db: cards.save_card(
+                    db, body.get("guid") or "", body.get("fields")))
+                self._json(saved)
+                return
+            if url.path == "/api/ability-check":
+                # Read-only: the problems a save of these records would report.
+                self._json({"problems": abilities.validate(body.get("records"))})
+                return
+            if url.path == "/api/ability-dsl-compile":
+                # Read-only: the records sentences compile to, with the checks' problems.
+                self._json(ability_dsl.preview(body.get("text") or "", body.get("guid") or ""))
+                return
+            if url.path == "/api/ability-dsl-read":
+                # Read-only: free text as the builder's parts, or the parse error and the
+                # parts read before it.
+                self._json(ability_dsl.read_text(body.get("text") or ""))
+                return
+            if url.path == "/api/ability-ir-text":
+                # The sentences for a semantic form.
+                self._json({"text": ability_ir_semantic.text(body.get("ir") or {})})
+                return
+            if url.path == "/api/ability-ir-from-text":
+                # The semantic form for sentence text.
+                self._json(ability_ir_semantic.from_text(body.get("text") or ""))
+                return
+            if url.path == "/api/ability-ir-check":
+                # Read-only: what the DSL would refuse in this semantic form.
+                self._json({"problems": ability_ir_semantic.check(body.get("ir") or {})})
+                return
+            if url.path == "/api/edit/ability-ir":
+                try:
+                    self._json(ability_ir_semantic.save(body.get("ir") or {}, body.get("guid") or ""))
+                except (abilities.Invalid, ability_dsl.Unsupported) as exc:
+                    problems = getattr(exc, "problems", None) or getattr(exc, "reasons", [])
+                    self._json({"error": f"not saved: {exc}", "problems": problems}, 400)
+                return
+            if url.path == "/api/edit/ability-dsl":
+                try:
+                    self._json(ability_dsl.save_text(body.get("text") or "", body.get("guid") or ""))
+                except abilities.Invalid as exc:
+                    self._json({"error": f"not saved: {exc}", "problems": exc.problems}, 400)
+                return
+            if url.path == "/api/edit/ability":
+                try:
+                    self._json(abilities.save_records(body.get("records")))
+                except abilities.Invalid as exc:
+                    self._json({"error": f"not saved: {exc}", "problems": exc.problems}, 400)
+                return
+            if url.path == "/api/edit/ability-revert":
+                self._json(abilities.revert_record(body.get("section"), body.get("guid")))
+                return
+            if url.path == "/api/edit/card-revert":
+                self._json(self._with_db(lambda db: cards.revert_card(db, body.get("guid") or "")))
+                return
+            if url.path == "/api/edit/publish-incdata":
+                self._json(self._with_db(lambda db: incdata.publish(db, str(body.get("set_guid") or ""))))
+                return
+            if url.path == "/api/edit/set-icon":
+                self._json(set_icons.save_set_icon(body.get("set_guid"), body.get("image")))
+                return
+            if url.path == "/api/edit/pack-art":
+                self._json(store_listing.save_custom_art(body.get("pack_guid"), body.get("kind"),
+                                                         body.get("image")))
+                return
+            if url.path == "/api/edit/store-pack":
+                self._json(store_listing.create_custom_pack(body.get("set_guid"), body.get("pack_type")))
+                return
+            if url.path == "/api/edit/store-listing":
+                self._json(store_listing.save_store_listing(body.get("set_guid"), body.get("packs")))
+                return
+            if url.path == "/api/edit/card-set":
+                self._json(self._with_db(lambda db: cards.assign_to_set(
+                    db, body.get("guids"), body.get("set_guid"))))
                 return
             if url.path == "/api/edit/card-map":
                 chosen = self._with_db(lambda db: editing.save_card_map(
@@ -597,7 +765,10 @@ def main():
     # that needs it waits on the same lock instead of reparsing.
     threading.Thread(target=catalog.warm_caches, args=(args.db.resolve(),),
                      daemon=True).start()
-    server = ThreadingHTTPServer((args.host, args.port), EditorHandler)
+    # The ability form's facts (Records references, client field types) likewise,
+    # then the sentence catalogue (it reads the same Records files).
+    threading.Thread(target=lambda: (abilities.warm_caches(), ability_dsl.warm()), daemon=True).start()
+    server =ThreadingHTTPServer((args.host, args.port), EditorHandler)
     print(f"Campaign editor: http://{args.host}:{args.port}/  (db: {args.db})")
     try:
         server.serve_forever()
