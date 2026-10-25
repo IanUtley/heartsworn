@@ -1619,7 +1619,70 @@ def _trigger_named(head: str) -> str:
     for phrase in (head, head.replace("this card", "this"), KEYWORD_TRIGGERS.get(head, "")):
         if phrase and phrase in triggers.by_phrase:
             return triggers.display.get(triggers.by_phrase[phrase], phrase)
+    generated = _subtype_trigger(head)
+    return generated or ""
+
+
+_SUBTYPE_TRIGGER = re.compile(r"^(when (?:a|an|another) )([a-z'-]+)((?: you control)? [a-z ]+)$")
+
+
+def _subtype_trigger(head: str) -> str:
+    """A trigger for any subtype Records has a trigger for: "when a warlock you control dies"
+    from "when a cleric you control dies". The copy's subtype is the only change, so it reads
+    back as the phrase it was made from. Registered in the catalogue for this process."""
+    found = _SUBTYPE_TRIGGER.match(head)
+    if not found:
+        return ""
+    skeleton = found.group(1) + "{X}" + found.group(3)
+    triggers = catalogue()["triggers"]
+    with _LOCK:
+        if head in triggers.by_phrase:
+            return triggers.display.get(triggers.by_phrase[head], head)
+        subtypes: dict[str, str] = {}
+        for content in triggers.content.values():
+            for node in _walk_subtypes(content):
+                subtypes.setdefault(str(node).lower(), str(node))
+        if found.group(2) not in subtypes:
+            return ""
+        for phrase, key in triggers.by_phrase.items():
+            other = _SUBTYPE_TRIGGER.match(phrase)
+            if not other or other.group(1) + "{X}" + other.group(3) != skeleton:
+                continue
+            content = copy.deepcopy(triggers.content[key])
+            if not _set_subtype(content, subtypes[found.group(2)]):
+                continue
+            new_key = f"{key}|{subtypes[found.group(2)]}"
+            triggers.content[new_key] = content
+            triggers.by_phrase[head] = new_key
+            triggers.display[new_key] = head
+            return head
     return ""
+
+
+def _walk_subtypes(node: Any):
+    if isinstance(node, dict):
+        if node.get("_t", "").endswith(".IsSubType") and node.get("m_SubType"):
+            yield node["m_SubType"]
+        for value in node.values():
+            yield from _walk_subtypes(value)
+    elif isinstance(node, list):
+        for item in node:
+            yield from _walk_subtypes(item)
+
+
+def _set_subtype(node: Any, value: str) -> bool:
+    """Set the subtype of the first IsSubType filter in ``node``; False if there is none."""
+    changed = False
+    if isinstance(node, dict):
+        if node.get("_t", "").endswith(".IsSubType"):
+            node["m_SubType"] = value
+            return True
+        for item in node.values():
+            changed = _set_subtype(item, value) or changed
+    elif isinstance(node, list):
+        for item in node:
+            changed = _set_subtype(item, value) or changed
+    return changed
 
 
 def _split_settings(text: str) -> list[str]:
