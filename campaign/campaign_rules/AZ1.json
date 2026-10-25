@@ -721,6 +721,11 @@
     "flag": "tamed:06c14db8"
    }
   },
+  "Node057": {
+   "completed": [
+    "counter(gnomes_safe,20)"
+   ]
+  },
   "Node058": {
    "impassable": [
     "counter(gnomes_carried,1)"
@@ -735,6 +740,9 @@
    ],
    "completed": [
     "!counter(gnomes_carried,1)"
+   ],
+   "visible": [
+    "visited(Node057)"
    ]
   },
   "Node060": {
@@ -743,6 +751,9 @@
    ],
    "completed": [
     "!counter(gnomes_carried,1)"
+   ],
+   "visible": [
+    "visited(Node057)"
    ]
   },
   "Node061": {
@@ -756,6 +767,9 @@
    ],
    "completed": [
     "!counter(gnomes_carried,1)"
+   ],
+   "visible": [
+    "visited(Node057)"
    ]
   },
   "Node063": {
@@ -764,6 +778,9 @@
    ],
    "completed": [
     "!counter(gnomes_carried,1)"
+   ],
+   "visible": [
+    "visited(Node057)"
    ]
   },
   "Node066": {
@@ -981,22 +998,27 @@
    "retryable"
   ],
   "Node063": [
-   "completed"
+   "completed",
+   "visible"
   ],
   "Node060": [
    "impassable",
-   "completed"
+   "completed",
+   "visible"
   ],
   "Node059": [
    "impassable",
-   "completed"
+   "completed",
+   "visible"
   ],
   "Node058": [
    "impassable",
-   "completed"
+   "completed",
+   "visible"
   ],
   "Node062": [
-   "completed"
+   "completed",
+   "visible"
   ],
   "Node061": [
    "completed"
@@ -1031,6 +1053,9 @@
    "retryable",
    "completed",
    "visible"
+  ],
+  "Node057": [
+   "completed"
   ]
  },
  "runtime": "rules",
@@ -1077,6 +1102,12 @@
    "tagged:04fc8981",
    "tagged:5e5ec1cd",
    "tagged:36207cdd"
+  ],
+  "Node055": [
+   "tagged:270bf0b5:ed926c27",
+   "tagged:7e793fe5:ed926c27",
+   "tagged:270bf0b5",
+   "tagged:7e793fe5"
   ]
  }
 }

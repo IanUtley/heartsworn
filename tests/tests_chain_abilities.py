@@ -2698,6 +2698,61 @@ def test_native_enters_play_and_inspire_fire(db):
     assert int(attrs or 0) & int(game_engine.ECardAttributes.Steadfast), attrs
 
 
+TPL_BLESSING_THE_FALLEN = "a75e46e7-2473-45af-99a1-3c82d36f0107"   # no abilities; TAC AllowYardInspire 1
+
+
+def test_blessing_the_fallen_lets_crypt_troops_inspire(db):
+    """Client ``Card.CheckAllowYardInspire``: an Inspire troop in its crypt
+    triggers as though in play while its controller has a card with the
+    AllowYardInspire IntAttr in the Warzone (Blessing the Fallen's TAC).
+
+    A Kraken Guard Mariner in the crypt must not inspire an entering Mariner on
+    its own, and must once Blessing the Fallen is in play.
+    """
+    from rules_port.triggers import dispatch_native_trigger
+
+    _copy_card(db, TPL_KRAKEN_GUARD_MARINER)
+    _copy_ability(db, AG_KRAKEN_GUARD_INSPIRE)
+    _copy_card(db, TPL_BLESSING_THE_FALLEN)
+    add_card(db, 301, 5, TPL_KRAKEN_GUARD_MARINER, loc="discard")
+    db.execute("UPDATE game_cards SET card_abilities=? WHERE card_uid=301",
+               (json.dumps([AG_KRAKEN_GUARD_INSPIRE]),))
+    for uid in (302, 303):
+        add_card(db, uid, 5, TPL_KRAKEN_GUARD_MARINER, loc="hand")
+    db.commit()
+
+    pl_t, ai_t = _pl_ai()
+    game = game_engine.Game(1, pl_t, ai_t)
+    handler = HandlerStub(db)
+    bstate = {"player_health": 20, "ai_health": 20, "turn_number": 1,
+              "stack": [], "_rules_port_attached": True,
+              "_next_instance_id": 1}
+
+    def enter(uid):
+        db.execute("UPDATE game_cards SET location='warzone' WHERE card_uid=?", (uid,))
+        db.commit()
+        dispatch_native_trigger(
+            db=db, handler=handler, game=game, session=SessionStub(),
+            player_uid=pl_t, ai_uid=ai_t, battle_state=bstate,
+            event_type="CardEnteredZoneEvent", source_card_id=uid,
+            source_player_id=5,
+            data={"event_source_collection": "hand",
+                  "event_destination_collection": "warzone"})
+        return int(db.execute("SELECT card_attributes FROM game_cards WHERE card_uid=?",
+                              (uid,)).fetchone()[0] or 0)
+
+    steadfast = int(game_engine.ECardAttributes.Steadfast)
+    assert not enter(302) & steadfast   # the crypt Mariner stays silent
+    # 302 leaves play, so only the crypt Mariner can inspire the next one.
+    db.execute("UPDATE game_cards SET location='void' WHERE card_uid=302")
+    add_card(db, 401, 5, TPL_BLESSING_THE_FALLEN, loc="warzone")
+    db.execute("UPDATE game_cards SET card_type='Constant' WHERE card_uid=401")
+    db.commit()
+    assert enter(303) & steadfast       # with Blessing in play it inspires
+    assert bstate["tac_statistics"]["cards"]["303"][
+        "CardStatsWithSpecificDuration"]["InspireCount"] == 1
+
+
 def test_troop_entry_discovers_the_opposing_champions_trigger(db):
     """The AI champion's "when a troop enters play" trait is owner-agnostic.
 
@@ -3829,6 +3884,7 @@ def _main():
              test_triggered_attribute_grant_persists_the_speed_bit,
              test_creation_replacement_and_bonus,
              test_native_enters_play_and_inspire_fire,
+             test_blessing_the_fallen_lets_crypt_troops_inspire,
              test_troop_entry_discovers_the_opposing_champions_trigger,
              test_ai_start_of_turn_buries_each_champion_deck,
              test_opposing_card_triggers_at_the_start_of_the_active_champions_turn,

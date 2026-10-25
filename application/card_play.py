@@ -116,7 +116,8 @@ class CardPlayMixin:
     def _card_target_requirements_met(self, session, play_plan,
                                       battle_state=None):
         """A hand card is only playable when every EXPLICIT target template of
-        its non-manual abilities has at least one legal candidate.  This is
+        its non-manual abilities has enough legal candidates for its minimum
+        (one, for a best-effort minimum).  This is
         what makes Countermagic ("Interrupt target card" — CollectionFlags
         CastSpells) unplayable with nothing on the chain: its only legal
         targets are cards in CastSpells, so with an empty chain the card is
@@ -156,7 +157,12 @@ class CardPlayMixin:
                     0, both_players=True,
                     champions=self._champion_targets(),
                     battle_state=battle_state)
-                if not candidates:
+                # A target that needs N cards is only available with N legal
+                # candidates; a best-effort minimum takes whatever is there,
+                # as long as there is at least one.
+                best_effort = bool(target.allow_best_effort_minimum)
+                needed = 1 if best_effort else target.minimum
+                if len(candidates) < needed:
                     targets_available = False
             if has_explicit_target:
                 requirements.append(targets_available)

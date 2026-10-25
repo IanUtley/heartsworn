@@ -34,3 +34,4 @@ share/
 browser_demo/site/
 browser_demo/probe/node_modules/
 browser_demo/probe/*.log
+client_patch/

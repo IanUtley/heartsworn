@@ -1270,6 +1270,31 @@ def extract_inventory_item_templates(path: str | None = None) -> list[tuple[Any,
     return _extract_inventory_item_templates(data)
 
 
+def _extract_card_packs(data: str) -> list[dict[str, str]]:
+    """Every ``InventoryCardPack`` record: its GUID, name, set and ``m_CardPackType``
+    (BoosterPack, FullSet, PrimalPack, ...). A pack with no set has a zero set GUID."""
+    packs = []
+    for _, record in records(data, "InventoryItemData")[0]:
+        if not str(record.get("_t") or "").endswith("InventoryCardPack"):
+            continue
+        pack_guid = nested_guid(record, "m_Id")
+        if not pack_guid:
+            continue
+        packs.append({"pack_guid": pack_guid, "name": str(record.get("m_Name") or ""),
+                      "set_guid": nested_guid(record, "m_SetId") or ZERO_GUID,
+                      "pack_type": str(record.get("m_CardPackType") or "")})
+    return sorted(packs, key=lambda pack: pack["pack_guid"])
+
+
+def extract_card_packs(path: str | None = None) -> list[dict[str, str]]:
+    """Card pack records of the Records snapshot (see ``_extract_card_packs``)."""
+    if path or configured_path():
+        data = load_text(path)
+    else:
+        data = load_records_text(configured_records_path())
+    return _extract_card_packs(data)
+
+
 def _extract_pack_map(data: str) -> list[tuple[Any, ...]]:
     rows = []
     for _, record in records(data, "InventoryItemData")[0]:

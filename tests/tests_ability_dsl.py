@@ -60,7 +60,9 @@ def test_compiled_ability_saves_to_the_overlay():
     assert saved["guid"] in overlay["AbilityTemplate"]
     assert all(entry["guid"] in overlay[entry["section"]] for entry in saved["new"])
     reread = dsl.decompile(saved["guid"])
-    assert reread["exact"] and reread["text"] == dsl.render(dsl.parse(text))
+    # The saved ability reads back as rows where its targets can be words, and those words
+    # read back to themselves.
+    assert reread["exact"] and dsl.render(dsl.parse(reread["text"])) == reread["text"]
 
     # Editing a Records ability shadows it; saving its own sentences again drops the shadow.
     dsl.save_text("Deal 3 damage to target champion or troop.", BURN)

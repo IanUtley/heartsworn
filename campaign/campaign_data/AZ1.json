@@ -2769,6 +2769,17 @@
       "completedQuest(az01_three_braves)"
      ]
     }
+   },
+   {
+    "campaign_template": "AZ1",
+    "conversation_guid": "270bf0b5-9003-434a-a739-2853b3f699cf",
+    "trigger_json": {
+     "label": "Gnomes Come Home - Deep Desert - Gnomes In Deck (Fight)",
+     "source": "conversation_name",
+     "tags": [
+      "counter(gnomes_carried,1)"
+     ]
+    }
    }
   ],
   "quest_conversations": [

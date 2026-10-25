@@ -199,6 +199,10 @@ def vulnerable_damage_factor(context, target, is_champion):
     counter.  Both champions carry the ability, so the controller is always
     covered.
     """
+    from . import ir_exec
+    if VULNERABLE_ABILITY_GUID in ir_exec.ENABLED:
+        value = ir_exec.static_int_set(context, target, "DamageReceivedMultiplier")
+        return 1 if value is None else value
     if is_champion:
         count = champion_counter(context.bstate, target, VULNERABLE_COUNTER_GUID)
     else:

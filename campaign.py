@@ -374,7 +374,9 @@ def _ensure_quest_campaign(db, champ_id, campaign_group, quest_script=None):
         "Champions": [],
         "CurState": "EXPLORE",
         "LastNode": q["objectives"][0]["id"] if q["objectives"] else "",
-        "PublicState": {"Data": {"CampaignGroup": campaign_group}},
+        # The client's quest tracker draws only quests whose group matches the
+        # zone, so a start from the engine (no group given) takes the template's.
+        "PublicState": {"Data": {"CampaignGroup": campaign_group or q["campaign_group"]}},
         "Started": None, "Finished": None, "FinishReason": None,
         "Wins": 0, "Losses": 0, "Score": 0, "HealthAdj": 0, "DungeonLifeAdj": 0,
         "Flags": {"_quest_objective_idx": 0, "_quest_objectives": q["objectives"]},
@@ -1958,6 +1960,29 @@ def _unlock_party_slot_for_mercenary(db, user_id, applied):
         }})
 
 
+RANDOM_EQUIPMENT_RARITIES = ("Common", "Uncommon", "Rare")
+
+
+def _random_equipment_specs(reward):
+    """One random equipment item per ticked rarity, drawn from the ticked pack(s).
+
+    ``random_equipment`` is ``{"pools": ["AZ1 PVE PACK", ...], "rarities": [...]}``;
+    at most one item per rarity, so three at most.
+    """
+    from services import equipment
+    config = (reward or {}).get("random_equipment") or {}
+    pools = config.get("pools") or []
+    rarities = set(config.get("rarities") or [])
+    specs = []
+    for rarity in RANDOM_EQUIPMENT_RARITIES:
+        if rarity not in rarities:
+            continue
+        candidates = [guid for pool in pools for guid in equipment.pack_pool(pool, rarity)]
+        if candidates:
+            specs.append({"guid": random.choice(candidates), "quantity": 1})
+    return specs
+
+
 def _stardust_item_specs(reward):
     """Item specs for a reward's ``stardust`` entries (rarity/amount/probability).
 
@@ -2260,7 +2285,8 @@ def _apply_reward_dict(handler, db, camp_id, state, reward, one_time,
     if isinstance(item_specs, dict):
         item_specs = [item_specs]
     item_specs = (list(item_specs) + _stardust_item_specs(reward) +
-                  _inventory_reward_specs(reward))
+                  _inventory_reward_specs(reward) +
+                  _random_equipment_specs(reward))
     for spec in item_specs:
         if isinstance(spec, str):
             spec = {"guid": spec}
@@ -2534,7 +2560,8 @@ def _apply_encounter_end_rewards(handler, db, session, camp_id, won,
             item_specs = [item_specs]
         if not condition or context:
             item_specs = (list(item_specs) + _stardust_item_specs(reward_obj) +
-                          _inventory_reward_specs(reward_obj))
+                          _inventory_reward_specs(reward_obj) +
+                          _random_equipment_specs(reward_obj))
             for spec in item_specs:
                 if isinstance(spec, str):
                     spec = {"guid": spec}

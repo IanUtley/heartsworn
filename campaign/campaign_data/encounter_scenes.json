@@ -1557,7 +1557,10 @@
       }
      ]
     },
-    "ai_deck_personality": "BigThreats"
+    "ai_deck_personality": "BigThreats",
+    "scene_tags": [
+     "counter(gnomes_carried,1)"
+    ]
    },
    {
     "guid": "049bdcd0-3387-4ee1-b66f-8b4a9b04a7ec",
@@ -1816,9 +1819,26 @@
      }
     ],
     "rewards_json": {
-     "gold": 250,
-     "xp": 250,
-     "one_time": false
+     "end_of_game_rewards": [
+      {
+       "gold": 250,
+       "xp": 250,
+       "one_time": false
+      },
+      {
+       "one_time": true,
+       "random_equipment": {
+        "pools": [
+         "AZ1 PVE PACK"
+        ],
+        "rarities": [
+         "Common",
+         "Uncommon",
+         "Rare"
+        ]
+       }
+      }
+     ]
     },
     "ai_deck_personality": "Aggressive"
    },
@@ -4001,7 +4021,11 @@
     "ai_deck_guid": "13ca72d6-a4d2-480b-a124-a9469abcbd99",
     "ai_champion_guid": "45cd21ce-c715-4dfb-b8dc-05ae3154704f",
     "mods_json": [],
-    "rewards_json": {},
+    "rewards_json": {
+     "gold": 450,
+     "xp": 350,
+     "one_time": false
+    },
     "ai_deck_personality": "Aggressive"
    },
    {
@@ -4012,7 +4036,11 @@
     "ai_deck_guid": "53534b40-c02f-4daf-bbac-901c862c9f38",
     "ai_champion_guid": "f7899c2f-a6ca-4fd7-b624-51aaef779c14",
     "mods_json": [],
-    "rewards_json": {},
+    "rewards_json": {
+     "gold": 550,
+     "xp": 400,
+     "one_time": false
+    },
     "ai_deck_personality": "Burn"
    },
    {
@@ -4026,8 +4054,8 @@
     "rewards_json": {
      "end_of_game_rewards": [
       {
-       "gold": 1000,
-       "xp": 1000,
+       "gold": 750,
+       "xp": 650,
        "one_time": false,
        "chest_guid": "1d54da38-e03e-449c-aa2d-c9a7c0ad2cb1"
       }

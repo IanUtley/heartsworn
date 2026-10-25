@@ -91,6 +91,18 @@ def _project(context, uid, owner, guid, old, new, champion=False):
         tpl, card_type, _name, cost, attack, defense, gems = \
             context.handler._card_full_data(context.game, scid, row[0])
         owner = db_card_owner_id(context.session.session_id, int(uid), conn=context.db)
+        # An underground card's Tunneling threshold is public progress: the
+        # client draws the tunneling counter only when it has this int attr,
+        # including on an opponent's face-down copy.
+        tunneling_attrs = {}
+        if str(row[2]).lower() == "underground":
+            from .tunneling import tunneling_value, _saved_int_attrs
+            threshold = tunneling_value(
+                context.db, row[0],
+                _saved_int_attrs(context.db, context.session.session_id, uid))
+            if threshold > 0:
+                tunneling_attrs = {"tunneling": threshold,
+                                   "int_attrs": {"Tunneling": threshold}}
         context.game.push_card_updated(
             scid, owner_uid(owner if owner is not None else 0,
                             context.player_uid, context.ai_uid, context.bstate),
@@ -98,6 +110,7 @@ def _project(context, uid, owner, guid, old, new, champion=False):
             game_engine.card_type_from_db(card_type),
             template_id=tpl, cost=cost, attack=attack, defense=defense,
             gems=gems, counters=encoded, nulling=str(row[2]).lower() == "deck",
+            **tunneling_attrs,
             secret_counter_guids={key for key in encoded if _secret(key)},
             secret_counter_owner_uid=owner_uid(owner or 0,
                                                context.player_uid,

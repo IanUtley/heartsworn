@@ -196,6 +196,21 @@ def set_number(set_guid):
     return _catalog()[2].get(str(set_guid or "").lower())
 
 
+# The design note that marks an item as a pack's, per pack name. AZ1 notes are
+# "AZ1 PVE PACK" in several spellings; AZ2 notes are the bare "az2".
+PACK_NOTES = {"AZ1 PVE PACK": "az1 pve pack", "AZ2 PVE PACK": "az2"}
+
+
+def pack_pool(pool_name, rarity):
+    """Live equipment GUIDs of a pack ("AZ1 PVE PACK") at this rarity."""
+    note = PACK_NOTES.get(str(pool_name or "").strip())
+    if note is None:
+        return []
+    return sorted(guid for guid, item in equipment_items().items()
+                  if item.is_live and item.rarity == rarity
+                  and " ".join(item.design_notes.split()).lower() == note)
+
+
 def chest_loot_pool(set_guid):
     """Return {equipment rarity: [template guid, ...]} for a set's chests.
 

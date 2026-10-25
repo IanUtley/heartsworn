@@ -1252,6 +1252,9 @@ def apply(rules: dict[str, Any], state: dict[str, Any],
             if battle and battle.get("victory") == wanted:
                 _run_actions(state, ending_actions(battle.get("victory_actions"), ending),
                              log, node_id, rules)
+            if battle and battle.get("defeat") == wanted:
+                _run_actions(state, ending_actions(battle.get("defeat_actions"), ending),
+                             log, node_id, rules)
             # Tagged outcomes (a defeat's conversation, a hidden-path check) carry
             # their own actions; they run when their tags hold.
             for outcome in (battle or {}).get("results") or ():
@@ -1842,7 +1845,7 @@ def validate(rules: dict[str, Any], *, known_conversations=None,
     # battle's result conversations carry their own actions.
     for spec in (rules.get("nodes") or {}).values():
         for entry in spec.get("entries") or ():
-            action_maps = [entry.get(key) for key in ("actions", "victory_actions")]
+            action_maps = [entry.get(key) for key in ("actions", "victory_actions", "defeat_actions")]
             action_maps += [result.get("actions") for result in entry.get("results") or ()
                             if isinstance(result, dict)]
             for action_map in action_maps:

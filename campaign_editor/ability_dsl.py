@@ -183,7 +183,8 @@ import campaign_data  # noqa: E402
 import card_abilities as abilities  # noqa: E402
 import card_attributes  # noqa: E402
 import client_schema  # noqa: E402
-from gamedata.records import deserialize_line  # noqa: E402
+from gamedata.records import deserialize_line
+import ability_targets  # noqa: E402  (target rows: words and records)  # noqa: E402
 
 ZERO = abilities.ZERO_GUID
 NS = "Game.Shared.Mechanics."
@@ -507,8 +508,36 @@ def _content(section: str, record: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+def _unordered(value: Any) -> Any:
+    """A value with the parts of every AND or OR filter sorted: those parts are unordered."""
+    if isinstance(value, dict):
+        out = {key: _unordered(item) for key, item in value.items()}
+        if isinstance(out.get("m_TargetFilters"), list):
+            out["m_TargetFilters"] = sorted((_unordered(x) for x in out["m_TargetFilters"]),
+                                            key=lambda x: json.dumps(x, sort_keys=True))
+        return out
+    if isinstance(value, list):
+        return [_unordered(item) for item in value]
+    return value
+
+
 def _key(value: Any) -> str:
-    return json.dumps(value, sort_keys=True)
+    return json.dumps(_unordered(value), sort_keys=True)
+
+
+def _variable_uses(value: Any, out: list[str]) -> list[str]:
+    """The variable names an effect uses: what it reads (inputs) and what it sets (randomized
+    or set variables, by ``m_VariableName``)."""
+    if isinstance(value, dict):
+        if value.get("m_VariableName"):
+            out.append(str(value["m_VariableName"]))
+        out.extend(_input_names(value, []))
+        for item in value.values():
+            _variable_uses(item, out)
+    elif isinstance(value, list):
+        for item in value:
+            _variable_uses(item, out)
+    return out
 
 
 def _input_names(value: Any, out: list[str]) -> list[str]:
@@ -1016,9 +1045,15 @@ def built_target_mismatches() -> list[str]:
                     phrase = f"{quantity} {side}{noun}{control}"
                     built = _build_target(phrase)
                     if built is not None and phrase in vocab.by_phrase and \
-                            vocab.content[vocab.by_phrase[phrase]] != built:
+                            _key(vocab.content[vocab.by_phrase[phrase]]) != _key(built):
                         out.append(phrase)
     return out
+
+
+def _named_content(properties: dict[str, Any]) -> dict[str, Any]:
+    """The content of the target record a row's properties describe (what Records compares)."""
+    record = ability_targets.target_record("row", properties)
+    return _content("AbilityTargetTemplate", record)
 
 
 def _target_content(phrase: str) -> dict[str, Any] | None:
@@ -1128,6 +1163,8 @@ def render(parsed: dict[str, Any]) -> str:
         lines.append("Settings: " + ", ".join(settings))
     if parsed.get("requires"):
         lines.append("Requires: " + parsed["requires"] + ".")
+    if parsed.get("named_targets"):
+        lines.append("Targets: " + ability_targets.render_definitions(parsed["named_targets"]) + ".")
     instead = bool(parsed.get("trigger")) and is_replacement(parsed["trigger"])
     for index, clause in enumerate(clauses):
         shape = SHAPE_BY_ID[clause["shape"]]
@@ -1162,23 +1199,77 @@ def decompile(guid: str) -> dict[str, Any]:
 
 
 def describe_root(guid: str, root: dict[str, Any]) -> dict[str, Any]:
-    """``decompile`` for a root record already in hand (the editor's tree, unsaved)."""
+    """``decompile`` for a root record already in hand (the editor's tree, unsaved). Targets
+    that can be written as words are read as named rows; if those rows do not compile back
+    to the same records, the ability is described with its phrases instead."""
     overlay = campaign_data.load_ability_overlay()
     try:
         parsed = _read_root(root, overlay)
     except Unsupported as error:
         return {"guid": guid, "supported": False, "exact": False, "text": "",
                 "reasons": error.reasons, "parsed": None}
-    text = render(parsed)
-    try:
-        compiled = compile_text(text)
-        differences = _differences(_tree(root, None, overlay),
-                                   _tree(compiled["root"], compiled["pending"], overlay))
-    except ValueError as error:
-        return {"guid": guid, "supported": True, "exact": False, "text": text, "parsed": parsed,
-                "reasons": [f"the sentences do not compile back: {error}"]}
-    return {"guid": guid, "supported": True, "exact": not differences, "text": text,
-            "parsed": parsed, "reasons": [f"differs at {d}" for d in differences[:6]]}
+    first_reasons: list[str] = []
+    for candidate in (_with_target_rows(parsed, root, overlay), parsed):
+        text = render(candidate)
+        try:
+            compiled = compile_text(text)
+            differences = _differences(_tree(root, None, overlay),
+                                       _tree(compiled["root"], compiled["pending"], overlay))
+        except ValueError as error:
+            first_reasons.append(f"the sentences do not compile back: {error}")
+            continue
+        if not differences:
+            return {"guid": guid, "supported": True, "exact": True, "text": text,
+                    "parsed": candidate, "reasons": []}
+        first_reasons.append(f"differs at {differences[0]}")
+    return {"guid": guid, "supported": True, "exact": False, "text": text, "parsed": parsed,
+            "reasons": first_reasons[-2:]}
+
+
+def _row_defaults(record: dict[str, Any]) -> bool:
+    """Whether a target is the kind a row states: all zones, one, automatic, all players."""
+    count = lambda value: (value or {}).get("m_Value") if isinstance(value, dict) else None
+    return (record.get("m_CollectionFlags") == ability_targets.ALL_ZONES
+            and bool(record.get("m_IsAutoTarget"))
+            and record.get("m_PlayerFilter") == "MultiplePlayers"
+            and count(record.get("m_MinTargetCount")) == 1
+            and count(record.get("m_MaxTargetCount")) == 1)
+
+
+def _with_target_rows(parsed: dict[str, Any], root: dict[str, Any], overlay: dict) -> dict[str, Any]:
+    """The same ability with each clause's target named as a row, where the target can be
+    written as words and the row is used by a clause. Other targets keep their phrase."""
+    names: dict[str, str] = {}
+    rows: dict[str, Any] = {}
+    for target in root.get("m_AbilityTargetTemplateIds") or []:
+        guid = str((target or {}).get("m_Guid") or "").lower()
+        record = _record("AbilityTargetTemplate", guid, overlay=overlay)
+        if not record or not isinstance(record.get("m_CardFilter"), dict):
+            continue
+        phrase = _target_phrase(guid, overlay)
+        if not phrase or phrase in names:
+            continue
+        properties = ability_targets.read_properties(record["m_CardFilter"])
+        quantity = ability_targets.quantity_of(record)
+        if not properties or quantity is None or properties.get("raw"):
+            continue   # nothing to state as a row (no properties, or one the words cannot show)
+        properties["quantity"] = list(quantity)
+        flags = record.get("m_CollectionFlags")
+        if flags and flags != ability_targets.ALL_ZONES and "|" not in flags:
+            properties["searched"] = flags   # where it searches, when that is not every zone
+        try:
+            ability_targets.render_phrase(properties)
+        except ValueError:
+            continue
+        names[phrase] = f"T{len(rows)}"
+        rows[names[phrase]] = properties
+    clauses = [dict(clause, target=names.get(clause["target"], clause["target"]))
+               for clause in parsed["clauses"]]
+    used = {clause["target"] for clause in clauses}
+    named = {name: props for name, props in rows.items() if name in used}
+    if not named:
+        return parsed
+    return dict(parsed, clauses=clauses, named_targets=named)
 
 
 def _root_spec(field: str) -> dict[str, str]:
@@ -1255,7 +1346,7 @@ def _read_root(root: dict[str, Any], overlay: dict) -> dict[str, Any]:
         latest[clause["target"]] = slot
         clauses.append(clause)
     read = {name for entry in content.get("m_AbilityEffectList") or []
-            for name in _input_names(_record("AbilityEffectTemplate", str(
+            for name in _variable_uses(_record("AbilityEffectTemplate", str(
                 (entry.get("m_EffectTemplateId") or {}).get("m_Guid") or "").lower(), overlay=overlay) or {}, [])}
     reasons += [f"variable {name} is read outside the effects" for name in variables if name not in read]
     if reasons:
@@ -1412,7 +1503,7 @@ def _split_clause(text: str):
                     yield effect.strip(), count.strip().lower(), duration, condition.strip().lower()
 
 
-def _parse_clause(text: str, instead: bool = False) -> dict[str, Any]:
+def _parse_clause(text: str, instead: bool = False, names: frozenset = frozenset()) -> dict[str, Any]:
     """One clause. ``instead``: it is a replacement's last clause, which may end "instead"."""
     cat = catalogue()
     suffixes = {"layer": 0, "recalculate": "", "new_target": False}
@@ -1447,7 +1538,9 @@ def _parse_clause(text: str, instead: bool = False) -> dict[str, Any]:
                 continue
             slots = found.groupdict()
             target = "you" if you else (slots.get("target") or "").lower()
-            if target in cat["targets"].by_phrase:
+            if target.upper() in names:   # a target row defined by the sentences' Targets line
+                target = target.upper()
+            elif target in cat["targets"].by_phrase:
                 target = cat["targets"].display.get(cat["targets"].by_phrase[target], target)
             elif _build_target(target) is None:
                 problems.append(f"no target {target!r}")
@@ -1552,6 +1645,7 @@ def parse(text: str) -> dict[str, Any]:
     """The structure of DSL text: settings, requires, trigger and clauses (``ValueError``
     names the line it cannot read)."""
     settings, requires, trigger, clauses = [], "", "", []
+    named: dict[str, Any] = {}
     pending: list[tuple[int, str]] = []   # (line number, clause text), read once all are known
     for number, line in enumerate(str(text or "").replace("\r", "").split("\n"), 1):
         line = _line(line)
@@ -1559,6 +1653,9 @@ def parse(text: str) -> dict[str, Any]:
         if not line or line.startswith("#"):
             continue
         try:
+            if lower.startswith("targets:"):
+                named.update(ability_targets.parse_definitions(line.split(":", 1)[1]))
+                continue
             if lower.startswith("settings:"):
                 settings += _split_settings(line.split(":", 1)[1])
                 continue
@@ -1587,7 +1684,7 @@ def parse(text: str) -> dict[str, Any]:
             may = YOU_MAY.match(part) if index == 0 else None
             if may:
                 part = part[may.end():]
-            clause = _parse_clause(part, instead and index == len(pending) - 1)
+            clause = _parse_clause(part, instead and index == len(pending) - 1, frozenset(named))
             if may and clause["target"] != "you":
                 raise ValueError("'you may' needs a clause for you")
             clause["contingent"] = bool(contingent)
@@ -1597,7 +1694,8 @@ def parse(text: str) -> dict[str, Any]:
             raise ValueError(f"line {number}: {error}") from None
     if optional and "optional" not in settings:
         settings.append("optional")
-    return {"settings": settings, "requires": requires, "trigger": trigger, "clauses": clauses}
+    return {"settings": settings, "requires": requires, "trigger": trigger, "clauses": clauses,
+            "named_targets": named}
 
 
 def _split_trigger(line: str) -> tuple[str, str]:
@@ -1832,9 +1930,14 @@ def compile_text(text: str, base: str = "") -> dict[str, Any]:
     entries, variables, bound = [], [], {}
     for index, clause in enumerate(parsed["clauses"]):
         shape = SHAPE_BY_ID[clause["shape"]]
-        target_content = _target_content(clause["target"])
+        if clause["target"] in (parsed.get("named_targets") or {}):
+            target_content = _named_content(parsed["named_targets"][clause["target"]])
+        else:
+            target_content = _target_content(clause["target"])
         target_key = _key(target_content)
-        target_guid = _target_for(clause["target"], target_content, pending)
+        target_phrase = (ability_targets.render_phrase(parsed["named_targets"][clause["target"]])
+                         if clause["target"] in (parsed.get("named_targets") or {}) else clause["target"])
+        target_guid = _target_for(target_phrase, target_content, pending)
         if clause.get("new_target") or target_key not in latest:
             targets.append(target_guid)
             latest[target_key] = len(targets) - 1
@@ -2078,6 +2181,9 @@ def _differences(left: Any, right: Any, path: str = "") -> list[str]:
         for key in sorted(set(left) | set(right)):
             out += _differences(left.get(key), right.get(key), f"{path}.{key}" if path else key)
         return out
+    if path.endswith("m_TargetFilters") and isinstance(left, list) and isinstance(right, list) \
+            and sorted(_key(x) for x in left) == sorted(_key(x) for x in right):
+        return []   # the parts of an AND or OR are unordered
     if isinstance(left, list) and isinstance(right, list) and len(left) == len(right):
         out = []
         for index, (a, b) in enumerate(zip(left, right)):

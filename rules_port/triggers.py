@@ -474,7 +474,11 @@ class NativeTriggerBackend:
                 # ``trigger_collection_allows`` mirrors the client collection
                 # check, including its None and Simulacrum exceptions.
                 if not trigger_collection_allows(
-                        graph.trigger_collection_flags, trigger_location):
+                        graph.trigger_collection_flags, trigger_location) and \
+                        not yard_inspire_allows(
+                            db, session.session_id, battle_state, handler, game,
+                            source_uid, source_owner, trigger_location,
+                            event.source_card_id):
                     continue
                 source_card_owner = source_owner
                 context = ConditionContext(
@@ -998,17 +1002,8 @@ def _record_typed_entry_statistics(db, session, state, card_uid, owner_id,
             return
 
 
-def _card_has_inspire(db, session_id, card_uid, state, handler, game):
-    """Mirror ``Card.HasInspire`` from authored card attributes/context."""
-    try:
-        attributes = int(__import__("rules_port.static_rules",
-                                    fromlist=["effective_attributes"])
-                        .effective_attributes(
-                            db, session_id, state, int(card_uid)))
-        if attributes & int(game_engine.ECardAttributes.Inspire):
-            return True
-    except (AttributeError, TypeError, ValueError, RuntimeError):
-        pass
+def _template_int_attr(db, session_id, card_uid, name) -> int:
+    """A card's printed IntAttr: its CardTemplate's serialized TAC in Records."""
     try:
         from gamedata import DEFAULT_RECORD_STORE
         from pvp_db import db_card_zone_details
@@ -1021,10 +1016,65 @@ def _card_has_inspire(db, session_id, card_uid, state, handler, game):
                 serialized.get("data", "")
                 if isinstance(serialized, dict) else "")
         from .tac import _tac_attr_hash, decode_tac
-        if int(decode_tac(data).get(_tac_attr_hash("Inspire"), 0) or 0) > 0:
-            return True
+        return int(decode_tac(data).get(_tac_attr_hash(name), 0) or 0)
     except (AttributeError, TypeError, ValueError):
+        return 0
+
+
+def card_context_int_attr(db, session_id, state, card_uid, name) -> int:
+    """Mirror ``Card.GetCardContext().Get(name)``: the printed TAC value plus the
+    card's runtime int_attrs, with authored static IntAttr modifiers over them."""
+    from pvp_db import db_card_mutation_field
+    total = _template_int_attr(db, session_id, card_uid, name)
+    for column in ("permanent_buffs", "temporary_buffs"):
+        try:
+            data = json.loads(db_card_mutation_field(
+                session_id, int(card_uid), column, conn=db) or "{}")
+        except (TypeError, ValueError, json.JSONDecodeError):
+            data = {}
+        attrs = data.get("int_attrs") if isinstance(data, dict) else None
+        if isinstance(attrs, dict):
+            total += int(attrs.get(name, attrs.get(name.lower(), 0)) or 0)
+    try:
+        from .static_rules import effective_card_int_attr
+        return effective_card_int_attr(db, session_id, state or {}, int(card_uid), name, total)
+    except RuntimeError:   # an unresolvable static modifier leaves the context as read
+        return total
+
+
+def yard_inspire_allows(db, session_id, state, handler, game, card_uid,
+                        controller, location, event_source_uid) -> bool:
+    """Mirror ``Card.CheckAllowYardInspire``: a troop with Inspire in its crypt
+    triggers as though in play, on another card's event, while a card in its
+    controller's Warzone carries the AllowYardInspire IntAttr (Blessing the
+    Fallen). The client only applies it where the collection check fails."""
+    if str(location or "").lower() != "discard":
+        return False
+    if event_source_uid is not None and int(event_source_uid) == int(card_uid):
+        return False
+    from pvp_db import db_card_source_info, db_warzone_card_uids
+    row = db_card_source_info(session_id, int(card_uid), conn=db)
+    if not row or "troop" not in str(row[1] or "").lower():
+        return False
+    if not any(card_context_int_attr(db, session_id, state, int(uid), "AllowYardInspire") > 0
+               for (uid,) in db_warzone_card_uids(session_id, int(controller), conn=db)):
+        return False
+    return _card_has_inspire(db, session_id, int(card_uid), state, handler, game)
+
+
+def _card_has_inspire(db, session_id, card_uid, state, handler, game):
+    """Mirror ``Card.HasInspire`` from authored card attributes/context."""
+    try:
+        attributes = int(__import__("rules_port.static_rules",
+                                    fromlist=["effective_attributes"])
+                        .effective_attributes(
+                            db, session_id, state, int(card_uid)))
+        if attributes & int(game_engine.ECardAttributes.Inspire):
+            return True
+    except (AttributeError, TypeError, ValueError, RuntimeError):
         pass
+    if _template_int_attr(db, session_id, card_uid, "Inspire") > 0:
+        return True
     try:
         scid = game_engine.SessionCardId(game_engine.UID(int(card_uid)))
         card_def = getattr(game, "card_defs", {}).get(scid)

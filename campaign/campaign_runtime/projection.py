@@ -146,8 +146,19 @@ def project(rules: dict[str, Any], state: dict[str, Any],
     started = state.get("encounter") or {}
     picker = (engine.count_picker(rules, state, count_picker)
               if count_picker in nodes else None)
+    # An NPC can have a gate node ("Myaa", revealed by a quest) and a conversation
+    # node ("Myaa@cavein", which carries the portrait). The client names both
+    # "Myaa" and takes the first one, the gate, which has no portrait. So the
+    # gate is dropped and its visibility goes to the conversation node.
+    gates = {n for n in nodes if "@" not in n and any(
+        other.startswith(n + "@") for other in nodes)}
     for node in nodes:
+        if node in gates:
+            continue
         info = layout["nodes"].get(node) or {}
+        if display(node) != node and display(node) in gates:
+            gate = layout["nodes"].get(display(node)) or {}
+            info = {**info, "visible": bool(info.get("visible") and gate.get("visible"))}
         entry = entries.get(node)
         if (kind == "panorama" and not info.get("visible") and
                 started.get("node") != node):

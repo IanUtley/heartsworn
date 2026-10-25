@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 import random
 import threading
 
@@ -163,10 +164,26 @@ def game_health_projection_attr(game, battle_state, owner_id):
 
 def set_game_champion_health(game, battle_state, owner_id, health_key, value):
     """Update both the checkpoint key and its client-facing Game health field."""
+    before = getattr(game, str(health_key), None)
     setattr(game, str(health_key), int(value))
     projected = game_health_projection_attr(game, battle_state, owner_id)
     if projected:
         setattr(game, projected, int(value))
+    _log_health_change(health_key, owner_id, before, int(value), battle_state)
+
+
+def _log_health_change(health_key, owner_id, before, after, battle_state):
+    """One line per champion health change: the amount, what the change was made by, and the ability and
+    source that were resolving. The caller's function name is the path (combat, a damage effect, a gain)."""
+    if before == after:
+        return
+    state = battle_state or {}
+    caller = sys._getframe(2).f_code.co_name
+    change = "?" if before is None else f"{after - before:+d}"
+    from db import log_req   # the request log (hconnect_requests.log), as the other RulesPort lines use
+    log_req(f"    HEALTH {health_key} owner={owner_id} {before} -> {after} ({change}) by {caller} "
+            f"ability={state.get('resolving_ability') or '-'} "
+            f"source={state.get('resolving_source_uid') or '-'} turn={state.get('turn_player') or '-'}")
 
 
 def raw_uid(value):

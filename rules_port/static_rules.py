@@ -2396,9 +2396,14 @@ def _cost_from_deltas(db, session_id, card_uid, native, *,
     if str(fields.get("location") or "").lower() == "hand":
         # Champion built-in Dazed (BuiltInResources 16ffaa33): "While you
         # are Dazed, non-resource cards in your hand have cost +1."
-        from .builtin_rules import dazed_cost_increase
-        cost += dazed_cost_increase(None, battle_state, fields.get("user_id"),
-                                    fields.get("card_type"))
+        from . import ir_exec
+        from .builtin_rules import DAZED_ABILITY_GUID, dazed_cost_increase
+        if DAZED_ABILITY_GUID in ir_exec.ENABLED:
+            view = ir_exec.BattleView(db, session_id, battle_state or {})
+            cost += ir_exec.static_cost_increase(view, int(card_uid), fields.get("user_id"))
+        else:
+            cost += dazed_cost_increase(None, battle_state, fields.get("user_id"),
+                                        fields.get("card_type"))
     return max(0, cost + int(native["cost_mod"]))
 
 

@@ -654,6 +654,21 @@ class HCPHandler(RulesPortProjectionMixin, ProfileStreamMixin, CardPlayMixin, Ca
                     _session._rules_port_mutation_emitted = True
                 return bool(dead)
             port.set_state_based_handler(native_state_based)
+            def native_hand_over_limit(player_id):
+                """The Discard phase stops the player whose hand is over the maximum."""
+                from rules_port.persistence import load_state as _load_state
+                if not isinstance(self.user_profile, dict):
+                    return False
+                if (int(getattr(player_id, "uid64", player_id)) !=
+                        int(getattr(game.player_uid, "uid64", game.player_uid))):
+                    return False
+                current_state = _load_state(session, default=lambda: dict(battle_state))
+                if self._hand_size_unlimited(session, current_state):
+                    return False
+                hand_count = db_hand_card_count(session.session_id, self.user_profile["id"])
+                return hand_count > self._max_hand_size(session)
+            port.set_hand_limit_checker(native_hand_over_limit)
+
             def native_phase_priority(_port=port, _game=game,
                                       _session=session, _state=battle_state):
                 """Translate Practice/PvE stop preferences into native queues."""
@@ -682,6 +697,13 @@ class HCPHandler(RulesPortProjectionMixin, ProfileStreamMixin, CardPlayMixin, Ca
                 policy = _lifecycle.practice_phase_priority(
                     state, phase, active_player_id=active,
                     player_id=human)
+                # Discard is a window the player must act in when their hand is over the
+                # maximum, whatever their stop preferences say.
+                if (phase == game_engine.ETurnPhases.Discard and
+                        _same_uid(active, human) and
+                        native_hand_over_limit(human)):
+                    from rules_port.kernel import TurnPhasePlayers
+                    policy = TurnPhasePlayers.ACTIVE
                 if os.environ.get("HEX_RULES_PORT_TRACE"):
                     log_req(
                         f"[rules-trace] phase-policy phase={phase!r} "
@@ -943,21 +965,9 @@ class HCPHandler(RulesPortProjectionMixin, ProfileStreamMixin, CardPlayMixin, Ca
                     self.user_profile.get("id", 0)
                     if current_state.get("turn_player") == "player"
                     and isinstance(self.user_profile, dict) else 0)
-                # The native EndPhase exit publishes only CombatEndedEvent, so
-                # the outgoing turn's "at the end of your turn" triggers fire
-                # here, before the cleanup below, as the legacy EndTurn
-                # hand-over did.  Triggers queue onto the chain as usual.
-                from rules_port.triggers import dispatch_native_trigger
-                turn_end_projection = (
-                    getattr(getattr(_port, "event_sink", None), "game", None)
-                    or game)
-                dispatch_native_trigger(
-                    db=_db, handler=self, game=turn_end_projection,
-                    session=_session, player_uid=turn_end_projection.player_uid,
-                    ai_uid=turn_end_projection.ai_uid,
-                    battle_state=current_state,
-                    event_type="TurnEndedEvent", source_card_id=None,
-                    source_player_id=outgoing_owner)
+                # "At the end of your turn" triggers fire once, when EndPhase is
+                # entered (native_phase_entry), while the outgoing turn is still
+                # in play. They are not dispatched again at the turn boundary.
                 self._clear_combat_damage(_session, current_state)
                 self._clear_expired_temporary_attributes(
                     _session, current_state, outgoing_owner, "end_turn",
@@ -974,6 +984,7 @@ class HCPHandler(RulesPortProjectionMixin, ProfileStreamMixin, CardPlayMixin, Ca
                     f"{next_side} ({selected!r})")
                 return selected
             port.set_turn_boundary_resolver(native_turn_boundary)
+
             facts = getattr(port, "runtime_facts", None)
             if facts is not None:
                 # The battle engine reloads a fresh mutable state dict for

@@ -77,6 +77,22 @@ canvas.dragging { cursor: grabbing; }
 .tabs button.active { color: var(--text); border-bottom-color: var(--accent); }
 .tab-body { overflow: auto; padding: 14px 16px 24px; flex: 1; }
 .muted { color: var(--muted); }
+.cards-head, .cards-assign { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-bottom: 8px; }
+.cards-head input { flex: 1; min-width: 0; }
+.cards-head select, .cards-assign select { flex: 1 1 160px; min-width: 0; max-width: 100%; }
+.card-source { font-size: 10px; text-transform: uppercase; padding: 1px 5px; border: 1px solid var(--line); border-radius: 3px; color: var(--muted); }
+.card-source-edited, .card-source-new, .card-source-custom { color: var(--accent); border-color: var(--accent); }
+.card-frame { margin-top: 10px; border-top: 1px solid var(--line); padding-top: 8px; }
+.frame-facts { display: grid; grid-template-columns: max-content 1fr; gap: 3px 10px; margin: 0; font-size: 12px; }
+.frame-facts dt { color: var(--muted); }
+.frame-facts dd { margin: 0; }
+.card-edit { display: grid; gap: 6px; }
+.card-edit h3 { margin: 0; }
+.card-threshold { display: grid; gap: 4px; }
+.threshold-row { display: flex; gap: 6px; align-items: center; }
+.threshold-row input { width: 64px; }
+.keyword-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 2px 8px; }
+.int-attr-name { min-width: 140px; }
 .offer-menu { position: fixed; z-index: 1000; display: flex; flex-direction: column;
   background: var(--panel-2); border: 1px solid var(--line); border-radius: 4px;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35); min-width: 140px; }
@@ -309,16 +325,17 @@ button.play { border-color: var(--encounter); color: var(--encounter); }
 .deck-close { margin-left: auto; }
 .deck-layout { flex: 1; min-height: 0; display: flex; }
 .deck-columns { display: flex; gap: 8px; overflow: auto; align-items: flex-start; width: 100%; padding-bottom: 6px; }
-.deck-column { flex: 0 0 158px; width: 158px; display: flex; flex-direction: column; }
+.deck-column { flex: 0 0 184px; width: 184px; display: flex; flex-direction: column; }
 /* Copies overlap like a pile: each card shows only its title row, and the
    card later in the column covers the rest. The bottom card shows in full. */
-.deck-slot { position: relative; display: flex; align-items: flex-start; gap: 4px; height: 262px; margin-top: -236px; flex-shrink: 0; }
+.deck-slot { position: relative; display: flex; align-items: flex-start; gap: 0; height: 262px; margin-top: -236px; flex-shrink: 0; }
 .deck-column > .deck-slot:first-child { margin-top: 0; }
 .deck-slot:hover { z-index: 10; }
 /* A hovered card grows to show all of its text, overlaying the cards below it
    without moving them. */
 .deck-slot:hover .deck-strip, .deck-slot:focus-within .deck-strip { height: auto; min-height: 262px; overflow: visible; }
-.deck-thresh { display: flex; flex-direction: column; gap: 3px; width: 22px; padding-top: 28px; flex-shrink: 0; }
+/* Each card shows only its title row, so its thresholds sit side by side in that row, to the left. */
+.deck-thresh { display: flex; flex-direction: row; justify-content: flex-end; align-items: center; gap: 2px; height: 26px; width: 48px; flex-shrink: 0; }
 .deck-strip { position: relative; width: 132px; height: 262px; border: 1px solid var(--line); border-radius: 4px; background: var(--panel-2); box-shadow: 0 1px 2px rgba(0, 0, 0, .35); overflow: hidden; flex-shrink: 0; }
 .deck-strip:hover, .deck-strip:focus { border-color: var(--accent); outline: none; }
 .deck-row { display: flex; align-items: center; gap: 4px; height: 26px; padding: 0 5px; }
@@ -331,8 +348,8 @@ button.play { border-color: var(--encounter); color: var(--encounter); }
 .deck-face-meta { font-size: .75em; color: var(--muted); margin-top: 3px; }
 .deck-stats { font-weight: 600; color: var(--text); }
 .deck-text { margin: 3px 0 0; font-size: .72em; line-height: 1.3; }
-.deck-shard { display: block; width: 22px; height: 18px; line-height: 18px; text-align: center; font-size: .75em; font-weight: 700; border-radius: 4px; color: #fff; border: 1px solid rgba(0, 0, 0, .4); }
-.deck-shard.shard-blood { background: #8e2a2a; }
+.deck-shard { display: block; width: 20px; height: 18px; line-height: 18px; text-align: center; font-size: .75em; font-weight: 700; border-radius: 4px; color: #fff; border: 1px solid rgba(0, 0, 0, .4); }
+.deck-shard.shard-blood { background: #3b1d2e; }
 .deck-shard.shard-ruby { background: #b8324a; }
 .deck-shard.shard-sapphire { background: #2c6fb3; }
 .deck-shard.shard-wild { background: #3f8f3f; }
@@ -347,3 +364,153 @@ button.play { border-color: var(--encounter); color: var(--encounter); }
 .ability { margin-top: 8px; }
 .ability-title { font-weight: 600; color: var(--accent); }
 .ability-text { margin-top: 2px; line-height: 1.35; }
+.card-face-img { display: block; width: 100%; max-width: 224px; height: auto; margin: 6px 0; border-radius: 8px; }
+
+.cards-main { padding: 0 16px 24px; max-width: 1480px; width: 100%; margin: 0 auto; }
+
+/* Card Editor page: the set's cards painted small on the left, the open card on the right. */
+body.cards-page { display: block; height: auto; min-height: 100%; }
+.cards-page .cards-main { display: block; }
+.cards-page .tab-body { padding: 14px 0 24px; overflow: visible; }
+.cards-layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
+.cards-browse, .cards-detail { min-width: 0; }
+.cards-frames-note { margin: 0 0 8px; padding: 6px 8px; font-size: 12px; color: var(--text);
+  border: 1px solid var(--amber); border-radius: 6px; background: var(--panel-2); }
+.cards-packs { margin: 0 0 8px; font-size: 12px; }
+.cards-packs h3 { margin: 6px 0; font-size: 13px; }
+.store-packs { width: 100%; border-collapse: collapse; }
+.store-packs th, .store-packs td { text-align: left; padding: 3px 4px; vertical-align: top; }
+.store-packs input[type="text"], .store-packs input:not([type]), .store-packs input[type="number"] { width: 100%; min-width: 0; }
+.store-packs input[type="number"] { width: 6em; }
+.cards-grid { list-style: none; margin: 0; padding: 2px; display: grid; gap: 8px;
+  grid-template-columns: repeat(auto-fill, minmax(92px, 1fr)); max-height: 46vh; overflow: auto; }
+.card-tile { position: relative; min-width: 0; }
+.card-tile-open { display: block; width: 100%; padding: 3px; background: none;
+  border: 1px solid transparent; border-radius: 8px; color: var(--text); text-align: left; }
+.card-tile.open .card-tile-open { border-color: var(--accent); background: var(--panel-2); }
+.card-thumb-slot { display: block; width: 100%; aspect-ratio: 160 / 224; border-radius: 6px; background: var(--panel-2); overflow: hidden; }
+.card-thumb { display: block; width: 100%; height: 100%; cursor: pointer; }
+.card-tile-caption { display: flex; gap: 4px; align-items: center; min-width: 0; padding: 0 3px; }
+.card-tile-caption input { margin: 0; flex: none; }
+.card-tile-name { flex: 1; min-width: 0; font-size: 11px; line-height: 1.2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.card-tile .card-source { flex: none; padding: 0 4px; }
+.card-detail-top { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; align-items: start; }
+.card-face-col { min-width: 0; }
+.cards-detail .card-face-img { max-width: 320px; margin: 0 auto 6px; }
+.card-edit .field { flex-wrap: wrap; }
+.card-edit .field input:not([type=checkbox]), .card-edit .field select, .card-edit .field textarea { flex: 1 1 160px; min-width: 0; }
+.field-wide { align-items: flex-start; }
+textarea { font: inherit; color: var(--text); background: var(--panel-2); border: 1px solid var(--line);
+  border-radius: 6px; padding: 5px 8px; width: 100%; min-width: 0; }
+input:not([type=checkbox]):not([type=radio]) { max-width: 100%; }
+.small-text { font-size: 12px; }
+.card-abilities, .ability-editor { margin-top: 14px; border-top: 1px solid var(--line); padding-top: 8px; min-width: 0; }
+.card-abilities h4, .ability-editor-head h4 { margin: 0 0 6px; overflow-wrap: anywhere; min-width: 0; }
+.card-edit h3, .child-head span, .child-editor p { overflow-wrap: anywhere; min-width: 0; }
+.ability-links, .child-list { list-style: none; margin: 0 0 8px; padding: 0; display: grid; gap: 6px; }
+.ability-link, .child-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 6px;
+  border: 1px solid var(--line); border-radius: 6px; background: var(--panel); min-width: 0; }
+.child-row { display: block; }
+.ability-link.open { border-color: var(--accent); }
+.ability-link-name { font-weight: 600; overflow-wrap: anywhere; }
+.ability-link code, .child-head code, .ability-editor-head code { overflow-wrap: anywhere; color: var(--muted); }
+.row-actions { display: inline-flex; flex-wrap: wrap; gap: 4px; margin-left: auto; }
+.row-actions button, .picker-row button, .child-editor button { padding: 3px 8px; font-size: 12px; }
+.picker-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 6px 0; }
+.picker { flex: 1 1 200px; min-width: 0; font: inherit; color: var(--text); background: var(--panel-2);
+  border: 1px solid var(--line); border-radius: 6px; padding: 5px 9px; }
+.picker-row select { max-width: 100%; min-width: 0; }
+.ability-editor-head { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; }
+.ability-block { margin: 8px 0; }
+.ability-block > summary { cursor: pointer; font-weight: 600; margin-bottom: 6px; }
+.ability-fields { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 230px), 1fr)); gap: 6px 10px; margin: 6px 0; }
+.ability-field { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.ability-field label { display: flex; flex-wrap: wrap; gap: 0 6px; align-items: baseline; }
+.ability-field .field-name { font-size: 12px; font-family: ui-monospace, monospace; overflow-wrap: anywhere; }
+.ability-field input:not([type=checkbox]), .ability-field select, .ability-field textarea { width: 100%; min-width: 0; }
+.ability-field input[type=checkbox] { align-self: flex-start; }
+.json-input, .guid-input { font-family: ui-monospace, monospace; font-size: 12px; }
+.flag-set { display: flex; flex-wrap: wrap; gap: 2px 8px; font-size: 12px; }
+.flag { display: inline-flex; gap: 3px; align-items: center; }
+.child-head { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.child-editor { margin-top: 6px; padding: 6px 8px; border-left: 3px solid var(--accent); background: var(--panel-2); border-radius: 4px; }
+.field-error { font-size: 12px; color: var(--blocked); overflow-wrap: anywhere; }
+.field-error:empty { display: none; }
+.field-error.warning { color: var(--amber); }
+.ability-problems ul { margin: 6px 0; padding-left: 18px; font-size: 12px; }
+.ability-problems li.error { color: var(--blocked); }
+.ability-problems li.warning { color: var(--amber); }
+.badge-warn { font-size: 10px; text-transform: uppercase; padding: 1px 5px; border: 1px solid var(--amber); border-radius: 3px; color: var(--amber); }
+@media (min-width: 900px) {
+  .cards-layout { grid-template-columns: minmax(280px, 38%) minmax(0, 1fr); }
+  .cards-browse { position: sticky; top: 8px; align-self: start; }
+  .cards-grid { max-height: calc(100vh - 210px); }
+}
+@media (min-width: 1200px) {
+  .card-detail-top { grid-template-columns: 320px minmax(0, 1fr); }
+}
+/* The ability editor's sentence form (cards.js, ability_dsl.py). */
+.dsl-text { width: 100%; box-sizing: border-box; font-family: ui-monospace, monospace; font-size: 12px; }
+.dsl-builder { margin-top: 6px; }
+.dsl-result ul { margin: 6px 0; padding-left: 18px; }
+.dsl-result code { overflow-wrap: anywhere; color: var(--muted); }
+.dsl-result li.error { color: var(--blocked); }
+/* The guided builder: templates, the chosen-so-far line, and the open step's choices. */
+.dsl-chain { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; margin: 6px 0; background: var(--panel-2); }
+.dsl-templates { display: flex; flex-wrap: wrap; gap: 4px 6px; align-items: center; margin-bottom: 8px; }
+.dsl-templates button { font-size: 12px; padding: 3px 8px; }
+.dsl-line { font-size: 14px; line-height: 1.9; margin: 4px 0 6px; overflow-wrap: anywhere; }
+.dsl-part { font: inherit; padding: 0 6px; margin: 0 1px; border-radius: 4px; border: 1px solid var(--line);
+  background: var(--panel); color: var(--text); cursor: pointer; }
+.dsl-part.blank { border-style: dashed; border-color: var(--amber); color: var(--amber); }
+.dsl-part.muted { color: var(--muted); font-style: italic; }
+.dsl-part.active { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.dsl-remove { font-size: 12px; margin-left: 6px; }
+.dsl-note { font-size: 12px; color: var(--amber); margin: 4px 0; }
+.dsl-step { border-top: 1px solid var(--line); padding-top: 6px; }
+.dsl-step-title { font-weight: 600; margin: 2px 0 6px; }
+.dsl-choices { display: flex; flex-wrap: wrap; gap: 4px 6px; max-height: 260px; overflow-y: auto; }
+.dsl-choice { text-align: left; max-width: 100%; overflow-wrap: anywhere; }
+.dsl-choice.on { border-color: var(--done); color: var(--done); }
+.dsl-search { width: 100%; box-sizing: border-box; margin-bottom: 6px; }
+.dsl-number { display: inline-flex; gap: 6px; margin-bottom: 4px; }
+.dsl-number input { width: 8em; }
+.dsl-check { margin: 6px 0 0; color: var(--done); }
+.dsl-check.error, .dsl-parse .error { color: var(--blocked); }
+.dsl-parse { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 12px; margin: 4px 0; }
+.dsl-parse[hidden] { display: none; }
+
+.effect-reference { margin: 16px 12px; font-size: 12px; }
+.effect-reference h2 { font-size: 15px; margin: 0 0 4px; }
+.effect-table { width: 100%; border-collapse: collapse; }
+.effect-table th, .effect-table td { text-align: left; padding: 3px 6px; border-bottom: 1px solid var(--panel-2); vertical-align: top; }
+.effect-table .num { text-align: right; white-space: nowrap; }
+
+.cards-set-icon { margin: 0 0 8px; font-size: 12px; }
+.cards-set-icon h3 { margin: 6px 0; font-size: 13px; }
+.art-slot { display: inline-flex; flex-direction: column; align-items: center; gap: 4px; margin: 2px 6px 2px 0;
+  padding: 4px; border: 1px dashed var(--panel-2); border-radius: 6px; min-width: 56px; }
+.art-slot:focus { outline: 2px solid var(--amber); }
+.art-slot-large { padding: 8px; }
+.art-slot img { border-radius: 4px; background: var(--panel-2); }
+.art-upload { cursor: pointer; text-decoration: underline; font-size: 11px; }
+.pack-art-strip { display: flex; flex-wrap: wrap; gap: 4px; margin: 4px 0; max-height: 180px; overflow: auto; }
+.pack-art-strip img { border-radius: 4px; background: var(--panel-2); }
+.summary-effects { margin: 4px 0 8px 18px; padding: 0; }
+.summary-effects li { margin-bottom: 6px; }
+.summary-vars { border-collapse: collapse; font-size: 12px; }
+.summary-vars th, .summary-vars td { text-align: left; padding: 2px 8px 2px 0; border-bottom: 1px solid var(--panel-2); }
+.graph-scroll { overflow: auto; max-height: 640px; border: 1px solid var(--panel-2); border-radius: 6px; }
+.graph { position: relative; }
+.graph svg { position: absolute; left: 0; top: 0; pointer-events: none; }
+.graph path { fill: none; stroke: var(--muted, #888); stroke-width: 1.2; }
+.graph marker path { fill: var(--muted, #888); stroke: none; }
+.graph text { font-size: 10px; fill: var(--muted, #888); }
+.graph-node { position: absolute; width: 210px; height: 64px; box-sizing: border-box; padding: 4px 6px; border-radius: 6px;
+  border: 1px solid var(--panel-2); background: var(--panel, #fff); font-size: 11px; overflow: hidden; display: flex; flex-direction: column; }
+.graph-kind { font-size: 9px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted, #888); }
+.graph-label { overflow: hidden; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; }
+.graph-ability { border-color: var(--amber); }
+.graph-target { border-style: dashed; }
+.graph-stage { position: relative; }
+.graph-tools { display: flex; gap: 6px; align-items: center; margin: 4px 0; }

@@ -1859,11 +1859,7 @@ def ai_draw_card(handler, game, session, ai_t, battle_state):
     row = db_ai_deck_top_card(session.session_id, conn=_db)
     if not row:
         # Deck-out: a player who must draw with an empty deck loses the game.
-        import commands as _cmd
-        _cmd.push_battle_game_end(handler=handler, session=session,
-                                  winners=[pl_t], losers=[ai_t])
-        if hasattr(handler, "_campaign_gameend"):
-            handler._campaign_gameend(session, won=True)
+        handler._finish_battle_gameend(session, True, winners=[pl_t], losers=[ai_t])
         log_req("    Game over: AI deck empty on draw (player wins)")
         return True
     # Replacement: "If you would draw a card..." / "If this would enter a hand..."

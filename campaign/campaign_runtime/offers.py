@@ -396,6 +396,13 @@ def build_offers(zone: str, data: dict[str, Any],
                 variants = [(race_battles[race], [])]
             else:
                 variants = battle_offers(battles)
+                # A conversation gated by exactly a tagged battle's tags is that
+                # battle's pre-fight talk; offering it bare as well shows the
+                # talk with no fight behind it.
+                if any(battle and battle_tags and
+                       sorted(_flat_tags(battle_tags)) == sorted(_flat_tags(when))
+                       for battle, battle_tags in variants):
+                    variants = [(b, t) for b, t in variants if b is not None]
             for battle, battle_tags in variants:
                 variant_when = conjoin(when, battle_tags)
                 entry = {"id": f"tagged:{conversation['guid'][:8]}" + (
@@ -486,6 +493,12 @@ def build_offers(zone: str, data: dict[str, Any],
                 if any(r["when"] for r in results):
                     entry["results"] = results
                     used.update(r["conversation"] for r in results)
+                else:
+                    # Without tagged results, the outcome conversations' endings run
+                    # from the battle entry as they close (the engine's result_of path).
+                    for key, out in (("victory", "success"), ("defeat", "fail")):
+                        if out in outcome and actions_of(outcome[out]):
+                            entry[f"{key}_actions"] = actions_of(outcome[out])
                 node_entries.append(entry)
             # (Not when the battles split by faction: each faction's battle
             # already leads with the intro, and every player is one faction.)

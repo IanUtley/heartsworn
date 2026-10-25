@@ -713,7 +713,7 @@ _DEVELOPER_HELP_LINES = (
     "!health [me|opp] <N> — set champion health",
     "!pass — advance turn phase",
     "!phase <Name> — jump to phase",
-    "!draw N — draw N cards",
+    "!draw [me|opp] N — draw N cards (opp: the AI draws from its deck)",
     "!discard — discard a random card from your hand",
     "!top <id|name> — put a card from your hand on top of your deck",
     "!zones — list cards by zone",
@@ -1146,7 +1146,7 @@ def _cmd_restart(handler):
     gameendnotify, so Wins, Losses and dungeon lives are left alone.  The same
     encounter (scene, conversation and mod choice) is then relaunched.
     """
-    from campaign_runtime import progress
+    from campaign_runtime import progress, runtime
     from campaign_playtest import is_playtest_campaign
     from pve_db import db_campaign_protocol_row, db_champion_last_deck_id
     from pvp_db import db_delete_game_session
@@ -1168,6 +1168,19 @@ def _cmd_restart(handler):
         encounter = state.get("ActiveEncounterGuid")
         if not encounter:
             return "No encounter in progress to restart"
+        # Record the battle's node and scene as battle_start does: battle_end
+        # applies the result from this record, and without it a win is dropped.
+        # Checked before anything is torn down, so a failure leaves the battle.
+        zone_id = runtime.owns(db, camp_id)
+        if zone_id:
+            zone = runtime.Zone(db, camp_id, zone_id)
+            node = zone.battle_node()
+            if not node:
+                return "No map node to restart the encounter on"
+            zone.rt["battle"] = {"node": node, "scene": encounter,
+                                 "mod": state.get("ActiveEncounterModChoice")}
+            zone.store()
+            db.commit()
         # Drop the live battle's rows (cards, events, transactions, session)
         # without applying a result.  The relaunch below records a fresh one.
         db_delete_game_session(session.session_id)
@@ -1502,7 +1515,27 @@ def _dispatch(handler, action, args, session, pl_t, ai_t, room, username):
                         else handler.user_profile["id"])
 
     if action == "draw":
-        count = max(1, int(args[0]) if args else 1)
+        # "!draw N" draws for you; "!draw opp N" draws for the AI.
+        words = [str(arg).lower() for arg in args]
+        side = "opp" if words[:1] in (["opp"], ["opponent"]) else "me"
+        count_args = args[1:] if words[:1] in (["opp"], ["opponent"], ["me"]) else args
+        count = max(1, int(count_args[0]) if count_args else 1)
+        if side == "opp":
+            if is_tourney:
+                return "Opponent draws are not supported in PvP games"
+            from pvp_db import db_ai_deck_top_card
+            engine = handler._checkpoint_engine(session)
+            game = game_engine.Game(session.session_id, pl_t, ai_t)
+            drew = 0
+            for _ in range(count):
+                if db_ai_deck_top_card(session.session_id, conn=db) is None:
+                    break
+                battle_state = engine.load_state(session)
+                handler._ai_draw_card(game, session, ai_t, battle_state)
+                engine.save_state(session, battle_state)
+                drew += 1
+            _send_game_events(handler, game, session, pl_t)
+            return f"AI drew {drew} cards"
         if is_tourney:
             from services.tournament_game import pvp_debug_draw
             drew = pvp_debug_draw(handler, session, count)

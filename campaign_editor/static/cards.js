@@ -985,18 +985,45 @@ async function attachAbility(guid) {
   els.status.textContent = `Attached ${found.record.m_Name}: save the card to keep it`;
 }
 
+// The ability editor (ability.html: the ability as pseudocode, with its sentences) is a
+// column of the card layout, beside the card fields: the pane moves into .cards-layout and
+// the layout gains a column for it (cards.html styles .with-ability).
+function showAbilityPane(query) {
+  const pane = document.getElementById("ability-pane");
+  const frame = document.getElementById("ability-frame");
+  if (!pane || !frame) return;
+  const layout = document.querySelector("#tab-cards .cards-layout");
+  if (layout && pane.parentElement !== layout) layout.append(pane);
+  if (layout) layout.classList.add("with-ability");
+  document.body.classList.add("ability-open");
+  pane.hidden = false;
+  frame.src = `/ability${query}`;
+  const close = document.getElementById("ability-close");
+  if (close && !close.dataset.wired) {
+    close.dataset.wired = "1";
+    close.addEventListener("click", hideAbilityPane);
+  }
+}
+
+function hideAbilityPane() {
+  const pane = document.getElementById("ability-pane");
+  const frame = document.getElementById("ability-frame");
+  if (pane) pane.hidden = true;
+  if (frame) frame.src = "about:blank";
+  const layout = document.querySelector("#tab-cards .cards-layout");
+  if (layout) layout.classList.remove("with-ability");
+  document.body.classList.remove("ability-open");
+}
+
 async function openAbility(guid) {
-  await Promise.all([loadAbilityOptions(), loadDslOptions()]);
-  const [root, dsl] = await Promise.all([getJSON(`/api/ability?guid=${encodeURIComponent(guid)}`),
-    getJSON(`/api/ability-dsl?guid=${encodeURIComponent(guid)}`)]);
-  // filledFrom: the sentences the fields already show (they were read from them).
-  abilityOpen = { root, children: root.children, touched: new Set(), problems: [], dsl,
-    filledFrom: (dsl.text || "").trim() };
-  renderAbility();
-  renderCardLinks();
+  showAbilityPane(`?guid=${encodeURIComponent(guid)}`);
 }
 
 async function newAbility() {
+  showAbilityPane("?new=1");   // a blank ability, in the ability editor beside the card fields
+}
+
+async function newAbilityOld() {
   await Promise.all([loadAbilityOptions(), loadDslOptions()]);
   const root = await getJSON(`/api/ability-new?section=AbilityTemplate&type=${encodeURIComponent(abilityOptions.types.AbilityTemplate[0])}`);
   abilityOpen = { root, children: {}, touched: new Set(), problems: [],

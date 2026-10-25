@@ -1,0 +1,8 @@
+{
+    // The campaign packages (campaign_runtime, campaign_rules, ...) live under
+    // campaign/ and are put on sys.path at runtime by campaign_source.py.
+    // Pylance does not run that code, so tell it where to look.
+    "python.analysis.extraPaths": [
+        "./campaign"
+    ]
+}

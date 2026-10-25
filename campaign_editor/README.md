@@ -353,3 +353,62 @@ Its `one_point_answer`, `two_point_answer`, and `three_point_answer` script
 events add 1, 2, and 3 respectively. Use `counter(answer_score)` in an editor
 tag to require at least one point, or `counter(answer_score,N)` for a
 threshold; the State table shows the exact score.
+
+## Cards
+
+The **Cards** tab browses every card template: the Records cards in
+`card_templates` plus any the editor has created. Search by name or GUID; the
+*source* badge says whether a card is untouched (`records`), edited
+(`edited`) or new (`new`).
+
+Admins edit a card's name, set, rarity, type, cost, attack, defense, subtype,
+variable cost and threshold colours. Saving writes the whole card to
+`campaign/campaign_data/card_templates.json`. An edited card shadows the
+Records card with the same GUID; *Revert to Records* removes the shadow. Check
+several cards and use *Assign checked* to set their card set in one step.
+
+Card sets come from Records' `CardSetTemplate` records and are read-only here.
+The shadow file is read by the editor only. The game server still reads its
+card data from `hconnect.db` and does not apply this file yet.
+
+The Card Editor page lists the chosen set's cards on the left, painted small by
+the battle board's painter (`web_client/static/card_face.js`), and the open
+card on the right, painted large. Until the client frames are loaded (*Hex
+folder*, or a folder read on an earlier visit) the page says so and draws the
+painter's stand-in face. *Flavour text* overrides the card's own flavour only
+when it is not empty (`m_FlavorText` on a custom card, `flavor` in the shadow
+row otherwise).
+
+### Abilities
+
+A card's root abilities (`AbilityTemplate` records named in `m_CardAbilities`)
+are attached, detached and ordered on the card and saved with it. *Edit* opens
+a root with its effect entries in order (`m_AbilityEffectList`: the effect, the
+target index into `m_AbilityTargetTemplateIds`, the condition, the duration,
+the contingent and secondary entry ids), its targets, and the effect,
+condition and target records they name. Fields are shown by the client class's
+own types and enums (`client_schema.py` reads `hex-private/HexClient`); nested
+objects are edited as JSON.
+
+*Check* and *Save ability* run the server's checks (`card_abilities.py`): the
+`_t` type and every field against the client class, enum members, 32-bit
+ranges, non-negative costs, GUID references (which section a field points at is
+learned from Records), target indexes, entry ids, and loops of contingent
+entries or of abilities invoking each other. Problems show next to their
+fields; a save with errors is rejected. Effect types with no executor in
+`rules_port/coverage.py` get a warning.
+
+Saved records go to `campaign/campaign_data/ability_records.json` (a record
+with a Records GUID replaces it whole; others are new). Records is never
+written. The game server does not read this file yet: it reads abilities from
+`hex-private/Records` and the seeded `ability_effects` table.
+
+*Sentences* (above the fields) shows the ability in plain words, one clause per
+line, for example `When this enters play, deal 2 damage to target opposing
+troop.` (`ability_dsl.py`; its docstring has the grammar and how each sentence is
+stored). The dropdowns build a clause; *Preview records* compiles the text
+without storing anything; *Save sentences* stores the records through the same
+checks and overlay. Effects, conditions and targets that Records already has are
+reused, and only new ones are written. An ability the sentences cannot fully
+show says why. It is then edited with the fields, and the sentences never
+overwrite it.

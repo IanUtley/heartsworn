@@ -1798,9 +1798,12 @@ class EffectContext:
                     transform_instance(self, int(target), new_template,
                                        keep_zone=True, event_gems=event_gems)
                 return f"transform {len(pending)} card(s)"
+            # The effect's own resolved target (e.g. a TriggerSource card) comes
+            # before the ability source, which is only the fallback.
             target = (self.bstate.get("player_transform_target") or
                       self.bstate.get("player_mod_target") or
                       self.bstate.get("player_shift_source") or
+                      self.target(default=None) or
                       self.bstate.get("resolving_source_uid"))
             if target is None:
                 return "transform: no target"
@@ -3340,6 +3343,17 @@ class EffectContext:
             db_update_card_state)
         db_reset_card_modifiers(
             self.session.session_id, int(target), json.dumps(data), conn=self.db)
+        # Keyword grants (Defensive, Flight ...) are written to card_attributes
+        # rather than to the modifiers above, so restore the template's own
+        # attributes as a transform revert does.
+        if template_row and template_row[1]:
+            from pvp_db import db_copy_template_payload
+            base = db_copy_template_payload(str(template_row[1]).lower(), conn=self.db)
+            if base:
+                self.db.execute(
+                    "UPDATE game_cards SET card_attributes=?, temporary_attributes=0 "
+                    "WHERE session_id=? AND card_uid=?",
+                    (int(base[2] or 0), self.session.session_id, int(target)))
         raw_temp = db_card_mutation_field(
             self.session.session_id, int(target), "temporary_buffs", conn=self.db)
         try:
@@ -3778,18 +3792,13 @@ class EffectContext:
                             target_owner, "champion destroyed by card effect")
                         return f"destroyed champion {hex(target)}"
                 else:
-                    import commands
-
                     winner_uid = (self.player_uid if target_owner == 0
                                   else self.ai_uid)
                     loser_uid = (self.ai_uid if target_owner == 0
                                  else self.player_uid)
-                    commands.push_battle_game_end(
-                        handler=self.handler, session=self.session,
+                    self.handler._finish_battle_gameend(
+                        self.session, target_owner == 0,
                         winners=[winner_uid], losers=[loser_uid])
-                    if hasattr(self.handler, "_campaign_gameend"):
-                        self.handler._campaign_gameend(
-                            self.session, won=(target_owner == 0))
                     return f"destroyed champion {hex(target)}"
 
         if self.native_context or self.bstate.get("_rules_port_native_effect"):
@@ -4275,6 +4284,10 @@ class EffectContext:
         owner_id = self.target_owner(
             self.resolved_target(),
             default=self.bstate.get("resolving_owner_id", 0))
+        from db import log_req   # one line per child activation, so a child that did not run can be traced
+        log_req(f"    ACTIVATE child {child_guid[:8]} owner={owner_id} "
+                f"target={self.resolved_target()} source={source_uid} "
+                f"parent={self.bstate.get('resolving_ability') or '-'}")
         if self.native_context or self.bstate.get("_rules_port_native_effect"):
             self.inherit_child_lists(child_guid)
             # A number of Records abilities materialize several temporary

@@ -22,6 +22,7 @@
   <label class="toggle"><input type="checkbox" id="show-labels" checked> Labels</label>
   <label class="toggle" title="Particles, animated materials and lightning (as in the client)"><input type="checkbox" id="show-fx" checked> Effects</label>
   <button id="fit" type="button">Fit</button>
+  <button id="card-editor" type="button" title="Open the card editor in a new tab">Card Editor</button>
   <span id="status" class="status">Loading…</span>
   <span id="account" class="account" hidden>
     <span id="account-name"></span>
@@ -78,6 +79,12 @@
 <dialog id="deck"><div id="deck-body"></div></dialog>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script src="/static/effects.js"></script>
+<script type="module">
+  // The client's own card painter and atlas reader (web_client/static), loaded as modules.
+  import "/shared/hex_assets.js";
+  import * as CardFace from "/shared/card_face.js";
+  window.CardFace = CardFace;
+</script>
 <script src="/static/app.js"></script>
 </body>
 </html>

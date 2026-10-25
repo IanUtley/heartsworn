@@ -56,8 +56,12 @@ def _null_hidden_card_representation(event, *, preserve_counters=False):
     its SessionCardId, controller, collection, and state remain useful to the
     HUD, while template-derived identity and stats are omitted.  Underground
     counters are public progress, so callers may retain their non-secret
-    counter projection; secret counters are filtered separately.
+    counter projection; secret counters are filtered separately.  The Tunneling
+    threshold (tunneling and its int attr) is kept with them: the client draws
+    the tunneling counter from it, so it is needed on a face-down copy too.
     """
+    kept_tunneling = int(getattr(event, "tunneling", 0) or 0) if preserve_counters else 0
+    kept_int_attrs = {"Tunneling": kept_tunneling} if kept_tunneling else {}
     event.card_id = ResourceId.invalid()
     event.orig_template = ResourceId.invalid()
     event.affected_id = ResourceId.invalid()
@@ -70,7 +74,7 @@ def _null_hidden_card_representation(event, *, preserve_counters=False):
     event.attack = 0
     event.defense = 0
     event.min_const = 0
-    event.tunneling = 0
+    event.tunneling = kept_tunneling
     event.min_limited = 0
     event.escalation = 0
     event.lethal = False
@@ -81,7 +85,7 @@ def _null_hidden_card_representation(event, *, preserve_counters=False):
     event.attributes = ECardAttributes.Unknown
     event.abilities = []
     event.intger_vars = {}
-    event.int_attrs = {}
+    event.int_attrs = kept_int_attrs
     event.gems = EGemTypesNew.Unknown
     event.threshold_list = []
     event.related_cards = []

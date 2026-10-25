@@ -906,6 +906,13 @@ class TransactionsMixin:
             _be.advance_phase(bstate)
             _be.save_state(session, bstate)
             self._advance_to_priority(session, pl_t, ai_t, bstate)
+            # Discarding down to size ends the turn. Only the keep and pass
+            # paths run the AI's turn, so hand the turn to the AI driver here,
+            # or its StartTurn waits for a pass that is never sent.
+            bstate = _be.load_state(session)
+            if bstate.get("turn_player") == _be.AI and not (
+                    session.session_name or "").startswith("tourney-"):
+                self._run_ai_turn(session, pl_t, ai_t, bstate)
         return True
 
     def _handle_mulligan_redraw_transaction(self, session, transaction):
@@ -2992,11 +2999,10 @@ class TransactionsMixin:
                 handled = True
             elif _be.current_phase(bstate) in (_hc.game_engine.ETurnPhases.EndTurn,
                                                _hc.game_engine.ETurnPhases.Discard):
-                # Defensive: end the human's turn and hand it to the AI.
+                # Hand the human's turn to the AI. The "end of your turn" triggers are not dispatched
+                # here: the turn flow fires them once, when it enters the EndTurn phase, and a pass at
+                # that stop only hands the turn over.
                 g_end2 = self._fresh_game(session, pl_t, ai_t, bstate)
-                self._dispatch_native_trigger(
-                    g_end2, session, pl_t, ai_t, bstate,
-                    "TurnEndedEvent", None, self.user_profile["id"])
                 self._clear_combat_damage(session, bstate)
                 self._clear_expired_temporary_attributes(
                     session, bstate, self.user_profile["id"], "end_turn",

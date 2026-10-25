@@ -1420,12 +1420,8 @@ class CardStateMixin:
                 session, False, winners=[ai_t], losers=[pl_t])
             _hc.log_req("    Game over: player deck empty on native draw")
         else:
-            import commands as _cmd
-            _cmd.push_battle_game_end(
-                handler=self, session=session,
-                winners=[pl_t], losers=[ai_t])
-            if hasattr(self, "_campaign_gameend"):
-                self._campaign_gameend(session, won=True)
+            self._finish_battle_gameend(
+                session, True, winners=[pl_t], losers=[ai_t])
             _hc.log_req("    Game over: AI deck empty on native draw")
         return True
 

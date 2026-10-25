@@ -740,6 +740,7 @@ class AuthoritativeSession:
         self._setup_transaction_resolver: Optional[Callable[[RulesTransaction], bool]] = None
         self._priority_transaction_resolver: Optional[Callable[[RulesTransaction], bool]] = None
         self._discard_transaction_resolver: Optional[Callable[[RulesTransaction], bool]] = None
+        self._hand_limit_checker: Optional[Callable[[object], bool]] = None
         self._discard_continuation_resolver: Optional[Callable[[RulesTransaction], bool]] = None
         self._ready_card_transaction_resolver: Optional[Callable[[RulesTransaction], bool]] = None
         self._triggered_ability_transaction_resolver: Optional[Callable[[RulesTransaction], bool]] = None
@@ -2270,9 +2271,13 @@ class AuthoritativeSession:
     def can_player_pass_priority(self, player_id) -> bool:
         return player_id in self.player_ids and not self.terminated
 
+    def set_hand_limit_checker(self, checker: Callable[[object], bool]) -> None:
+        """Attach the host's maximum-hand-size check (card zones live outside the port)."""
+        self._hand_limit_checker = checker
+
     def hand_larger_than_maximum(self, player_id) -> bool:
-        # Card-zone policy belongs in the future Player/Card port.
-        return False
+        checker = self._hand_limit_checker
+        return bool(checker(player_id)) if checker is not None else False
 
     def send_turn_phase_update(self) -> None:
         if self.event_sink is not None:

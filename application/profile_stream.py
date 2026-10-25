@@ -1,8 +1,16 @@
 """Profile/reward output projection mixin for HConnect connections."""
 
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from profile_db import db_get_unopened_chests, db_get_inventory_items
+
+# Card incdata the server sends at login (written by the card editor's publish button).
+PUBLISHED_INCDATA_DIR = Path(__file__).resolve().parent.parent / "campaign" / "incdata" / "published"
+# ProfileMainData.Type: TemplateManager.DataTypes.PC. The enum's serialized name is the client's
+# nested type; not yet confirmed on the wire, so check it before relying on publish.
+INCDATA_PC = 0
+INCDATA_DATA_TYPE = "Reckoning.Game.TemplateManager+DataTypes"
 
 if TYPE_CHECKING:
     # HConnect still binds these legacy protocol and DB names into this
@@ -363,6 +371,7 @@ class ProfileStreamMixin:
             "reqid": 0, "c": 0, "conh": 0, "sid": self.sid,
         }, dw3)
         log_req(f">>> PUSH LoginStreamDone (dt=2211) dw_sz={len(dw3)}")
+        self.push_published_incdata()
 
         # The client normally requests 60007 during login, but older service
         # initialization can drop that request.  Push the event as well so the
@@ -804,6 +813,35 @@ class ProfileStreamMixin:
             db_set_inventory_client_uid(
                 self.user_profile["id"], template_guid, item_id, conn=_db)
             _db.commit()
+
+    def push_published_incdata(self):
+        """Send each published card .incdata (campaign/incdata/published) to the client, as
+        ProfileMainData through ProfileGenericUpdate. The client loads each one with its
+        TemplateManager.IncrementalLoad, replacing the cards it already has by GUID."""
+        for path in sorted(PUBLISHED_INCDATA_DIR.glob("*.incdata")):
+            self.push_incdata(path.read_bytes(), name=path.name)
+
+    def push_incdata(self, gzipped, *, name="", data_type=INCDATA_PC, continues=False):
+        """One incdata file (gzip of its sections) as ProfileMainData in a ProfileGenericUpdate."""
+        from objfmt_builder import ObjFmtBuilder
+        b = ObjFmtBuilder("Game.Shared.ProfileMainData")
+        b.field_enum("Type", INCDATA_DATA_TYPE, data_type)
+        b.field_bytes("GZippedData", gzipped)
+        b.field_bool("Continues", continues)
+        inner = b.finish(3)
+        args = encode_objfmt_response(
+            ["Game.Shared.Network.Profile.ProfileGenericUpdateEventArgs",
+             "Game.Shared.ProfileGenericMessage", "System.Byte[]"],
+            [("Message", "struct", ("Game.Shared.ProfileGenericMessage", [("Data", "bytes", inner)]))]
+        )
+        dw = encode_datawrapper(0, 2211, compress_gzip(args), 1, "00000000-0000-0000-0000-000000000000")
+        issuer = f"0.0.0.0.ServiceProfile.{SERVICE_PROFILE_UID}.ServicePlayer.{self.client_uid}.99"
+        self.scnt += 1
+        self.send({
+            "issuer": issuer, "target": "ServiceProfile", "instance": "Shared",
+            "reqid": 0, "c": 0, "conh": 0, "sid": self.sid,
+        }, dw)
+        log_req(f">>> PUSH incdata {name or '(unnamed)'} ({len(gzipped)} bytes, dt=2211)")
 
     def push_balance_to_client(self):
         """Push the player's gold and platinum (BalanceUpdate, dt=2209).

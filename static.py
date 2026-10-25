@@ -380,6 +380,13 @@ DDL = [
         store_tab TEXT DEFAULT 'ShopBoosterTab'
     )
     """,
+    # Card packs the campaign editor listed in the store (campaign_data/store_listings.json).
+    # Kept so a pack unlisted in the editor is removed from store_items on the next start.
+    """
+    CREATE TABLE IF NOT EXISTS store_listed_packs (
+        pack_guid TEXT PRIMARY KEY
+    )
+    """,
     """
     CREATE TABLE IF NOT EXISTS store_purchases (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1503,6 +1510,68 @@ def _migrate_short_tournament_ids(db):
     db.commit()
 
 
+def _seed_custom_cards(db):
+    """The finished cards of the custom sets (``custom_sets/CardTemplates.json``) get
+    ``card_templates`` rows, so a custom set's packs can draw them. A card is finished
+    unless its ``m_ImplStage`` says otherwise, as the client's .incdata sends it. The
+    rows are replaced on each start; the client gets the cards from the set's .incdata."""
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "custom_sets", "CardTemplates.json")
+    if not os.path.exists(path):
+        return
+    rows = []
+    with open(path, encoding="utf-8") as stream:
+        raw_cards = json.load(stream)
+    for raw in raw_cards:
+        if str(raw.get("m_ImplStage") or "Done") != "Done":
+            continue
+        rows.append((
+            str(raw["m_Id"]["m_Guid"]).lower(), str(raw.get("m_SetId", {}).get("m_Guid", "")).lower(),
+            raw.get("m_Name", ""), raw.get("m_CardRarity") or "Common", int(raw.get("m_ResourceCost") or 0),
+            int(raw.get("m_BaseAttackValue") or 0), int(raw.get("m_BaseDefenseValue") or 0),
+            raw.get("m_CardType", ""), 1 if raw.get("m_IneligibleForPvPRandomTemplates") else 0,
+            1 if raw.get("m_IsPvE") else 0))
+    db.executemany(
+        "INSERT OR REPLACE INTO card_templates (guid, set_guid, name, rarity, cost, attack, defense, "
+        "card_type, no_pvp, is_pve) VALUES (?,?,?,?,?,?,?,?,?,?)", rows)
+    db.commit()
+
+
+def _seed_store_listings(db):
+    """Apply the editor's store listing: each listed Records card pack gets a store_items
+    row (price, currency, tab) and a pack_set_map row (set, Full Set or Primal). A pack
+    listed before and not now is removed from the store; its set mapping stays, since
+    players may still own the pack."""
+    from campaign_source import ensure_campaign_path
+    ensure_campaign_path()
+    import campaign_data
+
+    listed = campaign_data.load_store_listings()
+    wanted = {row["pack_guid"] for row in listed}
+    previous = {row[0] for row in db.execute("SELECT pack_guid FROM store_listed_packs")}
+    for pack_guid in previous - wanted:
+        db.execute("DELETE FROM store_items WHERE template_guid=?", (pack_guid,))
+    for row in listed:
+        values = (row.get("name", ""), row.get("short_desc", ""), int(row.get("price", 0)),
+                  row.get("currency", "Gold"), row.get("store_tab", "ShopBoosterTab"))
+        updated = db.execute(
+            "UPDATE store_items SET name=?, short_desc=?, price=?, currency=?, store_tab=? "
+            "WHERE template_guid=?", values + (row["pack_guid"],))
+        if updated.rowcount == 0:
+            db.execute(
+                "INSERT INTO store_items (template_guid, name, short_desc, price, currency, store_tab) "
+                "VALUES (?,?,?,?,?,?)", (row["pack_guid"],) + values)
+        pack_type = row.get("pack_type", "")
+        db.execute(
+            "INSERT INTO pack_set_map (pack_guid, set_guid, is_full_set, is_primal) VALUES (?,?,?,?) "
+            "ON CONFLICT(pack_guid) DO UPDATE SET set_guid=excluded.set_guid, "
+            "is_full_set=excluded.is_full_set, is_primal=excluded.is_primal",
+            (row["pack_guid"], row["set_guid"], int(pack_type == "FullSet"), int(pack_type == "PrimalPack")))
+    db.execute("DELETE FROM store_listed_packs")
+    db.executemany("INSERT INTO store_listed_packs (pack_guid) VALUES (?)",
+                   [(pack_guid,) for pack_guid in sorted(wanted)])
+    db.commit()
+
+
 def ensure_schema(db):
     """Create all tables and (re)seed static reference data.
 
@@ -1907,6 +1976,8 @@ def ensure_schema(db):
             "set_guid=excluded.set_guid, is_full_set=excluded.is_full_set, "
             "is_primal=excluded.is_primal",
             PACK_SET_MAP)
+    _seed_custom_cards(db)
+    _seed_store_listings(db)
 
     # Tournament types — seeded from code so the Battlegrounds always has rooms.
     # format is the ETournamentFormats bitmask (matches the client enum):

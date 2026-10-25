@@ -523,6 +523,8 @@ def save_conversation_override(zone_id: str, conversation_guid: str, ending: str
 
 
 REWARD_LISTS = ("cards", "items")
+RANDOM_EQUIPMENT_POOLS = ("AZ1 PVE PACK", "AZ2 PVE PACK")
+RANDOM_EQUIPMENT_RARITIES = ("Common", "Uncommon", "Rare")
 REWARD_RACE_MAPS = ("chest_guid_by_race", "card_guid_by_race", "item_guid_by_race")
 _GUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.I)
 
@@ -574,12 +576,26 @@ def clean_sleeves(entries: Any) -> list[dict[str, Any]]:
     return clean_inventory_grants(entries, "sleeves")
 
 
+def clean_random_equipment(config: Any) -> dict[str, Any]:
+    """``{pools, rarities}``: one random equipment item per ticked rarity, from the ticked packs."""
+    if not isinstance(config, dict):
+        raise ValueError("random_equipment must be an object")
+    pools = config.get("pools") or []
+    rarities = config.get("rarities") or []
+    if any(p not in RANDOM_EQUIPMENT_POOLS for p in pools):
+        raise ValueError(f"random_equipment pools must be among {', '.join(RANDOM_EQUIPMENT_POOLS)}")
+    if any(r not in RANDOM_EQUIPMENT_RARITIES for r in rarities):
+        raise ValueError(f"random_equipment rarities must be among {', '.join(RANDOM_EQUIPMENT_RARITIES)}")
+    return {"pools": [p for p in RANDOM_EQUIPMENT_POOLS if p in pools],
+            "rarities": [r for r in RANDOM_EQUIPMENT_RARITIES if r in rarities]}
+
+
 def clean_rewards(rewards: Any) -> dict[str, Any]:
     """Validate a reward object (campaign.py ``_apply_reward_dict`` keys)."""
     if not isinstance(rewards, dict):
         raise ValueError("rewards must be an object")
     known = {"gold", "xp", "quantity", "chest_guid", "card_guid", "item_guid",
-             "stardust", "mercenaries", "sleeves", "deck_guid",
+             "stardust", "mercenaries", "sleeves", "deck_guid", "random_equipment",
              *REWARD_LISTS, *REWARD_RACE_MAPS}
     unknown = sorted(set(rewards) - known)
     if unknown:
@@ -612,6 +628,8 @@ def clean_rewards(rewards: Any) -> dict[str, Any]:
         clean["mercenaries"] = clean_mercenaries(rewards["mercenaries"])
     if rewards.get("sleeves"):
         clean["sleeves"] = clean_sleeves(rewards["sleeves"])
+    if rewards.get("random_equipment"):
+        clean["random_equipment"] = clean_random_equipment(rewards["random_equipment"])
     for key in REWARD_LISTS:
         entries = rewards.get(key)
         if entries:
@@ -655,7 +673,7 @@ def save_quest_rewards(db: sqlite3.Connection, quest_script: str,
 
 SCENE_ENTRY_KEYS = {"gold", "xp", "one_time", "chest_guid", "card_guid", "quantity",
                     "items", "mercenaries", "sleeves", "item_guid", "item_guid_by_race",
-                    "deck_guid", "when", "stardust"}
+                    "deck_guid", "when", "stardust", "random_equipment"}
 _FLAG_TAG = re.compile(r"^!?flag\([^()\s][^()]*\)$")
 
 
@@ -731,6 +749,8 @@ def clean_scene_rewards(rewards: Any) -> dict[str, Any]:
             out["deck_guid"] = str(raw["deck_guid"]).lower()
         if raw.get("stardust"):
             out["stardust"] = clean_stardust(raw["stardust"])
+        if raw.get("random_equipment"):
+            out["random_equipment"] = clean_random_equipment(raw["random_equipment"])
         if raw.get("when"):
             out["when"] = clean_when(raw["when"])
         return out

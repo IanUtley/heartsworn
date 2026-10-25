@@ -51,7 +51,8 @@ def normalise(parsed: dict[str, Any]) -> dict[str, Any]:
         fields = {key: value for key, value in clause.items()
                   if not key.endswith("_guid") and key not in DERIVED_FIELDS and value is not None}
         clauses.append({**defaults, **fields})
-    return {"trigger": parsed.get("trigger") or "",
+    return {"named_targets": {name: dict(props) for name, props in (parsed.get("named_targets") or {}).items()},
+            "trigger": parsed.get("trigger") or "",
             "settings": [str(item).lower() for item in parsed.get("settings") or []],
             "requires": parsed.get("requires") or "", "clauses": clauses}
 

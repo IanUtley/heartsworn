@@ -144,6 +144,10 @@ rollback mode.
   `CanIgnoreCardsThresholds` lets its controller play cards whose thresholds
   are not met. An ability's charge-point cost adds its source card's
   `ChargePointCostModifier`.
+- A land that can produce more than one colour (a dual, or any-colour land)
+  asks its controller to choose which one colour it represents when it is
+  played. Its threshold is that chosen colour.
+- A land that enters tapped does not provide a temporary resource that turn.
 - Every resource, threshold, current-pool, total-pool, and player update must
   be emitted from the post-mutation state so the client HUD does not revert to
   default values.

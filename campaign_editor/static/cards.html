@@ -11,8 +11,48 @@
   <strong>Card Editor</strong>
   <span id="status" class="status">Loading…</span>
 </header>
+<style>
+  /* Readable controls in both themes: every select, option, input and textarea states its
+     own background and text colour (a native option list otherwise keeps the system's
+     colours and can come out dark-on-dark or light-on-light). */
+  /* :where() keeps these at zero specificity, so a rule in style.css that styles a
+     particular control still wins; these only replace the browser's own colours. */
+  :where(select, option, optgroup, textarea,
+    input:not([type=checkbox]):not([type=radio]):not([type=range]):not([type=color]):not([type=file])) {
+    background-color: var(--panel-2); color: var(--text); }
+  input::placeholder, textarea::placeholder { color: var(--muted); opacity: 1; }
+
+  /* The ability editor (/ability) is a column of the card layout, beside the card fields.
+     cards.js moves #ability-pane into .cards-layout and adds .with-ability when it opens. */
+  body.ability-open .cards-main { max-width: none; }
+  #ability-pane { display: flex; flex-direction: column; min-width: 0; height: 85vh;
+    border: 1px solid var(--line); border-radius: 8px; background: var(--panel); overflow: hidden; }
+  #ability-pane[hidden] { display: none; }
+  #ability-pane .pane-bar { display: flex; align-items: center; gap: 8px; padding: 4px 8px;
+    border-bottom: 1px solid var(--line); font-size: 12px; color: var(--muted); }
+  #ability-pane .pane-bar button { margin-left: auto; padding: 2px 8px; font-size: 12px; }
+  #ability-frame { flex: 1; display: block; width: 100%; min-height: 0; border: 0; background: var(--bg); }
+  @media (min-width: 900px) {
+    /* Card list across the top; the card fields and the ability editor side by side. */
+    .cards-layout.with-ability { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+    .cards-layout.with-ability .cards-browse { grid-column: 1 / -1; position: static; }
+    .cards-layout.with-ability .cards-grid { max-height: 30vh; }
+    .cards-layout.with-ability .card-detail-top { grid-template-columns: minmax(0, 1fr); }
+    .cards-layout #ability-pane { position: sticky; top: 8px; align-self: start; height: calc(100vh - 16px); }
+  }
+  @media (min-width: 1500px) {
+    /* Wide enough for three columns: card list | card fields | ability editor. */
+    .cards-layout.with-ability { grid-template-columns: minmax(260px, 22%) minmax(0, 1fr) minmax(0, 1fr); }
+    .cards-layout.with-ability .cards-browse { grid-column: auto; position: sticky; top: 8px; align-self: start; }
+    .cards-layout.with-ability .cards-grid { max-height: calc(100vh - 210px); }
+  }
+</style>
 <main class="cards-main">
   <div id="tab-cards" class="tab-body"></div>
+  <section id="ability-pane" aria-label="Ability editor" hidden>
+    <div class="pane-bar"><span>Ability editor</span><button type="button" id="ability-close">Close</button></div>
+    <iframe id="ability-frame" title="Ability editor" src="about:blank"></iframe>
+  </section>
 </main>
 <script type="module">
   // The client's card painter and atlas reader (web_client/static), loaded as modules.

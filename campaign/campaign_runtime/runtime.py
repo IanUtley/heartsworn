@@ -505,6 +505,19 @@ def count_choice(handler, zone: Zone, oparms):
         zone.rt.pop("active", None)
 
 
+def _live_battle_launch(zone: Zone, camp_id):
+    """``start`` while this campaign's battle is still live: the same battle again, so a
+    reconnect rejoins it rather than starting a new encounter. ``None`` when there is no
+    live battle to rejoin."""
+    from game_session import get_session
+    from services.tournament_game import campaign_session_reconnectable
+    if not campaign_session_reconnectable(get_session(f"camp_{camp_id}")):
+        return None
+    battle = zone.rt.get("battle") or {}
+    scene = battle.get("scene")
+    return (scene, None, battle.get("mod")) if scene else None
+
+
 def battle_start(zone: Zone, oparms) -> tuple[str, dict | None, str | None] | None:
     """``start``: the battle to launch: ``(scene, encounter action, mod)``."""
     node = zone.battle_node()
@@ -942,7 +955,7 @@ def handle_sendevent(handler, db, zone_id, env_json, comp, session_id, reqid,
             if active in zone.children:
                 enter_child(zone, active)
             else:
-                launch = battle_start(zone, oparms)
+                launch = _live_battle_launch(zone, camp_id) or battle_start(zone, oparms)
         elif event == "return_parent":
             back = zone.eng.get("return_to") or {}
             zone.eng["teleport"] = {"zone": back.get("zone") or zone.entry.get("parent") or "",

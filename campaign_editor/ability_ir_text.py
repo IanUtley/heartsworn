@@ -51,6 +51,8 @@ import ability_ir_vocab
 import card_abilities
 from ability_ir import Raw, Tac, TriggerEvent
 from ability_ir_effects import Node
+from gamedata import mechanics_fields as mf  # noqa: E402  (also sets sys.path)
+from gamedata.mechanics import CLASSES  # noqa: E402
 
 ROOT_CLASS = "AbilityTemplate"
 ACTIVATE_RECORD = "ActivateAbilityEffectTemplate"
@@ -126,12 +128,72 @@ def _indent(text: str) -> str:
     return text.replace("\n", "\n  ")
 
 
+def _class_name(record_type: str) -> str:
+    return record_type.rsplit(".", 1)[-1]
+
+
+def _type_pairs(value: Any, out: list[tuple[str, int | None]]) -> list[tuple[str, int | None]]:
+    """The ``(type, version)`` pairs of an IR value's serialized objects, in encounter order."""
+    if isinstance(value, Node):
+        cls = _class_name(value.record_type)
+        out.append((cls, CLASSES[cls]["version"] if cls in CLASSES else None))
+        for item in value.fields.values():
+            _type_pairs(item, out)
+    elif isinstance(value, Tac):
+        out.append((mf.TAC_CLASS, mf.TAC_VERSION))
+    elif isinstance(value, ability_ir.Target):
+        # A target's own type table is stored with it; its types come from there.
+        for entry in value.meta.get("_v") or ():
+            out.extend((name, version) for name, version in entry.items())
+    elif isinstance(value, irc.Clause):
+        for item in value.fields.values():
+            _type_pairs(item, out)
+    elif isinstance(value, ClauseLink):
+        _type_pairs(value.clause, out)
+    elif isinstance(value, Raw):
+        _type_pairs(value.value, out)
+    elif isinstance(value, dict):
+        for item in value.values():
+            _type_pairs(item, out)
+    elif isinstance(value, (list, tuple)):
+        for item in value:
+            _type_pairs(item, out)
+    return out
+
+
+def _generated_meta(node: Node) -> list[dict[str, int]] | None:
+    """The ``_v`` table a node's Records object carries, generated from its fields."""
+    if _class_name(node.record_type) not in CLASSES:
+        return None
+    return mf.version_table(_type_pairs(node, []))
+
+
+def _written_fields(node: Node) -> dict[str, Any]:
+    """The node's fields without the ones that hold their client default: the loader puts them back."""
+    cls = _class_name(node.record_type)
+    if cls not in CLASSES:
+        return node.fields
+    return {key: value for key, value in node.fields.items() if not mf.is_default(cls, key, value)}
+
+
+def _written_meta(node: Node) -> dict[str, Any] | None:
+    """The node's meta, without a ``_v`` the loader can generate exactly (None when there is
+    nothing to write)."""
+    if not node.meta:
+        return {}
+    generated = _generated_meta(node)
+    if set(node.meta) == {"_v"} and generated is not None and generated == node.meta["_v"]:
+        return None
+    return node.meta
+
+
 def _fields_args(fields: dict[str, Any], names: dict[str, str] | None,
                  meta: dict[str, Any] | None = None, base: dict[str, Any] | None = None):
     args: list[tuple[str | None, str]] = [(key, dumps(value, names)) for key, value in fields.items()]
     if base:
         args.append(("_base", dumps(base, names)))
-    if meta:
+    # ``_meta={}`` is written when the object stores no type table: the loader must not add one.
+    if meta is not None:
         args.append(("_meta", dumps(meta, names)))
     return args
 
@@ -183,11 +245,11 @@ def dumps(value: Any, names: dict[str, str] | None = None) -> str:
         return _call("link", args)
     if isinstance(value, Node):
         return _call(_name_of(_node_layer(value.record_type), value.record_type),
-                     _fields_args(value.fields, names, value.meta))
+                     _fields_args(_written_fields(value), names, _written_meta(value)))
     if isinstance(value, irf.Filter):
         return _call(f"filter.{value.kind}", _fields_args(value.fields, names))
     if isinstance(value, ability_ir.Target):
-        return _call(f"target.{value.kind}", _fields_args(value.fields, names, value.meta))
+        return _call(f"target.{value.kind}", _fields_args(value.fields, names, value.meta or None))
     if isinstance(value, ability_ir.Var):
         return _var_text(value, names)
     raise TextError(f"cannot print {type(value).__name__}")
@@ -245,6 +307,7 @@ def _build(name: str, positional: list[Any], keywords: dict[str, Any]) -> Any:
     if "." not in name:
         raise TextError(f"unknown call {name!r}")
     layer, kind = name.split(".", 1)
+    had_meta = "_meta" in keywords
     meta = keywords.pop("_meta", None) or {}
     base = keywords.pop("_base", None) or {}
     fields = dict(keywords)
@@ -257,7 +320,15 @@ def _build(name: str, positional: list[Any], keywords: dict[str, Any]) -> Any:
     to_class = _tables()
     if (layer, kind) not in to_class:
         raise TextError(f"no {layer} kind {kind!r}")
-    return Node(record_type=to_class[(layer, kind)], fields=fields, meta=meta)
+    record_type = to_class[(layer, kind)]
+    if _class_name(record_type) in CLASSES:
+        # The fields the text left out are the client defaults; a missing _meta is generated.
+        fields = mf.fill_defaults(_class_name(record_type), fields)
+        node = Node(record_type=record_type, fields=fields, meta=meta)
+        if not had_meta:
+            node.meta = {"_v": _generated_meta(node)}
+        return node
+    return Node(record_type=record_type, fields=fields, meta=meta)
 
 
 class _Reader:

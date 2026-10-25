@@ -121,6 +121,7 @@ document.getElementById("logout").addEventListener("click", async () => {
   location.reload();
 });
 document.getElementById("export").addEventListener("click", () => { location.href = "/api/export"; });
+document.getElementById("card-editor").addEventListener("click", () => window.open("/cards", "_blank"));
 document.getElementById("import").addEventListener("click", () => document.getElementById("import-file").click());
 document.getElementById("import-file").addEventListener("change", async (event) => {
   const file = event.target.files[0];
@@ -2605,6 +2606,7 @@ function rewardLines(rewards) {
   for (const sd of r.stardust || []) lines.push(`${sd.amount} ${sd.rarity} stardust${sd.probability < 100 ? ` (${sd.probability}%)` : ""}`);
   for (const key of ["cards", "items"]) if ((r[key] || []).length) lines.push(`${r[key].length} ${key === "items" ? "equipment" : key}`);
   if ((r.mercenaries || []).length) lines.push(`${r.mercenaries.map((m) => `${m.quantity > 1 ? `${m.quantity} ` : ""}${mercenaryName(m.guid)}`).join(", ")} (mercenary)`);
+  if (r.random_equipment) lines.push(`random equipment: ${r.random_equipment.rarities.join("/")} from ${r.random_equipment.pools.join(", ")}`);
   if ((r.sleeves || []).length) lines.push(`${r.sleeves.map((m) => `${m.quantity > 1 ? `${m.quantity} ` : ""}${sleeveName(m.guid)}`).join(", ")} (sleeve)`);
   return lines;
 }
@@ -2716,7 +2718,9 @@ function collectStardust(root, cls) {
 // ---- Quest reward editor: gold / xp / chests / cards (same or per race) ----
 let rewardCatalog = null;     // {chests, cards, races}, fetched on first use
 let rewardDraft = null;       // the reward object being edited
-const REWARD_FORM_KEYS = ["gold", "xp", "chest_guid", "chest_guid_by_race", "cards", "card_guid_by_race", "items", "item_guid_by_race", "stardust", "mercenaries", "sleeves"];
+const REWARD_FORM_KEYS = ["gold", "xp", "chest_guid", "chest_guid_by_race", "cards", "card_guid_by_race", "items", "item_guid_by_race", "stardust", "mercenaries", "sleeves", "random_equipment"];
+const RANDOM_EQUIPMENT_POOLS = ["AZ1 PVE PACK", "AZ2 PVE PACK"];
+const RANDOM_EQUIPMENT_RARITIES = ["Common", "Uncommon", "Rare"];
 const GUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 async function loadRewardCatalog() {
@@ -2891,6 +2895,11 @@ function renderRewardForm() {
       <input list="rw-sleeve-list" class="rw-sleeve" data-icon="sleeve" data-i="${i}" value="${esc(sleeveName(m.guid))}" placeholder="sleeve name">${sleeveImg(m.guid)}
       <button type="button" class="small" data-rw="del-sleeve" data-i="${i}">✕</button></div>`).join("")}</div>
     <button type="button" class="small" data-rw="add-sleeve">+ Sleeve</button>
+    <h4>Random equipment</h4>
+    <div id="rw-random-equipment">
+      <div>${RANDOM_EQUIPMENT_POOLS.map((p) => `<label><input type="checkbox" class="rw-re-pool" value="${esc(p)}" ${((d.random_equipment || {}).pools || []).includes(p) ? "checked" : ""}> ${esc(p)}</label>`).join(" ")}</div>
+      <div>${RANDOM_EQUIPMENT_RARITIES.map((r) => `<label><input type="checkbox" class="rw-re-rarity" value="${esc(r)}" ${((d.random_equipment || {}).rarities || []).includes(r) ? "checked" : ""}> ${esc(r)}</label>`).join(" ")}</div>
+    </div>
     <h4>Equipment by race</h4>
     ${races.map((r) => `<div class="reward-row"><span class="reward-race">${esc(r)}</span>
       <input list="rw-equip-list" class="rw-race-item" data-icon="equip" data-race="${esc(r)}" value="${esc(equipmentName((d.item_guid_by_race || {})[r]))}" placeholder="(none)">${iconImg((d.item_guid_by_race || {})[r])}</div>`).join("")}
@@ -2957,6 +2966,9 @@ function collectRewards() {
     if (guid) sleeves.push({ guid, quantity: 1 });
   });
   if (sleeves.length) out.sleeves = sleeves;
+  const randomPools = [...document.querySelectorAll(".rw-re-pool:checked")].map((input) => input.value);
+  const randomRarities = [...document.querySelectorAll(".rw-re-rarity:checked")].map((input) => input.value);
+  if (randomPools.length && randomRarities.length) out.random_equipment = { pools: randomPools, rarities: randomRarities };
   const stardust = collectStardust(document.getElementById("rewards-form"), "rw-sd");
   if (stardust.length) out.stardust = stardust;
   return out;
@@ -3037,7 +3049,7 @@ document.getElementById("rewards").addEventListener("click", async (event) => {
 // ---- Encounter scene rewards (encounter_scenes.rewards_json) ----
 // A scene pays one flat entry, or end_of_game_rewards: a list of entries
 // (each optionally gated by end_of_game_condition, e.g. a tamed troop).
-const SCENE_ENTRY_KEYS = ["gold", "xp", "one_time", "chest_guid", "card_guid", "quantity", "items", "mercenaries", "sleeves", "item_guid", "item_guid_by_race", "when", "stardust"];
+const SCENE_ENTRY_KEYS = ["gold", "xp", "one_time", "chest_guid", "card_guid", "quantity", "items", "mercenaries", "sleeves", "item_guid", "item_guid_by_race", "when", "stardust", "random_equipment"];
 
 function sceneEntries(rewards) {
   const r = rewards || {};
@@ -3104,6 +3116,9 @@ function sceneEntryForm(entry, i) {
     ${items.map((it, j) => `<div class="reward-row"><input list="rw-equip-list" class="sr-item" data-icon="equip" value="${esc(equipmentName(it.guid))}">${iconImg(it.guid)}
       <button type="button" class="small" data-sr="del-item" data-i="${i}" data-j="${j}">✕</button></div>`).join("")}
     <button type="button" class="small" data-sr="add-item" data-i="${i}">+ Equipment</button>
+    <div class="muted small-text">Random equipment: one item per ticked rarity, from the ticked pack(s)</div>
+    <div class="reward-row sr-random-equipment">${RANDOM_EQUIPMENT_POOLS.map((p) => `<label><input type="checkbox" class="sr-re-pool" value="${esc(p)}" ${((entry.random_equipment || {}).pools || []).includes(p) ? "checked" : ""}> ${esc(p)}</label>`).join(" ")}</div>
+    <div class="reward-row sr-random-equipment">${RANDOM_EQUIPMENT_RARITIES.map((r) => `<label><input type="checkbox" class="sr-re-rarity" value="${esc(r)}" ${((entry.random_equipment || {}).rarities || []).includes(r) ? "checked" : ""}> ${esc(r)}</label>`).join(" ")}</div>
     <div class="muted small-text">Mercenaries</div>
     ${(entry.mercenaries || []).map((m, j) => `<div class="reward-row"><input list="rw-merc-list" class="sr-merc" data-icon="merc" value="${esc(mercenaryName(m.guid))}">${mercenaryImg(m.guid)}
       <button type="button" class="small" data-sr="del-merc" data-i="${i}" data-j="${j}">✕</button></div>`).join("")}
@@ -3171,6 +3186,9 @@ function collectSceneEntries() {
       if (guid) items.push({ guid, quantity: 1 });
     });
     if (items.length) out.items = items;
+    const randomPools = [...box.querySelectorAll(".sr-re-pool:checked")].map((input) => input.value);
+    const randomRarities = [...box.querySelectorAll(".sr-re-rarity:checked")].map((input) => input.value);
+    if (randomPools.length && randomRarities.length) out.random_equipment = { pools: randomPools, rarities: randomRarities };
     const mercenaries = [];
     box.querySelectorAll(".sr-merc").forEach((input, j) => {
       const guid = mercenaryGuid(input.value);

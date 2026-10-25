@@ -7782,6 +7782,29 @@ def fra_session_reconnectable(session, raw_player_id=None):
     return True
 
 
+# Campaign battles cannot be rejoined yet: the rebuilt board is incomplete (see the
+# campaign reconnect notes). Set True to re-enable the offer, FindSession resume and join.
+CAMPAIGN_REJOIN_ENABLED = False
+
+
+def campaign_session_reconnectable(session, raw_player_id=None):
+    """Return whether a saved campaign battle (a ``camp_`` session with a live checkpoint) can be rejoined."""
+    if not CAMPAIGN_REJOIN_ENABLED:
+        return False
+    if (session is None or getattr(session, "state", "") == "ended" or
+            not str(getattr(session, "session_name", "") or "").startswith("camp_")):
+        return False
+    checkpoint = getattr(session, "turn_order", None)
+    if (not isinstance(checkpoint, dict) or
+            "turn_player" not in checkpoint or
+            checkpoint.get("terminated")):
+        return False
+    if (raw_player_id is not None and
+            not _session_has_reconnect_player(session, raw_player_id)):
+        return False
+    return True
+
+
 def _pvp_reassign_priority_after_disconnect(session, disconnected_pid,
                                             survivor_pid):
     """Make a live PvP checkpoint usable by the still-connected player.
@@ -10314,7 +10337,8 @@ def handle_join_disconnected_game(handler, target, instance, reqid, comp,
         session and str(getattr(session, "session_name", "") or "")
         .startswith("tourney-"))
     is_fra = bool(session and fra_session_reconnectable(session, player_pid))
-    if not (is_tournament or is_fra):
+    is_campaign = bool(session and campaign_session_reconnectable(session, player_pid))
+    if not (is_tournament or is_fra or is_campaign):
         session = None
     if not session:
         log_req(f"    No session found for player {player_uid:#x}")
@@ -10366,6 +10390,17 @@ def handle_ready_to_continue_game(handler, target, instance, reqid, comp,
         except Exception as exc:
             import traceback
             log_req(f"    FRA reconnect snapshot failed for {player_pid}: "
+                    f"{exc}\n{traceback.format_exc()}")
+    elif campaign_session_reconnectable(session, player_pid):
+        try:
+            with pvp_session_lock(session):
+                restored = handler._push_fra_reconnect_snapshot(
+                    session, player_pid)
+            if not restored:
+                log_req(f"    Campaign reconnect snapshot could not restore pid {player_pid}")
+        except Exception as exc:
+            import traceback
+            log_req(f"    Campaign reconnect snapshot failed for {player_pid}: "
                     f"{exc}\n{traceback.format_exc()}")
     elif (session and getattr(session, "state", "") != "ended" and
           str(getattr(session, "session_name", "") or "").startswith(
