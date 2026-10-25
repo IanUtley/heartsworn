@@ -23,6 +23,11 @@ A value is a string, an integer, ``null``, a list, a plain object, or one of tho
 ``none``, ``tac({...})``, ``event("class")``, ``raw(value)``. ``_meta=`` and ``_base=`` keywords carry a
 stored version tag and a variable's base values.
 
+A clause that invokes a child ability is a child link, ``link(...)``. A link with bindings
+(``bindings=[C1I1 = $I1]``) is compiled when the document is read: the child is inlined where the inliner can
+take it, and the load fails with the reasons where it cannot. A link without bindings stays the client's
+``ActivateAbility`` clause.
+
 ``ability_code`` writes an ability from the Records by GUID; ``loads_ability`` reads the text back into the
 Records it stands for. ``dumps`` and ``loads`` are the same pair for one IR object.
 """
@@ -32,6 +37,7 @@ from __future__ import annotations
 import functools
 import json
 import re
+from dataclasses import dataclass
 from typing import Any
 
 import ability_ir
@@ -39,6 +45,7 @@ import ability_ir_clauses as irc
 import ability_ir_conditions as cond
 import ability_ir_effects as ef
 import ability_ir_filters as irf
+import ability_ir_link as link
 import ability_ir_root as rt
 import ability_ir_vocab
 import card_abilities
@@ -46,6 +53,7 @@ from ability_ir import Raw, Tac, TriggerEvent
 from ability_ir_effects import Node
 
 ROOT_CLASS = "AbilityTemplate"
+ACTIVATE_RECORD = "ActivateAbilityEffectTemplate"
 ROOT_RECORD = "Reckoning.Game.AbilityTemplate"
 MODIFIER_PREFIX = ef.MODIFIER_PREFIX
 IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
@@ -54,6 +62,15 @@ DECLARATIONS = ("variable", "target", "effect", "condition")
 
 class TextError(ValueError):
     """Text the IR syntax does not accept, or an object it cannot print."""
+
+
+@dataclass
+class ClauseLink:
+    """An ``ActivateAbility`` clause written as a child link: ``link(...)``. Its ``bindings`` are the
+    declared inputs (``C1I1 = $I1``); a link with none is the client's own clause."""
+
+    clause: irc.Clause
+    bindings: tuple[link.Binding, ...] = ()
 
 
 def _node_layer(record_type: str) -> str:
@@ -158,6 +175,12 @@ def dumps(value: Any, names: dict[str, str] | None = None) -> str:
         return f"raw({dumps(value.value)})"
     if isinstance(value, irc.Clause):
         return _call("clause", _fields_args(value.fields, names))
+    if isinstance(value, ClauseLink):
+        args = _fields_args(value.clause.fields, names)
+        if value.bindings:
+            pairs = [f"{_name_text(b.child)} = ${_name_text(b.parent)}" for b in value.bindings]
+            args.append(("bindings", "[" + ", ".join(pairs) + "]"))
+        return _call("link", args)
     if isinstance(value, Node):
         return _call(_name_of(_node_layer(value.record_type), value.record_type),
                      _fields_args(value.fields, names, value.meta))
@@ -216,6 +239,9 @@ def _build(name: str, positional: list[Any], keywords: dict[str, Any]) -> Any:
         return ability_ir.Var(kind="effect_constant", base={}, fields=dict(keywords))
     if name == "tuple":
         return tuple(positional[0])
+    if name == "link":
+        bindings = keywords.pop("bindings", None) or []
+        return ClauseLink(clause=irc.Clause(fields=dict(keywords)), bindings=tuple(bindings))
     if "." not in name:
         raise TextError(f"unknown call {name!r}")
     layer, kind = name.split(".", 1)
@@ -270,7 +296,10 @@ class _Reader:
             self.take()
             items = []
             while self.peek()[1] != "]":
-                items.append(self.value())
+                if self.peek()[0] == "id" and self.peek(1)[1] == "=":
+                    items.append(self.binding())
+                else:
+                    items.append(self.value())
                 if self.peek()[1] == ",":
                     self.take()
             self.take("]")
@@ -300,6 +329,14 @@ class _Reader:
                 return irc.Ref(self.names[text], None)
             raise TextError(f"{text!r} is not declared")
         raise TextError(f"unexpected {text!r}")
+
+    def binding(self) -> link.Binding:
+        child = self.take()[1]
+        self.take("=")
+        value = self.value()
+        if not (isinstance(value, ability_ir.Var) and value.kind == "input_ref"):
+            raise TextError(f"a binding takes an input, as {child} = $name")
+        return link.Binding(child=child, parent=str(value.fields["name"]))
 
     def call(self) -> Any:
         name = self.take()[1]
@@ -376,15 +413,81 @@ def loads_ability(text: str) -> dict[str, Any]:
     if not isinstance(root, Node) or root.record_type != ROOT_RECORD:
         raise TextError("the ability must end with one root.ability_template(...) call")
     root.fields["variables"] = variables
-    records = [rt.node_to_record(root)]
+    clauses = []
+    bound: list[tuple[int, ClauseLink]] = []
+    for position, item in enumerate(root.fields.get("ability_effect_list") or []):
+        if isinstance(item, ClauseLink):
+            clauses.append(item.clause)
+            if item.bindings:
+                bound.append((position, item))
+        else:
+            clauses.append(item)
+    root.fields["ability_effect_list"] = clauses
+    root_record = rt.node_to_record(root)
+    effects = {}
+    for keyword, value in bodies:
+        if keyword == "effect":
+            effects[str(_guid_of(value.fields.get("template_id"))).lower()] = ef.node_to_record(value)
+    if bound:
+        root_record = _compile_links(root_record, bound, effects)
+    used = _referenced_guids(root_record)
+    records = [root_record]
     for keyword, value in bodies:
         if keyword == "target":
-            records.append(ability_ir.target_to_record(value))
+            guid, record = _guid_of(value.fields.get("id")), ability_ir.target_to_record(value)
         elif keyword == "effect":
-            records.append(ef.node_to_record(value))
+            guid, record = _guid_of(value.fields.get("template_id")), ef.node_to_record(value)
         else:
-            records.append(cond.node_to_record(value))
-    return {"root": records[0], "records": records}
+            guid, record = _guid_of(value.fields.get("template_id")), cond.node_to_record(value)
+        if str(guid).lower() in used:   # a body the compiled root no longer uses is left out
+            records.append(record)
+    return {"root": root_record, "records": records}
+
+
+def _referenced_guids(record: dict[str, Any]) -> set[str]:
+    """Every GUID the root record refers to through its clauses and targets."""
+    out = set()
+    for clause in record.get("m_AbilityEffectList") or []:
+        for field_ in ("m_EffectTemplateId", "m_ConditionId"):
+            if isinstance(clause.get(field_), dict):
+                out.add(str(clause[field_].get("m_Guid") or "").lower())
+    for target in record.get("m_AbilityTargetTemplateIds") or []:
+        out.add(str(target.get("m_Guid") or "").lower())
+    return out
+
+
+def _compile_links(root_record: dict[str, Any], bound: list[tuple[int, ClauseLink]],
+                   effects: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    """The root with its bound child links compiled (inlined). ``TextError`` with the reasons when one is refused."""
+    def effect_of(guid: str) -> dict[str, Any]:
+        if guid in effects:
+            return effects[guid]
+        return _lookup("AbilityEffectTemplate", guid)
+
+    def root_of(guid: str) -> dict[str, Any] | None:
+        return card_abilities.lookup("AbilityTemplate", guid)[0]
+
+    def target_of(guid: str) -> dict[str, Any] | None:
+        return card_abilities.lookup("AbilityTargetTemplate", guid)[0]
+
+    def condition_of(guid: str) -> dict[str, Any] | None:
+        return card_abilities.lookup("AbilityEffectConditionTemplate", guid)[0]
+
+    links = []
+    for position, item in bound:
+        clause = root_record["m_AbilityEffectList"][position]
+        effect = effect_of(str(clause["m_EffectTemplateId"]["m_Guid"]).lower())
+        child = str((effect.get("m_AbilityToInvoke") or {}).get("m_Guid") or "").lower()
+        if not child:
+            raise TextError(f"clause {position + 1} has no child ability to bind")
+        links.append(link.ChildLink(
+            clause=position, child=child, target=int(clause.get("m_TargetTemplateIndex") or 0),
+            lucky=bool(effect.get("m_RandomlyLuckyOrUnlucky")),
+            bindings=tuple(item.bindings), entry=clause))
+    compiled, problems = link.compile_root(root_record, links, effect_of, root_of, target_of, condition_of)
+    if problems or compiled is None:
+        raise TextError("; ".join(problems) or "the child links cannot be compiled")
+    return compiled
 
 
 def _guid_of(value: Any) -> str:
@@ -451,7 +554,16 @@ def ability_code(guid: str) -> str:
         lines.append(f"effect {name} = {dumps(node)}")
     for name, node in conditions:
         lines.append(f"condition {name} = {dumps(node)}")
+    # A clause that invokes a child ability is written as a child link, not as a plain clause.
+    link_guids = {str(_guid_of(node.fields.get("template_id"))).lower() for _, node in effects
+                  if node.record_type.endswith(ACTIVATE_RECORD)}
+    clauses = []
+    for clause in root.fields.get("ability_effect_list") or []:
+        effect_ref = clause.fields.get("effect_template_id")
+        is_link = isinstance(effect_ref, irc.Ref) and effect_ref.guid.lower() in link_guids
+        clauses.append(ClauseLink(clause=clause) if is_link else clause)
     root_fields = {key: value for key, value in root.fields.items() if key != "variables"}
+    root_fields["ability_effect_list"] = clauses
     lines.append(dumps(Node(record_type=root.record_type, fields=root_fields, meta=root.meta), names))
     return "\n".join(lines) + "\n"
 
@@ -475,6 +587,7 @@ VALUE_CALLS = [
     ("event", 'event("Records class") a trigger event'),
     ("raw", "raw(value) an object the IR keeps verbatim"),
     ("clause", "clause(...) one entry of an ability's effect list"),
+    ("link", "link(..., bindings=[C1I1 = $I1]) a child ability invoked by an entry of the effect list"),
     ("effect_constant", "effect_constant(value=N) a constant inside an effect"),
 ]
 DECLARATION_NAMES = [

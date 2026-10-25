@@ -49,6 +49,23 @@ class IrTextTest(unittest.TestCase):
             written = tx.loads_ability(tx.ability_code(guid))["records"]
             self.assertEqual(sorted(map(_canon, written)), sorted(map(_canon, _expected(root))), guid)
 
+    def test_bound_child_link_compiles_to_an_alias_or_is_refused(self):
+        guid = "a2e69e41-aed9-6877-898b-d97e72f9fc41"   # a child link the inliner takes
+        lines = tx.ability_code(guid).splitlines()
+        start = next(i for i, line in enumerate(lines) if "link(" in line)
+        end = next(i for i in range(start + 1, len(lines)) if lines[i].strip().startswith(")"))
+
+        def with_binding(parent):
+            out = list(lines)
+            out.insert(end, f"      bindings=[EqualToStoredTargetAtk = ${parent}],")
+            return "\n".join(out) + "\n"
+
+        root = tx.loads_ability(with_binding("DamagedCards"))["root"]
+        alias = [v for v in root["m_Variables"] if v.get("m_Name") == "EqualToStoredTargetAtk"]
+        self.assertEqual(alias[0]["m_ExpressionText"], "DamagedCards")
+        with self.assertRaises(tx.TextError):
+            tx.loads_ability(with_binding("NoSuchInput"))
+
     def test_bad_code_raises(self):
         with self.assertRaises(tx.TextError):
             tx.loads_ability("root.ability_template(name=)")
