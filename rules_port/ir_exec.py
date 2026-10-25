@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import functools
 import json
+import os
 from dataclasses import dataclass, field
 from types import SimpleNamespace
 from typing import Any
@@ -251,6 +252,8 @@ def _filter_holds(card_filter: Any, card: Card, scope: Scope) -> bool:
     if cls == "InZone":
         zones = {part.strip().lower() for part in typed.m_Collection.split("|")}
         return card.zone in zones
+    if cls == "IsAbilitySource":
+        return card.uid == scope.source_uid
     raise NotImplementedError(f"card filter {cls or type(typed).__name__}")
 
 
@@ -260,12 +263,9 @@ def _has_counters(card: Card, spec: dict[str, Any]) -> bool:
     return compare(card.counters.get(guid, 0), int(spec.get("m_Amount", 1)))
 
 
-def _counter_count(scope: Scope, counter_guid: str) -> int:
-    """How many of a counter the source card carries."""
-    for card in _battle_cards(scope):
-        if card.uid == scope.source_uid:
-            return card.counters.get(counter_guid, 0)
-    return 0
+def _zones_of(flags: Any) -> set[str]:
+    """The battle zones an ECardCollections flag string names ("Warzone|Champions" -> {"warzone", ...})."""
+    return {part.strip().lower() for part in str(flags or "").split("|") if part.strip() and part.strip() != "None"}
 
 
 def _condition_holds(condition: Any, scope: Scope) -> bool:
@@ -337,14 +337,51 @@ def _count_holds(condition: Any, scope: Scope) -> bool:
     return _COMPARISONS[condition.m_ComparisonOp](len(matching), int(condition.m_RequiredQuantity))
 
 
+COUNTER_VARIABLE_PLAYERS = ("Self", "MultipleOpponents", "MultiplePlayers")
+
+
+def _counter_variable(variable: Any, counter: str | None, scope: Scope) -> int:
+    """C# CounterVariable.GetValue (``counter`` given) and CardCountAbilityVariable.GetValue (``counter``
+    None): over the cards that pass the player filter (the ability's controller, its opponents, or
+    everyone), sit in one of the collection flags' zones, and pass the card filter, the counter each card
+    carries, or one per card. The totals are summed, or the highest is taken when the variable says so."""
+    player_filter = str(_field(variable, "m_PlayerFilter") or "Self")
+    if player_filter not in COUNTER_VARIABLE_PLAYERS:
+        raise NotImplementedError(f"counter variable for {player_filter}")
+    zones = _zones_of(_field(variable, "m_CollectionFlags"))
+    if not zones:
+        raise NotImplementedError("counter variable without collection flags")
+    values = []
+    for card in _battle_cards(scope):
+        if player_filter == "Self" and card.owner != int(scope.owner_uid):
+            continue
+        if player_filter == "MultipleOpponents" and card.owner == int(scope.owner_uid):
+            continue
+        if card.zone not in zones or not _filter_holds(_field(variable, "m_CardFilter"), card, scope):
+            continue
+        values.append(card.counters.get(counter, 0) if counter else 1)
+    if _field(variable, "m_UseHighestValue"):
+        return max(values, default=0)
+    return sum(values)
+
+
+# The ability variables the interpreter binds (coverage refuses an ability with any other kind).
+SUPPORTED_VARIABLES = {"AbilityConstant", "CounterVariable", "CardCountAbilityVariable"}
+
+
 def _bind_variables(root: MechanicsObject, scope: Scope) -> None:
-    """Each ability variable: its default, or the live count of a counter variable."""
+    """Each ability variable: a constant's default, or the total of a counter or card-count variable."""
     for variable in root.m_Variables:
-        counter = _guid(_field(variable, "m_CardCounterTemplateId"))
-        if counter:
-            scope.variables[variable.m_Name] = _counter_count(scope, counter)
-        else:
+        kind = _short(variable.type_name)
+        if kind == "CounterVariable":
+            counter = _guid(_field(variable, "m_CardCounterTemplateId"))
+            scope.variables[variable.m_Name] = _counter_variable(variable, counter, scope)
+        elif kind == "CardCountAbilityVariable":
+            scope.variables[variable.m_Name] = _counter_variable(variable, None, scope)
+        elif kind == "AbilityConstant":
             scope.variables[variable.m_Name] = int(variable.m_DefaultValue or 0)
+        else:
+            raise NotImplementedError(f"variable {kind}")
 
 
 def _input_value(modifier: MechanicsObject, scope: Scope) -> int:
@@ -400,8 +437,14 @@ def _run_clause(root: MechanicsObject, clause: Any, scope: Scope) -> None:
             if modifier.m_RemoveAllCounters or modifier.m_Operation not in COUNTER_OPERATIONS:
                 raise NotImplementedError(f"counter operation {modifier.m_Operation}")
             counter = _guid(modifier.m_CardCounterTemplateId)
+            amount = _input_value(modifier, scope)
+            if modifier.m_RemoveHalfRoundedUp:
+                # C# CounterModifier.Apply: the amount is half the target's count, rounded up.
+                card = _card_by_uid(scope, target)
+                current = card.counters.get(counter.lower(), 0) if card else 0
+                amount = (current + 1) // 2
             change_counter(scope.context, target, counter_template_name(counter).lower() or "counter",
-                           counter, _input_value(modifier, scope), COUNTER_OPERATIONS[modifier.m_Operation])
+                           counter, amount, COUNTER_OPERATIONS[modifier.m_Operation])
         else:
             raise NotImplementedError(f"modifier {kind}")
 
@@ -424,6 +467,34 @@ class BattleView:
 # Abilities whose static effects the live paths take from the interpreter. Empty by default: the
 # live engine computes those effects itself until an ability is opted in.
 ENABLED: set[str] = set()
+
+# The engine switch. When on, the live chain resolver (rules_port/resolution.py resolve_port_trigger) runs
+# each ability the interpreter covers in place of the native resolver; the others keep the native path.
+# HEX_IR_ENGINE=1 turns it on at start-up, and set_engine() changes it while the server runs.
+ENGINE_ON: bool = os.environ.get("HEX_IR_ENGINE", "") == "1"
+
+
+def set_engine(on: bool) -> None:
+    """Turn the interpreter engine on or off for the abilities resolved from now on."""
+    global ENGINE_ON
+    ENGINE_ON = bool(on)
+
+
+def engine_runs(guid: str, source_uid: Any, owner_uid: Any) -> bool:
+    """Whether the interpreter resolves this ability in place of the native resolver: the engine is on,
+    the ability has a source card and an owner, and no construct of it is uncovered."""
+    return ENGINE_ON and source_uid is not None and owner_uid is not None and not coverage(guid)
+
+
+def live_event(event_type: str, owner_uid: int, data: dict[str, Any], trigger_source_uid: Any) -> dict[str, Any]:
+    """The interpreter's event for a live trigger: its player, and for a zone move the card and zones
+    the live dispatch recorded (``event_source_collection`` and ``event_destination_collection``)."""
+    event: dict[str, Any] = {"player": owner_uid}
+    if event_type == "CardEnteredZoneEvent":
+        event["card"] = trigger_source_uid
+        event["from"] = data.get("event_source_collection")
+        event["to"] = data.get("event_destination_collection")
+    return event
 
 
 def _champion_scopes(context: Any) -> list[Scope]:
@@ -509,6 +580,12 @@ def run_ability(guid: str, event_type: str, *, context: Any, source_uid: int,
     event = {"player": owner_uid, **(event or {})}
     scope = Scope(context=context, source_uid=int(source_uid), owner_uid=int(owner_uid),
                   table=root.version_table, event=event)
+    # The trigger fires only while its source is in one of the zones its collection flags name (C#
+    # AbilityTemplate.TriggerCollectionFlags).
+    zones = _zones_of(_field(root, "m_TriggerCollectionFlags"))
+    source = _card_by_uid(scope, source_uid)
+    if zones and (source is None or source.zone not in zones):
+        return False
     if not _ability_condition_holds(root.m_AbilityCondition, scope):
         return False
     if not _condition_holds(root.m_TriggerCondition, scope):
@@ -540,6 +617,7 @@ SUPPORTED_CONDITIONS = {
 SUPPORTED_FILTERS = {
     "AndCardFilter", "OrCardFilter", "NotCardFilter", "IsControlledBy", "IsNotControlledBy",
     "HasCountersValue", "IsTroop", "IsHero", "IsResource", "IsType", "IntAttrFilter", "InZone",
+    "IsAbilitySource",
 }
 SUPPORTED_MODIFIERS = {"DamageModifier", "CounterModifier"}
 SUPPORTED_TARGETS = {"AbilitySourceCardTargetTemplate", "AbilityTargetTemplate"}
@@ -584,6 +662,24 @@ def coverage(guid: str) -> list[str]:
         if template.get("m_IsRandomTarget"):
             missing.append("random target")
         for name in _tagged_classes(template.get("m_CardFilter"), []):
+            if name not in SUPPORTED_FILTERS:
+                missing.append(f"filter {name}")
+    for variable in raw.get("m_Variables") or []:
+        kind = _short((variable or {}).get("_t")) if isinstance(variable, dict) else ""
+        if kind not in SUPPORTED_VARIABLES:
+            missing.append(f"variable {kind or 'untyped'}")
+            continue
+        if kind == "AbilityConstant":
+            continue
+        player = str(variable.get("m_PlayerFilter") or "Self")
+        if player not in COUNTER_VARIABLE_PLAYERS:
+            missing.append(f"{kind} for {player}")
+        if not _zones_of(variable.get("m_CollectionFlags")):
+            missing.append(f"{kind} without collection flags")
+        if kind == "CardCountAbilityVariable" and str(variable.get("m_OnlyIncludeDifferentRacesForFaction") or
+                                                      "Unknown") != "Unknown":
+            missing.append("card count of different races")
+        for name in _tagged_classes(variable.get("m_CardFilter"), []):
             if name not in SUPPORTED_FILTERS:
                 missing.append(f"filter {name}")
     for clause in raw.get("m_AbilityEffectList") or []:

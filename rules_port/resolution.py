@@ -2032,6 +2032,23 @@ def resolve_port_played_permanent(game, session, db, handler, player_uid,
     return result
 
 
+def run_interpreted_trigger(handler, game, session, db, player_uid, ai_uid, battle_state, guid,
+                            source_uid, owner_uid, event_name, trigger_source_uid, event_data):
+    """Resolve a trigger's ability with the interpreter (rules_port/ir_exec.py) on the live battle state.
+
+    Its effects go through the live primitives, so the outcome is the native resolver's. Returns the
+    marker ``"interpreter"`` in place of the native resolver's state."""
+    from . import ir_exec
+    from .context import EffectContext
+    ir_exec.run_ability(
+        guid, event_name,
+        context=EffectContext.from_rules_port(
+            game, session, db, handler, player_uid, ai_uid, battle_state, ""),
+        source_uid=int(source_uid), owner_uid=int(owner_uid),
+        event=ir_exec.live_event(event_name, int(owner_uid), event_data, trigger_source_uid))
+    return "interpreter"
+
+
 def resolve_port_trigger(handler, game, session, db, player_uid, ai_uid,
                          battle_state, item):
     """Resolve one chain trigger without re-entering the legacy BOM walker."""
@@ -2124,12 +2141,21 @@ def resolve_port_trigger(handler, game, session, db, player_uid, ai_uid,
     battle_state["resolving_trigger_event_data"] = (
         dict(event_data) if isinstance(event_data, dict) else {})
     try:
-        state = resolve_port_ability(
-            handler, game, session, db, player_uid, ai_uid, battle_state,
-            guid, source_uid, owner_id, target_map=target_map,
-            event_tac=(event_data.get("event_tac")
-                       if isinstance(event_data, dict) else None),
-            instance_id=int(item.get("instance_id", 1)))
+        from . import ir_exec
+        event_name = str(item.get("trigger_event_type") or "").rsplit(".", 1)[-1]
+        if ir_exec.engine_runs(guid, source_uid, owner_id):
+            state = run_interpreted_trigger(
+                handler, game, session, db, player_uid, ai_uid, battle_state,
+                guid, source_uid, owner_id, event_name,
+                item.get("trigger_source_uid"),
+                event_data if isinstance(event_data, dict) else {})
+        else:
+            state = resolve_port_ability(
+                handler, game, session, db, player_uid, ai_uid, battle_state,
+                guid, source_uid, owner_id, target_map=target_map,
+                event_tac=(event_data.get("event_tac")
+                           if isinstance(event_data, dict) else None),
+                instance_id=int(item.get("instance_id", 1)))
         if not battle_state.get("resolution_paused"):
             # A queued trigger resolves here (mulligan/setup drains, the port's
             # chain resolver, and the PvP projections).  Consume an authored

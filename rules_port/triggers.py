@@ -631,7 +631,9 @@ class NativeTriggerBackend:
                         ability_instance_id=instance_id,
                         target_card_ids=chain_targets(target),
                         ignores_chain=True)
-                    from .resolution import resolve_port_ability
+                    from .resolution import (resolve_port_ability,
+                                             run_interpreted_trigger)
+                    from . import ir_exec
                     old_source = battle_state.get("resolving_source_uid")
                     old_owner = battle_state.get("resolving_owner_id")
                     old_trigger_target = battle_state.get(
@@ -652,14 +654,20 @@ class NativeTriggerBackend:
                     battle_state["resolving_trigger_event_data"] = dict(
                         event.data or {})
                     try:
-                        result = resolve_port_ability(
-                            handler, game, session, db, player_uid, ai_uid,
-                            battle_state, key[1], source_uid, source_card_owner,
-                            target_map=({requires_input_index: int(target)}
-                                        if (requires_input_index is not None
-                                            and target is not None) else {}),
-                            event_tac=event.data.get("event_tac"),
-                            instance_id=instance_id)
+                        if ir_exec.engine_runs(key[1], source_uid, source_card_owner):
+                            result = run_interpreted_trigger(
+                                handler, game, session, db, player_uid, ai_uid,
+                                battle_state, key[1], source_uid, source_card_owner,
+                                event_name, event.source_card_id, dict(event.data or {}))
+                        else:
+                            result = resolve_port_ability(
+                                handler, game, session, db, player_uid, ai_uid,
+                                battle_state, key[1], source_uid, source_card_owner,
+                                target_map=({requires_input_index: int(target)}
+                                            if (requires_input_index is not None
+                                                and target is not None) else {}),
+                                event_tac=event.data.get("event_tac"),
+                                instance_id=instance_id)
                     finally:
                         battle_state["resolving_source_uid"] = old_source
                         battle_state["resolving_owner_id"] = old_owner

@@ -51,7 +51,12 @@ def _scenario(ability_guid, opposing_troops, moved=None, extra=(), champion=Fals
         add_card(db, uid, owner, scenarios.TPL_GLADIATOR, loc=zone)
         db.execute("UPDATE game_cards SET permanent_buffs=? WHERE card_uid=?", (buffs, uid))
     if champion:
-        # A champion built-in: the champions carry the ability, so no troop is placed for it.
+        # A champion built-in: the champions carry the ability, so no troop is placed for it. A moved card
+        # (a troop that dies, say) still exists in the battle, in the zone it moved to.
+        if moved and moved[0] != 900:
+            uid, owner, source, destination = moved
+            add_card(db, uid, owner, scenarios.TPL_GLADIATOR, loc=source)
+            db.execute("UPDATE game_cards SET location=? WHERE card_uid=?", (destination, uid))
         db.commit()
         return db, pl_t, ai_t, game, handler, bstate, player_champ, ai_champ
     template = _template_for(db, ability_guid)
@@ -77,7 +82,7 @@ def _scenario(ability_guid, opposing_troops, moved=None, extra=(), champion=Fals
 def _snapshot(db, bstate, player_champ, ai_champ):
     rows = db.execute(
         "SELECT card_uid, user_id, location, card_damage, permanent_buffs FROM game_cards "
-        "WHERE card_uid IN (900, 501, 502, 503, 504, 505) ORDER BY card_uid").fetchall()
+        "ORDER BY card_uid").fetchall()
     return {
         "player_health": bstate.get("player_health"),
         "ai_health": bstate.get("ai_health"),
@@ -213,6 +218,8 @@ CHAMPION_CASES = [
 ]
 
 TURN_EVENTS = {"TurnStartedEvent", "TurnEndedEvent", "CardEnteredZoneEvent"}
+# Turn-event abilities with a card template that the interpreter refuses (name, missing constructs).
+SKIPPED_BY_COVERAGE = []
 
 
 def auto_cases(limit):
@@ -227,7 +234,9 @@ def auto_cases(limit):
         event = str((raw.get("m_TriggerEventType") or {}).get("m_InternalType") or "").rsplit(".", 1)[-1]
         if event not in TURN_EVENTS or _template_for(db, record.guid.lower()) is None:
             continue
-        if coverage(record.guid.lower()):
+        missing = coverage(record.guid.lower())
+        if missing:
+            SKIPPED_BY_COVERAGE.append((f"{event}: {raw.get('m_GameText', '')[:70]}", missing))
             continue
         moved = None
         if event == "CardEnteredZoneEvent":
@@ -263,13 +272,86 @@ def _card_roots():
     return roots
 
 
+def _counter_guids_of(ability_guid):
+    """Every counter template the ability names (a variable's or a modifier's counter), as GUIDs."""
+    from gamedata import DEFAULT_RECORD_STORE as STORE
+    found = set()
+
+    def walk(value):
+        if isinstance(value, dict):
+            for key, item in value.items():
+                if key in ("m_CardCounterTemplateId", "m_CounterType") and isinstance(item, dict):
+                    found.add(str(item.get("m_Guid") or "").lower())
+                else:
+                    walk(item)
+        elif isinstance(value, list):
+            for item in value:
+                walk(item)
+
+    for record in STORE.load("AbilityTemplate"):
+        if record.guid.lower() == ability_guid:
+            walk(record.to_dict(include_metadata=True))
+            break
+    return sorted(guid for guid in found if guid and guid != "00000000-0000-0000-0000-000000000000")
+
+
+def random_cases(case, count, seed):
+    """``count`` randomised battles for one case: random counters on the champions and on a few other
+    cards in each zone, and random opposing troops, all from ``seed``. Every battle is checked the same way."""
+    import random
+    from rules_port.bom_fields import counter_template_name
+    rng = random.Random(f"{seed}:{case['ability']}")
+    counters = _counter_guids_of(case["ability"])
+    cases = []
+    for index in range(count):
+        def value():
+            return rng.choice([0, 0, 1, 2, 3])
+        champion_counters = {}
+        for guid in counters:
+            if rng.random() < 0.7:
+                champion_counters.setdefault("player", {})[guid] = value()
+                champion_counters.setdefault("ai", {})[guid] = value()
+        extra = []
+        for offset in range(rng.randint(0, 3)):
+            uid = 600 + offset
+            owner = rng.choice([TROOP_OWNER, OPPOSING_OWNER])
+            zone = rng.choice(["warzone", "warzone", "hand", "discard", "deck", "void"])
+            named = {}
+            for guid in counters:
+                if rng.random() < 0.5:
+                    named[counter_template_name(guid).lower() or guid] = value()
+            buffs = json.dumps({"counters": named, "counter_guids": {
+                counter_template_name(guid).lower() or guid: guid for guid in counters}}) if named else "{}"
+            extra.append((uid, owner, zone, buffs))
+        opposing = [(510 + offset, rng.choice([0, 0, 1, 2])) for offset in range(rng.randint(0, 2))]
+        cases.append({**case, "name": f"{case['name']} [random {index}]", "extra": extra,
+                      "opposing": opposing, "random_counters": champion_counters,
+                      "prepare": _random_prepare(champion_counters)})
+    return cases
+
+
+def _random_prepare(champion_counters):
+    def prepare(db, bstate, player_champ, ai_champ):
+        bstate["champion_counters"] = {
+            str(player_champ): dict(champion_counters.get("player", {})),
+            str(ai_champ): dict(champion_counters.get("ai", {})),
+        }
+    return prepare
+
+
 def main():
     from rules_port.ir_exec import coverage, clear_cards
     from_cards = os.environ.get("IR_EQ_CARDS") == "1"
     card_roots = _card_roots() if from_cards else {}
     resolved = _find_abilities([case["ability"][:8] for case in CASES + CHAMPION_CASES])
     passed, failed, uncovered = [], [], []
-    for case in CHAMPION_CASES + CASES + auto_cases(int(os.environ.get("IR_EQ_LIMIT", "40"))):
+    turn_cases = auto_cases(int(os.environ.get("IR_EQ_LIMIT", "40")))
+    random_count = int(os.environ.get("IR_EQ_RANDOM", "0"))
+    seed = os.environ.get("IR_EQ_SEED", "0")
+    expanded = []
+    for case in turn_cases:
+        expanded.extend(random_cases(case, random_count, seed) if random_count else [case])
+    for case in CHAMPION_CASES + CASES + expanded:
         case["ability"] = resolved.get(case["ability"][:8], case["ability"])
         if from_cards and case["ability"] not in card_roots:
             uncovered.append((case["name"], ["no card file for this ability"]))
@@ -297,7 +379,7 @@ def main():
         print("FAIL", name)
         print("   live", live_state)
         print("   ir  ", ir_state)
-    for name, missing in uncovered:
+    for name, missing in uncovered + SKIPPED_BY_COVERAGE:
         print("UNCOVERED", name, "-", "; ".join(missing))
     if from_cards:
         clear_cards()
