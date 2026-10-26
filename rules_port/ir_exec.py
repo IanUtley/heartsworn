@@ -1311,6 +1311,10 @@ def _invoke(parent_guid: str, position: int, effect_raw: dict[str, Any], scope: 
     for owner in owners:
         child_scope = Scope(context=scope.context, source_uid=int(scope.source_uid), owner_uid=int(owner),
                             table=child_root.version_table, event=dict(scope.event))
+        # The child starts from the lists the parent recorded so far (C# Session.CreateAbility appends the parent), so
+        # a stored-targets read in the child finds the parent's stored cards.
+        with _bridge_caster(scope.context.bstate, ability=parent_guid):
+            scope.context.inherit_child_lists(child_guid)
         try:
             _run_effects(child_guid, child_root, child_scope, start=0)
         except NeedsChoice as pause:
