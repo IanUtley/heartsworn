@@ -27,6 +27,9 @@ from gamedata.mechanics_fields import current_fields
 from gamedata.mechanics_objects import MechanicsObject, from_record
 from gamedata.records import RecordObject
 from rules_port.ir_event_effects import NATIVE_LEAF_EFFECTS, coverage_of as event_effect_coverage, run_native_leaf
+from rules_port.ir_exec_costs import unsupported_costs
+
+from . import ir_triggers
 
 # A CounterModifier's operation, as the live counter primitive names it.
 COUNTER_OPERATIONS = {"Add": "add", "Remove": "remove", "Set": "set"}
@@ -384,6 +387,8 @@ def _condition_holds(condition: Any, scope: Scope) -> bool:
     if cls == "TriggerCardMatchesFilter":
         card = _card_by_uid(scope, scope.event.get("card"))
         return card is not None and _filter_holds(condition.m_CardFilter, card, scope)
+    if cls in ir_triggers.CONDITIONS:
+        return ir_triggers.condition_holds(cls, condition, scope, _condition_holds)
     if getattr(condition, "m_CardCollection", None) is not None:
         return _count_holds(condition, scope)
     raise NotImplementedError(f"trigger condition {cls}")
@@ -692,6 +697,9 @@ def _run_clause(root: MechanicsObject, clause: Any, scope: Scope) -> None:
             written = scope.context.bstate.get("ability_variables", {})
             if name in written:
                 scope.variables[name] = int(written[name])
+    from rules_port.ir_exec_combat import COMBAT_EFFECTS, run_clause as run_combat_clause
+    if _short(effect_type) in COMBAT_EFFECTS:
+        run_combat_clause(_short(effect_type), root, clause, effect_raw, scope)
         return
     if _short(effect_type) != "CardModifierAbilityEffectTemplate":
         raise NotImplementedError(f"effect {_short(effect_type)}")
@@ -830,10 +838,12 @@ def _pauses_for_choice(guid: str, seen: set[str]) -> bool:
     return False
 
 
-def live_event(event_type: str, owner_uid: int, data: dict[str, Any], trigger_source_uid: Any) -> dict[str, Any]:
-    """The interpreter's event for a live trigger: its player, and for a zone move the card and zones
-    the live dispatch recorded (``event_source_collection`` and ``event_destination_collection``)."""
-    event: dict[str, Any] = {"player": owner_uid}
+def live_event(event_type: str, owner_uid: int, data: dict[str, Any], trigger_source_uid: Any,
+               target_player_uid: Any = None) -> dict[str, Any]:
+    """The interpreter's event for a live trigger: its player, its card and target player, and for a zone move the
+    card and zones the live dispatch recorded (``event_source_collection`` and ``event_destination_collection``)."""
+    event: dict[str, Any] = {"player": owner_uid, **ir_triggers.event_fields(event_type, trigger_source_uid,
+                                                                             target_player_uid)}
     if event_type == "CardEnteredZoneEvent":
         event["card"] = trigger_source_uid
         event["from"] = data.get("event_source_collection")
@@ -1177,12 +1187,12 @@ def resume_ability(continuation: dict[str, Any], answer: int | None, *, context:
 
 # What the interpreter runs. A construct outside these sets is uncovered: its ability raises
 # NotImplementedError when run, and the coverage report lists it.
-SUPPORTED_TRIGGERS = {"TurnEndedEvent", "TurnStartedEvent", "CardEnteredZoneEvent"}
+SUPPORTED_TRIGGERS = {"TurnEndedEvent", "TurnStartedEvent", "CardEnteredZoneEvent"} | ir_triggers.TRIGGER_EVENTS
 SUPPORTED_CONDITIONS = {
     "AndTriggerCondition", "TriggerCondition", "TriggerSource", "TriggerPlayerControlsAbilitySource",
     "TriggerCardEnteredZone", "TriggerCardMatchesFilter", "RequiresCardsControlled",
     "TriggerCardIsAbilitySource",
-}
+} | ir_triggers.CONDITIONS
 SUPPORTED_FILTERS = {
     "AndCardFilter", "OrCardFilter", "NotCardFilter", "IsControlledBy", "IsNotControlledBy",
     "HasCountersValue", "IsTroop", "IsHero", "IsResource", "IsType", "IntAttrFilter", "InZone",
@@ -1216,10 +1226,6 @@ def _tagged_classes(value: Any, out: list[str]) -> list[str]:
 
 # The destinations the live move leaf moves a card to (its deck reinsertion is not ported).
 MOVE_DESTINATIONS = {"hand", "discard", "void", "warzone", "underground", "deck"}
-
-# The ability fields that name a cost, or make the ability optional.
-_COST_FIELDS = ("m_Optional", "m_ActivationCost", "m_ChargePointCost", "m_VariableActivationCost", "m_LifeCost",
-                "m_SpellPointCost", "m_CounterCosts")
 
 # A RequiresCardsControlled flag the interpreter evaluates only at its default. Any other value is refused:
 # the count would otherwise ignore it silently.
@@ -1318,10 +1324,8 @@ def coverage(guid: str) -> list[str]:
         for name in _tagged_classes(template.get("m_CardFilter"), []):
             if name not in SUPPORTED_FILTERS:
                 missing.append(f"filter {name}")
-    # A cost or an optional ability: the interpreter does not model paying, nor a player's choice to decline.
-    for field_name in _COST_FIELDS:
-        if raw.get(field_name) not in (None, 0, "", [], {}, "0"):
-            missing.append(f"cost or optional ({field_name})")
+    # Paid costs and optional abilities are settled before the ability reaches the interpreter (ir_exec_costs).
+    missing.extend(unsupported_costs(raw))
     for operator in _comparison_ops(raw, []):
         if operator not in _COMPARISONS:
             missing.append(f"comparison {operator}")
@@ -1404,6 +1408,10 @@ def coverage(guid: str) -> list[str]:
                     missing.extend(f"invoked: {item}" for item in coverage(child))
                 finally:
                     _COVERAGE_STACK.discard(child)
+            continue
+        from rules_port.ir_exec_combat import COMBAT_EFFECTS, coverage_missing as combat_missing
+        if kind in COMBAT_EFFECTS:
+            missing.extend(combat_missing(kind, clause, raw.get("m_AbilityEffectList") or []))
             continue
         if kind != "CardModifierAbilityEffectTemplate":
             missing.append(f"effect {kind}")
