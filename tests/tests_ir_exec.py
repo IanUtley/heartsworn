@@ -337,6 +337,61 @@ def test_a_chosen_target_pauses_and_resumes_from_its_continuation(db):
     assert locations == {600: "warzone", 601: "discard"}, locations
 
 
+INVOKER_TEXT = """
+INVOKE = ActivateAbilityEffectTemplate(
+    name="InvokeTheSacrificeChoice",
+    template_id=Ref("00000000-0000-0000-0000-00000000c0d1"),
+    ability_to_invoke=Ref("0d6e4d1f-58ce-93b1-50d5-33d114d332a9"),
+)
+INVOKER = AbilityTemplate(
+    ability_template_id=Ref("00000000-0000-0000-0000-00000000c0d0"),
+    name="InvokesTheSacrificeChoiceAtTheStartOfYourTurn",
+    trigger_event_type={"m_InternalType": "Game.Shared.Mechanics.TurnStartedEvent"},
+    trigger_condition=TriggerPlayerControlsAbilitySource(),
+    ability_target_template_ids=[Ref("190a4d8c-7c2c-10d0-6429-99c5aeb0791f")],
+    ability_effect_list=[Clause(effect_template_id=Ref("00000000-0000-0000-0000-00000000c0d1"),
+                                target_template_index=0)],
+)
+"""
+
+
+def test_an_invoked_choice_pauses_and_resumes_the_invoking_ability(db):
+    """An ability that invokes another ability which pauses for a choice keeps the invoking ability as an outer
+    frame of the continuation (JSON round trip included). The answer resumes the child, and the invoker resumes
+    after its invoke clause."""
+    import json
+    from gamedata import ir_python, ir_registry
+    from rules_port import ir_exec
+    from rules_port.context import EffectContext
+
+    ir_registry.clear()
+    names = ir_python.loads(INVOKER_TEXT)
+    ir_exec.register_card(names)
+    try:
+        pl_t, ai_t, game, handler, bstate, _player_champ, _ai_champ = _setup(db)
+        add_card(db, 900, 5, TPL_GLADIATOR, loc="warzone")
+        add_card(db, 600, 5, TPL_GLADIATOR, loc="warzone")
+        add_card(db, 601, 5, TPL_GLADIATOR, loc="warzone")
+        db.commit()
+        context = EffectContext.from_rules_port(game, SessionStub(), db, handler, pl_t, ai_t, bstate, "")
+        invoker = str(names["INVOKER"].m_AbilityTemplateId["m_Guid"]).lower()
+        try:
+            ir_exec.run_ability(invoker, "TurnStartedEvent", context=context, source_uid=900, owner_uid=5,
+                                event={"player": 5})
+            raise AssertionError("the invoked choice did not pause")
+        except ir_exec.NeedsChoice as pause:
+            candidates = sorted(pause.candidates)
+            continuation = json.loads(json.dumps(pause.continuation))
+        assert candidates == [600, 601], candidates
+        assert continuation["parent"]["ability_guid"] == invoker, continuation
+        ir_exec.resume_ability(continuation, 601, context=context)
+        locations = dict(db.execute("SELECT card_uid, location FROM game_cards WHERE card_uid IN (600, 601)").fetchall())
+        assert locations == {600: "warzone", 601: "discard"}, locations
+    finally:
+        ir_exec.clear_cards()
+        ir_registry.clear()
+
+
 if __name__ == "__main__":
     import db as dbmod
     for run in (test_burning_ability_runs_from_its_ir, test_dazed_and_vulnerable_removals_match_the_live_engine,
@@ -349,7 +404,8 @@ if __name__ == "__main__":
                 test_is_subtype_matches_the_way_csharp_has_subtype,
                 test_an_automatic_player_target_is_the_controllers_champion,
                 test_a_fixed_token_summon_creates_the_token_for_the_controller,
-                test_a_chosen_target_pauses_and_resumes_from_its_continuation):
+                test_a_chosen_target_pauses_and_resumes_from_its_continuation,
+                test_an_invoked_choice_pauses_and_resumes_the_invoking_ability):
         dbmod._db = make_db()
         run(dbmod._db)
     print("ok")

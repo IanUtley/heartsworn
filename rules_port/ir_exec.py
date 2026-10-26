@@ -689,8 +689,23 @@ def engine_runs(guid: str, source_uid: Any, owner_uid: Any) -> bool:
     so those abilities stay on the native path."""
     if not (ENGINE_ON and source_uid is not None and owner_uid is not None) or coverage(guid):
         return False
+    return not _pauses_for_choice(guid, set())
+
+
+def _pauses_for_choice(guid: str, seen: set[str]) -> bool:
+    """Whether an ability, or an ability it invokes, has a target the player picks."""
+    if guid in seen:
+        return False
+    seen = seen | {guid}
     root = _load("AbilityTemplate", guid)
-    return not any(_needs_choice(root, index) for index in range(len(root.m_AbilityTargetTemplateIds or [])))
+    if any(_needs_choice(root, index) for index in range(len(root.m_AbilityTargetTemplateIds or []))):
+        return True
+    for clause in root.m_AbilityEffectList:
+        effect_type, effect_raw = _stored("AbilityEffectTemplate", _guid(_field(clause, "m_EffectTemplateId")))
+        if _short(effect_type) == "ActivateAbilityEffectTemplate" and \
+                _pauses_for_choice(_guid(effect_raw.get("m_AbilityToInvoke")), seen):
+            return True
+    return False
 
 
 def live_event(event_type: str, owner_uid: int, data: dict[str, Any], trigger_source_uid: Any) -> dict[str, Any]:
@@ -837,6 +852,10 @@ def _run_effects(guid: str, root: MechanicsObject, scope: Scope, start: int) -> 
                                     "candidates": candidates, "optional": optional,
                                     "chosen": {str(k): v for k, v in scope.chosen.items()}}
                     raise NeedsChoice(continuation, candidates, optional)
+            effect_type, effect_raw = _stored("AbilityEffectTemplate", _guid(_field(clause, "m_EffectTemplateId")))
+            if _short(effect_type) == "ActivateAbilityEffectTemplate":
+                _invoke(guid, position, effect_raw, scope)
+                continue
             _run_clause(root, clause, scope)
     finally:
         if previous is None:
@@ -846,10 +865,45 @@ def _run_effects(guid: str, root: MechanicsObject, scope: Scope, start: int) -> 
     return True
 
 
+def _invoke(parent_guid: str, position: int, effect_raw: dict[str, Any], scope: Scope) -> None:
+    """C# ActivateAbilityEffectTemplate: run the invoked ability as a child of the same source, owner and event. Its
+    own trigger is not checked. A choice the child pauses for is kept with this invoke as the outer frame of its
+    continuation, so resuming the child then carries on from the invoking clause."""
+    child_guid = _guid(effect_raw.get("m_AbilityToInvoke"))
+    child_root = _load("AbilityTemplate", child_guid)
+    child_scope = Scope(context=scope.context, source_uid=int(scope.source_uid), owner_uid=int(scope.owner_uid),
+                        table=child_root.version_table, event=dict(scope.event))
+    try:
+        _run_effects(child_guid, child_root, child_scope, start=0)
+    except NeedsChoice as pause:
+        frame = {"ability_guid": parent_guid, "event": dict(scope.event), "source_uid": int(scope.source_uid),
+                 "owner_uid": int(scope.owner_uid), "position": position,
+                 "chosen": {str(k): v for k, v in scope.chosen.items()}}
+        _append_chain(pause.continuation, frame)
+        raise
+
+
+def _append_chain(continuation: dict[str, Any], outer: dict[str, Any] | None) -> None:
+    """Attach ``outer`` (the invoking frames) after the last frame of ``continuation``."""
+    node = continuation
+    while node.get("parent") is not None:
+        node = node["parent"]
+    node["parent"] = outer
+
+
+def _frame_scope(frame: dict[str, Any], context: Any) -> tuple[MechanicsObject, Scope]:
+    """The root and scope of one frame of a paused ability, as it was when the frame paused."""
+    root = _load("AbilityTemplate", frame["ability_guid"])
+    scope = Scope(context=context, source_uid=int(frame["source_uid"]), owner_uid=int(frame["owner_uid"]),
+                  table=root.version_table, event=dict(frame["event"]))
+    scope.chosen = {int(k): (None if v is None else int(v)) for k, v in frame["chosen"].items()}
+    return root, scope
+
+
 def resume_ability(continuation: dict[str, Any], answer: int | None, *, context: Any) -> bool:
     """Resume a paused ability with the player's answer: the card chosen, or None for choosing none. The answer
-    must be one of the candidates the pause offered (or None when the choice is optional)."""
-    guid = continuation["ability_guid"]
+    must be one of the candidates the pause offered (or None when the choice is optional). The invoking frames
+    then resume after their invoke clauses, outermost last."""
     index = int(continuation["target_index"])
     candidates = [int(uid) for uid in continuation["candidates"]]
     if answer is None:
@@ -857,13 +911,25 @@ def resume_ability(continuation: dict[str, Any], answer: int | None, *, context:
             raise ValueError("this choice is not optional")
     elif int(answer) not in candidates:
         raise ValueError(f"{answer} is not a candidate of this choice")
-    root = _load("AbilityTemplate", guid)
-    scope = Scope(context=context, source_uid=int(continuation["source_uid"]),
-                  owner_uid=int(continuation["owner_uid"]), table=root.version_table,
-                  event=dict(continuation["event"]))
-    scope.chosen = {int(k): (None if v is None else int(v)) for k, v in continuation["chosen"].items()}
+    root, scope = _frame_scope(continuation, context)
     scope.chosen[index] = None if answer is None else int(answer)
-    return _run_effects(guid, root, scope, start=int(continuation["position"]))
+    outer = continuation.get("parent")
+    try:
+        _run_effects(continuation["ability_guid"], root, scope, start=int(continuation["position"]))
+    except NeedsChoice as pause:
+        _append_chain(pause.continuation, outer)
+        raise
+    frame = outer
+    while frame is not None:
+        frame_root, frame_scope = _frame_scope(frame, context)
+        nxt = frame.get("parent")
+        try:
+            _run_effects(frame["ability_guid"], frame_root, frame_scope, start=int(frame["position"]) + 1)
+        except NeedsChoice as pause:
+            _append_chain(pause.continuation, nxt)
+            raise
+        frame = nxt
+    return True
 
 
 # What the interpreter runs. A construct outside these sets is uncovered: its ability raises
@@ -946,6 +1012,10 @@ def _comparison_ops(value: Any, out: list[str]) -> list[str]:
     return out
 
 
+# The abilities whose coverage is being checked, so an invocation cycle is refused rather than followed.
+_COVERAGE_STACK: set[str] = set()
+
+
 def coverage(guid: str) -> list[str]:
     """The constructs in an ability the interpreter does not run (empty when it runs them all)."""
     _cls, raw = _stored("AbilityTemplate", guid)
@@ -1022,6 +1092,19 @@ def coverage(guid: str) -> list[str]:
             # token's entry triggers are queued on the battle stack, as on the live path, for the chain to resolve.
             continue
         if kind == "SacrificeCardAbilityEffectTemplate":
+            continue
+        if kind == "ActivateAbilityEffectTemplate":
+            if effect.get("m_RandomlyLuckyOrUnlucky"):
+                missing.append("random invocation")
+            child = _guid(effect.get("m_AbilityToInvoke"))
+            if child in _COVERAGE_STACK:
+                missing.append("recursive invocation")
+            else:
+                _COVERAGE_STACK.add(child)
+                try:
+                    missing.extend(f"invoked: {item}" for item in coverage(child))
+                finally:
+                    _COVERAGE_STACK.discard(child)
             continue
         if kind != "CardModifierAbilityEffectTemplate":
             missing.append(f"effect {kind}")
