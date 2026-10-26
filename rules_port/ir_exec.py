@@ -38,6 +38,7 @@ from rules_port.ir_event_effects import NATIVE_LEAF_EFFECTS, coverage_of as even
 from rules_port.ir_exec_costs import unsupported_costs
 
 from . import ir_triggers
+from rules_port import granted_abilities
 
 # A CounterModifier's operation, as the live counter primitive names it.
 COUNTER_OPERATIONS = {"Add": "add", "Remove": "remove", "Set": "set"}
@@ -1136,6 +1137,11 @@ def _run_effects(guid: str, root: MechanicsObject, scope: Scope, start: int) -> 
             if _short(effect_type) == "RevealCardsAbilityEffectTemplate":
                 _reveal_cards(root, clause, effect_raw, scope)
                 continue
+            if _short(effect_type) in granted_abilities.GRANTED_EFFECTS:
+                granted_abilities.run(_short(effect_type), effect_raw, str(_field(clause, "m_EffectDuration") or ""),
+                                      _targets(root, int(_field(clause, "m_TargetTemplateIndex") or 0), scope),
+                                      scope.context)
+                continue
             _run_clause(root, clause, scope)
     scope.gate = None
     return True
@@ -1577,6 +1583,9 @@ def coverage(guid: str) -> list[str]:
                 missing.append(f"move to {destination or 'no zone'}")
             if str(effect.get("m_AllCardsOfTargetInZone") or "None") not in ("None", ""):
                 missing.append("move of every card in a zone")
+            continue
+        if kind in granted_abilities.GRANTED_EFFECTS:
+            missing.extend(granted_abilities.gaps(kind, effect, str(clause.get("m_EffectDuration") or "")))
             continue
         if kind == "PlayCardAbilityEffectTemplate":
             # The free play is the live play leaf's; a play that is only an activation is not modelled.
