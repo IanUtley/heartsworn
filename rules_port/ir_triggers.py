@@ -12,20 +12,23 @@ from typing import Any, Callable
 # Trigger types the interpreter runs. CardEnteredZoneEvent, TurnStartedEvent and TurnEndedEvent are in ir_exec.
 TRIGGER_EVENTS = {
     "CardDealtDamageEvent", "CardAttackedEvent", "CardCastEvent", "CardDrawnEvent",
-    "CardDiscardedEvent", "CardCreatedEvent", "AsEntersPlayEvent",
+    "CardDiscardedEvent", "CardCreatedEvent", "AsEntersPlayEvent", "CardGainedIntAttrEvent",
 }
 
 # Trigger condition classes this module evaluates.
 CONDITIONS = {"NotTriggerCondition", "TriggerPlayerControlsTarget", "TriggerEventIsCombatDamage",
-              "OrTriggerCondition"}
+              "OrTriggerCondition", "TriggerEventIntAttribute"}
 
 
-def event_fields(event_type: str, trigger_source_uid: Any, target_player_uid: Any) -> dict[str, Any]:
+def event_fields(event_type: str, trigger_source_uid: Any, target_player_uid: Any,
+                 data: dict[str, Any]) -> dict[str, Any]:
     """The fields a live event adds to the interpreter's scope.
 
     ``card`` is the trigger source (the native ``ConditionContext.trigger_uid``), ``target_player`` is the event's
-    TargetPlayerId (the damaged card's controller for a damage event), and ``event_type`` is the event's class name."""
-    return {"event_type": event_type, "card": trigger_source_uid, "target_player": target_player_uid}
+    TargetPlayerId (the damaged card's controller for a damage event), ``event_type`` is the event's class name, and
+    ``int_attribute`` is the attribute a CardGainedIntAttrEvent reports."""
+    return {"event_type": event_type, "card": trigger_source_uid, "target_player": target_player_uid,
+            "int_attribute": data.get("event_int_attribute")}
 
 
 def condition_holds(cls: str, condition: Any, scope: Any, holds: Callable[[Any, Any], bool]) -> bool:
@@ -48,6 +51,10 @@ def condition_holds(cls: str, condition: Any, scope: Any, holds: Callable[[Any, 
             # The event carries no target player here; refuse it rather than guess a side (the native path decides).
             raise NotImplementedError("the event names no target player")
         return int(target) == int(scope.owner_uid)
+    if cls == "TriggerEventIntAttribute":
+        # C# TriggerEventIntAttribute: the event is an attribute gain, and it names this attribute.
+        return (scope.event.get("event_type") == "CardGainedIntAttrEvent" and
+                str(getattr(condition, "m_Attribute", "") or "") == str(scope.event.get("int_attribute") or ""))
     if cls == "TriggerEventIsCombatDamage":
         # A damage event is combat damage when it is CardDealtDamageEvent (the native check, for the events here).
         return scope.event.get("event_type") == "CardDealtDamageEvent"
