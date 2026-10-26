@@ -2574,8 +2574,9 @@ class EffectContext:
                 event_previous_state=old_state)
         return f"{label}: moved {hex(target)} to {destination}"
 
-    def move_card_to_zone(self) -> str | None:
-        """Handle ordinary typed MoveCardToZone destinations.
+    def move_card_to_zone(self, target: int | None = None) -> str | None:
+        """Handle ordinary typed MoveCardToZone destinations. ``target`` names the card explicitly (the interpreter's
+        chosen or automatic target); without it the card is the resolver's target.
 
         Deck reinsertion, choice-zone cleanup, and authored multi-card moves
         are rejected as unsupported until their ordering contracts are ported.
@@ -2626,7 +2627,8 @@ class EffectContext:
         if destination not in {"hand", "discard", "void", "warzone",
                                "underground", "deck"}:
             return None
-        target = self.resolved_target()
+        if target is None:
+            target = self.resolved_target()
         if target is None and destination == "underground":
             target = self.bstate.get("resolving_source_uid")
         previous_owner_id = None

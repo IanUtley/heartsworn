@@ -1040,25 +1040,18 @@ def _reveal_cards(root: MechanicsObject, clause: Any, effect_raw: dict[str, Any]
 
 def _move_cards(root: MechanicsObject, clause: Any, effect_raw: dict[str, Any], scope: Scope) -> None:
     """C# MoveCardToZoneEffectTemplate: each target moves to the authored zone, through the live move leaf
-    (rules_port.context move_card_to_zone), with the owner and target the leaf reads set for this effect."""
+    (rules_port.context move_card_to_zone), with the owner and the target passed explicitly for this effect."""
     context = scope.context
     bstate = context.bstate
     targets = _targets(root, int(_field(clause, "m_TargetTemplateIndex") or 0), scope)
-    # The move leaf reads its target from these aliases first (context.resolved_target). A stale one left by an earlier
-    # chain item would move that card instead of the target, so they are cleared while the move runs.
-    target_aliases = ("player_spell_target", "player_mod_target")
-    saved = {key: bstate.get(key) for key in ("resolving_owner_id", "resolving_target_uid", "_rules_port_native_effect",
-                                              *target_aliases)}
+    saved = {key: bstate.get(key) for key in ("resolving_owner_id", "resolving_target_uid", "_rules_port_native_effect")}
     previous_template = context.effect_template_override
     context.effect_template_override = effect_raw
     bstate["resolving_owner_id"] = int(scope.owner_uid)
     bstate["_rules_port_native_effect"] = True
     try:
         for target in targets:
-            for key in target_aliases:
-                bstate.pop(key, None)
-            bstate["resolving_target_uid"] = int(target)
-            context.move_card_to_zone()
+            context.move_card_to_zone(target=int(target))
     finally:
         context.effect_template_override = previous_template
         for key, value in saved.items():
