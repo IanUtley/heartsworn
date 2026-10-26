@@ -27,6 +27,7 @@ from gamedata.mechanics import CLASSES
 from gamedata.mechanics_fields import current_fields
 from gamedata.mechanics_objects import MechanicsObject, from_record
 from gamedata.records import RecordObject
+from rules_port.ir_exec_targets import capped, random_picks, target_count
 from rules_port.ir_exec_transform import EFFECTS as TRANSFORM_EFFECTS
 from rules_port.ir_exec_transform import refusals as transform_refusals
 from rules_port.ir_exec_transform import run as run_transform_effect
@@ -204,6 +205,7 @@ class Scope:
     table: list[dict[str, int]] | None = None
     event: dict[str, Any] = field(default_factory=dict)   # player, card, from, to
     chosen: dict[int, int | None] = field(default_factory=dict)   # target index -> the card the player chose
+    picked: dict[int, list[int]] = field(default_factory=dict)   # random target index -> the cards it drew
     # The test each of the running clause's targets must pass (its RequiresTargetPassesFilterCondition), or None.
     gate: Any = None
     applied: dict[int, bool] = field(default_factory=dict)   # effect position -> whether it applied (C# applied_effects)
@@ -233,15 +235,18 @@ def _battle_cards(scope: Scope) -> list[Card]:
     bstate = context.bstate
     cards: list[Card] = []
     counters = bstate.get("champion_counters") or {}
-    for uid, owner in _champion_owners(bstate).items():
-        cards.append(Card(uid=uid, owner=owner, zone="champions", is_champion=True,
-                          card_type="Champion",
-                          counters={k: int(v) for k, v in (counters.get(str(uid)) or {}).items()},
-                          subtype=_champion_subtype(context, owner)))
     rows = context.db.execute(
         "SELECT card_uid, user_id, location, is_champion, card_type, permanent_buffs, template_guid, "
         "(SELECT name FROM card_templates WHERE guid = game_cards.template_guid), position "
         "FROM game_cards WHERE session_id=?", (context.session.session_id,)).fetchall()
+    # A champion is a game_cards row too: it is listed once, as its row, and only a champion without one is synthetic.
+    row_uids = {int(row[0]) for row in rows}
+    for uid, owner in _champion_owners(bstate).items():
+        if uid not in row_uids:
+            cards.append(Card(uid=uid, owner=owner, zone="champions", is_champion=True,
+                              card_type="Champion",
+                              counters={k: int(v) for k, v in (counters.get(str(uid)) or {}).items()},
+                              subtype=_champion_subtype(context, owner)))
     from pvp_db import db_template_subtype
     for card_uid, user_id, location, is_champion, card_type, buffs_json, template, template_name, position in rows:
         buffs = json.loads(buffs_json or "{}")
@@ -551,6 +556,18 @@ def _input_value(modifier: MechanicsObject, scope: Scope) -> int:
     return scope.variables[name]
 
 
+def _auto_card_targets(template: MechanicsObject, index: int, scope: Scope) -> list[int]:
+    """The cards an automatic card target picks. A random one draws its cards once, when the ability first names
+    it, and its later effects reuse them (the live resolver keeps them on the activation). Any other one is
+    recomputed, then kept to its maximum count."""
+    count = target_count(template.m_MaxTargetCount, scope.variables)
+    if template.m_IsRandomTarget:
+        if index not in scope.picked:
+            scope.picked[index] = random_picks(_card_candidates(template, scope), count, scope.context.bstate)
+        return list(scope.picked[index])
+    return capped(_card_candidates(template, scope), count)
+
+
 def _targets(root: MechanicsObject, index: int, scope: Scope) -> list[int]:
     """The cards a clause's target index picks, minus those the running clause's condition on its targets refuses."""
     targets = _resolved_targets(root, index, scope)
@@ -567,7 +584,7 @@ def _resolved_targets(root: MechanicsObject, index: int, scope: Scope) -> list[i
     if kind == "AbilitySourceCardTargetTemplate":
         return [scope.source_uid]
     if kind == "AbilityTargetTemplate" and template.m_IsAutoTarget:
-        return _card_candidates(template, scope)
+        return _auto_card_targets(template, index, scope)
     if kind == "SourceRevealedTargetTemplate":
         return _revealed_candidates(template, index, scope)
     if kind in ("AbilityTargetTemplate", "SourceRevealedTargetTemplate") and not template.m_IsAutoTarget \
@@ -617,10 +634,13 @@ def _card_candidates(template: MechanicsObject, scope: Scope) -> list[int]:
     zones = _zones_of(template.m_CollectionFlags)
     player = str(template.m_PlayerFilter or "MultiplePlayers")
     top = _top_n_of_deck(template.m_CardFilter)
-    cards = [card for card in _battle_cards(scope)
-             if (not zones or card.zone in zones)
-             and _player_passes(player, card.owner, scope)
-             and _filter_holds(template.m_CardFilter, card, scope)]
+    # The live pool is the zones' cards in board order (the game_cards position), so a random pick or a cap of an
+    # automatic target takes the same cards the live resolver takes.
+    cards = sorted((card for card in _battle_cards(scope)
+                    if (not zones or card.zone in zones)
+                    and _player_passes(player, card.owner, scope)
+                    and _filter_holds(template.m_CardFilter, card, scope)),
+                   key=lambda card: card.position)
     if top is None:
         return [card.uid for card in cards]
     if top.m_CountFromBottom or top.m_TopHalfOfDeck:
@@ -1110,6 +1130,7 @@ def _run_effects(guid: str, root: MechanicsObject, scope: Scope, start: int) -> 
                                     "position": position, "target_index": index,
                                     "candidates": candidates, "optional": optional,
                                     "chosen": {str(k): v for k, v in scope.chosen.items()},
+                                    "picked": {str(k): list(v) for k, v in scope.picked.items()},
                                     "variables": dict(scope.variables),
                                     "applied": {str(k): v for k, v in scope.applied.items()}}
                     template = _load("AbilityTargetTemplate", _guid(root.m_AbilityTargetTemplateIds[index]))
@@ -1299,6 +1320,7 @@ def _invoke(parent_guid: str, position: int, effect_raw: dict[str, Any], scope: 
             frame = {"ability_guid": parent_guid, "event": dict(scope.event), "source_uid": int(scope.source_uid),
                      "owner_uid": int(scope.owner_uid), "position": position,
                      "chosen": {str(k): v for k, v in scope.chosen.items()},
+                     "picked": {str(k): list(v) for k, v in scope.picked.items()},
                      "variables": dict(scope.variables),
                      "applied": {str(k): v for k, v in scope.applied.items()}}
             _append_chain(pause.continuation, frame)
@@ -1319,6 +1341,7 @@ def _frame_scope(frame: dict[str, Any], context: Any) -> tuple[MechanicsObject, 
     scope = Scope(context=context, source_uid=int(frame["source_uid"]), owner_uid=int(frame["owner_uid"]),
                   table=root.version_table, event=dict(frame["event"]))
     scope.chosen = {int(k): (None if v is None else int(v)) for k, v in frame["chosen"].items()}
+    scope.picked = {int(k): [int(uid) for uid in v] for k, v in (frame.get("picked") or {}).items()}
     # The variables the frame had bound (a random branch's number, say) are part of its state, so the resumed effects
     # see the same values the paused run did.
     scope.variables = dict(frame.get("variables") or {})
@@ -1498,7 +1521,13 @@ def coverage(guid: str) -> list[str]:
             continue
         if kind == "AbilityTargetTemplate" and str(template.get("m_PlayerFilter") or "") not in TARGET_PLAYER_FILTERS:
             missing.append(f"target player filter {template.get('m_PlayerFilter')}")
+        if kind == "AbilityTargetTemplate" and not template.get("m_IsAutoTarget") and \
+                target_count(_load("AbilityTargetTemplate", template_guid).m_MaxTargetCount, {}) != 1:
+            # The player picks one card; a chosen target of several cards (or no limit) is not modelled.
+            missing.append("chosen target of more than one card")
         if template.get("m_IsRandomTarget"):
+            # The pick is drawn from the battle's RNG, but the interpreter's random pool does not yet match the live one
+            # (see ir_exec_targets.py), so a random target stays with the native resolver.
             missing.append("random target")
         for name in _tagged_classes(template.get("m_CardFilter"), []):
             if name not in SUPPORTED_FILTERS and not bridge.filter_accepted(name):
