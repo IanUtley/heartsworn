@@ -24,7 +24,8 @@ RESOURCE_PROPERTIES = {
 }
 PLAYER_MODIFIERS = set(RESOURCE_PROPERTIES) | {"LoseLifeModifier", "SpellPointsModifier"}
 CARD_COST_MODIFIER = "CardCostModifier"
-MODIFIERS = PLAYER_MODIFIERS | {CARD_COST_MODIFIER}
+CARD_THRESHOLD_MODIFIER = "CardThresholdModifier"
+MODIFIERS = PLAYER_MODIFIERS | {CARD_COST_MODIFIER, CARD_THRESHOLD_MODIFIER}
 # The effects that change a player's pools or thresholds without a modifier.
 EFFECTS = {"ReplenishResourcesAbilityEffectTemplate", "LoseThresholdAbilityEffectTemplate"}
 # The clause durations a resource change runs with. The live leaves do not read the duration, so only the
@@ -60,11 +61,14 @@ def coverage_modifier(kind: str, effect: dict[str, Any], clause: dict[str, Any],
         return missing
     if duration not in RESOURCE_DURATIONS:
         missing.append(f"{kind} duration {duration}")
+    if kind == CARD_THRESHOLD_MODIFIER:
+        # Its thresholds are set on each card it names, with no amount to read.
+        return missing
     if ix._short((modifier.get("m_InputValue") or {}).get("_t")) not in ("EffectInputVariable", "EffectConstant"):
         missing.append(f"{kind} without a typed amount")
     player = _player_filter(raw, index)
-    if player not in ix.SUPPORTED_PLAYER_TARGETS:
-        missing.append(f"{kind} on {'a card' if player is None else 'player ' + player}")
+    if player is not None and player not in ix.SUPPORTED_PLAYER_TARGETS:
+        missing.append(f"{kind} for player {player}")
     if kind in ("CurrentResourceModifier", "TotalResourceModifier") and modifier.get("m_Set"):
         missing.append("resource set (not add)")
     if kind == "ChargePointsModifier" and modifier.get("m_RemoveAllCharges"):
@@ -88,7 +92,7 @@ def coverage_effect(kind: str, effect: dict[str, Any], clause: dict[str, Any], r
 
 
 @contextmanager
-def _bridge_player(bstate: dict[str, Any], champion: int) -> Iterator[None]:
+def _bridge_target(bstate: dict[str, Any], champion: int) -> Iterator[None]:
     """Name a player's champion as the target of the resource leaves, for the duration of one leaf call. The leaves
     read the target from these aliases before the source card, so each one is set and restored."""
     keys = ("player_spell_target", "player_mod_target", "resolving_target_uid")
@@ -114,14 +118,28 @@ def _player_champion(root: MechanicsObject, index: int, scope: ix.Scope) -> int:
 
 
 def run_modifier(kind: str, modifier: MechanicsObject, root: MechanicsObject, clause: Any, scope: ix.Scope) -> None:
-    """Run one CardModifier clause of a resource kind through the live leaf for it."""
+    """Run one CardModifier clause of a resource kind through the live leaf for it, once per target. A player target is
+    the player's champion; a card target is the card, whose controller is the one the leaf charges."""
     context = scope.context
     index = int(ix._field(clause, "m_TargetTemplateIndex") or 0)
     if kind == CARD_COST_MODIFIER:
         _run_card_cost(modifier, root, index, str(ix._field(clause, "m_EffectDuration") or ""), scope)
         return
+    if kind == CARD_THRESHOLD_MODIFIER:
+        for target in ix._targets(root, index, scope):
+            context.card_threshold(int(target), {
+                "shard": str(modifier.m_Shard),
+                "setthresholds": bool(modifier.m_SetThresholds),
+                "copysourcecard": bool(modifier.m_CopySourceCard),
+            })
+        return
     amount = ix._input_value(modifier, scope)
-    champion = _player_champion(root, index, scope)
+    for target in ix._targets(root, index, scope):
+        _apply_to_target(kind, modifier, int(target), amount, context)
+
+
+def _apply_to_target(kind: str, modifier: MechanicsObject, target: int, amount: int, context: Any) -> None:
+    """One resource or life change on one target, through the live leaf for its kind."""
     if kind in RESOURCE_PROPERTIES:
         from rules_port.effects import _resource_modifier
         param: dict[str, Any] = {"property": RESOURCE_PROPERTIES[kind], "amount": amount}
@@ -131,12 +149,12 @@ def run_modifier(kind: str, modifier: MechanicsObject, root: MechanicsObject, cl
                 "random": bool(modifier.m_Random),
                 "randomlowestthreshold": bool(modifier.m_RandomLowestThreshold),
             })
-        with _bridge_player(context.bstate, champion):
+        with _bridge_target(context.bstate, target):
             _resource_modifier(context, {"param": json.dumps(param)})
     elif kind == "LoseLifeModifier":
-        context.lose_life(champion, amount, {"lose_half_health": False})
+        context.lose_life(target, amount, {"lose_half_health": False})
     elif kind == "SpellPointsModifier":
-        context.spell_points(champion, amount)
+        context.spell_points(target, amount)
     else:
         raise NotImplementedError(f"modifier {kind}")
 
@@ -166,7 +184,7 @@ def run_effect(kind: str, effect_raw: dict[str, Any], root: MechanicsObject, cla
         # The pool refilled is the caster's (the owner the interpreter bridges for the run).
         context.replenish_resources()
     elif kind == "LoseThresholdAbilityEffectTemplate":
-        with _bridge_player(context.bstate, champion):
+        with _bridge_target(context.bstate, champion):
             context.lose_thresholds(list(effect_raw.get("m_Thresholds") or []))
     else:
         raise NotImplementedError(f"effect {kind}")
