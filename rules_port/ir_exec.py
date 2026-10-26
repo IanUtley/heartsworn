@@ -16,6 +16,7 @@ from __future__ import annotations
 import functools
 import json
 import os
+import re
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from types import SimpleNamespace
@@ -26,6 +27,7 @@ from gamedata.mechanics import CLASSES
 from gamedata.mechanics_fields import current_fields
 from gamedata.mechanics_objects import MechanicsObject, from_record
 from gamedata.records import RecordObject
+from rules_port import ir_variables
 
 # A CounterModifier's operation, as the live counter primitive names it.
 COUNTER_OPERATIONS = {"Add": "add", "Remove": "remove", "Set": "set"}
@@ -457,11 +459,27 @@ def _counter_variable(variable: Any, counter: str | None, scope: Scope) -> int:
 
 
 # The ability variables the interpreter binds (coverage refuses an ability with any other kind).
-SUPPORTED_VARIABLES = {"AbilityConstant", "AbilityVariable", "CounterVariable", "CardCountAbilityVariable"}
+SUPPORTED_VARIABLES = {"AbilityConstant", "AbilityVariable", "CounterVariable", "CardCountAbilityVariable"} \
+    | ir_variables.VARIABLE_KINDS
 
 
-def _bind_variables(root: MechanicsObject, scope: Scope) -> None:
-    """Each ability variable: a constant's default, or the total of a counter or card-count variable."""
+def _clause_names(clause: Any) -> set[str]:
+    """The names a clause's effect and condition refer to, as the Records store them (a quoted string)."""
+    record = clause.to_record() if isinstance(clause, MechanicsObject) else clause
+    texts = [json.dumps(record, default=str)]
+    effect = _stored("AbilityEffectTemplate", _guid(_field(clause, "m_EffectTemplateId")))[1]
+    condition = _guid(_field(clause, "m_ConditionId"))
+    texts.append(json.dumps(effect, default=str))
+    if condition and condition != "00000000-0000-0000-0000-000000000000":
+        texts.append(json.dumps(_stored("AbilityEffectConditionTemplate", condition)[1], default=str))
+    return set(re.findall(r'"([^"]+)"', "".join(texts)))
+
+
+def _bind_variables(root: MechanicsObject, scope: Scope, wanted: set[str] | None = None) -> None:
+    """Each ability variable: a constant's default, the total of a counter or card-count variable, a card property
+    or an expression over the others (bound last, once the variables it names are). ``wanted`` is the names the
+    clause about to run refers to; None binds every expression."""
+    expressions = {}
     for variable in root.m_Variables:
         kind = _short(variable.type_name)
         if kind == "CounterVariable":
@@ -474,8 +492,13 @@ def _bind_variables(root: MechanicsObject, scope: Scope) -> None:
         elif kind == "AbilityVariable":
             # Set by an effect (RandomizeVariable): keep the value it gave, else start at zero.
             scope.variables.setdefault(variable.m_Name, 0)
+        elif kind == ir_variables.CARD_PROPERTY_VARIABLE:
+            scope.variables[variable.m_Name] = ir_variables.card_property_value(scope, variable)
+        elif kind == ir_variables.EXPRESSION_VARIABLE:
+            expressions[variable.m_Name] = variable
         else:
             raise NotImplementedError(f"variable {kind}")
+    ir_variables.bind_expressions(expressions, scope.variables, wanted)
 
 
 def _input_value(modifier: MechanicsObject, scope: Scope) -> int:
@@ -952,7 +975,7 @@ def _run_effects(guid: str, root: MechanicsObject, scope: Scope, start: int) -> 
         for position in range(start, len(root.m_AbilityEffectList)):
             clause = root.m_AbilityEffectList[position]
             # Counts are read when the effect runs, after the effects before it (C# evaluates a variable lazily).
-            _bind_variables(root, scope)
+            _bind_variables(root, scope, _clause_names(clause))
             # An effect runs only when its own condition holds (its m_ConditionId, as C# checks it).
             if not _clause_condition_holds(clause, scope):
                 continue
@@ -1313,12 +1336,20 @@ def coverage(guid: str) -> list[str]:
                     missing.append(f"variable condition against {rhs}")
             elif kind != "RequiresCardsControlled":
                 missing.append(f"effect condition {kind}")
+    declared = {str(v.get("m_Name") or "") for v in raw.get("m_Variables") or [] if isinstance(v, dict)}
+    expressions: dict[str, str] = {}
     for variable in raw.get("m_Variables") or []:
         kind = _short((variable or {}).get("_t")) if isinstance(variable, dict) else ""
         if kind not in SUPPORTED_VARIABLES:
             missing.append(f"variable {kind or 'untyped'}")
             continue
         if kind in ("AbilityConstant", "AbilityVariable"):
+            continue
+        if kind == ir_variables.CARD_PROPERTY_VARIABLE:
+            missing.extend(ir_variables.card_property_gaps(variable))
+            continue
+        if kind == ir_variables.EXPRESSION_VARIABLE:
+            expressions[str(variable.get("m_Name") or "")] = str(variable.get("m_ExpressionText") or "")
             continue
         player = str(variable.get("m_PlayerFilter") or "Self")
         if player not in COUNTER_VARIABLE_PLAYERS:
@@ -1331,6 +1362,7 @@ def coverage(guid: str) -> list[str]:
         for name in _tagged_classes(variable.get("m_CardFilter"), []):
             if name not in SUPPORTED_FILTERS:
                 missing.append(f"filter {name}")
+    missing.extend(ir_variables.expression_gaps(expressions, declared))
     for clause in raw.get("m_AbilityEffectList") or []:
         effect_type, effect = _stored("AbilityEffectTemplate", _guid(clause.get("m_EffectTemplateId")))
         kind = _short(effect_type)
