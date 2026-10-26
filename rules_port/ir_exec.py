@@ -680,6 +680,10 @@ def _run_clause(root: MechanicsObject, clause: Any, scope: Scope) -> None:
     if _short(effect_type) == "SummonTokenTroopAbilityEffectTemplate":
         _summon_tokens(root, clause, effect_raw, scope)
         return
+    from rules_port.ir_exec_combat import COMBAT_EFFECTS, run_clause as run_combat_clause
+    if _short(effect_type) in COMBAT_EFFECTS:
+        run_combat_clause(_short(effect_type), root, clause, effect_raw, scope)
+        return
     if _short(effect_type) != "CardModifierAbilityEffectTemplate":
         raise NotImplementedError(f"effect {_short(effect_type)}")
     modifier = _typed(effect_raw["m_Modifier"], "Modifier", effect_raw.get("_v"))
@@ -1368,6 +1372,10 @@ def coverage(guid: str) -> list[str]:
                     missing.extend(f"invoked: {item}" for item in coverage(child))
                 finally:
                     _COVERAGE_STACK.discard(child)
+            continue
+        from rules_port.ir_exec_combat import COMBAT_EFFECTS, coverage_missing as combat_missing
+        if kind in COMBAT_EFFECTS:
+            missing.extend(combat_missing(kind, clause, raw.get("m_AbilityEffectList") or []))
             continue
         if kind != "CardModifierAbilityEffectTemplate":
             missing.append(f"effect {kind}")
