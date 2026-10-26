@@ -26,6 +26,7 @@ from gamedata.mechanics import CLASSES
 from gamedata.mechanics_fields import current_fields
 from gamedata.mechanics_objects import MechanicsObject, from_record
 from gamedata.records import RecordObject
+from rules_port.ir_exec_costs import unsupported_costs
 
 from . import ir_triggers
 
@@ -1194,10 +1195,6 @@ def _tagged_classes(value: Any, out: list[str]) -> list[str]:
 # The destinations the live move leaf moves a card to (its deck reinsertion is not ported).
 MOVE_DESTINATIONS = {"hand", "discard", "void", "warzone", "underground", "deck"}
 
-# The ability fields that name a cost, or make the ability optional.
-_COST_FIELDS = ("m_Optional", "m_ActivationCost", "m_ChargePointCost", "m_VariableActivationCost", "m_LifeCost",
-                "m_SpellPointCost", "m_CounterCosts")
-
 # A RequiresCardsControlled flag the interpreter evaluates only at its default. Any other value is refused:
 # the count would otherwise ignore it silently.
 _COUNT_FLAG_DEFAULTS = {
@@ -1295,10 +1292,8 @@ def coverage(guid: str) -> list[str]:
         for name in _tagged_classes(template.get("m_CardFilter"), []):
             if name not in SUPPORTED_FILTERS:
                 missing.append(f"filter {name}")
-    # A cost or an optional ability: the interpreter does not model paying, nor a player's choice to decline.
-    for field_name in _COST_FIELDS:
-        if raw.get(field_name) not in (None, 0, "", [], {}, "0"):
-            missing.append(f"cost or optional ({field_name})")
+    # Paid costs and optional abilities are settled before the ability reaches the interpreter (ir_exec_costs).
+    missing.extend(unsupported_costs(raw))
     for operator in _comparison_ops(raw, []):
         if operator not in _COMPARISONS:
             missing.append(f"comparison {operator}")
