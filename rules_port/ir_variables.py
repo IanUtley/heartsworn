@@ -13,10 +13,20 @@ from typing import Any, Callable
 
 CARD_PROPERTY_VARIABLE = "CardPropertyVariable"
 EXPRESSION_VARIABLE = "ExpressionAbilityVariable"
-VARIABLE_KINDS = {CARD_PROPERTY_VARIABLE, EXPRESSION_VARIABLE}
+ABILITY_PROPERTY_VARIABLE = "AbilityPropertyVariable"
+HIGHEST_CARD_VARIABLE = "HighestCardAbilityVariable"
+THRESHOLD_VARIABLE = "SourcePlayerThresholdAbilityVariable"
+VARIABLE_KINDS = {CARD_PROPERTY_VARIABLE, EXPRESSION_VARIABLE, ABILITY_PROPERTY_VARIABLE, HIGHEST_CARD_VARIABLE,
+                  THRESHOLD_VARIABLE}
 
 # The card properties the native resolver reads for the source card (static_rules._card_property_value).
 CARD_PROPERTIES = {"CurrentAttackValue", "CurrentDefenseValue", "ResourceCostTrue"}
+
+# A name an expression may use without an ability variable of that name: the source's escalation count.
+ESCALATION_NAME = "ESC"
+
+# C# int.MinValue: what a highest-card variable gives when no card passes its filter.
+_NO_CARD = -2147483648
 
 _OPERATORS = (ast.Add, ast.Sub, ast.Mult, ast.Div)
 
@@ -65,7 +75,7 @@ def expression_gaps(expressions: dict[str, str], declared: set[str]) -> list[str
             gaps.append(f"expression {text}")
             continue
         for used in _names(tree):
-            if used not in declared:
+            if used not in declared and used != ESCALATION_NAME:
                 gaps.append(f"expression name {used}")
         graph[name] = _names(tree) & set(expressions)
     for name in graph:
@@ -109,6 +119,81 @@ def card_property_value(scope: Any, variable: Any) -> int:
     return int(value or 0)
 
 
+def ability_property_gaps(variable: dict[str, Any]) -> list[str]:
+    """What stops an AbilityPropertyVariable from running: a property other than the X cost, or a player's choice."""
+    gaps = []
+    if str(variable.get("m_Property") or "") != "AbilityResourceXCost":
+        gaps.append(f"ability property {variable.get('m_Property')}")
+    if variable.get("m_RequiresPlayerInput") or variable.get("m_RequiresExplicitSet"):
+        gaps.append("ability property the player sets")
+    return gaps
+
+
+def ability_property_value(scope: Any) -> int:
+    """The X cost paid for the spell or ability now (C# AbilityPropertyVariable with AbilityResourceXCost)."""
+    return int(scope.context.bstate.get("x_cost", 0) or 0)
+
+
+def highest_card_gaps(variable: dict[str, Any]) -> list[str]:
+    """What stops a HighestCardAbilityVariable from running: a property the native resolver does not read for a card,
+    or a value the player is asked for."""
+    gaps = []
+    if str(variable.get("m_Property") or "") not in CARD_PROPERTIES:
+        gaps.append(f"highest card property {variable.get('m_Property')}")
+    if variable.get("m_RequiresPlayerInput") or variable.get("m_RequiresExplicitSet"):
+        gaps.append("highest card the player sets")
+    return gaps
+
+
+def highest_card_value(scope: Any, variable: Any) -> int:
+    """The highest stat or cost among the cards its zones and filter pass, from the player the variable names
+    (native ``static_rules._highest_card_variable``); the default when the variable names no cards to read."""
+    from rules_port.static_rules import _variable_card_candidates, effective_cost, effective_stats
+
+    context = scope.context
+    session_id = context.session.session_id
+    cards = _variable_card_candidates(context.db, session_id, context.bstate, scope.source_uid, scope.owner_uid,
+                                      variable.to_record(), self_owner="source")
+    if cards is None:
+        return int(variable.m_DefaultValue or 0)
+    if not cards:
+        return _NO_CARD
+    prop = str(variable.m_Property or "").lower()
+    if prop in {"currentattackvalue", "attack", "cardattack"}:
+        values = [effective_stats(context.db, session_id, context.bstate, int(card["card_uid"]))[0] for card in cards]
+    elif prop in {"currentdefensevalue", "defense", "carddefense"}:
+        values = [effective_stats(context.db, session_id, context.bstate, int(card["card_uid"]))[1] for card in cards]
+    else:
+        values = [effective_cost(context.db, session_id, context.bstate, int(card["card_uid"])) for card in cards]
+    return int(max(values))
+
+
+def threshold_gaps(variable: dict[str, Any]) -> list[str]:
+    """What stops a SourcePlayerThresholdAbilityVariable from running: a value the player is asked for."""
+    if variable.get("m_RequiresPlayerInput") or variable.get("m_RequiresExplicitSet"):
+        return ["threshold the player sets"]
+    return []
+
+
+def threshold_value(scope: Any, variable: Any) -> int:
+    """The shards the source player holds of the named threshold, counted as the native resolver counts them
+    (``static_rules._source_player_threshold``)."""
+    from rules_port.static_rules import _source_player_threshold
+
+    return int(_source_player_threshold(scope.context.bstate, scope.owner_uid, variable.to_record()) or 0)
+
+
+def uses_escalation(expressions: dict[str, Any]) -> bool:
+    """Whether any expression variable names the source's escalation count."""
+    return any(ESCALATION_NAME in _names(tree)
+               for variable in expressions.values() if not _is_threshold(variable)
+               for tree in [_parse(variable.m_ExpressionText or "")] if tree is not None)
+
+
+def _is_threshold(variable: Any) -> bool:
+    return str(getattr(variable, "type_name", "")).endswith(THRESHOLD_VARIABLE)
+
+
 def evaluate(text: str, lookup: Callable[[str], int]) -> float:
     """The value of an expression, each name read through ``lookup``. Raises ArithmeticError or ValueError when the
     text cannot be worked out; the caller then takes the default."""
@@ -139,11 +224,20 @@ def _value(node: ast.expr, lookup: Callable[[str], int]) -> float:
     raise ValueError(f"unsupported expression node {type(node).__name__}")
 
 
-def bind_expressions(variables: dict[str, Any], values: dict[str, int], wanted: set[str] | None = None) -> None:
+def escalation_value(scope: Any) -> int:
+    """The source card's escalation count now, as the native resolver reads ``ESC``."""
+    from rules_port.statistics import card_escalation_count
+
+    context = scope.context
+    return int(card_escalation_count(context.db, context.session.session_id, context.bstate, scope.source_uid))
+
+
+def bind_expressions(variables: dict[str, Any], values: dict[str, int], wanted: set[str] | None = None,
+                     threshold: Callable[[Any], int] | None = None) -> None:
     """Bind each expression variable (``variables``: name -> the typed variable) into ``values``. An expression can
     name another expression variable, so each is worked out when first read. A variable with Don't recalculate is
     worked out once, the first time a clause names it (``wanted``; None means every clause), and then keeps that
-    value, as the native cache does."""
+    value, as the native cache does. A threshold variable is worked out by ``threshold`` in the same way."""
     fresh: dict[str, int] = {}
 
     def value_of(name: str, stack: frozenset[str]) -> int:
@@ -156,6 +250,9 @@ def bind_expressions(variables: dict[str, Any], values: dict[str, int], wanted: 
             return values[name]
         if name in stack:
             raise NotImplementedError(f"expression cycle on {name}")
+        if _is_threshold(variable):
+            fresh[name] = int(threshold(variable))
+            return fresh[name]
         default = int(variable.m_DefaultValue or 0)
         try:
             computed = int(evaluate(variable.m_ExpressionText or "",
