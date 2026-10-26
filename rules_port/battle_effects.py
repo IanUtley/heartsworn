@@ -75,7 +75,12 @@ def battle_cards(context, effect=None):
         attacker = context.bstate.get("resolving_source_uid")
     if attacker is None or defender is None:
         return "battle: need two cards"
-    attacker, defender = int(attacker), int(defender)
+    return fight_cards(context, int(attacker), int(defender))
+
+
+def fight_cards(context, attacker, defender):
+    """Two cards fight: each deals its attack to the other (the reciprocal hit when the template fights back).
+    Shared by the live Battle2Cards effect and the IR interpreter, which passes both cards explicitly."""
 
     def attack(uid):
         from .static_rules import effective_stats
