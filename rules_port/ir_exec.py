@@ -290,6 +290,11 @@ def _is_subtype(wanted: str, card: Card) -> bool:
     return wanted.lower() in {word for word in current.lower().split(" ")}
 
 
+def _has_card_type(card: Card, wanted: str) -> bool:
+    """Whether a card carries a card type. A card's type is a flag list ("Troop|Quick"), so a Quick troop is a troop."""
+    return wanted in {part.strip() for part in str(card.card_type or "").split("|")}
+
+
 def _filter_holds(card_filter: Any, card: Card, scope: Scope) -> bool:
     """Whether a card passes a card filter (a typed filter, or a plain HasCountersValue)."""
     if card_filter is None:
@@ -314,16 +319,15 @@ def _filter_holds(card_filter: Any, card: Card, scope: Scope) -> bool:
     if cls == "HasCountersValue":
         return _has_counters(card, typed.__dict__)
     if cls == "IntAttrFilter":
-        from rules_port.damage_effects import _int_attr_values
-        values = _int_attr_values(scope.context, card.uid)
-        compare = _COMPARISONS[typed.m_ComparisonOp]
-        return compare(int(values.get(typed.m_Attribute, 0)), int(typed.m_Value))
+        from rules_port.ir_exec_parity import int_attr_value
+        actual = int_attr_value(scope.context, card.uid, scope.owner_uid, typed.m_Attribute)
+        return _COMPARISONS[typed.m_ComparisonOp](actual, int(typed.m_Value))
     if cls == "IsTroop":
-        return card.card_type == "Troop" and not card.is_champion
+        return _has_card_type(card, "Troop") and not card.is_champion
     if cls == "IsHero":
         return card.is_champion
     if cls == "IsResource":
-        return card.card_type == "Resource"
+        return _has_card_type(card, "Resource")
     if cls == "NotCardFilter":
         return not _filter_holds(typed.m_TargetFilter, card, scope)
     if cls == "IsType":
@@ -644,9 +648,10 @@ def _summon_tokens(root: MechanicsObject, clause: Any, effect_raw: dict[str, Any
         context.effect_template_override = previous_template
 
 
-def _heal_owners(root: MechanicsObject, index: int, scope: Scope) -> list[int]:
-    """The players a heal lands on: the controller ("You"), the one opponent, or the owners of the champion
-    targets. A player's id is the live resolver's owner id (the AI is 0)."""
+def _target_owners(root: MechanicsObject, index: int, scope: Scope) -> list[int]:
+    """The players a clause's target belongs to: the controller ("You"), the one opponent, or the owner of each card
+    target (a heal lands on the owner's champion; an invoke runs for each owner). A player's id is the live
+    resolver's owner id (the AI is 0)."""
     template = _load("AbilityTargetTemplate", _guid(root.m_AbilityTargetTemplateIds[index]))
     if _short(template.type_name) != "PlayerTargetTemplate":
         return [owner for owner in (_card_owner(scope, uid) for uid in _targets(root, index, scope)) if owner is not None]
@@ -664,13 +669,25 @@ def _heal_owners(root: MechanicsObject, index: int, scope: Scope) -> list[int]:
     raise NotImplementedError(f"player target {player}")
 
 
+def _is_sacrifice(clause: Any) -> bool:
+    """Whether a clause's effect is a sacrifice."""
+    effect_type, _raw = _stored("AbilityEffectTemplate", _guid(_field(clause, "m_EffectTemplateId")))
+    return _short(effect_type) == "SacrificeCardAbilityEffectTemplate"
+
+
 def _run_clause(root: MechanicsObject, clause: Any, scope: Scope) -> None:
     effect_guid = _guid(_field(clause, "m_EffectTemplateId"))
     effect_type, effect_raw = _stored("AbilityEffectTemplate", effect_guid)
     if _short(effect_type) == "SacrificeCardAbilityEffectTemplate":
         from rules_port.death_effects import kill_troop
-        for target in _targets(root, int(_field(clause, "m_TargetTemplateIndex") or 0), scope):
-            kill_troop(scope.context, target, cause="sacrifice")
+        index = int(_field(clause, "m_TargetTemplateIndex") or 0)
+        # A sacrifice of other cards never takes the source as its own payment (the native candidates leave it out);
+        # "sacrifice this" is the source itself.
+        this_card = _short(_load("AbilityTargetTemplate", _guid(root.m_AbilityTargetTemplateIds[index])).type_name) \
+            == "AbilitySourceCardTargetTemplate"
+        for target in _targets(root, index, scope):
+            if this_card or int(target) != int(scope.source_uid):
+                kill_troop(scope.context, target, cause="sacrifice")
         return
     if _short(effect_type) == "SummonTokenTroopAbilityEffectTemplate":
         _summon_tokens(root, clause, effect_raw, scope)
@@ -695,7 +712,7 @@ def _run_clause(root: MechanicsObject, clause: Any, scope: Scope) -> None:
         # A health gain for each player it lands on, through the live gain path (which refuses while
         # CantGainHealth applies).
         amount = _input_value(modifier, scope)
-        for owner in _heal_owners(root, index, scope):
+        for owner in _target_owners(root, index, scope):
             scope.context.gain_health(int(owner), amount)
         return
     # Damage is dealt to the cards in last-in-first-out order: the client pushes the matching cards on a stack and
@@ -936,7 +953,9 @@ def run_ability(guid: str, event_type: str, *, context: Any, source_uid: int,
         zone = str(event["from"]).lower()
     if event_type is not None and zones and zone not in zones:
         return False
-    if not _ability_condition_holds(root.m_AbilityCondition, scope):
+    # An activation's own threshold is checked when the player activates (C# CanActivateAbilityBase), not again when
+    # it resolves, so only a triggered ability re-checks it here.
+    if event_type is not None and not _ability_condition_holds(root.m_AbilityCondition, scope):
         return False
     if not _condition_holds(root.m_TriggerCondition, scope):
         return False
@@ -959,6 +978,8 @@ def _run_effects(guid: str, root: MechanicsObject, scope: Scope, start: int) -> 
             index = int(_field(clause, "m_TargetTemplateIndex") or 0)
             if index not in scope.chosen and _needs_choice(root, index):
                 candidates, optional = _choice_candidates(root, index, scope)
+                if _is_sacrifice(clause):
+                    candidates = [uid for uid in candidates if int(uid) != int(scope.source_uid)]
                 if len(candidates) == 1 and not optional:
                     # The live resolver does not prompt for a single forced candidate (its single_forced rule).
                     scope.chosen[index] = candidates[0]
@@ -982,7 +1003,7 @@ def _run_effects(guid: str, root: MechanicsObject, scope: Scope, start: int) -> 
                     _revealed_target_empty(root, int(_field(clause, "m_TargetTemplateIndex") or 0), scope):
                 break
             if _short(effect_type) == "ActivateAbilityEffectTemplate":
-                _invoke(guid, position, effect_raw, scope)
+                _invoke(guid, position, effect_raw, scope, _target_owners(root, index, scope))
                 continue
             if _short(effect_type) == "RandomizeVariableEffectTemplate":
                 _randomize_variable(effect_raw, scope)
@@ -1075,23 +1096,25 @@ def _revealed_target_empty(root: MechanicsObject, index: int, scope: Scope) -> b
         and not _revealed_candidates(template, index, scope)
 
 
-def _invoke(parent_guid: str, position: int, effect_raw: dict[str, Any], scope: Scope) -> None:
-    """C# ActivateAbilityEffectTemplate: run the invoked ability as a child of the same source, owner and event. Its
-    own trigger is not checked. A choice the child pauses for is kept with this invoke as the outer frame of its
-    continuation, so resuming the child then carries on from the invoking clause."""
+def _invoke(parent_guid: str, position: int, effect_raw: dict[str, Any], scope: Scope, owners: list[int]) -> None:
+    """C# ActivateAbilityEffectTemplate: run the invoked ability once for each owner the invoke's target names (the
+    controller of "You invoke", each opposing champion of "Each opposing champion invokes"), as a child of the same
+    source and event. Its own trigger is not checked. A choice the child pauses for is kept with this invoke as the
+    outer frame of its continuation, so resuming the child then carries on from the invoking clause."""
     child_guid = _guid(effect_raw.get("m_AbilityToInvoke"))
     child_root = _load("AbilityTemplate", child_guid)
-    child_scope = Scope(context=scope.context, source_uid=int(scope.source_uid), owner_uid=int(scope.owner_uid),
-                        table=child_root.version_table, event=dict(scope.event))
-    try:
-        _run_effects(child_guid, child_root, child_scope, start=0)
-    except NeedsChoice as pause:
-        frame = {"ability_guid": parent_guid, "event": dict(scope.event), "source_uid": int(scope.source_uid),
-                 "owner_uid": int(scope.owner_uid), "position": position,
-                 "chosen": {str(k): v for k, v in scope.chosen.items()},
-                 "variables": dict(scope.variables)}
-        _append_chain(pause.continuation, frame)
-        raise
+    for owner in owners:
+        child_scope = Scope(context=scope.context, source_uid=int(scope.source_uid), owner_uid=int(owner),
+                            table=child_root.version_table, event=dict(scope.event))
+        try:
+            _run_effects(child_guid, child_root, child_scope, start=0)
+        except NeedsChoice as pause:
+            frame = {"ability_guid": parent_guid, "event": dict(scope.event), "source_uid": int(scope.source_uid),
+                     "owner_uid": int(scope.owner_uid), "position": position,
+                     "chosen": {str(k): v for k, v in scope.chosen.items()},
+                     "variables": dict(scope.variables)}
+            _append_chain(pause.continuation, frame)
+            raise
 
 
 def _append_chain(continuation: dict[str, Any], outer: dict[str, Any] | None) -> None:
@@ -1270,6 +1293,11 @@ def coverage(guid: str) -> list[str]:
         # A ResourceId is a value (a counter's identity), not a construct.
         if name not in SUPPORTED_CONDITIONS and name not in SUPPORTED_FILTERS and name != "ResourceId":
             missing.append(f"condition {name}")
+    trigger_condition = _short((raw.get("m_TriggerCondition") or {}).get("_t"))
+    if not trigger and trigger_condition in SUPPORTED_FILTERS:
+        # A card filter standing as the whole condition of an ability with no trigger. The native activation does not
+        # test it (the ability runs on the native path), so the interpreter refuses it rather than gate differently.
+        missing.append(f"activation condition {trigger_condition}")
     for template_guid in (_guid(item) for item in raw.get("m_AbilityTargetTemplateIds") or []):
         template_type, template = _stored("AbilityTargetTemplate", template_guid)
         kind = _short(template_type)
@@ -1289,6 +1317,15 @@ def coverage(guid: str) -> list[str]:
         for name in _tagged_classes(template.get("m_CardFilter"), []):
             if name not in SUPPORTED_FILTERS:
                 missing.append(f"filter {name}")
+        # The interpreter picks one card for a target index. A target that takes several (or a count that varies)
+        # is refused, as the native resolver takes them all ("two target" and "up to two target" cards).
+        for bound in ("m_MinTargetCount", "m_MaxTargetCount"):
+            count = template.get(bound)
+            if isinstance(count, dict) and count.get("m_Value") is not None and int(count["m_Value"]) != 1 \
+                    and not (bound == "m_MinTargetCount" and int(count["m_Value"]) == 0):
+                missing.append(f"multi-card target ({bound} {count['m_Value']})")
+            elif isinstance(count, dict) and count.get("m_Value") is None:
+                missing.append(f"variable target count ({bound})")
     # A cost or an optional ability: the interpreter does not model paying, nor a player's choice to decline.
     for field_name in _COST_FIELDS:
         if raw.get(field_name) not in (None, 0, "", [], {}, "0"):
