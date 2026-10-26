@@ -1918,6 +1918,34 @@ class PendingChoicesMixin:
         if chosen_uid and int(chosen_uid) in candidates:
             g = self._fresh_game(session, pl_t, ai_t, bstate)
             native_continuation = pend.get("continuation")
+            if isinstance(native_continuation, dict) and isinstance(native_continuation.get("interpreter"), dict):
+                # The interpreter paused for this pick (rules_port/ir_exec.py). Put the presented cards back behind
+                # the deck projection, then resume the interpreter from the continuation with the chosen card.
+                from rules_port import ir_exec
+                from rules_port.context import EffectContext
+                from rules_port.resolution import prompt_interpreted_reveal
+                self._hide_candidates_to_deck(g, session, pl_t, ai_t, revealed)
+                bstate.pop("pending_deck_search", None)
+                bstate.pop("resolution_paused", None)
+                try:
+                    ir_exec.resume_ability(
+                        native_continuation["interpreter"], int(chosen_uid),
+                        context=EffectContext.from_rules_port(
+                            g, session, _hc._db, self, pl_t, ai_t, bstate, ""))
+                except ir_exec.NeedsChoice as pause:
+                    prompt_interpreted_reveal(self, g, session, _hc._db, pl_t, ai_t, bstate, pause)
+                    _be.save_state(session, bstate)
+                    self._send_battle_events(session, g, pl_t)
+                    self._push_transaction_ack(session)
+                    return True
+                _be.save_state(session, bstate)
+                self._send_battle_events(session, g, pl_t)
+                if self._resume_completed_rules_port_chain(session, bstate):
+                    if not self._advance_rules_port_to_priority(session, pl_t, ai_t, bstate):
+                        self._push_transaction_ack(session)
+                else:
+                    self._push_transaction_ack(session)
+                return True
             if native_continuation:
                 # The reveal itself only changed the client projection.  Put
                 # every presented card back behind the deck projection, then

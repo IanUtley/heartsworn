@@ -196,11 +196,13 @@ class NeedsChoice(Exception):
     """The ability reached a target the player chooses. Its continuation (JSON-serialisable) resumes it with
     ``resume_ability`` once the player answers; ``candidates`` are the cards the answer may name."""
 
-    def __init__(self, continuation: dict[str, Any], candidates: list[int], optional: bool):
+    def __init__(self, continuation: dict[str, Any], candidates: list[int], optional: bool, revealed: bool = False):
         super().__init__(f"choice of target {continuation['target_index']} for {continuation['ability_guid']}")
         self.continuation = continuation
         self.candidates = candidates
         self.optional = optional
+        # A choice among the cards a reveal showed (the client's revealed-card picker), not among the battle's cards.
+        self.revealed = revealed
 
 
 def _champion_owners(bstate: dict[str, Any]) -> dict[int, int]:
@@ -775,17 +777,27 @@ def engine_runs(guid: str, source_uid: Any, owner_uid: Any, answers: dict[int, A
     own = [index for index in range(len(root.m_AbilityTargetTemplateIds or [])) if _needs_choice(root, index)]
     if any(index not in (answers or {}) for index in own):
         return False
-    return not _invoked_choice(root, set())
+    return not _invoked_non_revealed_choice(root, set())
 
 
-def _invoked_choice(root: MechanicsObject, seen: set[str]) -> bool:
-    """Whether an ability invokes another that picks a card (its choice is not answered by the chain item)."""
+def _invoked_non_revealed_choice(root: MechanicsObject, seen: set[str]) -> bool:
+    """Whether an invoked ability (at any depth) picks a card other than from a reveal. A reveal's pick is shown
+    through the revealed-card picker, which the engine wires; any other pick is not."""
     for clause in root.m_AbilityEffectList:
         effect_type, effect_raw = _stored("AbilityEffectTemplate", _guid(_field(clause, "m_EffectTemplateId")))
-        if _short(effect_type) == "ActivateAbilityEffectTemplate":
-            child = _guid(effect_raw.get("m_AbilityToInvoke"))
-            if _pauses_for_choice(child, set()):
-                return True
+        if _short(effect_type) != "ActivateAbilityEffectTemplate":
+            continue
+        child = _guid(effect_raw.get("m_AbilityToInvoke"))
+        if child in seen:
+            continue
+        child_root = _load("AbilityTemplate", child)
+        for index in range(len(child_root.m_AbilityTargetTemplateIds or [])):
+            if _needs_choice(child_root, index):
+                template = _load("AbilityTargetTemplate", _guid(child_root.m_AbilityTargetTemplateIds[index]))
+                if _short(template.type_name) != "SourceRevealedTargetTemplate":
+                    return True
+        if _invoked_non_revealed_choice(child_root, seen | {child}):
+            return True
     return False
 
 
@@ -965,7 +977,9 @@ def _run_effects(guid: str, root: MechanicsObject, scope: Scope, start: int) -> 
                                     "position": position, "target_index": index,
                                     "candidates": candidates, "optional": optional,
                                     "chosen": {str(k): v for k, v in scope.chosen.items()}}
-                    raise NeedsChoice(continuation, candidates, optional)
+                    template = _load("AbilityTargetTemplate", _guid(root.m_AbilityTargetTemplateIds[index]))
+                    revealed = _short(template.type_name) == "SourceRevealedTargetTemplate"
+                    raise NeedsChoice(continuation, candidates, optional, revealed=revealed)
             effect_type, effect_raw = _stored("AbilityEffectTemplate", _guid(_field(clause, "m_EffectTemplateId")))
             # A chosen revealed target that finds no card ends the ability: the client disables that effect and
             # runs nothing after it (Oakhenge's remaining cards are not moved, and the random generator is not drawn).

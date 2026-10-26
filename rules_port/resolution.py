@@ -2042,6 +2042,29 @@ def _answers_from_target_map(target_map: dict[Any, Any]) -> dict[int, int | None
     return answers
 
 
+def prompt_interpreted_reveal(handler, game, session, db, player_uid, ai_uid, battle_state, pause):
+    """Show the player the cards an interpreted ability's reveal offers, through the client's revealed-card picker, and
+    keep the interpreter's continuation with the prompt. The answer resumes the interpreter (see
+    application/pending_choices.py _resolve_pending_revealed_choice). Returns "waiting"."""
+    prompt = getattr(handler, "_prompt_revealed_choice", None)
+    if not callable(prompt):
+        raise RuntimeError("the interpreter paused for a revealed choice, with no picker to show it")
+    continuation = pause.continuation
+    target_index = int(continuation["target_index"])
+    native_shape = {
+        "ability_guid": continuation["ability_guid"], "source_uid": continuation["source_uid"],
+        "owner_id": continuation["owner_uid"], "target_index": target_index, "target_map": {},
+        "variables": {}, "resume_effect_order": int(continuation["position"]), "ability_instance_id": 1,
+        "interpreter": continuation,
+    }
+    prompt(game, session, player_uid, ai_uid, battle_state, continuation["ability_guid"],
+           int(continuation["source_uid"]), int(continuation["owner_uid"]),
+           list(pause.candidates), [int(uid) for uid in (battle_state.get("revealed_cards") or [])],
+           optional=bool(pause.optional), continuation=native_shape)
+    battle_state["resolution_paused"] = True
+    return "waiting"
+
+
 def run_interpreted_trigger(handler, game, session, db, player_uid, ai_uid, battle_state, guid,
                             source_uid, owner_uid, event_name, trigger_source_uid, event_data, answers=None):
     """Resolve a trigger's ability with the interpreter (rules_port/ir_exec.py) on the live battle state.
@@ -2067,6 +2090,8 @@ def run_interpreted_trigger(handler, game, session, db, player_uid, ai_uid, batt
         if len(game.events) != started:
             raise
         return None
+    except ir_exec.NeedsChoice as pause:
+        return prompt_interpreted_reveal(handler, game, session, db, player_uid, ai_uid, battle_state, pause)
     return "interpreter"
 
 
