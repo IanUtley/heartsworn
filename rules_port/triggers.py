@@ -766,6 +766,7 @@ class NativeTriggerBackend:
                             "ability_guid": key[1],
                             "source_uid": source_uid,
                             "target_uid": target,
+                            "trigger_source_uid": event.source_card_id,
                             "trigger_target_uid": trigger_target_uid,
                             "trigger_event_type": event_name,
                             "trigger_event_data": dict(event.data or {}),
