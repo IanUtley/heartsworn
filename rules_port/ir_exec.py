@@ -641,6 +641,10 @@ def _player_passes(player_filter: str, owner: int, scope: Scope) -> bool:
         return owner != controller
     if player_filter == "MultiplePlayers":
         return True
+    # SinglePlayer is refused by coverage() except for a counter's chain cards (CastSpells), where the chosen card is the
+    # only candidate the filter has to admit.
+    if player_filter == "SinglePlayer":
+        return True
     raise NotImplementedError(f"target player filter {player_filter}")
 
 
@@ -1083,6 +1087,10 @@ def _run_effects(guid: str, root: MechanicsObject, scope: Scope, start: int) -> 
                 from rules_port.ir_exec_play import play_for_free
                 play_for_free(scope.context, _targets(root, index, scope), effect_raw)
                 continue
+            if _short(effect_type) == "CounterSpellAbilityEffectTemplate":
+                from rules_port.ir_exec_counter import counter_targets
+                counter_targets(scope.context, _targets(root, index, scope), effect_raw)
+                continue
             # The effect applies from here on: a later NotContingent condition reads it (C# applied_effects).
             scope.applied[position] = True
             if _short(effect_type) == "ActivateAbilityEffectTemplate":
@@ -1399,7 +1407,9 @@ def coverage(guid: str) -> list[str]:
             if player not in SUPPORTED_PLAYER_TARGETS:
                 missing.append(f"player target {player}")
             continue
-        if kind == "AbilityTargetTemplate" and str(template.get("m_PlayerFilter") or "") not in TARGET_PLAYER_FILTERS:
+        player_filter = str(template.get("m_PlayerFilter") or "")
+        chain_card = player_filter == "SinglePlayer" and str(template.get("m_CollectionFlags") or "") == "CastSpells"
+        if kind == "AbilityTargetTemplate" and player_filter not in TARGET_PLAYER_FILTERS and not chain_card:
             missing.append(f"target player filter {template.get('m_PlayerFilter')}")
         if template.get("m_IsRandomTarget"):
             missing.append("random target")
@@ -1490,6 +1500,10 @@ def coverage(guid: str) -> list[str]:
                 missing.append(f"move to {destination or 'no zone'}")
             if str(effect.get("m_AllCardsOfTargetInZone") or "None") not in ("None", ""):
                 missing.append("move of every card in a zone")
+            continue
+        if kind == "CounterSpellAbilityEffectTemplate":
+            # The counter is the live counter leaf's (it refuses a card no longer on the chain, or one that cannot be
+            # interrupted). The effect has no modifier of its own.
             continue
         if kind == "PlayCardAbilityEffectTemplate":
             # The free play is the live play leaf's; a play that is only an activation is not modelled.
