@@ -26,6 +26,10 @@ from gamedata.mechanics import CLASSES
 from gamedata.mechanics_fields import current_fields
 from gamedata.mechanics_objects import MechanicsObject, from_record
 from gamedata.records import RecordObject
+from rules_port.ir_event_effects import NATIVE_LEAF_EFFECTS, coverage_of as event_effect_coverage, run_native_leaf
+from rules_port.ir_exec_costs import unsupported_costs
+
+from . import ir_triggers
 
 # A CounterModifier's operation, as the live counter primitive names it.
 COUNTER_OPERATIONS = {"Add": "add", "Remove": "remove", "Set": "set"}
@@ -191,6 +195,7 @@ class Scope:
     table: list[dict[str, int]] | None = None
     event: dict[str, Any] = field(default_factory=dict)   # player, card, from, to
     chosen: dict[int, int | None] = field(default_factory=dict)   # target index -> the card the player chose
+    applied: dict[int, bool] = field(default_factory=dict)   # effect position -> whether it applied (C# applied_effects)
 
 
 class NeedsChoice(Exception):
@@ -382,6 +387,8 @@ def _condition_holds(condition: Any, scope: Scope) -> bool:
     if cls == "TriggerCardMatchesFilter":
         card = _card_by_uid(scope, scope.event.get("card"))
         return card is not None and _filter_holds(condition.m_CardFilter, card, scope)
+    if cls in ir_triggers.CONDITIONS:
+        return ir_triggers.condition_holds(cls, condition, scope, _condition_holds)
     if getattr(condition, "m_CardCollection", None) is not None:
         return _count_holds(condition, scope)
     raise NotImplementedError(f"trigger condition {cls}")
@@ -675,6 +682,25 @@ def _run_clause(root: MechanicsObject, clause: Any, scope: Scope) -> None:
     if _short(effect_type) == "SummonTokenTroopAbilityEffectTemplate":
         _summon_tokens(root, clause, effect_raw, scope)
         return
+    if _short(effect_type) in NATIVE_LEAF_EFFECTS:
+        # TAC and event-firing leaves run on the native path, once per target as the resolver runs them.
+        run_native_leaf(scope.context, _short(effect_type), effect_raw,
+                        _targets(root, int(_field(clause, "m_TargetTemplateIndex") or 0), scope))
+        return
+    if _short(effect_type) == "SetCardIntegerVariableEffectTemplate":
+        # The native leaf reads the ability's variables and writes its new value to the battle state, so the
+        # variables are published for it and the value it wrote is read back into the interpreter's scope.
+        name = str(effect_raw.get("m_VariableName") or "")
+        with _bridge_caster(scope.context.bstate, variables=scope.variables):
+            run_native_leaf(scope.context, _short(effect_type), effect_raw,
+                            _targets(root, int(_field(clause, "m_TargetTemplateIndex") or 0), scope))
+            written = scope.context.bstate.get("ability_variables", {})
+            if name in written:
+                scope.variables[name] = int(written[name])
+    from rules_port.ir_exec_combat import COMBAT_EFFECTS, run_clause as run_combat_clause
+    if _short(effect_type) in COMBAT_EFFECTS:
+        run_combat_clause(_short(effect_type), root, clause, effect_raw, scope)
+        return
     if _short(effect_type) != "CardModifierAbilityEffectTemplate":
         raise NotImplementedError(f"effect {_short(effect_type)}")
     modifier = _typed(effect_raw["m_Modifier"], "Modifier", effect_raw.get("_v"))
@@ -812,10 +838,12 @@ def _pauses_for_choice(guid: str, seen: set[str]) -> bool:
     return False
 
 
-def live_event(event_type: str, owner_uid: int, data: dict[str, Any], trigger_source_uid: Any) -> dict[str, Any]:
-    """The interpreter's event for a live trigger: its player, and for a zone move the card and zones
-    the live dispatch recorded (``event_source_collection`` and ``event_destination_collection``)."""
-    event: dict[str, Any] = {"player": owner_uid}
+def live_event(event_type: str, owner_uid: int, data: dict[str, Any], trigger_source_uid: Any,
+               target_player_uid: Any = None) -> dict[str, Any]:
+    """The interpreter's event for a live trigger: its player, its card and target player, and for a zone move the
+    card and zones the live dispatch recorded (``event_source_collection`` and ``event_destination_collection``)."""
+    event: dict[str, Any] = {"player": owner_uid, **ir_triggers.event_fields(event_type, trigger_source_uid,
+                                                                             target_player_uid)}
     if event_type == "CardEnteredZoneEvent":
         event["card"] = trigger_source_uid
         event["from"] = data.get("event_source_collection")
@@ -836,6 +864,11 @@ def _clause_condition_holds(clause: Any, scope: Scope) -> bool:
         return True
     _cls, raw = _stored("AbilityEffectConditionTemplate", guid)
     stored = raw.get("m_Condition") or {}
+    if _short(stored.get("_t")) == "NotContingentAbilityCondition":
+        # C# NotContingentAbilityCondition: holds when the earlier effect at m_EffectIndex did not apply.
+        if stored.get("m_EffectIndex") is None:
+            return True
+        return not scope.applied.get(int(stored["m_EffectIndex"]), False)
     if _short(stored.get("_t")) == "AbilityVariableCondition":
         # C# AbilityVariableCondition: the named variable compared with a constant.
         name = str(stored.get("m_Lhs") or "")
@@ -955,6 +988,7 @@ def _run_effects(guid: str, root: MechanicsObject, scope: Scope, start: int) -> 
             _bind_variables(root, scope)
             # An effect runs only when its own condition holds (its m_ConditionId, as C# checks it).
             if not _clause_condition_holds(clause, scope):
+                scope.applied[position] = False
                 continue
             index = int(_field(clause, "m_TargetTemplateIndex") or 0)
             if index not in scope.chosen and _needs_choice(root, index):
@@ -970,7 +1004,8 @@ def _run_effects(guid: str, root: MechanicsObject, scope: Scope, start: int) -> 
                                     "position": position, "target_index": index,
                                     "candidates": candidates, "optional": optional,
                                     "chosen": {str(k): v for k, v in scope.chosen.items()},
-                                    "variables": dict(scope.variables)}
+                                    "variables": dict(scope.variables),
+                                    "applied": {str(k): v for k, v in scope.applied.items()}}
                     template = _load("AbilityTargetTemplate", _guid(root.m_AbilityTargetTemplateIds[index]))
                     revealed = _short(template.type_name) == "SourceRevealedTargetTemplate"
                     raise NeedsChoice(continuation, candidates, optional, revealed=revealed)
@@ -986,6 +1021,8 @@ def _run_effects(guid: str, root: MechanicsObject, scope: Scope, start: int) -> 
                 from rules_port.ir_exec_play import play_for_free
                 play_for_free(scope.context, _targets(root, index, scope), effect_raw)
                 continue
+            # The effect applies from here on: a later NotContingent condition reads it (C# applied_effects).
+            scope.applied[position] = True
             if _short(effect_type) == "ActivateAbilityEffectTemplate":
                 _invoke(guid, position, effect_raw, scope)
                 continue
@@ -1094,7 +1131,8 @@ def _invoke(parent_guid: str, position: int, effect_raw: dict[str, Any], scope: 
         frame = {"ability_guid": parent_guid, "event": dict(scope.event), "source_uid": int(scope.source_uid),
                  "owner_uid": int(scope.owner_uid), "position": position,
                  "chosen": {str(k): v for k, v in scope.chosen.items()},
-                 "variables": dict(scope.variables)}
+                 "variables": dict(scope.variables),
+                 "applied": {str(k): v for k, v in scope.applied.items()}}
         _append_chain(pause.continuation, frame)
         raise
 
@@ -1116,6 +1154,7 @@ def _frame_scope(frame: dict[str, Any], context: Any) -> tuple[MechanicsObject, 
     # The variables the frame had bound (a random branch's number, say) are part of its state, so the resumed effects
     # see the same values the paused run did.
     scope.variables = dict(frame.get("variables") or {})
+    scope.applied = {int(k): bool(v) for k, v in (frame.get("applied") or {}).items()}
     return root, scope
 
 
@@ -1153,12 +1192,12 @@ def resume_ability(continuation: dict[str, Any], answer: int | None, *, context:
 
 # What the interpreter runs. A construct outside these sets is uncovered: its ability raises
 # NotImplementedError when run, and the coverage report lists it.
-SUPPORTED_TRIGGERS = {"TurnEndedEvent", "TurnStartedEvent", "CardEnteredZoneEvent"}
+SUPPORTED_TRIGGERS = {"TurnEndedEvent", "TurnStartedEvent", "CardEnteredZoneEvent"} | ir_triggers.TRIGGER_EVENTS
 SUPPORTED_CONDITIONS = {
     "AndTriggerCondition", "TriggerCondition", "TriggerSource", "TriggerPlayerControlsAbilitySource",
     "TriggerCardEnteredZone", "TriggerCardMatchesFilter", "RequiresCardsControlled",
     "TriggerCardIsAbilitySource",
-}
+} | ir_triggers.CONDITIONS
 SUPPORTED_FILTERS = {
     "AndCardFilter", "OrCardFilter", "NotCardFilter", "IsControlledBy", "IsNotControlledBy",
     "HasCountersValue", "IsTroop", "IsHero", "IsResource", "IsType", "IntAttrFilter", "InZone",
@@ -1192,10 +1231,6 @@ def _tagged_classes(value: Any, out: list[str]) -> list[str]:
 
 # The destinations the live move leaf moves a card to (its deck reinsertion is not ported).
 MOVE_DESTINATIONS = {"hand", "discard", "void", "warzone", "underground", "deck"}
-
-# The ability fields that name a cost, or make the ability optional.
-_COST_FIELDS = ("m_Optional", "m_ActivationCost", "m_ChargePointCost", "m_VariableActivationCost", "m_LifeCost",
-                "m_SpellPointCost", "m_CounterCosts")
 
 # A RequiresCardsControlled flag the interpreter evaluates only at its default. Any other value is refused:
 # the count would otherwise ignore it silently.
@@ -1294,10 +1329,8 @@ def coverage(guid: str) -> list[str]:
         for name in _tagged_classes(template.get("m_CardFilter"), []):
             if name not in SUPPORTED_FILTERS:
                 missing.append(f"filter {name}")
-    # A cost or an optional ability: the interpreter does not model paying, nor a player's choice to decline.
-    for field_name in _COST_FIELDS:
-        if raw.get(field_name) not in (None, 0, "", [], {}, "0"):
-            missing.append(f"cost or optional ({field_name})")
+    # Paid costs and optional abilities are settled before the ability reaches the interpreter (ir_exec_costs).
+    missing.extend(unsupported_costs(raw))
     for operator in _comparison_ops(raw, []):
         if operator not in _COMPARISONS:
             missing.append(f"comparison {operator}")
@@ -1316,7 +1349,7 @@ def coverage(guid: str) -> list[str]:
                     missing.append(f"variable condition on {stored.get('m_Lhs')}")
                 elif not rhs.lstrip("-").isdigit() and rhs not in declared:
                     missing.append(f"variable condition against {rhs}")
-            elif kind != "RequiresCardsControlled":
+            elif kind not in ("RequiresCardsControlled", "NotContingentAbilityCondition"):
                 missing.append(f"effect condition {kind}")
     for variable in raw.get("m_Variables") or []:
         kind = _short((variable or {}).get("_t")) if isinstance(variable, dict) else ""
@@ -1344,6 +1377,14 @@ def coverage(guid: str) -> list[str]:
             # token's entry triggers are queued on the battle stack, as on the live path, for the chain to resolve.
             continue
         if kind == "SacrificeCardAbilityEffectTemplate":
+            continue
+        if kind in NATIVE_LEAF_EFFECTS:
+            missing.extend(event_effect_coverage(kind, effect))
+            continue
+        if kind == "SetCardIntegerVariableEffectTemplate":
+            operation = str(effect.get("m_Operation") or "Set").rsplit(".", 1)[-1]
+            if operation not in ("Add", "Remove", "Set"):
+                missing.append(f"card integer operation {operation}")
             continue
         if kind == "MoveCardToZoneEffectTemplate":
             destination = _short(effect.get("m_DestinationCollection")).lower()
@@ -1377,6 +1418,10 @@ def coverage(guid: str) -> list[str]:
                     missing.extend(f"invoked: {item}" for item in coverage(child))
                 finally:
                     _COVERAGE_STACK.discard(child)
+            continue
+        from rules_port.ir_exec_combat import COMBAT_EFFECTS, coverage_missing as combat_missing
+        if kind in COMBAT_EFFECTS:
+            missing.extend(combat_missing(kind, clause, raw.get("m_AbilityEffectList") or []))
             continue
         if kind != "CardModifierAbilityEffectTemplate":
             missing.append(f"effect {kind}")
