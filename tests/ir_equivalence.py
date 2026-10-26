@@ -396,7 +396,7 @@ CHAMPION_CASES = [
 
 TURN_EVENTS = {"TurnStartedEvent", "TurnEndedEvent", "CardEnteredZoneEvent"}
 # The live events the interpreter runs beyond the turn and zone events (rules_port/ir_triggers.py).
-TRIGGER_EVENTS = {"CardDealtDamageEvent", "CardAttackedEvent", "CardCastEvent"}
+from rules_port.ir_triggers import TRIGGER_EVENTS  # noqa: E402
 # Turn-event abilities with a card template that the interpreter refuses (name, missing constructs).
 SKIPPED_BY_COVERAGE = []
 

@@ -10,10 +10,14 @@ from __future__ import annotations
 from typing import Any, Callable
 
 # Trigger types the interpreter runs. CardEnteredZoneEvent, TurnStartedEvent and TurnEndedEvent are in ir_exec.
-TRIGGER_EVENTS = {"CardDealtDamageEvent", "CardAttackedEvent", "CardCastEvent"}
+TRIGGER_EVENTS = {
+    "CardDealtDamageEvent", "CardAttackedEvent", "CardCastEvent", "CardDrawnEvent",
+    "CardDiscardedEvent", "CardCreatedEvent", "AsEntersPlayEvent",
+}
 
 # Trigger condition classes this module evaluates.
-CONDITIONS = {"NotTriggerCondition", "TriggerPlayerControlsTarget", "TriggerEventIsCombatDamage"}
+CONDITIONS = {"NotTriggerCondition", "TriggerPlayerControlsTarget", "TriggerEventIsCombatDamage",
+              "OrTriggerCondition"}
 
 
 def event_fields(event_type: str, trigger_source_uid: Any, target_player_uid: Any) -> dict[str, Any]:
@@ -32,6 +36,11 @@ def condition_holds(cls: str, condition: Any, scope: Any, holds: Callable[[Any, 
         if child is None:
             raise NotImplementedError("NotTriggerCondition without a condition")
         return not holds(child, scope)
+    if cls == "OrTriggerCondition":
+        children = list(getattr(condition, "m_Conditions", None) or [])
+        if not children:
+            raise NotImplementedError("OrTriggerCondition without a condition")
+        return any(holds(child, scope) for child in children)
     if cls == "TriggerPlayerControlsTarget":
         # The ability's source controller is the event's TargetPlayerId (C# TriggerPlayerControlsTarget.IsValid).
         target = scope.event.get("target_player")
