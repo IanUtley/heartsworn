@@ -18,12 +18,19 @@ PROTECTION_MODIFIERS = {
     "BlockImmunityExceptionModifier", "BlockRestrictionModifier", "TargetingImmunityModifier",
     "AttackImmunityModifier",
 }
-GROUP_G_MODIFIERS = KEYWORD_MODIFIERS | PROTECTION_MODIFIERS
+SHIELD_AND_SUBTYPE_MODIFIERS = {"DamageShieldModifier", "SubTypeModifier"}
+GROUP_G_MODIFIERS = KEYWORD_MODIFIERS | PROTECTION_MODIFIERS | SHIELD_AND_SUBTYPE_MODIFIERS
 # The clause durations this module runs. Others are refused by coverage().
 DURATIONS = {"Permanent", "EndOfTurn"}
 # A keyword is granted with Add; Remove is not ported yet. An int attribute is set or added.
 ATTRIBUTE_OPERATIONS = {"Add"}
 INT_ATTR_OPERATIONS = {"Set", "Add"}
+# A subtype is set, added or removed by the native subtype leaf. A damage shield's lifetime is its own flags
+# (one shot, or lasts indefinitely), so its clause is Instant; a subtype persists on the card, so Instant or Permanent.
+SUBTYPE_OPERATIONS = {"Set", "Add", "Remove"}
+SHIELD_DURATIONS = {"Instant"}
+SUBTYPE_DURATIONS = {"Instant", "Permanent"}
+INPUT_KINDS = {"EffectConstant", "EffectInputVariable"}
 
 
 def _short(type_name: Any) -> str:
@@ -50,6 +57,10 @@ def modifier_gaps(modifier: Any, duration: str) -> list[str]:
     the same field reads, so coverage and the runner agree on what runs.
     """
     kind = _kind(modifier)
+    if kind == "DamageShieldModifier":
+        return _damage_shield_gaps(modifier, duration)
+    if kind == "SubTypeModifier":
+        return _subtype_gaps(modifier, duration)
     if duration not in DURATIONS:
         return [f"{kind} duration {duration}"]
     operation = _short(_get(modifier, "m_Operation"))
@@ -73,6 +84,28 @@ def modifier_gaps(modifier: Any, duration: str) -> list[str]:
             gaps.append("int attribute without a name")
         return gaps
     return []
+
+
+def _damage_shield_gaps(modifier: Any, duration: str) -> list[str]:
+    gaps = []
+    if duration not in SHIELD_DURATIONS:
+        gaps.append(f"DamageShieldModifier duration {duration}")
+    if not (_get(modifier, "m_OneShot") or _get(modifier, "m_LastsIndefinitely")):
+        gaps.append("damage shield without a lifetime")
+    if _kind(_get(modifier, "m_InputValue")) not in INPUT_KINDS:
+        gaps.append("damage shield amount")
+    return gaps
+
+
+def _subtype_gaps(modifier: Any, duration: str) -> list[str]:
+    gaps = []
+    if duration not in SUBTYPE_DURATIONS:
+        gaps.append(f"SubTypeModifier duration {duration}")
+    if _short(_get(modifier, "m_Operation")) not in SUBTYPE_OPERATIONS:
+        gaps.append(f"subtype operation {_short(_get(modifier, 'm_Operation'))}")
+    if not _get(modifier, "m_Subtype"):
+        gaps.append("subtype without a name")
+    return gaps
 
 
 def _flag_bits(flags: Any) -> int:
@@ -112,6 +145,23 @@ def run_modifier(modifier: MechanicsObject, effect_guid: str, duration: str,
             _int_attribute(context, int(target), {
                 "attribute": modifier.m_Attribute, "operation": modifier.m_Operation,
                 "amount": amount, "duration": duration})
+        return
+    if kind == "DamageShieldModifier":
+        # The native shield leaf reads the shield's own flags; the amount is its input (a constant at most).
+        from rules_port.ir_exec import _input_value
+        params = {"oneshot": bool(modifier.m_OneShot), "lastsindefinitely": bool(modifier.m_LastsIndefinitely),
+                  "onlycombatdamage": bool(modifier.m_OnlyCombatDamage),
+                  "onlypreventfromdamagedealer": bool(modifier.m_OnlyPreventFromDamageDealer),
+                  "damagedealeradditionaltarget": int(modifier.m_DamageDealerAdditionalTarget or 0)}
+        amount = _input_value(modifier, scope)
+        for target in targets:
+            context.damage_shield(int(target), amount, params)
+        return
+    if kind == "SubTypeModifier":
+        # The native subtype leaf sets, adds or removes the subtype the card carries.
+        metadata = {"subtype": modifier.m_Subtype, "operation": modifier.m_Operation}
+        for target in targets:
+            context.subtype_modifier(int(target), metadata)
         return
     # Protection modifiers persist as typed rules on the card, through the leaf the native path uses.
     from rules_port.metadata import modifier_metadata
