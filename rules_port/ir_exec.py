@@ -38,7 +38,7 @@ from rules_port.ir_event_effects import NATIVE_LEAF_EFFECTS, coverage_of as even
 from rules_port.ir_exec_costs import unsupported_costs
 
 from . import ir_triggers
-from rules_port import granted_abilities
+from rules_port import continuous_statics, granted_abilities
 
 # A CounterModifier's operation, as the live counter primitive names it.
 COUNTER_OPERATIONS = {"Add": "add", "Remove": "remove", "Set": "set"}
@@ -777,6 +777,9 @@ def _run_clause(root: MechanicsObject, clause: Any, scope: Scope) -> None:
         return
     if _short(effect_type) != "CardModifierAbilityEffectTemplate":
         raise NotImplementedError(f"effect {_short(effect_type)}")
+    if continuous_statics.is_static_owned(str(_field(clause, "m_EffectDuration") or "")):
+        # The native static path projects this clause from its source while it is in play, so it is not applied here.
+        return
     modifier = _typed(effect_raw["m_Modifier"], "Modifier", effect_raw.get("_v"))
     if not isinstance(modifier, MechanicsObject):
         raise NotImplementedError(f"effect {effect_guid} has an untyped modifier")
@@ -1638,7 +1641,7 @@ def coverage(guid: str) -> list[str]:
         if modifier in ("AttackModifier", "DefenseModifier"):
             stat = effect.get("m_Modifier") or {}
             clause_duration = str(clause.get("m_EffectDuration") or "")
-            if clause_duration not in STAT_DURATIONS:
+            if clause_duration not in STAT_DURATIONS and not continuous_statics.covered_as_static(clause_duration, trigger):
                 missing.append(f"stat duration {clause_duration}")
             if stat.get("m_ReplaceExistingValue"):
                 missing.append("stat replaces the existing value")
