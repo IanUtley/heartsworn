@@ -8,7 +8,8 @@ controller, so no effect logic is forked here.
 
 from __future__ import annotations
 
-from typing import Any
+from contextlib import contextmanager
+from typing import Any, Iterator
 
 from rules_port import ir_exec
 
@@ -16,7 +17,8 @@ from rules_port import ir_exec
 # ir_exec._run_clause hands them to run_clause().
 COMBAT_EFFECTS = {
     "TapCardAbilityEffectTemplate", "UntapCardAbilityEffectTemplate", "RemoveCardFromCombatAbilityEffectTemplate",
-    "GiveBonusTurnAbilityEffectTemplate", "Battle2CardsAbilityEffectTemplate",
+    "GiveBonusTurnAbilityEffectTemplate", "Battle2CardsAbilityEffectTemplate", "BlockEffectTemplate",
+    "SwapHealthAbilityEffectTemplate", "VerdictAbilityEffectTemplate",
 }
 
 
@@ -34,8 +36,9 @@ def _second_clause(clauses: Any, clause: Any) -> Any:
 
 def coverage_missing(effect_type: str, clause: Any, clauses: Any) -> list[str]:
     """The reasons this combat effect clause cannot be run (empty when it can)."""
-    if effect_type == "Battle2CardsAbilityEffectTemplate" and _second_clause(clauses, clause) is None:
-        return ["fight without a second card"]
+    if effect_type in ("Battle2CardsAbilityEffectTemplate", "BlockEffectTemplate") \
+            and _second_clause(clauses, clause) is None:
+        return ["fight or block without a second card"]
     return []
 
 
@@ -61,6 +64,17 @@ def run_clause(effect_type: str, root: Any, clause: Any, effect_raw: dict[str, A
                 context.queue_bonus_turn()
             elif effect_type == "Battle2CardsAbilityEffectTemplate":
                 _fight(root, clause, scope, targets)
+            elif effect_type == "BlockEffectTemplate":
+                _block(root, clause, scope, targets)
+            elif effect_type == "SwapHealthAbilityEffectTemplate":
+                # The native leaf swaps the controller's health with the champion it is targeting, if any.
+                with _target_set(context.bstate, resolving_target_uid=targets[0] if targets else None):
+                    context.swap_health()
+            elif effect_type == "VerdictAbilityEffectTemplate":
+                # The live verdict leaf resolves once for each card it is given, as the native path does.
+                for target in targets:
+                    with _target_set(context.bstate, resolving_target_uid=int(target)):
+                        context.verdict()
             else:
                 raise NotImplementedError(f"effect {effect_type}")
     finally:
@@ -82,3 +96,40 @@ def _fight(root: Any, clause: Any, scope: ir_exec.Scope, defenders: list[int]) -
     if len(attackers) != 1 or len(defenders) != 1:
         raise NotImplementedError("fight with more than one card on a side")
     fight_cards(scope.context, int(attackers[0]), int(defenders[0]))
+
+
+def _block(root: Any, clause: Any, scope: ir_exec.Scope, attackers: list[int]) -> None:
+    """The clause's target is the attacking troop, and the referenced effect's target is the blocker, as the native
+    resolver reads them (combat_effects.block)."""
+    second = _second_clause(root.m_AbilityEffectList, clause)
+    if second is None:
+        raise NotImplementedError("block without a second card")
+    blockers = ir_exec._targets(root, int(ir_exec._field(second, "m_TargetTemplateIndex") or 0), scope)
+    if not attackers or not blockers:
+        return
+    if len(attackers) != 1 or len(blockers) != 1:
+        raise NotImplementedError("block with more than one card on a side")
+    from rules_port.combat_effects import block
+    with _target_set(scope.context.bstate, player_spell_target=int(attackers[0]),
+                     resolving_target_uid=int(attackers[0]), resolving_secondary_target_uid=int(blockers[0])):
+        block(scope.context)
+
+
+@contextmanager
+def _target_set(bstate: dict[str, Any], **keys: Any) -> Iterator[None]:
+    """Set the target keys the live leaves read, for one call, and restore them after. A key set to None is left
+    unset, so the leaf falls back as it does on the live path."""
+    saved = {key: bstate.get(key) for key in keys}
+    try:
+        for key, value in keys.items():
+            if value is not None:
+                bstate[key] = value
+            else:
+                bstate.pop(key, None)
+        yield
+    finally:
+        for key, value in saved.items():
+            if value is None:
+                bstate.pop(key, None)
+            else:
+                bstate[key] = value
