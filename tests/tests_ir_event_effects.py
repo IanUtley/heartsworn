@@ -37,3 +37,10 @@ def test_every_listed_tac_operation_is_decoded_by_name():
 def test_fire_event_is_a_native_leaf_with_no_missing_construct():
     assert "FireEventEffectTemplate" in NATIVE_LEAF_EFFECTS
     assert coverage_of("FireEventEffectTemplate", {}) == []
+
+
+def test_bookkeeping_effects_are_native_leaves():
+    for kind in ("StoreNameAbilityEffectTemplate", "RememberKeywordPowersEffectTemplate",
+                 "RegisterTriggerAbilityEffectTemplate", "ActivateTriggeredAbilityEffectTemplate"):
+        assert kind in NATIVE_LEAF_EFFECTS
+        assert coverage_of(kind, {}) == []
