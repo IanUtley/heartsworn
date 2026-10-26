@@ -460,6 +460,39 @@ def test_a_random_variable_picks_the_branch_its_condition_tests(db):
         ir_registry.clear()
 
 
+DARKSPIRE_DEATHCRY = "9853659b-89f4-1e16-f940-67bdb37f5729"   # rolls a random branch; the second searches the deck
+DARKSPIRE_PRIESTESS = "14909185-1070-48df-9508-61d5a9650bd2"
+DARKSPIRE_TYRANT = "16d3de85-92b8-4b5d-a2d9-b043793740fe"
+
+
+def test_a_random_branch_searches_the_deck_for_a_named_card_and_moves_the_choice(db):
+    """A random branch that invokes a deck search pauses for the card to take. Only cards whose name matches
+    are offered, and the chosen card moves to hand through the live move leaf."""
+    import json
+    from rules_port import ir_exec
+    from rules_port.context import EffectContext
+
+    pl_t, ai_t, game, handler, bstate, _player_champ, _ai_champ = _setup(db)
+    bstate["_rules_rng"] = _FixedRng(1)              # the roll is 1 + 1 = 2: the search branch
+    add_card(db, 900, 5, TPL_GLADIATOR, loc="warzone")
+    add_card(db, 700, 5, DARKSPIRE_PRIESTESS, loc="deck")
+    add_card(db, 701, 5, DARKSPIRE_TYRANT, loc="deck")
+    add_card(db, 702, 5, TPL_GLADIATOR, loc="deck")
+    db.commit()
+    context = EffectContext.from_rules_port(game, SessionStub(), db, handler, pl_t, ai_t, bstate, "")
+    try:
+        ir_exec.run_ability(DARKSPIRE_DEATHCRY, "CardEnteredZoneEvent", context=context, source_uid=900,
+                            owner_uid=5, event={"player": 5, "card": 900, "from": "warzone", "to": "discard"})
+        raise AssertionError("the search did not pause for its card")
+    except ir_exec.NeedsChoice as pause:
+        candidates = sorted(pause.candidates)
+        continuation = json.loads(json.dumps(pause.continuation))
+    assert candidates == [700, 701], candidates
+    ir_exec.resume_ability(continuation, 701, context=context)
+    locations = dict(db.execute("SELECT card_uid, location FROM game_cards WHERE card_uid IN (700, 701, 702)").fetchall())
+    assert locations == {700: "deck", 701: "hand", 702: "deck"}, locations
+
+
 if __name__ == "__main__":
     import db as dbmod
     for run in (test_burning_ability_runs_from_its_ir, test_dazed_and_vulnerable_removals_match_the_live_engine,
@@ -474,7 +507,8 @@ if __name__ == "__main__":
                 test_a_fixed_token_summon_creates_the_token_for_the_controller,
                 test_a_chosen_target_pauses_and_resumes_from_its_continuation,
                 test_an_invoked_choice_pauses_and_resumes_the_invoking_ability,
-                test_a_random_variable_picks_the_branch_its_condition_tests):
+                test_a_random_variable_picks_the_branch_its_condition_tests,
+                test_a_random_branch_searches_the_deck_for_a_named_card_and_moves_the_choice):
         dbmod._db = make_db()
         run(dbmod._db)
     print("ok")

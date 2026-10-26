@@ -172,6 +172,8 @@ class Card:
     counters: dict[str, int]
     # The card's current subtype line ("Human Cleric"); None when it is not known.
     subtype: str | None = None
+    # The card's template name; None for a synthetic champion, whose name the battle does not carry.
+    name: str | None = None
 
 
 @dataclass
@@ -216,10 +218,11 @@ def _battle_cards(scope: Scope) -> list[Card]:
                           counters={k: int(v) for k, v in (counters.get(str(uid)) or {}).items()},
                           subtype=_champion_subtype(context, owner)))
     rows = context.db.execute(
-        "SELECT card_uid, user_id, location, is_champion, card_type, permanent_buffs, template_guid "
+        "SELECT card_uid, user_id, location, is_champion, card_type, permanent_buffs, template_guid, "
+        "(SELECT name FROM card_templates WHERE guid = game_cards.template_guid) "
         "FROM game_cards WHERE session_id=?", (context.session.session_id,)).fetchall()
     from pvp_db import db_template_subtype
-    for card_uid, user_id, location, is_champion, card_type, buffs_json, template in rows:
+    for card_uid, user_id, location, is_champion, card_type, buffs_json, template, template_name in rows:
         buffs = json.loads(buffs_json or "{}")
         names = buffs.get("counter_guids") or {}
         values = buffs.get("counters") or {}
@@ -232,7 +235,7 @@ def _battle_cards(scope: Scope) -> list[Card]:
                           card_type=str(card_type or ""),
                           counters={str(names[name]).lower(): int(count)
                                     for name, count in values.items() if name in names},
-                          subtype=str(subtype or "")))
+                          subtype=str(subtype or ""), name=str(template_name or "")))
     return cards
 
 
@@ -250,6 +253,18 @@ def _champion_subtype(context: Any, owner: int) -> str | None:
         return None
     from rules_port.targeting import _champion_subtype as template_subtype
     return template_subtype(str(guid).lower())
+
+
+def _name_contains(filter_: MechanicsObject, card: Card) -> bool:
+    """C# NameContainsFilter.IsMatch: the template name matches the pattern, ignoring case (an empty pattern
+    matches every card). The keyword and subtype inclusions are refused by coverage."""
+    import re
+    pattern = str(filter_.m_ContainsString or "")
+    if not pattern:
+        return True
+    if card.name is None:
+        raise NotImplementedError("the name of a champion")
+    return re.search(pattern, card.name, re.IGNORECASE) is not None
 
 
 def _is_subtype(wanted: str, card: Card) -> bool:
@@ -310,6 +325,8 @@ def _filter_holds(card_filter: Any, card: Card, scope: Scope) -> bool:
     if cls == "InZone":
         zones = {part.strip().lower() for part in typed.m_Collection.split("|")}
         return card.zone in zones
+    if cls == "NameContainsFilter":
+        return _name_contains(typed, card)
     if cls == "IsAbilitySource":
         return card.uid == scope.source_uid
     if cls == "IsSubType":
@@ -881,6 +898,9 @@ def _run_effects(guid: str, root: MechanicsObject, scope: Scope, start: int) -> 
             if _short(effect_type) == "RandomizeVariableEffectTemplate":
                 _randomize_variable(effect_raw, scope)
                 continue
+            if _short(effect_type) == "MoveCardToZoneEffectTemplate":
+                _move_cards(root, clause, effect_raw, scope)
+                continue
             _run_clause(root, clause, scope)
     finally:
         if previous is None:
@@ -888,6 +908,30 @@ def _run_effects(guid: str, root: MechanicsObject, scope: Scope, start: int) -> 
         else:
             bstate["resolving_source_uid"] = previous
     return True
+
+
+def _move_cards(root: MechanicsObject, clause: Any, effect_raw: dict[str, Any], scope: Scope) -> None:
+    """C# MoveCardToZoneEffectTemplate: each target moves to the authored zone, through the live move leaf
+    (rules_port.context move_card_to_zone), with the owner and target the leaf reads set for this effect."""
+    context = scope.context
+    bstate = context.bstate
+    targets = _targets(root, int(_field(clause, "m_TargetTemplateIndex") or 0), scope)
+    saved = {key: bstate.get(key) for key in ("resolving_owner_id", "resolving_target_uid", "_rules_port_native_effect")}
+    previous_template = context.effect_template_override
+    context.effect_template_override = effect_raw
+    bstate["resolving_owner_id"] = int(scope.owner_uid)
+    bstate["_rules_port_native_effect"] = True
+    try:
+        for target in targets:
+            bstate["resolving_target_uid"] = int(target)
+            context.move_card_to_zone()
+    finally:
+        context.effect_template_override = previous_template
+        for key, value in saved.items():
+            if value is None:
+                bstate.pop(key, None)
+            else:
+                bstate[key] = value
 
 
 def _randomize_variable(effect_raw: dict[str, Any], scope: Scope) -> None:
@@ -980,7 +1024,7 @@ SUPPORTED_CONDITIONS = {
 SUPPORTED_FILTERS = {
     "AndCardFilter", "OrCardFilter", "NotCardFilter", "IsControlledBy", "IsNotControlledBy",
     "HasCountersValue", "IsTroop", "IsHero", "IsResource", "IsType", "IntAttrFilter", "InZone",
-    "IsAbilitySource", "IsSubType",
+    "IsAbilitySource", "IsSubType", "NameContainsFilter",
 }
 SUPPORTED_MODIFIERS = {"DamageModifier", "CounterModifier", "HealHeroModifier", "AttackModifier", "DefenseModifier"}
 # The clause durations a stat modifier runs with: Permanent (the card's permanent buffs) and EndOfTurn (its
@@ -1006,6 +1050,9 @@ def _tagged_classes(value: Any, out: list[str]) -> list[str]:
             _tagged_classes(item, out)
     return out
 
+
+# The destinations the live move leaf moves a card to (its deck reinsertion is not ported).
+MOVE_DESTINATIONS = {"hand", "discard", "void", "warzone", "underground"}
 
 # The ability fields that name a cost, or make the ability optional.
 _COST_FIELDS = ("m_Optional", "m_ActivationCost", "m_ChargePointCost", "m_VariableActivationCost", "m_LifeCost",
@@ -1033,6 +1080,26 @@ def _unsupported_count_flags(value: Any, out: list[str]) -> list[str]:
     elif isinstance(value, list):
         for item in value:
             _unsupported_count_flags(item, out)
+    return out
+
+
+_REGEX_CHARACTERS = set("\\.[](){}*+?|^$")
+
+
+def _unsupported_name_filters(value: Any, out: list[str]) -> list[str]:
+    """Every NameContainsFilter the interpreter cannot evaluate as C# does: its keyword or subtype inclusion, or a
+    pattern that uses regular-expression syntax (only plain text is compared)."""
+    if isinstance(value, dict):
+        if _short(value.get("_t")) == "NameContainsFilter":
+            if value.get("m_IncludeKeywords") or value.get("m_IncludeSubType"):
+                out.append("name filter with keywords or subtype")
+            if set(str(value.get("m_ContainsString") or "")) & _REGEX_CHARACTERS:
+                out.append("name filter with a regular expression")
+        for item in value.values():
+            _unsupported_name_filters(item, out)
+    elif isinstance(value, list):
+        for item in value:
+            _unsupported_name_filters(item, out)
     return out
 
 
@@ -1096,6 +1163,7 @@ def coverage(guid: str) -> list[str]:
         if operator not in _COMPARISONS:
             missing.append(f"comparison {operator}")
     missing.extend(_unsupported_count_flags(raw, []))
+    missing.extend(_unsupported_name_filters(raw, []))
     for clause in raw.get("m_AbilityEffectList") or []:
         condition_guid = _guid(clause.get("m_ConditionId"))
         if condition_guid and condition_guid != "00000000-0000-0000-0000-000000000000":
@@ -1137,6 +1205,13 @@ def coverage(guid: str) -> list[str]:
             # token's entry triggers are queued on the battle stack, as on the live path, for the chain to resolve.
             continue
         if kind == "SacrificeCardAbilityEffectTemplate":
+            continue
+        if kind == "MoveCardToZoneEffectTemplate":
+            destination = _short(effect.get("m_DestinationCollection")).lower()
+            if destination not in MOVE_DESTINATIONS:
+                missing.append(f"move to {destination or 'no zone'}")
+            if str(effect.get("m_AllCardsOfTargetInZone") or "None") not in ("None", ""):
+                missing.append("move of every card in a zone")
             continue
         if kind == "RandomizeVariableEffectTemplate":
             if effect.get("m_SecondValue") or effect.get("m_MaxValueField"):

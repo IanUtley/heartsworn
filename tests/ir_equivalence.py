@@ -66,6 +66,15 @@ MOVED_UID = 503
 SOURCE_UID = 900
 
 
+def _test_champion_guid():
+    """A champion template with a subtype line, for the battle's champions."""
+    from gamedata import DEFAULT_RECORD_STORE as STORE
+    for record in sorted(STORE.load("ChampionTemplate"), key=lambda r: r.guid.lower()):
+        if str(record.to_dict(include_metadata=True).get("m_SubType") or ""):
+            return record.guid.lower()
+    return None
+
+
 class _SeededRng:
     """The battle's session RNG (``next(bound)``), seeded per ability so both sides draw the same numbers."""
 
@@ -85,6 +94,10 @@ def _scenario(ability_guid, opposing_troops, moved=None, extra=(), champion=Fals
     db = dbmod._db
     pl_t, ai_t, game, handler, bstate, player_champ, ai_champ = scenarios._setup(db)
     bstate["_rules_rng"] = _SeededRng(zlib.crc32(ability_guid.encode()))
+    # The battle's champions have templates, as a live battle's do: a subtype filter reads its champion's subtype.
+    if getattr(handler, "_ai_champ_guid", None) is None:
+        handler._ai_champ_guid = _test_champion_guid()
+        handler._player_champ_guid = _test_champion_guid()
     for uid, owner, zone, buffs in extra:
         add_card(db, uid, owner, scenarios.TPL_GLADIATOR, loc=zone)
         db.execute("UPDATE game_cards SET permanent_buffs=? WHERE card_uid=?", (buffs, uid))
@@ -558,6 +571,8 @@ def choice_parity(case, index):
     from rules_port.ir_exec import NeedsChoice, resume_ability, run_ability
     from rules_port.resolution import resolve_port_ability
 
+    event = case.get("event_data") or {"player": TROOP_OWNER}
+
     def fresh():
         db, pl_t, ai_t, game, handler, bstate, player_champ, ai_champ = _scenario(
             case["ability"], case["opposing"], None, case.get("extra", ()), any_template=True)
@@ -568,7 +583,7 @@ def choice_parity(case, index):
     db, pl_t, ai_t, game, handler, bstate, player_champ, ai_champ, start, context = fresh()
     try:
         run_ability(case["ability"], case["event"], context=context, source_uid=SOURCE_UID,
-                    owner_uid=TROOP_OWNER, event={"player": TROOP_OWNER})
+                    owner_uid=TROOP_OWNER, event=event)
         return None, "the ability did not pause for a choice"
     except NeedsChoice as pause:
         candidates = list(pause.candidates)
@@ -578,7 +593,7 @@ def choice_parity(case, index):
         db, pl_t, ai_t, game, handler, bstate, player_champ, ai_champ, start, context = fresh()
         try:
             run_ability(case["ability"], case["event"], context=context, source_uid=SOURCE_UID,
-                        owner_uid=TROOP_OWNER, event={"player": TROOP_OWNER})
+                        owner_uid=TROOP_OWNER, event=event)
         except NeedsChoice as again:
             continuation = again.continuation
         resume_ability(continuation, answer, context=context)
@@ -611,6 +626,8 @@ def choice_cases(limit):
         cases.append((
             {"name": f"choice {event}: {raw.get('m_GameText', '')[:70]}", "ability": record.guid.lower(),
              "event": event, "opposing": [(502, 0), (503, 0)], "extra": [(600, TROOP_OWNER, "warzone", "{}"), (601, TROOP_OWNER, "warzone", "{}")],
+             "event_data": ({"player": TROOP_OWNER, "card": SOURCE_UID, "from": "hand", "to": "warzone"}
+                            if event == "CardEnteredZoneEvent" else None),
              "prepare": _nothing, "moved": None},
             indices[0]))
         if len(cases) >= limit:
