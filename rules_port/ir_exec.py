@@ -706,8 +706,8 @@ def _player_passes(player_filter: str, owner: int, scope: Scope) -> bool:
         return owner != controller
     if player_filter == "MultiplePlayers":
         return True
-    # SinglePlayer is refused by coverage() except for a counter's chain cards (CastSpells), where the chosen card is the
-    # only candidate the filter has to admit.
+    # SinglePlayer admits any player: the chosen card (one card, so one player) is what the rule constrains, and the
+    # live validator checks that its controller is the only one. Coverage refuses an automatic SinglePlayer target.
     if player_filter == "SinglePlayer":
         return True
     raise NotImplementedError(f"target player filter {player_filter}")
@@ -1568,7 +1568,10 @@ def coverage(guid: str) -> list[str]:
             continue
         player_filter = str(template.get("m_PlayerFilter") or "")
         chain_card = player_filter == "SinglePlayer" and str(template.get("m_CollectionFlags") or "") == "CastSpells"
-        if kind == "AbilityTargetTemplate" and player_filter not in TARGET_PLAYER_FILTERS and not chain_card:
+        # A chosen SinglePlayer target picks one card, so its one-player rule holds; an automatic one would span players.
+        chosen_single_player = player_filter == "SinglePlayer" and not template.get("m_IsAutoTarget")
+        if kind == "AbilityTargetTemplate" and player_filter not in TARGET_PLAYER_FILTERS and not chain_card \
+                and not chosen_single_player:
             missing.append(f"target player filter {template.get('m_PlayerFilter')}")
         if kind == "AbilityTargetTemplate" and not template.get("m_IsAutoTarget") and \
                 target_count(_load("AbilityTargetTemplate", template_guid).m_MaxTargetCount, {}) != 1:
