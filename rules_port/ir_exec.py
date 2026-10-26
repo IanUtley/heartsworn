@@ -27,6 +27,9 @@ from gamedata.mechanics import CLASSES
 from gamedata.mechanics_fields import current_fields
 from gamedata.mechanics_objects import MechanicsObject, from_record
 from gamedata.records import RecordObject
+from rules_port.ir_exec_transform import EFFECTS as TRANSFORM_EFFECTS
+from rules_port.ir_exec_transform import refusals as transform_refusals
+from rules_port.ir_exec_transform import run as run_transform_effect
 from rules_port import ir_exec_conditions as bridge
 from rules_port.ir_modifiers import GROUP_G_MODIFIERS, modifier_gaps
 from rules_port.ir_exec_zones import ZONE_EFFECTS, run_zone_effect, zone_effect_gaps
@@ -1121,6 +1124,9 @@ def _run_effects(guid: str, root: MechanicsObject, scope: Scope, start: int) -> 
             if _short(effect_type) == "ActivateAbilityEffectTemplate":
                 _invoke(guid, position, effect_raw, scope, _target_owners(root, index, scope))
                 continue
+            if _short(effect_type) in TRANSFORM_EFFECTS:
+                _transform_targets(guid, root, clause, _short(effect_type), effect_raw, scope)
+                continue
             if _short(effect_type) == "RandomizeVariableEffectTemplate":
                 _randomize_variable(effect_raw, scope)
                 continue
@@ -1182,11 +1188,13 @@ def _reveal_cards(root: MechanicsObject, clause: Any, effect_raw: dict[str, Any]
 
 @contextmanager
 def _bridge_caster(bstate: dict[str, Any], *, owner: Any = None, source: Any = None,
-                   variables: dict[str, Any] | None = None) -> Iterator[None]:
-    """The one place the interpreter writes the caster, source and variables into the battle state. The shared
-    resolver leaves read those from the battle state, so they are set here for the duration of one interpreted call
-    and restored after it. Every target the interpreter acts on is passed explicitly, not read from this state."""
-    saved = {key: bstate.get(key) for key in ("resolving_owner_id", "resolving_source_uid", "ability_variables")}
+                   variables: dict[str, Any] | None = None, ability: str | None = None) -> Iterator[None]:
+    """The one place the interpreter writes the caster, source, variables and ability into the battle state. The
+    shared resolver leaves read those from the battle state, so they are set here for the duration of one
+    interpreted call and restored after it. Every target the interpreter acts on is passed explicitly, not read from
+    this state."""
+    saved = {key: bstate.get(key) for key in ("resolving_owner_id", "resolving_source_uid", "ability_variables",
+                                              "resolving_ability")}
     try:
         if owner is not None:
             bstate["resolving_owner_id"] = int(owner)
@@ -1194,6 +1202,8 @@ def _bridge_caster(bstate: dict[str, Any], *, owner: Any = None, source: Any = N
             bstate["resolving_source_uid"] = int(source)
         if variables is not None:
             bstate["ability_variables"] = dict(variables)
+        if ability is not None:
+            bstate["resolving_ability"] = ability
         yield
     finally:
         for key, value in saved.items():
@@ -1216,6 +1226,29 @@ def _move_cards(root: MechanicsObject, clause: Any, effect_raw: dict[str, Any], 
                 context.move_card_to_zone(target=int(target))
     finally:
         context.effect_template_override = previous_template
+
+
+def _transform_targets(guid: str, root: MechanicsObject, clause: Any, kind: str, effect_raw: dict[str, Any],
+                       scope: Scope) -> None:
+    """Transform, token copy and tunnel effects (area K): the clause's targets, through the live leaves. The leaves
+    read the ability and its variables (a random filter's amounts) from the battle state, so both are bridged."""
+    targets = _targets(root, int(_field(clause, "m_TargetTemplateIndex") or 0), scope)
+    with _bridge_caster(scope.context.bstate, ability=guid, variables=scope.variables):
+        run_transform_effect(kind, effect_raw, targets, scope.context, count=_effect_amount(effect_raw, scope))
+
+
+def _effect_amount(effect_raw: dict[str, Any], scope: Scope) -> int | None:
+    """An effect's typed amount (its m_InputValue): a constant, or an ability variable's bound value. None when the
+    effect has no amount."""
+    value = effect_raw.get("m_InputValue")
+    if not value:
+        return None
+    kind = _short(value.get("_t"))
+    if kind == "EffectConstant":
+        return int(value.get("m_Value") or 0)
+    if kind == "EffectInputVariable":
+        return int(scope.variables[str(value.get("m_InputVariableName") or "")])
+    raise NotImplementedError(f"input value {kind}")
 
 
 def _randomize_variable(effect_raw: dict[str, Any], scope: Scope) -> None:
@@ -1394,6 +1427,22 @@ def _comparison_ops(value: Any, out: list[str]) -> list[str]:
 _COVERAGE_STACK: set[str] = set()
 
 
+def _amount_refusals(effect: dict[str, Any], raw: dict[str, Any]) -> list[str]:
+    """An effect's amount the interpreter cannot bind: a kind it does not read, or a variable the ability does not
+    declare."""
+    value = effect.get("m_InputValue")
+    if not value:
+        return []
+    kind = _short(value.get("_t"))
+    if kind == "EffectConstant":
+        return []
+    if kind != "EffectInputVariable":
+        return [f"input value {kind}"]
+    declared = {str(v.get("m_Name") or "") for v in raw.get("m_Variables") or [] if isinstance(v, dict)}
+    name = str(value.get("m_InputVariableName") or "")
+    return [] if name in declared else [f"input variable {name}"]
+
+
 def coverage(guid: str) -> list[str]:
     """The constructs in an ability the interpreter does not run (empty when it runs them all)."""
     from rules_port import ir_exec_resources
@@ -1554,6 +1603,14 @@ def coverage(guid: str) -> list[str]:
                     missing.extend(f"invoked: {item}" for item in coverage(child))
                 finally:
                     _COVERAGE_STACK.discard(child)
+            continue
+        if kind in TRANSFORM_EFFECTS:
+            target_ids = raw.get("m_AbilityTargetTemplateIds") or []
+            index = int(clause.get("m_TargetTemplateIndex") or 0)
+            target_kind = _short(_stored("AbilityTargetTemplate", _guid(target_ids[index]))[0]) \
+                if index < len(target_ids) else ""
+            missing.extend(transform_refusals(kind, effect, target_kind))
+            missing.extend(_amount_refusals(effect, raw))
             continue
         if kind in ir_exec_resources.EFFECTS:
             missing.extend(ir_exec_resources.coverage_effect(kind, effect, clause, raw))
