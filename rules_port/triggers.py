@@ -659,7 +659,8 @@ class NativeTriggerBackend:
                             interpreted = run_interpreted_trigger(
                                 handler, game, session, db, player_uid, ai_uid,
                                 battle_state, key[1], source_uid, source_card_owner,
-                                event_name, event.source_card_id, dict(event.data or {}))
+                                event_name, event.source_card_id, dict(event.data or {}),
+                                target_player_uid=event.target_player_id)
                         if interpreted is not None:
                             result = interpreted
                         else:
@@ -727,6 +728,7 @@ class NativeTriggerBackend:
                         "trigger_target_uid": trigger_target_uid,
                         "trigger_event_type": event_name,
                         "trigger_event_data": dict(event.data or {}),
+                        "trigger_target_player_uid": event.target_player_id,
                         "source_owner_uid": source_card_owner,
                         "instance_id": instance_id,
                         **activation_payload})
@@ -770,6 +772,7 @@ class NativeTriggerBackend:
                             "trigger_target_uid": trigger_target_uid,
                             "trigger_event_type": event_name,
                             "trigger_event_data": dict(event.data or {}),
+                            "trigger_target_player_uid": event.target_player_id,
                             "source_owner_uid": source_card_owner,
                             "instance_id": instance_id,
                             **activation_payload,
