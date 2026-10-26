@@ -74,6 +74,7 @@ def reload_runtime_modules():
     import domain.constants as domain_constants
     import campaign_playtest as campaign_playtest_module
     import ai_eval as ai_eval_module
+    import ai_combat as ai_combat_module
 
     # Reload foundational modules first, then all already-loaded modules in
     # the application/runtime packages.  Filtering sys.modules avoids
@@ -92,7 +93,7 @@ def reload_runtime_modules():
          application_dispatcher, player_transactions, campaign,
          campaign_playtest_module],
         [rules_transactions, rules_runtime, rules_wire],
-        [ai_eval_module],
+        [ai_eval_module, ai_combat_module],
         [aim, te, ts, tg, sch, arena_service, mail_service, en],
     ]
     prefixes = ("abilities", "rules_port", "application", "services",
