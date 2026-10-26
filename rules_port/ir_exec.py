@@ -947,6 +947,12 @@ def _run_effects(guid: str, root: MechanicsObject, scope: Scope, start: int) -> 
                                     "chosen": {str(k): v for k, v in scope.chosen.items()}}
                     raise NeedsChoice(continuation, candidates, optional)
             effect_type, effect_raw = _stored("AbilityEffectTemplate", _guid(_field(clause, "m_EffectTemplateId")))
+            # A chosen revealed target that finds no card ends the ability: the client disables that effect and
+            # runs nothing after it (Oakhenge's remaining cards are not moved, and the random generator is not drawn).
+            # An automatic revealed target that finds nothing only disables its own effect.
+            if _short(effect_type) in ("MoveCardToZoneEffectTemplate", "RevealCardsAbilityEffectTemplate") and \
+                    _revealed_target_empty(root, int(_field(clause, "m_TargetTemplateIndex") or 0), scope):
+                break
             if _short(effect_type) == "ActivateAbilityEffectTemplate":
                 _invoke(guid, position, effect_raw, scope)
                 continue
@@ -1004,11 +1010,6 @@ def _move_cards(root: MechanicsObject, clause: Any, effect_raw: dict[str, Any], 
     bstate["_rules_port_native_effect"] = True
     try:
         for target in targets:
-            # A card already in the destination deck is not moved: the client draws no random slot for it (the
-            # oracle's revealed-and-returned cards keep their order and the RNG is untouched).
-            if str(effect_raw.get("m_DestinationCollection") or "").rsplit(".", 1)[-1].lower() == "deck" and \
-                    _card_by_uid(scope, target) is not None and _card_by_uid(scope, target).zone == "deck":
-                continue
             bstate["resolving_target_uid"] = int(target)
             context.move_card_to_zone()
     finally:
@@ -1030,6 +1031,13 @@ def _randomize_variable(effect_raw: dict[str, Any], scope: Scope) -> None:
     span = max(0, maximum - minimum) + 1
     scope.variables[str(effect_raw.get("m_VariableName") or "RandomNumber")] = \
         minimum + int(rng_below(scope.context.bstate, span)) % span
+
+
+def _revealed_target_empty(root: MechanicsObject, index: int, scope: Scope) -> bool:
+    """Whether a clause's revealed target is a chosen one that finds no card.""" 
+    template = _load("AbilityTargetTemplate", _guid(root.m_AbilityTargetTemplateIds[index]))
+    return _short(template.type_name) == "SourceRevealedTargetTemplate" and not template.m_IsAutoTarget \
+        and not _revealed_candidates(template, index, scope)
 
 
 def _invoke(parent_guid: str, position: int, effect_raw: dict[str, Any], scope: Scope) -> None:
