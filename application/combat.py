@@ -128,6 +128,19 @@ class CombatMixin:
         # picker is open (the AI end-turn hand-back) drops its phase updates.
         prompt_open = bool(getattr(getattr(session, "_rules_port_session", None),
                                    "trigger_prompt_open", False))
+        # A deck-search picker holds the turn the same way. The in-memory battle state is the one that knows the
+        # picker is still open: the persisted copy still holds it while the answer's own packets are sent.
+        deck_search_open = bool((getattr(self, "_current_bstate", None) or {}).get("pending_deck_search"))
+        carries_picker = any(type(ev).__name__ == "TriggeredAbilityActivationDataRequiredSessionEventArgs"
+                             for ev in game.events)
+        if deck_search_open and not picker_packet and not carries_picker:
+            # The client leaves its picker on any priority window that follows it, so the window waits for the answer.
+            held = ("TurnPhaseUpdatedSessionEventArgs", "PlayerOptionListSessionEventArgs",
+                    "GreenLightSessionEventArgs")
+            before = len(game.events)
+            game.events = [ev for ev in game.events if type(ev).__name__ not in held]
+            _hc.log_req(f"    Deck-search picker open: held {before - len(game.events)} priority event(s)")
+        prompt_open = prompt_open or deck_search_open
         if prompt_open and not picker_packet:
             game.events = [ev for ev in game.events
                            if type(ev).__name__ != "TurnPhaseUpdatedSessionEventArgs"]

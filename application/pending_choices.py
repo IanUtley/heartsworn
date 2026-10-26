@@ -538,6 +538,7 @@ class PendingChoicesMixin:
         prompt_ability = search_ability or ability_guid
         pend = {
             "ability_guid": prompt_ability,
+            "source_ability_guid": str(ability_guid or "").lower(),
             "source_uid": int(source_uid),
             "owner_id": int(owner_id),
             "instance_id": inst_id,
@@ -632,6 +633,25 @@ class PendingChoicesMixin:
         _hc.log_req(f"    Deck-search prompt: {ability_guid[:8]} source={hex(source_uid)} "
                 f"candidates={len(pend['candidates'])} inst={inst_id}")
         return f"deck search: awaiting {len(pend['candidates'])} candidates"
+
+    def _resend_pending_deck_search(self, session, bstate, pl_t, ai_t):
+        """Re-open a deck-search picker the client has lost. A priority sync from the client asks for the window
+        back while the picker is pending, so the same candidates and prompt go out again."""
+        import hconnect_server as _hc
+        pend = bstate.get("pending_deck_search") or {}
+        kind = str(pend.get("kind") or "search")
+        if kind not in ("search", "shard"):
+            return
+        game = self._fresh_game(session, pl_t, ai_t, bstate)
+        continuation = pend.get("continuation")
+        self._prompt_deck_search(
+            game, session, pl_t, ai_t, bstate,
+            pend.get("source_ability_guid") or pend["ability_guid"],
+            int(pend["source_uid"]), int(pend["owner_id"]),
+            [int(uid) for uid in (pend.get("candidates") or [])],
+            kind=kind, continuation=continuation if isinstance(continuation, dict) else None)
+        _hc.log_req("    Deck-search picker re-sent to the client")
+        self._send_battle_events(session, game, pl_t)
 
     def _prompt_choice_cards(self, game, session, pl_t, ai_t, bstate,
                              pending):

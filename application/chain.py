@@ -698,12 +698,15 @@ class ChainMixin:
         if pending_input:
             _hc.log_req("    RequestPrioritySync: held for pending client input: "
                         + ",".join(pending_input))
+            pl_t = _hc.game_engine.UID.make(244, int(self.client_reck_id))
+            ai_t = _hc.game_engine.UID.make(_hc.game_engine.SERVICE_AI_UID_TYPE, 1000)
             if pending_checkpoint.get("pending_trigger"):
                 # The client only sends its next transaction after a reply, so
                 # re-open the trigger picker (its events are the reply).
-                pl_t = _hc.game_engine.UID.make(244, int(self.client_reck_id))
-                ai_t = _hc.game_engine.UID.make(_hc.game_engine.SERVICE_AI_UID_TYPE, 1000)
                 self._resend_pending_trigger(
+                    session, pending_checkpoint, pl_t, ai_t)
+            if pending_checkpoint.get("pending_deck_search"):
+                self._resend_pending_deck_search(
                     session, pending_checkpoint, pl_t, ai_t)
             return True
 
