@@ -1177,7 +1177,7 @@ def _invoke(parent_guid: str, position: int, effect_raw: dict[str, Any], scope: 
             frame = {"ability_guid": parent_guid, "event": dict(scope.event), "source_uid": int(scope.source_uid),
                      "owner_uid": int(scope.owner_uid), "position": position,
                      "chosen": {str(k): v for k, v in scope.chosen.items()},
-                     "variables": dict(scope.variables)},
+                     "variables": dict(scope.variables),
                      "applied": {str(k): v for k, v in scope.applied.items()}}
             _append_chain(pause.continuation, frame)
             raise
@@ -1389,10 +1389,8 @@ def coverage(guid: str) -> list[str]:
                 missing.append(f"multi-card target ({bound} {count['m_Value']})")
             elif isinstance(count, dict) and count.get("m_Value") is None:
                 missing.append(f"variable target count ({bound})")
-    # A cost or an optional ability: the interpreter does not model paying, nor a player's choice to decline.
-    for field_name in _COST_FIELDS:
-        if raw.get(field_name) not in (None, 0, "", [], {}, "0"):
-            missing.append(f"cost or optional ({field_name})")
+    # Paid costs and optional abilities are settled before the ability reaches the interpreter (ir_exec_costs).
+    missing.extend(unsupported_costs(raw))
     for operator in _comparison_ops(raw, []):
         if operator not in _COMPARISONS:
             missing.append(f"comparison {operator}")
