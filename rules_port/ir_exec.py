@@ -762,14 +762,31 @@ def set_engine(on: bool) -> None:
     ENGINE_ON = bool(on)
 
 
-def engine_runs(guid: str, source_uid: Any, owner_uid: Any) -> bool:
-    """Whether the interpreter resolves this ability in place of the native resolver: the engine is on,
-    the ability has a source card and an owner, no construct of it is uncovered, and it has no card the player
-    chooses. A choice pauses the interpreter (NeedsChoice), and the live prompt that answers it is not wired yet,
-    so those abilities stay on the native path."""
+def engine_runs(guid: str, source_uid: Any, owner_uid: Any, answers: dict[int, Any] | None = None) -> bool:
+    """Whether the interpreter resolves this ability in place of the native resolver: the engine is on, the ability
+    has a source card and an owner, and no construct of it is uncovered.
+
+    A card the player picks is allowed when the player's answer for it is given (``answers``, keyed by target index),
+    and the abilities it invokes pick nothing. The native prompt asks the player and its answer comes back in the
+    chain item; without an answer the ability stays on the native path."""
     if not (ENGINE_ON and source_uid is not None and owner_uid is not None) or coverage(guid):
         return False
-    return not _pauses_for_choice(guid, set())
+    root = _load("AbilityTemplate", guid)
+    own = [index for index in range(len(root.m_AbilityTargetTemplateIds or [])) if _needs_choice(root, index)]
+    if any(index not in (answers or {}) for index in own):
+        return False
+    return not _invoked_choice(root, set())
+
+
+def _invoked_choice(root: MechanicsObject, seen: set[str]) -> bool:
+    """Whether an ability invokes another that picks a card (its choice is not answered by the chain item)."""
+    for clause in root.m_AbilityEffectList:
+        effect_type, effect_raw = _stored("AbilityEffectTemplate", _guid(_field(clause, "m_EffectTemplateId")))
+        if _short(effect_type) == "ActivateAbilityEffectTemplate":
+            child = _guid(effect_raw.get("m_AbilityToInvoke"))
+            if _pauses_for_choice(child, set()):
+                return True
+    return False
 
 
 def _pauses_for_choice(guid: str, seen: set[str]) -> bool:

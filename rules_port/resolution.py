@@ -2032,8 +2032,18 @@ def resolve_port_played_permanent(game, session, db, handler, player_uid,
     return result
 
 
+def _answers_from_target_map(target_map: dict[Any, Any]) -> dict[int, int | None]:
+    """A chain item's target map as the interpreter's answers: each target index to the card chosen, or None."""
+    answers: dict[int, int | None] = {}
+    for index, value in (target_map or {}).items():
+        values = value if isinstance(value, (list, tuple, set)) else (value,)
+        chosen = [int(item) for item in values if item is not None and str(item).lstrip("-").isdigit()]
+        answers[int(index)] = chosen[0] if chosen else None
+    return answers
+
+
 def run_interpreted_trigger(handler, game, session, db, player_uid, ai_uid, battle_state, guid,
-                            source_uid, owner_uid, event_name, trigger_source_uid, event_data):
+                            source_uid, owner_uid, event_name, trigger_source_uid, event_data, answers=None):
     """Resolve a trigger's ability with the interpreter (rules_port/ir_exec.py) on the live battle state.
 
     Its effects go through the live primitives, so the outcome is the native resolver's. Returns the
@@ -2051,7 +2061,8 @@ def run_interpreted_trigger(handler, game, session, db, player_uid, ai_uid, batt
             context=EffectContext.from_rules_port(
                 game, session, db, handler, player_uid, ai_uid, battle_state, ""),
             source_uid=int(source_uid), owner_uid=int(owner_uid),
-            event=ir_exec.live_event(event_name, int(owner_uid), event_data, trigger_source_uid))
+            event=ir_exec.live_event(event_name, int(owner_uid), event_data, trigger_source_uid),
+            answers=answers)
     except NotImplementedError:
         if len(game.events) != started:
             raise
@@ -2115,6 +2126,7 @@ def resolve_port_trigger(handler, game, session, db, player_uid, ai_uid,
             if spec.requires_input:
                 target_map[index] = int(selected_target)
                 break
+    answers = _answers_from_target_map(target_map)
     old_source = battle_state.get("resolving_source_uid")
     old_owner = battle_state.get("resolving_owner_id")
     old_target = battle_state.get("resolving_target_uid")
@@ -2154,12 +2166,12 @@ def resolve_port_trigger(handler, game, session, db, player_uid, ai_uid,
         from . import ir_exec
         event_name = str(item.get("trigger_event_type") or "").rsplit(".", 1)[-1]
         interpreted = None
-        if ir_exec.engine_runs(guid, source_uid, owner_id):
+        if ir_exec.engine_runs(guid, source_uid, owner_id, answers=answers):
             interpreted = run_interpreted_trigger(
                 handler, game, session, db, player_uid, ai_uid, battle_state,
                 guid, source_uid, owner_id, event_name,
                 item.get("trigger_source_uid"),
-                event_data if isinstance(event_data, dict) else {})
+                event_data if isinstance(event_data, dict) else {}, answers=answers)
         if interpreted is not None:
             state = interpreted
         else:

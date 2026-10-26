@@ -557,6 +557,21 @@ def test_oakhenge_matches_the_client_oracle_run_when_the_revealed_cards_are_reso
                                                int(oracle["initial_seed"]["seed_w"]))
 
 
+def test_the_engine_takes_a_chosen_target_only_once_it_is_answered(db):
+    """With the engine switch on, an ability that picks a card stays on the native path until the chain item
+    carries the player's answer; the answered ability then runs in the interpreter."""
+    from rules_port import ir_exec
+
+    previous = ir_exec.ENGINE_ON
+    ir_exec.set_engine(True)
+    try:
+        assert not ir_exec.engine_runs(SACRIFICE_CHOICE_ABILITY, 900, 5)
+        assert not ir_exec.engine_runs(SACRIFICE_CHOICE_ABILITY, 900, 5, answers={})
+        assert ir_exec.engine_runs(SACRIFICE_CHOICE_ABILITY, 900, 5, answers={0: 601})
+    finally:
+        ir_exec.set_engine(previous)
+
+
 if __name__ == "__main__":
     import db as dbmod
     for run in (test_burning_ability_runs_from_its_ir, test_dazed_and_vulnerable_removals_match_the_live_engine,
@@ -574,7 +589,8 @@ if __name__ == "__main__":
                 test_a_random_variable_picks_the_branch_its_condition_tests,
                 test_a_random_branch_searches_the_deck_for_a_named_card_and_moves_the_choice,
                 test_a_revealed_choice_takes_one_card_and_the_rest_go_back_in_random_places,
-                test_oakhenge_matches_the_client_oracle_run_when_the_revealed_cards_are_resources):
+                test_oakhenge_matches_the_client_oracle_run_when_the_revealed_cards_are_resources,
+                test_the_engine_takes_a_chosen_target_only_once_it_is_answered):
         dbmod._db = make_db()
         run(dbmod._db)
     print("ok")
