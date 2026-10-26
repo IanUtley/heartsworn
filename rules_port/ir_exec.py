@@ -27,6 +27,7 @@ from gamedata.mechanics import CLASSES
 from gamedata.mechanics_fields import current_fields
 from gamedata.mechanics_objects import MechanicsObject, from_record
 from gamedata.records import RecordObject
+from rules_port.ir_modifiers import GROUP_G_MODIFIERS, modifier_gaps
 from rules_port.ir_exec_zones import ZONE_EFFECTS, run_zone_effect, zone_effect_gaps
 from rules_port import ir_variables
 from rules_port.ir_event_effects import NATIVE_LEAF_EFFECTS, coverage_of as event_effect_coverage, run_native_leaf
@@ -760,6 +761,11 @@ def _run_clause(root: MechanicsObject, clause: Any, scope: Scope) -> None:
         for target in _targets(root, index, scope):
             attack, defense = (amount, 0) if kind == "AttackModifier" else (0, amount)
             apply_stat_mod(scope.context, target, attack, defense, this_turn=this_turn)
+        return
+    if kind in GROUP_G_MODIFIERS:
+        from rules_port.ir_modifiers import run_modifier
+        duration = str(_field(clause, "m_EffectDuration") or "")
+        run_modifier(modifier, effect_guid, duration, _targets(root, index, scope), scope)
         return
     if kind == "HealHeroModifier":
         # A health gain for each player it lands on, through the live gain path (which refuses while
@@ -1517,7 +1523,10 @@ def coverage(guid: str) -> list[str]:
             game_text = str(effect.get("m_GameText") or "").lower()
             if any(phrase in game_text for phrase in DERIVED_STAT_TEXT):
                 missing.append("stat derived from another card")
-        if modifier not in SUPPORTED_MODIFIERS:
+        if modifier in GROUP_G_MODIFIERS:
+            missing.extend(modifier_gaps(effect.get("m_Modifier") or {},
+                                         str(clause.get("m_EffectDuration") or "")))
+        elif modifier not in SUPPORTED_MODIFIERS:
             missing.append(f"modifier {modifier or '(untagged)'}")
         elif modifier == "CounterModifier" and (
                 (effect.get("m_Modifier") or {}).get("m_Operation") not in COUNTER_OPERATIONS
