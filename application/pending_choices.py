@@ -634,6 +634,14 @@ class PendingChoicesMixin:
                 f"candidates={len(pend['candidates'])} inst={inst_id}")
         return f"deck search: awaiting {len(pend['candidates'])} candidates"
 
+    def _mark_interpreted_chain_item_done(self, bstate):
+        """The interpreter finished the paused chain item's effects. Mark it as done, as the native continuation does, so
+        the chain finishes the item without running its effects (and their random draws) again."""
+        bstate.pop("resolution_paused", None)
+        completed = int(bstate.pop("paused_chain_instance_id", 0) or 0)
+        if completed:
+            bstate["completed_chain_instance_id"] = completed
+
     def _resend_pending_deck_search(self, session, bstate, pl_t, ai_t):
         """Re-open a deck-search picker the client has lost. A priority sync from the client asks for the window
         back while the picker is pending, so the same candidates and prompt go out again."""
@@ -1811,6 +1819,7 @@ class PendingChoicesMixin:
                 self._send_battle_events(session, g, pl_t)
                 self._push_transaction_ack(session)
                 return True
+            self._mark_interpreted_chain_item_done(bstate)
             _be.save_state(session, bstate)
             self._send_battle_events(session, g, pl_t)
             if self._resume_completed_rules_port_chain(session, bstate):
@@ -1994,6 +2003,7 @@ class PendingChoicesMixin:
                     self._send_battle_events(session, g, pl_t)
                     self._push_transaction_ack(session)
                     return True
+                self._mark_interpreted_chain_item_done(bstate)
                 _be.save_state(session, bstate)
                 self._send_battle_events(session, g, pl_t)
                 if self._resume_completed_rules_port_chain(session, bstate):
