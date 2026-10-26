@@ -368,7 +368,9 @@ def ai_pass_declare_defense(handler, session, pl_t, ai_t, bstate, game):
         blk_hints = [Hint(ai_cards[b["uid"]], ev) for b in avail
                      if b["uid"] in ai_cards]
         if atk_hints and blk_hints:
-            solved = solve_block(atk_hints, blk_hints, ai_health, ev)
+            solved = solve_block(
+                atk_hints, blk_hints, ai_health, ev,
+                attacker_resources=int(bstate.get("player_resources", 0) or 0))
             assignment = {int(k): [int(x) for x in v]
                           for k, v in solved.items() if v}
     if assignment:

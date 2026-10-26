@@ -441,10 +441,13 @@ def _results_table(personality):
 
 
 def solve_block(attackers, blockers, defender_defense, evaluator, *,
-                toxified=False, troop_ratio=1.0):
+                toxified=False, troop_ratio=1.0, attacker_resources=None):
     """AICombat.SolveBlock.  ``attackers`` are the player's attacking hints,
     ``blockers`` the AI's blocking hints.  Returns ``{attacker_uid: [blocker
-    uids]}``; attackers that are not in the result are unblocked."""
+    uids]}``; attackers that are not in the result are unblocked.
+
+    ``attacker_resources`` is the attacking player's available resources. With none left they cannot respond to the
+    block, so a single block is not gated by value (a deliberate departure from the client's SolveBlock)."""
     personality = evaluator.personality
     attacker_window = WindowList(attackers)
     blocker_window = WindowList(blockers)
@@ -474,7 +477,8 @@ def solve_block(attackers, blockers, defender_defense, evaluator, *,
     # champion, the chump block stands even if it is not worth the card.
     incoming = sum(a.attack(True) for a in attackers)
     lethal_unblocked = incoming >= int(defender_defense)
-    if len(assignment) == 1 and not lethal_unblocked:
+    can_respond = attacker_resources is None or int(attacker_resources) > 0
+    if len(assignment) == 1 and not lethal_unblocked and can_respond:
         (attacker_uid, blocker_uids), = assignment.items()
         if len(blocker_uids) == 1:
             attacker = next((a for a in attackers if a.uid == attacker_uid), None)
