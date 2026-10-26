@@ -26,6 +26,7 @@ from gamedata.mechanics import CLASSES
 from gamedata.mechanics_fields import current_fields
 from gamedata.mechanics_objects import MechanicsObject, from_record
 from gamedata.records import RecordObject
+from rules_port import ir_exec_conditions as bridge
 
 # A CounterModifier's operation, as the live counter primitive names it.
 COUNTER_OPERATIONS = {"Add": "add", "Remove": "remove", "Set": "set"}
@@ -191,6 +192,8 @@ class Scope:
     table: list[dict[str, int]] | None = None
     event: dict[str, Any] = field(default_factory=dict)   # player, card, from, to
     chosen: dict[int, int | None] = field(default_factory=dict)   # target index -> the card the player chose
+    # The test each of the running clause's targets must pass (its RequiresTargetPassesFilterCondition), or None.
+    gate: Any = None
 
 
 class NeedsChoice(Exception):
@@ -339,6 +342,8 @@ def _filter_holds(card_filter: Any, card: Card, scope: Scope) -> bool:
         return card.uid == scope.source_uid
     if cls == "IsSubType":
         return _is_subtype(str(typed.m_SubType or ""), card)
+    if bridge.filter_accepted(cls):
+        return bridge.filter_holds(typed, card.uid, scope)
     raise NotImplementedError(f"card filter {cls or type(typed).__name__}")
 
 
@@ -382,6 +387,10 @@ def _condition_holds(condition: Any, scope: Scope) -> bool:
     if cls == "TriggerCardMatchesFilter":
         card = _card_by_uid(scope, scope.event.get("card"))
         return card is not None and _filter_holds(condition.m_CardFilter, card, scope)
+    if cls in bridge.BRIDGED_CONDITIONS:
+        return bridge.condition_holds(condition, scope)
+    if bridge.filter_accepted(cls):
+        return bridge.trigger_card_holds(condition, scope)
     if getattr(condition, "m_CardCollection", None) is not None:
         return _count_holds(condition, scope)
     raise NotImplementedError(f"trigger condition {cls}")
@@ -392,6 +401,9 @@ def _ability_condition_holds(condition: Any, scope: Scope) -> bool:
     if condition is None:
         return True
     typed = _typed(condition, "AbilityCondition", scope.table)
+    if isinstance(typed, MechanicsObject) and _short(typed.type_name) in bridge.BRIDGED_CONDITIONS and \
+            _short(typed.type_name) != "AbilityControllerHasThresholdAbilityCondition":
+        return bridge.condition_holds(typed, scope)
     if not isinstance(typed, MechanicsObject) or \
             _short(typed.type_name) != "AbilityControllerHasThresholdAbilityCondition":
         raise NotImplementedError(f"ability condition {_short(getattr(typed, 'type_name', ''))}")
@@ -493,6 +505,14 @@ def _input_value(modifier: MechanicsObject, scope: Scope) -> int:
 
 
 def _targets(root: MechanicsObject, index: int, scope: Scope) -> list[int]:
+    """The cards a clause's target index picks, minus those the running clause's condition on its targets refuses."""
+    targets = _resolved_targets(root, index, scope)
+    if scope.gate is None:
+        return targets
+    return [uid for uid in targets if scope.gate(uid)]
+
+
+def _resolved_targets(root: MechanicsObject, index: int, scope: Scope) -> list[int]:
     """The cards a clause's target index picks: the ability's source, or every card an automatic
     target's filter passes."""
     template = _load("AbilityTargetTemplate", _guid(root.m_AbilityTargetTemplateIds[index]))
@@ -836,12 +856,19 @@ def _clause_condition_holds(clause: Any, scope: Scope) -> bool:
         return True
     _cls, raw = _stored("AbilityEffectConditionTemplate", guid)
     stored = raw.get("m_Condition") or {}
+    if _short(stored.get("_t")) == "RequiresTargetPassesFilterCondition":
+        # Tested against each target as the clause picks it (scope.gate), not before the clause runs.
+        if scope.gate is None:
+            raise NotImplementedError("target condition outside its clause")
+        return True
     if _short(stored.get("_t")) == "AbilityVariableCondition":
         # C# AbilityVariableCondition: the named variable compared with a constant.
         name = str(stored.get("m_Lhs") or "")
         if name not in scope.variables:
             raise KeyError(f"variable {name} is not bound")
         return _COMPARISONS[stored["m_ComparisonOp"]](scope.variables[name], _variable_or_number(stored, scope))
+    if _short(stored.get("_t")) in bridge.BRIDGED_CONDITIONS:
+        return bridge.condition_holds(stored, scope)
     condition = _typed(raw.get("m_Condition"), "AbilityEffectCondition", raw.get("_v"))
     if not isinstance(condition, MechanicsObject) or not hasattr(condition, "m_CardCollection"):
         raise NotImplementedError(f"effect condition {guid}")
@@ -953,7 +980,9 @@ def _run_effects(guid: str, root: MechanicsObject, scope: Scope, start: int) -> 
             clause = root.m_AbilityEffectList[position]
             # Counts are read when the effect runs, after the effects before it (C# evaluates a variable lazily).
             _bind_variables(root, scope)
-            # An effect runs only when its own condition holds (its m_ConditionId, as C# checks it).
+            # An effect runs only when its own condition holds (its m_ConditionId, as C# checks it). A condition
+            # on the effect's targets is tested as each target is picked (scope.gate).
+            scope.gate = _target_gate(clause, scope)
             if not _clause_condition_holds(clause, scope):
                 continue
             index = int(_field(clause, "m_TargetTemplateIndex") or 0)
@@ -994,7 +1023,20 @@ def _run_effects(guid: str, root: MechanicsObject, scope: Scope, start: int) -> 
                 _reveal_cards(root, clause, effect_raw, scope)
                 continue
             _run_clause(root, clause, scope)
+    scope.gate = None
     return True
+
+
+def _target_gate(clause: Any, scope: Scope):
+    """The per-target test of a clause whose effect condition is RequiresTargetPassesFilterCondition, else None."""
+    guid = _guid(_field(clause, "m_ConditionId"))
+    if not guid or guid == "00000000-0000-0000-0000-000000000000":
+        return None
+    _cls, raw = _stored("AbilityEffectConditionTemplate", guid)
+    stored = raw.get("m_Condition") or {}
+    if _short(stored.get("_t")) != "RequiresTargetPassesFilterCondition":
+        return None
+    return bridge.target_gate(stored, scope)
 
 
 def _reveal_cards(root: MechanicsObject, clause: Any, effect_raw: dict[str, Any], scope: Scope) -> None:
@@ -1192,31 +1234,6 @@ MOVE_DESTINATIONS = {"hand", "discard", "void", "warzone", "underground", "deck"
 _COST_FIELDS = ("m_Optional", "m_ActivationCost", "m_ChargePointCost", "m_VariableActivationCost", "m_LifeCost",
                 "m_SpellPointCost", "m_CounterCosts")
 
-# A RequiresCardsControlled flag the interpreter evaluates only at its default. Any other value is refused:
-# the count would otherwise ignore it silently.
-_COUNT_FLAG_DEFAULTS = {
-    "m_PlayerFilter": {"Self"}, "m_SameOwner": {0, False, None}, "m_QuantityIsHighestOpposingChampionsMatch": {0, False, None},
-    "m_QuantityIsLowestOpposingChampionsMatch": {0, False, None}, "m_OnlyIncludeDifferentCosts": {0, False, None},
-    "m_OnlyIncludeDifferentNames": {0, False, None}, "m_OnlyIncludeDifferentRacesForFaction": {"Unknown", None},
-    "m_QuantityCardFilter": {None},
-}
-
-
-def _unsupported_count_flags(value: Any, out: list[str]) -> list[str]:
-    """Every RequiresCardsControlled flag set away from its default in a stored value."""
-    if isinstance(value, dict):
-        if _short(value.get("_t")) == "RequiresCardsControlled":
-            for flag, defaults in _COUNT_FLAG_DEFAULTS.items():
-                if not any(value.get(flag) == default for default in defaults):
-                    out.append(f"count flag {flag}={value.get(flag)}")
-        for item in value.values():
-            _unsupported_count_flags(item, out)
-    elif isinstance(value, list):
-        for item in value:
-            _unsupported_count_flags(item, out)
-    return out
-
-
 _REGEX_CHARACTERS = set("\\.[](){}*+?|^$")
 
 
@@ -1265,10 +1282,11 @@ def coverage(guid: str) -> list[str]:
         missing.append("ability threshold")
     ability_condition = _short((raw.get("m_AbilityCondition") or {}).get("_t"))
     if ability_condition and ability_condition != "AbilityControllerHasThresholdAbilityCondition":
-        missing.append(f"ability condition {ability_condition}")
+        missing.extend(bridge.unsupported(raw.get("m_AbilityCondition"), "ability condition"))
     for name in _tagged_classes(raw.get("m_TriggerCondition"), []):
         # A ResourceId is a value (a counter's identity), not a construct.
-        if name not in SUPPORTED_CONDITIONS and name not in SUPPORTED_FILTERS and name != "ResourceId":
+        if name not in SUPPORTED_CONDITIONS and name not in SUPPORTED_FILTERS and name != "ResourceId" \
+                and name not in bridge.BRIDGED_CONDITIONS and not bridge.filter_accepted(name):
             missing.append(f"condition {name}")
     for template_guid in (_guid(item) for item in raw.get("m_AbilityTargetTemplateIds") or []):
         template_type, template = _stored("AbilityTargetTemplate", template_guid)
@@ -1287,7 +1305,7 @@ def coverage(guid: str) -> list[str]:
         if template.get("m_IsRandomTarget"):
             missing.append("random target")
         for name in _tagged_classes(template.get("m_CardFilter"), []):
-            if name not in SUPPORTED_FILTERS:
+            if name not in SUPPORTED_FILTERS and not bridge.filter_accepted(name):
                 missing.append(f"filter {name}")
     # A cost or an optional ability: the interpreter does not model paying, nor a player's choice to decline.
     for field_name in _COST_FIELDS:
@@ -1296,7 +1314,6 @@ def coverage(guid: str) -> list[str]:
     for operator in _comparison_ops(raw, []):
         if operator not in _COMPARISONS:
             missing.append(f"comparison {operator}")
-    missing.extend(_unsupported_count_flags(raw, []))
     missing.extend(_unsupported_name_filters(raw, []))
     for clause in raw.get("m_AbilityEffectList") or []:
         condition_guid = _guid(clause.get("m_ConditionId"))
@@ -1311,8 +1328,12 @@ def coverage(guid: str) -> list[str]:
                     missing.append(f"variable condition on {stored.get('m_Lhs')}")
                 elif not rhs.lstrip("-").isdigit() and rhs not in declared:
                     missing.append(f"variable condition against {rhs}")
+            elif kind == "RequiresTargetPassesFilterCondition":
+                # Tested against each target (scope.gate), so only its filter has to run.
+                missing.extend(bridge.unsupported(stored.get("m_Filter"), "effect condition"))
             elif kind != "RequiresCardsControlled":
-                missing.append(f"effect condition {kind}")
+                missing.extend(bridge.unsupported(stored, "effect condition"))
+                missing.extend(f"comparison {op}" for op in _comparison_ops(stored, []) if op not in _COMPARISONS)
     for variable in raw.get("m_Variables") or []:
         kind = _short((variable or {}).get("_t")) if isinstance(variable, dict) else ""
         if kind not in SUPPORTED_VARIABLES:
@@ -1329,7 +1350,7 @@ def coverage(guid: str) -> list[str]:
                                                       "Unknown") != "Unknown":
             missing.append("card count of different races")
         for name in _tagged_classes(variable.get("m_CardFilter"), []):
-            if name not in SUPPORTED_FILTERS:
+            if name not in SUPPORTED_FILTERS and not bridge.filter_accepted(name):
                 missing.append(f"filter {name}")
     for clause in raw.get("m_AbilityEffectList") or []:
         effect_type, effect = _stored("AbilityEffectTemplate", _guid(clause.get("m_EffectTemplateId")))
