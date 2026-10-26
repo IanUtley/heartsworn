@@ -5,10 +5,12 @@ spell points, life and counter costs) is planned and taken in services/tournamen
 only the effects that are left. An optional ability is accepted or declined by the player's opt-in before it is
 resolved, and a declined one never reaches the interpreter.
 
-Two costs do reach the interpreter and stay refused. A variable activation cost's X value is not passed to it. A cost
-that names cards to sacrifice, discard or exhaust has its selection in the native cost_target_map
-(rules_port/resolution.py), which the effects may count ("for each troop exhausted this way"). Both abilities stay on
-the native path.
+A cost that names cards to sacrifice, discard or exhaust is paid the same way, and its cards reach the effects only
+through the ability's list variables ("for each troop exhausted this way", the ExhaustedCards list). Those variables are
+not in the interpreter's supported set, so an ability that reads them is refused by its variables, not here.
+
+A variable activation cost stays refused: its X value is not passed to the interpreter, and the effects read it through
+AbilityPropertyVariable (which is also refused), or through a card filter the interpreter does not model.
 """
 
 from __future__ import annotations
@@ -17,9 +19,6 @@ from typing import Any
 
 # Costs paid before the ability is put on the chain, so resolution never sees them.
 PAID_BEFORE_CHAIN = ("m_ActivationCost", "m_ChargePointCost", "m_LifeCost", "m_SpellPointCost", "m_CounterCosts")
-
-# Cost fields that name the cards the player selects to pay with. A ResourceId with the zero GUID names nothing.
-COST_TARGET_FIELDS = ("m_SacrificeTarget", "m_DiscardTarget", "m_DiscardTargets", "m_ExhaustTarget", "m_ExhaustTargets")
 
 _NO_GUID = "00000000-0000-0000-0000-000000000000"
 
@@ -38,7 +37,4 @@ def unsupported_costs(raw: dict[str, Any]) -> list[str]:
     missing: list[str] = []
     if _is_set(raw.get("m_VariableActivationCost")):
         missing.append("cost or optional (m_VariableActivationCost)")
-    for field_name in COST_TARGET_FIELDS:
-        if _is_set(raw.get(field_name)):
-            missing.append(f"cost or optional ({field_name})")
     return missing
