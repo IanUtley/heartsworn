@@ -18,7 +18,16 @@ EFFECTS = {
     "TransformCardAbilityEffectTemplate",
     "TransformCardAtRandomAbilityEffectTemplate",
     "CreateTokenCopyAbilityEffectTemplate",
+    "TransformSelfAbilityEffectTemplate",
+    "ConscriptAbilityEffectTemplate",
 }
+
+# The effects whose target is the player (their champion stands for them). Only Conscript takes a player target as
+# its own meaning. For every other effect here a player target has no card to act on, so it is refused.
+PLAYER_TARGET_EFFECTS = {"ConscriptAbilityEffectTemplate"}
+
+# The typed amount field an effect reads, when it is not m_InputValue.
+AMOUNT_FIELDS = {"ConscriptAbilityEffectTemplate": "m_Amount"}
 
 
 def refusals(kind: str, effect: dict[str, Any], target_kind: str) -> list[str]:
@@ -29,7 +38,7 @@ def refusals(kind: str, effect: dict[str, Any], target_kind: str) -> list[str]:
     missing: list[str] = []
     if effect.get("m_SerializedTAC"):
         missing.append(f"{kind} with a serialized TAC")
-    if target_kind == "PlayerTargetTemplate":
+    if target_kind == "PlayerTargetTemplate" and kind not in PLAYER_TARGET_EFFECTS:
         missing.append(f"{kind} of a player")
     if kind == "TransformCardAbilityEffectTemplate" and not effect.get("m_Portal"):
         template = str((effect.get("m_CardTemplateId") or {}).get("m_Guid") or ZERO_GUID)
@@ -90,6 +99,18 @@ def _transform_at_random(context: Any, target: int, count: int | None) -> None:
     transform_card_at_random(context)
 
 
+def _transform_self(context: Any, target: int, count: int | None) -> None:
+    # C# TransformSelfAbilityEffectTemplate: the source becomes a copy of the target (a replica when authored), or a
+    # garden plant at random. The leaf reads the source and the target from the battle state (both bridged).
+    context.transform_self()
+
+
+def _conscript(context: Any, target: int, count: int | None) -> None:
+    # C# ConscriptAbilityEffectTemplate: cards from the deck for the player (the target is the player's champion).
+    # The leaf reads its amount from the bridged ability variables, and the owner from the target.
+    context.conscript()
+
+
 def _copy_token(context: Any, target: int, count: int | None) -> None:
     # C# CreateTokenCopyAbilityEffectTemplate: copies of the target, as many as the effect's count.
     from rules_port.token_effects import create_token_copy
@@ -101,4 +122,6 @@ _RUNNERS: dict[str, Callable[[Any, int, int | None], None]] = {
     "TransformCardAbilityEffectTemplate": _transform,
     "TransformCardAtRandomAbilityEffectTemplate": _transform_at_random,
     "CreateTokenCopyAbilityEffectTemplate": _copy_token,
+    "TransformSelfAbilityEffectTemplate": _transform_self,
+    "ConscriptAbilityEffectTemplate": _conscript,
 }

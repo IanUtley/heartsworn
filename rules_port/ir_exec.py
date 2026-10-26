@@ -27,6 +27,7 @@ from gamedata.mechanics import CLASSES
 from gamedata.mechanics_fields import current_fields
 from gamedata.mechanics_objects import MechanicsObject, from_record
 from gamedata.records import RecordObject
+from rules_port.ir_exec_transform import AMOUNT_FIELDS as TRANSFORM_AMOUNT_FIELDS
 from rules_port.ir_exec_transform import EFFECTS as TRANSFORM_EFFECTS
 from rules_port.ir_exec_transform import refusals as transform_refusals
 from rules_port.ir_exec_transform import run as run_transform_effect
@@ -1427,10 +1428,10 @@ def _comparison_ops(value: Any, out: list[str]) -> list[str]:
 _COVERAGE_STACK: set[str] = set()
 
 
-def _amount_refusals(effect: dict[str, Any], raw: dict[str, Any]) -> list[str]:
+def _amount_refusals(effect: dict[str, Any], raw: dict[str, Any], field_name: str = "m_InputValue") -> list[str]:
     """An effect's amount the interpreter cannot bind: a kind it does not read, or a variable the ability does not
     declare."""
-    value = effect.get("m_InputValue")
+    value = effect.get(field_name)
     if not value:
         return []
     kind = _short(value.get("_t"))
@@ -1610,7 +1611,7 @@ def coverage(guid: str) -> list[str]:
             target_kind = _short(_stored("AbilityTargetTemplate", _guid(target_ids[index]))[0]) \
                 if index < len(target_ids) else ""
             missing.extend(transform_refusals(kind, effect, target_kind))
-            missing.extend(_amount_refusals(effect, raw))
+            missing.extend(_amount_refusals(effect, raw, TRANSFORM_AMOUNT_FIELDS.get(kind, "m_InputValue")))
             continue
         if kind in ir_exec_resources.EFFECTS:
             missing.extend(ir_exec_resources.coverage_effect(kind, effect, clause, raw))
