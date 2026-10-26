@@ -983,6 +983,10 @@ def _reveal_cards(root: MechanicsObject, clause: Any, effect_raw: dict[str, Any]
     from rules_port.reveal_effects import reveal_cards
     context = scope.context
     targets = _targets(root, int(_field(clause, "m_TargetTemplateIndex") or 0), scope)
+    # No card to show: nothing is revealed. The live leaf would otherwise fall back to a zone-and-count reveal.
+    if not targets:
+        scope.context.bstate["revealed_cards"] = []
+        return
     saved = {key: context.bstate.get(key) for key in ("resolving_owner_id",)}
     previous_template, previous_targets = context.effect_template_override, context.effect_targets
     context.effect_template_override = effect_raw
