@@ -976,8 +976,8 @@ def live_event(event_type: str, owner_uid: int, data: dict[str, Any], trigger_so
                target_player_uid: Any = None) -> dict[str, Any]:
     """The interpreter's event for a live trigger: its player, its card and target player, and for a zone move the
     card and zones the live dispatch recorded (``event_source_collection`` and ``event_destination_collection``)."""
-    event: dict[str, Any] = {"player": owner_uid, **ir_triggers.event_fields(event_type, trigger_source_uid,
-                                                                             target_player_uid)}
+    event: dict[str, Any] = {"player": owner_uid, **ir_triggers.event_fields(
+        event_type, trigger_source_uid, target_player_uid, data)}
     if event_type == "CardEnteredZoneEvent":
         event["card"] = trigger_source_uid
         event["from"] = data.get("event_source_collection")

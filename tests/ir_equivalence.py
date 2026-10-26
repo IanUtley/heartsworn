@@ -283,7 +283,8 @@ def _live(case):
                                 player_uid=pl_t, ai_uid=ai_t, battle_state=bstate,
                                 event_type=case["event"], source_card_id=source,
                                 source_player_id=TROOP_OWNER,
-                                target_player_id=case.get("target_player"))
+                                target_player_id=case.get("target_player"),
+                                data={"event_int_attribute": case.get("int_attribute")})
     # The live trigger goes on the battle stack; the chain resolves it (and anything it queues).
     for _ in range(8):
         if not bstate.get("stack"):
@@ -551,11 +552,14 @@ def auto_cases(limit):
         # A damage event names the damaged card's controller: the player's own troop's owner and the opposing one,
         # so a "when you are dealt damage" ability runs on one and not the other.
         targets = [TROOP_OWNER, OPPOSING_OWNER] if event in TRIGGER_EVENTS else [None]
+        # An attribute gain names the attribute its ability's TriggerEventIntAttribute tests.
+        attribute = next((part.get("m_Attribute") for part in _trigger_condition_parts(raw)
+                          if part.get("_t", "").endswith("TriggerEventIntAttribute")), None)
         for target in targets:
             cases.append({"name": f"{event}: {raw.get('m_GameText', '')[:70]}",
                           "ability": record.guid.lower(), "event": event,
                           "opposing": [], "prepare": _threshold_prepare(raw), "moved": moved,
-                          "target_player": target})
+                          "target_player": target, "int_attribute": attribute})
         if len(cases) >= limit:
             break
     return cases
