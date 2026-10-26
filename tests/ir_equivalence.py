@@ -27,12 +27,37 @@ TROOP_OWNER = 5          # the player (owns the player champion)
 OPPOSING_OWNER = 0       # the AI (owns the AI champion)
 
 
-def _template_for(db, ability_guid):
-    row = db.execute(
-        "SELECT guid FROM card_templates WHERE abilities_json LIKE ? "
-        "ORDER BY (card_type='Troop') DESC LIMIT 1",
-        (f"%{ability_guid}%",)).fetchone()
+def _any_template(db, ability_guid):
+    """A troop-first card template that carries the ability, whatever else it carries. For a direct resolution
+    (no trigger dispatch), the card's other abilities do not run, so only the ability itself matters."""
+    row = db.execute("SELECT guid FROM card_templates WHERE abilities_json LIKE ? "
+                     "ORDER BY (card_type='Troop') DESC LIMIT 1", (f"%{ability_guid}%",)).fetchone()
     return row[0] if row else None
+
+
+def _event_of(ability_guid):
+    """The trigger event an ability names (its short name), or "" for a static ability."""
+    from gamedata import DEFAULT_RECORD_STORE as STORE
+    for record in STORE.load("AbilityTemplate"):
+        if record.guid.lower() == ability_guid:
+            raw = record.to_dict(include_metadata=True)
+            return str((raw.get("m_TriggerEventType") or {}).get("m_InternalType") or "").rsplit(".", 1)[-1]
+    return ""
+
+
+def _template_for(db, ability_guid, event):
+    """A troop-first card template for this ability. Another triggered ability on the card can fire from this
+    ability's effects (an Inspire on a summoning troop, say), and the live side would then run it too, so a
+    card with any other triggered ability cannot stand for this ability alone. None when no usable card exists."""
+    rows = db.execute(
+        "SELECT guid, abilities_json FROM card_templates WHERE abilities_json LIKE ? "
+        "ORDER BY (card_type='Troop') DESC",
+        (f"%{ability_guid}%",)).fetchall()
+    for guid, abilities in rows:
+        others = [item for item in json.loads(abilities or "[]") if item.lower() != ability_guid]
+        if all(not _event_of(item.lower()) for item in others):
+            return guid
+    return None
 
 
 MOVED_UID = 503
@@ -41,12 +66,25 @@ MOVED_UID = 503
 SOURCE_UID = 900
 
 
-def _scenario(ability_guid, opposing_troops, moved=None, extra=(), champion=False):
+class _SeededRng:
+    """The battle's session RNG (``next(bound)``), seeded per ability so both sides draw the same numbers."""
+
+    def __init__(self, seed):
+        import random
+        self._random = random.Random(seed)
+
+    def next(self, bound):
+        return self._random.randrange(bound)
+
+
+def _scenario(ability_guid, opposing_troops, moved=None, extra=(), champion=False, any_template=False):
     """A fresh battle with the ability's troop in play for its owner, and the opposing troops.
     ``extra`` places more cards: (uid, owner, zone, permanent_buffs)."""
+    import zlib
     dbmod._db = make_db()
     db = dbmod._db
     pl_t, ai_t, game, handler, bstate, player_champ, ai_champ = scenarios._setup(db)
+    bstate["_rules_rng"] = _SeededRng(zlib.crc32(ability_guid.encode()))
     for uid, owner, zone, buffs in extra:
         add_card(db, uid, owner, scenarios.TPL_GLADIATOR, loc=zone)
         db.execute("UPDATE game_cards SET permanent_buffs=? WHERE card_uid=?", (buffs, uid))
@@ -54,12 +92,13 @@ def _scenario(ability_guid, opposing_troops, moved=None, extra=(), champion=Fals
         # A champion built-in: the champions carry the ability, so no troop is placed for it. A moved card
         # (a troop that dies, say) still exists in the battle, in the zone it moved to.
         if moved and moved[0] != 900:
-            uid, owner, source, destination = moved
-            add_card(db, uid, owner, scenarios.TPL_GLADIATOR, loc=source)
+            uid, owner, source, destination = moved[:4]
+            add_card(db, uid, owner, _moved_template(moved), loc=source)
             db.execute("UPDATE game_cards SET location=? WHERE card_uid=?", (destination, uid))
         db.commit()
         return db, pl_t, ai_t, game, handler, bstate, player_champ, ai_champ
-    template = _template_for(db, ability_guid)
+    template = (_any_template(db, ability_guid) if any_template
+                else _template_for(db, ability_guid, _event_of(ability_guid)))
     if template is None:
         return None
     # The ability's troop starts where a moved case says it does, when that case moves it.
@@ -70,8 +109,8 @@ def _scenario(ability_guid, opposing_troops, moved=None, extra=(), champion=Fals
         if damage:
             db.execute("UPDATE game_cards SET card_damage=? WHERE card_uid=?", (damage, uid))
     if moved and moved[0] != 900:
-        uid, owner, source, destination = moved
-        add_card(db, uid, owner, scenarios.TPL_GLADIATOR, loc=source)
+        uid, owner, source, destination = moved[:4]
+        add_card(db, uid, owner, _moved_template(moved), loc=source)
         db.execute("UPDATE game_cards SET location=? WHERE card_uid=?", (destination, uid))
     elif moved:
         db.execute("UPDATE game_cards SET location=? WHERE card_uid=900", (moved[3],))
@@ -79,11 +118,32 @@ def _scenario(ability_guid, opposing_troops, moved=None, extra=(), champion=Fals
     return db, pl_t, ai_t, game, handler, bstate, player_champ, ai_champ
 
 
-def _snapshot(db, bstate, player_champ, ai_champ):
+# Chain bookkeeping: the ability's place on the chain, which the engine (not the effect) sends. The effects are
+# what the comparison is about, so these are left out of both sides.
+CHAIN_EVENTS = {"AbilityPushedOnChainSessionEventArgs", "ChainEmptySessionEventArgs",
+                "RemovedTopOfChainSessionEventArgs", "TopOfChainResolvedSessionEventArgs",
+                "AbilityCancelledSessionEventArgs"}
+
+
+def _client_events(game, start=0):
+    """The effects' events the game sent the client after ``start`` (its index before the run), in order: each
+    one's class and its scalar attributes."""
+    out = []
+    for event in (getattr(game, "events", []) or [])[start:]:
+        if type(event).__name__ in CHAIN_EVENTS:
+            continue
+        scalars = {key: value for key, value in vars(event).items()
+                   if isinstance(value, (int, str, bool)) or value is None}
+        out.append((type(event).__name__, sorted(scalars.items(), key=lambda kv: kv[0])))
+    return out
+
+
+def _snapshot(db, bstate, player_champ, ai_champ, game=None, start_events=0):
     rows = db.execute(
         "SELECT card_uid, user_id, location, card_damage, permanent_buffs FROM game_cards "
         "ORDER BY card_uid").fetchall()
     return {
+        "events": _client_events(game, start_events),
         "player_health": bstate.get("player_health"),
         "ai_health": bstate.get("ai_health"),
         "champion_counters": copy.deepcopy(bstate.get("champion_counters") or {}),
@@ -92,19 +152,29 @@ def _snapshot(db, bstate, player_champ, ai_champ):
     }
 
 
+# (live, interpreter) seconds for each case both sides ran and agreed on.
+TIMINGS: list[tuple[float, float]] = []
+
+# Seconds the last _live run spent dispatching the trigger and resolving its chain (set by _live).
+LAST_TIMING = [0.0]
+
+
 def _live(case):
     from rules_port.context import EffectContext  # noqa: F401
     from rules_port.triggers import dispatch_native_trigger
+    import time
     setup = _scenario(case["ability"], case["opposing"], case.get("moved"),
                       case.get("extra", ()), case.get("champion", False))
     if setup is None:
         return None
     db, pl_t, ai_t, game, handler, bstate, player_champ, ai_champ = setup
     case["prepare"](db, bstate, player_champ, ai_champ)
+    start_events = len(game.events)
     source = player_champ if case.get("champion") else SOURCE_UID
     from rules_port.resolution import resolve_port_trigger
+    started = time.perf_counter()
     if case.get("moved"):
-        uid, owner, zone_from, zone_to = case["moved"]
+        uid, owner, zone_from, zone_to = case["moved"][:4]
         dispatch_native_trigger(db=db, handler=handler, game=game, session=SessionStub(),
                                 player_uid=pl_t, ai_uid=ai_t, battle_state=bstate,
                                 event_type=case["event"], source_card_id=uid,
@@ -122,26 +192,35 @@ def _live(case):
             break
         resolve_port_trigger(handler, game, SessionStub(), db, pl_t, ai_t, bstate,
                              bstate["stack"].pop())
-    return _snapshot(db, bstate, player_champ, ai_champ)
+    LAST_TIMING[0] = time.perf_counter() - started
+    return _snapshot(db, bstate, player_champ, ai_champ, game, start_events)
+
+
+class NotRunByInterpreter(Exception):
+    """The engine switch was on, but the interpreter did not run the ability (the live path resolved it)."""
 
 
 def _interpreted(case):
-    from rules_port.context import EffectContext
-    from rules_port.ir_exec import run_ability
-    setup = _scenario(case["ability"], case["opposing"], case.get("moved"),
-                      case.get("extra", ()), case.get("champion", False))
-    db, pl_t, ai_t, game, handler, bstate, player_champ, ai_champ = setup
-    source = player_champ if case.get("champion") else SOURCE_UID
-    case["prepare"](db, bstate, player_champ, ai_champ)
-    context = EffectContext.from_rules_port(game, SessionStub(), db, handler, pl_t, ai_t, bstate, "")
-    if case.get("moved"):
-        uid, owner, zone_from, zone_to = case["moved"]
-        event = {"player": owner, "card": uid, "from": zone_from, "to": zone_to}
-    else:
-        event = {"player": TROOP_OWNER}
-    run_ability(case["ability"], case["event"], context=context, source_uid=source,
-                owner_uid=TROOP_OWNER, event=event)
-    return _snapshot(db, bstate, player_champ, ai_champ)
+    """The interpreter side: the same trigger dispatch as the live side, with the engine switch on, so the chain
+    protocol is identical and only the effects differ. Raises NotRunByInterpreter when the interpreter did not run."""
+    from rules_port import ir_exec
+    runs = []
+    original = ir_exec.run_ability
+
+    def counting(*args, **kwargs):
+        runs.append(args[0])
+        return original(*args, **kwargs)
+    previous = ir_exec.ENGINE_ON
+    ir_exec.set_engine(True)
+    ir_exec.run_ability = counting
+    try:
+        snapshot = _live(case)
+    finally:
+        ir_exec.run_ability = original
+        ir_exec.set_engine(previous)
+    if not runs:
+        raise NotRunByInterpreter("the interpreter did not run this ability")
+    return snapshot
 
 
 def _nothing(db, bstate, player_champ, ai_champ):
@@ -222,6 +301,75 @@ TURN_EVENTS = {"TurnStartedEvent", "TurnEndedEvent", "CardEnteredZoneEvent"}
 SKIPPED_BY_COVERAGE = []
 
 
+def _trigger_condition_parts(raw):
+    """Every trigger-condition part of a record (the nested AND/OR parts flattened), as dicts."""
+    out = []
+
+    def walk(value):
+        if isinstance(value, dict):
+            if "_t" in value:
+                out.append(value)
+            for item in value.values():
+                walk(item)
+        elif isinstance(value, list):
+            for item in value:
+                walk(item)
+    walk(raw.get("m_TriggerCondition"))
+    return out
+
+
+def _zone_move(db, raw):
+    """The card move a zone trigger needs, read from its own condition: the ability's source moves when the
+    condition names it (a "dies" or "enters play" ability), else another card moves. The zones are the
+    condition's source and destination collections; the owner is the controller unless the condition names
+    the opponent; a card filter's subtype picks the moved card's template."""
+    parts = _trigger_condition_parts(raw)
+    names = {part["_t"].rsplit(".", 1)[-1] for part in parts}
+    zone = next((part for part in parts if part["_t"].endswith("TriggerCardEnteredZone")), {})
+    source = str(zone.get("m_SourceCollection") or "None").lower()
+    destination = str(zone.get("m_DestinationCollection") or "None").lower()
+    source = "hand" if source in ("none", "") else source
+    destination = "warzone" if destination in ("none", "") else destination
+    opposing = bool(zone.get("m_Opposing")) and not zone.get("m_Your")
+    owner = OPPOSING_OWNER if opposing else TROOP_OWNER
+    mover = 900 if "TriggerCardIsAbilitySource" in names else MOVED_UID
+    subtype = ""
+    for part in parts:
+        if part["_t"].endswith("TriggerCardMatchesFilter"):
+            for filt in _trigger_condition_parts({"m_TriggerCondition": part.get("m_CardFilter")}):
+                if filt["_t"].endswith("IsSubType"):
+                    subtype = str(filt.get("m_SubType") or "")
+    template = _subtype_template(db, subtype) if subtype else None
+    return (mover, owner, source, destination) + ((template,) if template else ())
+
+
+def _subtype_template(db, subtype):
+    """A troop template with the subtype (a card a subtype filter can match), or None."""
+    row = db.execute("SELECT guid FROM card_templates WHERE card_type='Troop' AND subtype LIKE ? "
+                     "ORDER BY guid LIMIT 1", (f"%{subtype}%",)).fetchone()
+    return row[0] if row else None
+
+
+def _moved_template(moved):
+    return moved[4] if len(moved) > 4 and moved[4] else scenarios.TPL_GLADIATOR
+
+
+def _threshold_prepare(raw):
+    """A threshold ability's requirement: the controller has the required count of the shard. Other abilities
+    need nothing set up."""
+    from gamedata import DEFAULT_RECORD_STORE  # noqa: F401  (the record is already in raw)
+    import game_engine
+    condition = raw.get("m_AbilityCondition") or {}
+    if not str(condition.get("_t") or "").endswith("AbilityControllerHasThresholdAbilityCondition"):
+        return _nothing
+    flag = game_engine.SHARD_TO_FLAG[str(condition.get("m_ColorFlags") or "").lower()]
+    required = int(condition.get("m_RequiredQuantity") or 0)
+
+    def prepare(db, bstate, player_champ, ai_champ):
+        bstate["player_threshold"] = {flag: required}
+    return prepare
+
+
 def auto_cases(limit):
     """Covered abilities with a turn trigger that a card carries, as cases (the event is their own)."""
     from gamedata import DEFAULT_RECORD_STORE as STORE
@@ -232,7 +380,11 @@ def auto_cases(limit):
     for record in STORE.load("AbilityTemplate"):
         raw = record.to_dict(include_metadata=True)
         event = str((raw.get("m_TriggerEventType") or {}).get("m_InternalType") or "").rsplit(".", 1)[-1]
-        if event not in TURN_EVENTS or _template_for(db, record.guid.lower()) is None:
+        if event not in TURN_EVENTS:
+            continue
+        if _template_for(db, record.guid.lower(), event) is None:
+            SKIPPED_BY_COVERAGE.append((f"{event}: {raw.get('m_GameText', '')[:70]}",
+                                        ["no card template where it fires alone"]))
             continue
         missing = coverage(record.guid.lower())
         if missing:
@@ -240,14 +392,10 @@ def auto_cases(limit):
             continue
         moved = None
         if event == "CardEnteredZoneEvent":
-            # "When this enters play" moves the troop itself; other zone triggers move another card.
-            if "TriggerCardIsAbilitySource" in json.dumps(record.to_dict(include_metadata=True)):
-                moved = (900, TROOP_OWNER, "hand", "warzone")
-            else:
-                moved = (MOVED_UID, TROOP_OWNER, "warzone", "discard")
+            moved = _zone_move(db, raw)
         cases.append({"name": f"{event}: {raw.get('m_GameText', '')[:70]}",
                       "ability": record.guid.lower(), "event": event,
-                      "opposing": [], "prepare": _nothing, "moved": moved})
+                      "opposing": [], "prepare": _threshold_prepare(raw), "moved": moved})
         if len(cases) >= limit:
             break
     return cases
@@ -339,8 +487,140 @@ def _random_prepare(champion_counters):
     return prepare
 
 
+CASE_SECONDS = int(os.environ.get("IR_EQ_CASE_SECONDS", "20"))
+
+
+class CaseTimeout(BaseException):
+    """Not an Exception, so the port's broad handlers cannot swallow it and carry on."""
+    pass
+
+
+# Cards one case may generate (summoned tokens and created cards). A summon loop that keeps making cards is
+# reported as a case that did not settle, not left to run until memory runs out.
+CASE_CARD_LIMIT = int(os.environ.get("IR_EQ_CARD_LIMIT", "300"))
+_generated = [0]
+
+
+def _count_generated_cards():
+    """Count the cards the live path generates, per case, on both sides."""
+    import pvp_db
+    original = pvp_db.db_insert_generated_card
+
+    def counting(*args, **kwargs):
+        _generated[0] += 1
+        if _generated[0] > CASE_CARD_LIMIT:
+            raise CaseTimeout()
+        return original(*args, **kwargs)
+    pvp_db.db_insert_generated_card = counting
+
+
+class _time_limit:
+    """Raise CaseTimeout after ``seconds`` (the harness runs one case at a time, on the main thread)."""
+
+    def __init__(self, seconds):
+        self.seconds = seconds
+
+    def __enter__(self):
+        import signal
+
+        def handler(signum, frame):
+            raise CaseTimeout()
+        self._old = signal.signal(signal.SIGALRM, handler)
+        signal.alarm(self.seconds)
+
+    def __exit__(self, *exc):
+        import signal
+        signal.alarm(0)
+        signal.signal(signal.SIGALRM, self._old)
+        return False
+
+
+def _chosen_targets(ability_guid):
+    """Indices of the ability's targets the player picks (non-automatic AbilityTargetTemplates)."""
+    from gamedata import DEFAULT_RECORD_STORE as STORE
+    record = STORE.get("AbilityTemplate", ability_guid)
+    if record is None:
+        return []
+    indices = []
+    for index, item in enumerate(record.to_dict(include_metadata=True).get("m_AbilityTargetTemplateIds") or []):
+        target = STORE.get("AbilityTargetTemplate", str(item.get("m_Guid") or "").lower())
+        if target is not None and target.to_dict(include_metadata=True).get("_t", "").endswith(".AbilityTargetTemplate") \
+                and not target.to_dict(include_metadata=True).get("m_IsAutoTarget"):
+            indices.append(index)
+    return indices
+
+
+def choice_parity(case, index):
+    """A chosen target, answered: for each candidate the interpreter's pause offers, the interpreter resumed with
+    that answer and the native resolver run with the same target map must leave the same battle and client events.
+    Returns (passed, detail)."""
+    from rules_port.context import EffectContext
+    from rules_port.ir_exec import NeedsChoice, resume_ability, run_ability
+    from rules_port.resolution import resolve_port_ability
+
+    def fresh():
+        db, pl_t, ai_t, game, handler, bstate, player_champ, ai_champ = _scenario(
+            case["ability"], case["opposing"], None, case.get("extra", ()), any_template=True)
+        start = len(game.events)
+        context = EffectContext.from_rules_port(game, SessionStub(), db, handler, pl_t, ai_t, bstate, "")
+        return db, pl_t, ai_t, game, handler, bstate, player_champ, ai_champ, start, context
+
+    db, pl_t, ai_t, game, handler, bstate, player_champ, ai_champ, start, context = fresh()
+    try:
+        run_ability(case["ability"], case["event"], context=context, source_uid=SOURCE_UID,
+                    owner_uid=TROOP_OWNER, event={"player": TROOP_OWNER})
+        return None, "the ability did not pause for a choice"
+    except NeedsChoice as pause:
+        candidates = list(pause.candidates)
+    if not candidates:
+        return None, "no candidate for the choice"
+    for answer in candidates:
+        db, pl_t, ai_t, game, handler, bstate, player_champ, ai_champ, start, context = fresh()
+        try:
+            run_ability(case["ability"], case["event"], context=context, source_uid=SOURCE_UID,
+                        owner_uid=TROOP_OWNER, event={"player": TROOP_OWNER})
+        except NeedsChoice as again:
+            continuation = again.continuation
+        resume_ability(continuation, answer, context=context)
+        interpreted = _snapshot(db, bstate, player_champ, ai_champ, game, start)
+
+        db, pl_t, ai_t, game, handler, bstate, player_champ, ai_champ, start, context = fresh()
+        resolve_port_ability(handler, game, SessionStub(), db, pl_t, ai_t, bstate, case["ability"],
+                             SOURCE_UID, TROOP_OWNER, target_map={index: answer}, instance_id=1)
+        native = _snapshot(db, bstate, player_champ, ai_champ, game, start)
+        if interpreted != native:
+            return False, f"answer {answer}: interpreter {interpreted['cards']} native {native['cards']}"
+    return True, f"{len(candidates)} answers agree"
+
+
+def choice_cases(limit):
+    """Covered turn-event abilities with a chosen target, as cases (the first chosen target's index is used)."""
+    from gamedata import DEFAULT_RECORD_STORE as STORE
+    from rules_port.ir_exec import coverage
+    from tests.tests_combat import make_db as _make
+    cases = []
+    db = _make()
+    for record in STORE.load("AbilityTemplate"):
+        raw = record.to_dict(include_metadata=True)
+        event = str((raw.get("m_TriggerEventType") or {}).get("m_InternalType") or "").rsplit(".", 1)[-1]
+        if event not in TURN_EVENTS:
+            continue
+        indices = _chosen_targets(record.guid.lower())
+        if not indices or coverage(record.guid.lower()) or _any_template(db, record.guid.lower()) is None:
+            continue
+        cases.append((
+            {"name": f"choice {event}: {raw.get('m_GameText', '')[:70]}", "ability": record.guid.lower(),
+             "event": event, "opposing": [(502, 0), (503, 0)], "extra": [(600, TROOP_OWNER, "warzone", "{}"), (601, TROOP_OWNER, "warzone", "{}")],
+             "prepare": _nothing, "moved": None},
+            indices[0]))
+        if len(cases) >= limit:
+            break
+    return cases
+
+
 def main():
     from rules_port.ir_exec import coverage, clear_cards
+    _count_generated_cards()
     from_cards = os.environ.get("IR_EQ_CARDS") == "1"
     card_roots = _card_roots() if from_cards else {}
     resolved = _find_abilities([case["ability"][:8] for case in CASES + CHAMPION_CASES])
@@ -351,7 +631,12 @@ def main():
     expanded = []
     for case in turn_cases:
         expanded.extend(random_cases(case, random_count, seed) if random_count else [case])
-    for case in CHAMPION_CASES + CASES + expanded:
+    # IR_EQ_CHUNK="start:end" runs a slice of the cases in this process (the port keeps memory across cases, so
+    # a long run is split into several processes).
+    start, end = (int(part) for part in os.environ.get("IR_EQ_CHUNK", f"0:{len(expanded) + 9}").split(":"))
+    everything = CHAMPION_CASES + CASES + expanded
+    print("CASES", len(everything), flush=True)
+    for case in everything[start:end]:
         case["ability"] = resolved.get(case["ability"][:8], case["ability"])
         if from_cards and case["ability"] not in card_roots:
             uncovered.append((case["name"], ["no card file for this ability"]))
@@ -360,19 +645,35 @@ def main():
         if missing:
             uncovered.append((case["name"], missing))
             continue
-        live = _live(case)
-        if live is None:
-            uncovered.append((case["name"], ["no card template carries this ability"]))
-            continue
+        if os.environ.get("IR_EQ_PROGRESS") == "1":
+            print("CASE", case["name"], flush=True)
+        _generated[0] = 0
         try:
-            interpreted = _interpreted(case)
+            with _time_limit(CASE_SECONDS):
+                live = _live(case)
+                live_seconds = LAST_TIMING[0]
+                if live is None:
+                    uncovered.append((case["name"], ["no card template carries this ability"]))
+                    continue
+                _generated[0] = 0
+                interpreted = _interpreted(case)
+                interpreted_seconds = LAST_TIMING[0]
+        except CaseTimeout:
+            # A chain that does not settle (a summon whose tokens summon more) is reported, not compared.
+            uncovered.append((case["name"], [f"the live chain did not settle within {CASE_SECONDS}s"]))
+            continue
         except NotImplementedError as exc:
             uncovered.append((case["name"], [str(exc)]))
             continue
+        except NotRunByInterpreter as exc:
+            uncovered.append((case["name"], [str(exc)]))
+            continue
         except Exception as exc:  # a crash is a failure, reported with its cause
-            failed.append((case["name"], live, f"{type(exc).__name__}: {exc}"))
+            failed.append((case["name"], "", f"{type(exc).__name__}: {exc}"))
             continue
         (passed if live == interpreted else failed).append((case["name"], live, interpreted))
+        if live == interpreted:
+            TIMINGS.append((live_seconds, interpreted_seconds))
     for name, _live_state, _ir_state in passed:
         print("PASS", name)
     for name, live_state, ir_state in failed:
@@ -385,6 +686,30 @@ def main():
         clear_cards()
         print(f"interpreter ran from {len(card_roots)} card file(s): {', '.join(sorted(set(card_roots.values())))}")
     print(f"{len(passed)} passed, {len(failed)} failed, {len(uncovered)} uncovered")
+    choice_results = []
+    for case, index in choice_cases(int(os.environ.get("IR_EQ_CHOICES", "40"))):
+        try:
+            choice_results.append((case["name"], *choice_parity(case, index)))
+        except Exception as exc:  # reported with its cause
+            choice_results.append((case["name"], False, f"{type(exc).__name__}: {exc}"))
+    for name, ok, detail in choice_results:
+        if ok is None:
+            print("CHOICE SKIP", name, "-", detail)
+        else:
+            print("CHOICE", "PASS" if ok else "FAIL", name, "-", detail)
+    if choice_results:
+        print(f"choices: {sum(1 for _, ok, _ in choice_results if ok)} passed, "
+              f"{sum(1 for _, ok, _ in choice_results if ok is False)} failed, "
+              f"{sum(1 for _, ok, _ in choice_results if ok is None)} skipped")
+    if TIMINGS:
+        live_total = sum(live for live, _ in TIMINGS)
+        interp_total = sum(interp for _, interp in TIMINGS)
+        ratios = sorted(interp / live for live, interp in TIMINGS if live > 0)
+        print(f"TIMING over {len(TIMINGS)} cases both sides ran (dispatch + chain, seconds):")
+        print(f"  live total {live_total:.3f}s, interpreter total {interp_total:.3f}s, "
+              f"ratio {interp_total / live_total:.2f}x")
+        print(f"  per-case ratio: median {ratios[len(ratios) // 2]:.2f}x, "
+              f"min {ratios[0]:.2f}x, max {ratios[-1]:.2f}x")
 
 
 # Expected results for the custom (Python-only) cards in ir_cards/custom/: the source troop's card_damage

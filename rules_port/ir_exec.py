@@ -29,12 +29,14 @@ from gamedata.records import RecordObject
 # A CounterModifier's operation, as the live counter primitive names it.
 COUNTER_OPERATIONS = {"Add": "add", "Remove": "remove", "Set": "set"}
 
+# C# EComparisons. An operator outside this table is refused by coverage.
 _COMPARISONS = {
     "GreaterThanOrEqual": lambda a, b: a >= b,
     "GreaterThan": lambda a, b: a > b,
     "LessThanOrEqual": lambda a, b: a <= b,
     "LessThan": lambda a, b: a < b,
-    "Equal": lambda a, b: a == b,
+    "Equals": lambda a, b: a == b,
+    "NotEqual": lambda a, b: a != b,
 }
 
 
@@ -166,6 +168,8 @@ class Card:
     is_champion: bool
     card_type: str
     counters: dict[str, int]
+    # The card's current subtype line ("Human Cleric"); None when it is not known.
+    subtype: str | None = None
 
 
 @dataclass
@@ -179,6 +183,18 @@ class Scope:
     variables: dict[str, int] = field(default_factory=dict)
     table: list[dict[str, int]] | None = None
     event: dict[str, Any] = field(default_factory=dict)   # player, card, from, to
+    chosen: dict[int, int | None] = field(default_factory=dict)   # target index -> the card the player chose
+
+
+class NeedsChoice(Exception):
+    """The ability reached a target the player chooses. Its continuation (JSON-serialisable) resumes it with
+    ``resume_ability`` once the player answers; ``candidates`` are the cards the answer may name."""
+
+    def __init__(self, continuation: dict[str, Any], candidates: list[int], optional: bool):
+        super().__init__(f"choice of target {continuation['target_index']} for {continuation['ability_guid']}")
+        self.continuation = continuation
+        self.candidates = candidates
+        self.optional = optional
 
 
 def _champion_owners(bstate: dict[str, Any]) -> dict[int, int]:
@@ -195,20 +211,60 @@ def _battle_cards(scope: Scope) -> list[Card]:
     for uid, owner in _champion_owners(bstate).items():
         cards.append(Card(uid=uid, owner=owner, zone="champions", is_champion=True,
                           card_type="Champion",
-                          counters={k: int(v) for k, v in (counters.get(str(uid)) or {}).items()}))
+                          counters={k: int(v) for k, v in (counters.get(str(uid)) or {}).items()},
+                          subtype=_champion_subtype(context, owner)))
     rows = context.db.execute(
-        "SELECT card_uid, user_id, location, is_champion, card_type, permanent_buffs "
+        "SELECT card_uid, user_id, location, is_champion, card_type, permanent_buffs, template_guid "
         "FROM game_cards WHERE session_id=?", (context.session.session_id,)).fetchall()
-    for card_uid, user_id, location, is_champion, card_type, buffs_json in rows:
+    from pvp_db import db_template_subtype
+    for card_uid, user_id, location, is_champion, card_type, buffs_json, template in rows:
         buffs = json.loads(buffs_json or "{}")
         names = buffs.get("counter_guids") or {}
         values = buffs.get("counters") or {}
+        # The current subtype: a SubTypeModifier's value in the card's buffs, else the template's.
+        subtype = buffs.get("subtype")
+        if subtype is None:
+            subtype = db_template_subtype(template, conn=context.db) if template else ""
         cards.append(Card(uid=int(card_uid), owner=int(user_id),
                           zone=str(location or "").lower(), is_champion=bool(is_champion),
                           card_type=str(card_type or ""),
                           counters={str(names[name]).lower(): int(count)
-                                    for name, count in values.items() if name in names}))
+                                    for name, count in values.items() if name in names},
+                          subtype=str(subtype or "")))
     return cards
+
+
+def _champion_subtype(context: Any, owner: int) -> str | None:
+    """A champion's subtype line from its template, by its controller: the AI's (owner 0) or the player's
+    (the profile's id). None when the battle does not name that champion's template (a PvP opponent)."""
+    handler = context.handler
+    if int(owner) == 0:
+        guid = getattr(handler, "_ai_champ_guid", None)
+    else:
+        profile = getattr(handler, "user_profile", None) or {}
+        guid = (getattr(handler, "_player_champ_guid", None)
+                if int(profile.get("id", -1) or -1) == int(owner) else None)
+    if not guid:
+        return None
+    from rules_port.targeting import _champion_subtype as template_subtype
+    return template_subtype(str(guid).lower())
+
+
+def _is_subtype(wanted: str, card: Card) -> bool:
+    """C# IsSubType.IsMatch: "*" matches any card; otherwise Card.HasSubType on its subtype line. A
+    multi-word value is a substring match; a single word matches a whole word, ignoring case."""
+    if not wanted:
+        return False
+    if wanted == "*":
+        return True
+    if card.subtype is None:
+        raise NotImplementedError("subtype of a champion the battle does not name")
+    current = card.subtype
+    if not current:
+        return False
+    if " " in wanted:
+        return wanted in current
+    return wanted.lower() in {word for word in current.lower().split(" ")}
 
 
 def _filter_holds(card_filter: Any, card: Card, scope: Scope) -> bool:
@@ -254,6 +310,8 @@ def _filter_holds(card_filter: Any, card: Card, scope: Scope) -> bool:
         return card.zone in zones
     if cls == "IsAbilitySource":
         return card.uid == scope.source_uid
+    if cls == "IsSubType":
+        return _is_subtype(str(typed.m_SubType or ""), card)
     raise NotImplementedError(f"card filter {cls or type(typed).__name__}")
 
 
@@ -316,6 +374,12 @@ def _ability_condition_holds(condition: Any, scope: Scope) -> bool:
     thresholds = _participant_thresholds(scope.context.bstate, int(scope.owner_uid))
     available = int(thresholds.get(flag, thresholds.get(str(flag), 0)) or 0)
     return _COMPARISONS[typed.m_ComparisonOp](available, int(typed.m_RequiredQuantity))
+
+
+def _card_owner(scope: Scope, uid: int) -> int | None:
+    """The owner of a battle card, None when the battle has no such card."""
+    card = _card_by_uid(scope, uid)
+    return card.owner if card else None
 
 
 def _card_by_uid(scope: Scope, uid: Any) -> Card | None:
@@ -406,11 +470,129 @@ def _targets(root: MechanicsObject, index: int, scope: Scope) -> list[int]:
     if kind == "AbilitySourceCardTargetTemplate":
         return [scope.source_uid]
     if kind == "AbilityTargetTemplate" and template.m_IsAutoTarget:
-        zones = {part.strip().lower() for part in str(template.m_CollectionFlags or "").split("|") if part.strip()}
-        return [card.uid for card in _battle_cards(scope)
-                if (not zones or card.zone in zones)
-                and _filter_holds(template.m_CardFilter, card, scope)]
+        return _card_candidates(template, scope)
+    if kind == "AbilityTargetTemplate" and index in scope.chosen:
+        # A chosen target the player has answered: the card, or nothing when the player chose none.
+        chosen = scope.chosen[index]
+        return [] if chosen is None else [int(chosen)]
+    if kind == "PlayerTargetTemplate":
+        # An automatic player target: the controller ("You") or the one opponent. Its champion stands for
+        # the player, as the live resolver's player target does for damage and the summoned tokens' owner.
+        player = str(template.m_PlayerFilter or "")
+        owners = sorted({owner for owner in _champion_owners(scope.context.bstate).values()})
+        if player == "Self":
+            return [_player_champion(scope, int(scope.owner_uid))]
+        if player == "SingleOpponent":
+            others = [owner for owner in owners if owner != int(scope.owner_uid)]
+            if len(others) != 1:
+                raise NotImplementedError("the opponent is not a single player")
+            return [_player_champion(scope, others[0])]
+        raise NotImplementedError(f"player target {player}")
     raise NotImplementedError(f"target {kind}")
+
+
+# The player filters an automatic card target honours (C# EPlayerCardTargets). Anything else is refused.
+TARGET_PLAYER_FILTERS = {"Self", "MultipleOpponents", "SingleOpponent", "MultiplePlayers"}
+
+
+def _card_candidates(template: MechanicsObject, scope: Scope) -> list[int]:
+    """The cards an AbilityTargetTemplate's zones, player filter and card filter pass: the automatic targets,
+    and the candidates a chosen target is answered from."""
+    zones = {part.strip().lower() for part in str(template.m_CollectionFlags or "").split("|") if part.strip()}
+    player = str(template.m_PlayerFilter or "MultiplePlayers")
+    return [card.uid for card in _battle_cards(scope)
+            if (not zones or card.zone in zones)
+            and _player_passes(player, card.owner, scope)
+            and _filter_holds(template.m_CardFilter, card, scope)]
+
+
+def _needs_choice(root: MechanicsObject, index: int) -> bool:
+    """Whether a clause's target is a card the player picks (a non-automatic AbilityTargetTemplate)."""
+    template = _load("AbilityTargetTemplate", _guid(root.m_AbilityTargetTemplateIds[index]))
+    return _short(template.type_name) == "AbilityTargetTemplate" and not template.m_IsAutoTarget
+
+
+def _choice_candidates(root: MechanicsObject, index: int, scope: Scope) -> tuple[list[int], bool]:
+    """The cards a chosen target may name, and whether the player may choose none (its m_Optional)."""
+    template = _load("AbilityTargetTemplate", _guid(root.m_AbilityTargetTemplateIds[index]))
+    return _card_candidates(template, scope), bool(template.m_Optional)
+
+
+def _player_passes(player_filter: str, owner: int, scope: Scope) -> bool:
+    """Whether a card controlled by ``owner`` is in a target's player filter, relative to the ability's controller."""
+    controller = int(scope.owner_uid)
+    if player_filter == "Self":
+        return owner == controller
+    if player_filter in ("MultipleOpponents", "SingleOpponent"):
+        return owner != controller
+    if player_filter == "MultiplePlayers":
+        return True
+    raise NotImplementedError(f"target player filter {player_filter}")
+
+
+def _player_champion(scope: Scope, owner: int) -> int:
+    """The champion UID of a player in the battle."""
+    for uid, champion_owner in _champion_owners(scope.context.bstate).items():
+        if champion_owner == int(owner):
+            return uid
+    raise NotImplementedError(f"player {owner} has no champion in the battle")
+
+
+def _card_abilities(template_guid: str) -> list[str]:
+    """The ability GUIDs a card template carries (its m_CardAbilities)."""
+    from gamedata import DEFAULT_RECORD_STORE as STORE
+    record = STORE.get("CardTemplate", template_guid.lower())
+    if record is None:
+        raise NotImplementedError(f"token template {template_guid} is missing from the Records")
+    raw = record.to_dict(include_metadata=True)
+    return [str(_guid(item.get("m_CardAbilityId")) or "") for item in raw.get("m_CardAbilities") or []]
+
+
+def _summon_tokens(root: MechanicsObject, clause: Any, effect_raw: dict[str, Any], scope: Scope) -> None:
+    """C# SummonTokenTroop: the live token primitive creates the tokens for the target's controller. Its
+    fields come from this effect's stored template and its numbers from the ability's bound variables."""
+    from rules_port import token_effects
+    context = scope.context
+    # The live resolver creates the controller's tokens first, then the others'.
+    targets = sorted(_targets(root, int(_field(clause, "m_TargetTemplateIndex") or 0), scope),
+                     key=lambda uid: (_card_owner(scope, uid) != int(scope.owner_uid), uid))
+    saved = {key: context.bstate.get(key) for key in
+             ("resolving_owner_id", "resolving_target_uid", "ability_variables")}
+    previous_template = context.effect_template_override
+    context.effect_template_override = effect_raw
+    context.bstate["resolving_owner_id"] = int(scope.owner_uid)
+    context.bstate["ability_variables"] = dict(scope.variables)
+    try:
+        for target in targets:
+            context.bstate["resolving_target_uid"] = int(target)
+            token_effects.summon_token(context)
+    finally:
+        context.effect_template_override = previous_template
+        for key, value in saved.items():
+            if value is None:
+                context.bstate.pop(key, None)
+            else:
+                context.bstate[key] = value
+
+
+def _heal_owners(root: MechanicsObject, index: int, scope: Scope) -> list[int]:
+    """The players a heal lands on: the controller ("You"), the one opponent, or the owners of the champion
+    targets. A player's id is the live resolver's owner id (the AI is 0)."""
+    template = _load("AbilityTargetTemplate", _guid(root.m_AbilityTargetTemplateIds[index]))
+    if _short(template.type_name) != "PlayerTargetTemplate":
+        return [owner for owner in (_card_owner(scope, uid) for uid in _targets(root, index, scope)) if owner is not None]
+    player = str(template.m_PlayerFilter or "")
+    if player == "Self":
+        return [int(scope.owner_uid)]
+    if player == "SingleOpponent":
+        owners = set(_champion_owners(scope.context.bstate).values())
+        others = sorted(owner for owner in owners if owner != int(scope.owner_uid))
+        if len(others) == 1:
+            return others
+        if not others and int(scope.owner_uid) != 0:
+            return [0]  # PvE: the opponent is the AI, owner 0
+        raise NotImplementedError("the opponent is not a single player")
+    raise NotImplementedError(f"player target {player}")
 
 
 def _run_clause(root: MechanicsObject, clause: Any, scope: Scope) -> None:
@@ -421,13 +603,33 @@ def _run_clause(root: MechanicsObject, clause: Any, scope: Scope) -> None:
         for target in _targets(root, int(_field(clause, "m_TargetTemplateIndex") or 0), scope):
             kill_troop(scope.context, target, cause="sacrifice")
         return
+    if _short(effect_type) == "SummonTokenTroopAbilityEffectTemplate":
+        _summon_tokens(root, clause, effect_raw, scope)
+        return
     if _short(effect_type) != "CardModifierAbilityEffectTemplate":
         raise NotImplementedError(f"effect {_short(effect_type)}")
     modifier = _typed(effect_raw["m_Modifier"], "Modifier", effect_raw.get("_v"))
     if not isinstance(modifier, MechanicsObject):
         raise NotImplementedError(f"effect {effect_guid} has an untyped modifier")
     kind = _short(modifier.type_name)
-    for target in _targets(root, int(_field(clause, "m_TargetTemplateIndex") or 0), scope):
+    index = int(_field(clause, "m_TargetTemplateIndex") or 0)
+    if kind in ("AttackModifier", "DefenseModifier"):
+        # The shared stat primitive, with the live path's choice of buffs (EndOfTurn is this turn only).
+        from rules_port.stat_effects import apply_stat_mod
+        amount = _input_value(modifier, scope)
+        this_turn = str(_field(clause, "m_EffectDuration") or "") == "EndOfTurn"
+        for target in _targets(root, index, scope):
+            attack, defense = (amount, 0) if kind == "AttackModifier" else (0, amount)
+            apply_stat_mod(scope.context, target, attack, defense, this_turn=this_turn)
+        return
+    if kind == "HealHeroModifier":
+        # A health gain for each player it lands on, through the live gain path (which refuses while
+        # CantGainHealth applies).
+        amount = _input_value(modifier, scope)
+        for owner in _heal_owners(root, index, scope):
+            scope.context.gain_health(int(owner), amount)
+        return
+    for target in _targets(root, index, scope):
         if kind == "DamageModifier":
             from rules_port.damage_effects import deal_damage
             deal_damage(scope.context, target, _input_value(modifier, scope))
@@ -482,8 +684,13 @@ def set_engine(on: bool) -> None:
 
 def engine_runs(guid: str, source_uid: Any, owner_uid: Any) -> bool:
     """Whether the interpreter resolves this ability in place of the native resolver: the engine is on,
-    the ability has a source card and an owner, and no construct of it is uncovered."""
-    return ENGINE_ON and source_uid is not None and owner_uid is not None and not coverage(guid)
+    the ability has a source card and an owner, no construct of it is uncovered, and it has no card the player
+    chooses. A choice pauses the interpreter (NeedsChoice), and the live prompt that answers it is not wired yet,
+    so those abilities stay on the native path."""
+    if not (ENGINE_ON and source_uid is not None and owner_uid is not None) or coverage(guid):
+        return False
+    root = _load("AbilityTemplate", guid)
+    return not any(_needs_choice(root, index) for index in range(len(root.m_AbilityTargetTemplateIds or [])))
 
 
 def live_event(event_type: str, owner_uid: int, data: dict[str, Any], trigger_source_uid: Any) -> dict[str, Any]:
@@ -561,7 +768,8 @@ def static_cost_increase(context: Any, card_uid: int, owner: int) -> int:
 
 
 def run_ability(guid: str, event_type: str, *, context: Any, source_uid: int,
-                owner_uid: int, event: dict[str, Any] | None = None) -> bool:
+                owner_uid: int, event: dict[str, Any] | None = None,
+                answers: dict[int, int | None] | None = None) -> bool:
     """Run one ability for an event. Returns whether its trigger fired.
 
     ``event`` names what happened: ``player`` (whose turn or whose card), and for a zone move the
@@ -584,19 +792,51 @@ def run_ability(guid: str, event_type: str, *, context: Any, source_uid: int,
     # AbilityTemplate.TriggerCollectionFlags).
     zones = _zones_of(_field(root, "m_TriggerCollectionFlags"))
     source = _card_by_uid(scope, source_uid)
-    if zones and (source is None or source.zone not in zones):
+    # With m_UsesPreviousState the flags are tested against the zone the source was in before the event
+    # (C# PassesCollectionFlagRequirements), which for the card that moved is the event's "from" zone.
+    zone = source.zone if source else None
+    if _field(root, "m_UsesPreviousState") and event.get("card") is not None \
+            and int(event["card"]) == int(source_uid) and event.get("from"):
+        zone = str(event["from"]).lower()
+    if zones and zone not in zones:
         return False
     if not _ability_condition_holds(root.m_AbilityCondition, scope):
         return False
     if not _condition_holds(root.m_TriggerCondition, scope):
         return False
-    _bind_variables(root, scope)
-    # Damage and other effects are dealt by the ability's source, as the live resolver records it.
-    bstate = context.bstate
+    scope.chosen = {int(k): (None if v is None else int(v)) for k, v in (answers or {}).items()}
+    return _run_effects(guid, root, scope, start=0)
+
+
+def _run_effects(guid: str, root: MechanicsObject, scope: Scope, start: int) -> bool:
+    """Run the ability's effects from clause ``start``. A clause whose target the player picks either takes its
+    one forced candidate, takes nothing, or pauses with NeedsChoice before it runs."""
+    bstate = scope.context.bstate
     previous = bstate.get("resolving_source_uid")
-    bstate["resolving_source_uid"] = int(source_uid)
+    bstate["resolving_source_uid"] = int(scope.source_uid)
     try:
-        for clause in root.m_AbilityEffectList:
+        for position in range(start, len(root.m_AbilityEffectList)):
+            clause = root.m_AbilityEffectList[position]
+            # Counts are read when the effect runs, after the effects before it (C# evaluates a variable lazily).
+            _bind_variables(root, scope)
+            # An effect runs only when its own condition holds (its m_ConditionId, as C# checks it).
+            if not _clause_condition_holds(clause, scope):
+                continue
+            index = int(_field(clause, "m_TargetTemplateIndex") or 0)
+            if index not in scope.chosen and _needs_choice(root, index):
+                candidates, optional = _choice_candidates(root, index, scope)
+                if len(candidates) == 1 and not optional:
+                    # The live resolver does not prompt for a single forced candidate (its single_forced rule).
+                    scope.chosen[index] = candidates[0]
+                elif not candidates:
+                    scope.chosen[index] = None
+                else:
+                    continuation = {"ability_guid": guid, "event": dict(scope.event),
+                                    "source_uid": int(scope.source_uid), "owner_uid": int(scope.owner_uid),
+                                    "position": position, "target_index": index,
+                                    "candidates": candidates, "optional": optional,
+                                    "chosen": {str(k): v for k, v in scope.chosen.items()}}
+                    raise NeedsChoice(continuation, candidates, optional)
             _run_clause(root, clause, scope)
     finally:
         if previous is None:
@@ -604,6 +844,26 @@ def run_ability(guid: str, event_type: str, *, context: Any, source_uid: int,
         else:
             bstate["resolving_source_uid"] = previous
     return True
+
+
+def resume_ability(continuation: dict[str, Any], answer: int | None, *, context: Any) -> bool:
+    """Resume a paused ability with the player's answer: the card chosen, or None for choosing none. The answer
+    must be one of the candidates the pause offered (or None when the choice is optional)."""
+    guid = continuation["ability_guid"]
+    index = int(continuation["target_index"])
+    candidates = [int(uid) for uid in continuation["candidates"]]
+    if answer is None:
+        if not continuation["optional"]:
+            raise ValueError("this choice is not optional")
+    elif int(answer) not in candidates:
+        raise ValueError(f"{answer} is not a candidate of this choice")
+    root = _load("AbilityTemplate", guid)
+    scope = Scope(context=context, source_uid=int(continuation["source_uid"]),
+                  owner_uid=int(continuation["owner_uid"]), table=root.version_table,
+                  event=dict(continuation["event"]))
+    scope.chosen = {int(k): (None if v is None else int(v)) for k, v in continuation["chosen"].items()}
+    scope.chosen[index] = None if answer is None else int(answer)
+    return _run_effects(guid, root, scope, start=int(continuation["position"]))
 
 
 # What the interpreter runs. A construct outside these sets is uncovered: its ability raises
@@ -617,10 +877,18 @@ SUPPORTED_CONDITIONS = {
 SUPPORTED_FILTERS = {
     "AndCardFilter", "OrCardFilter", "NotCardFilter", "IsControlledBy", "IsNotControlledBy",
     "HasCountersValue", "IsTroop", "IsHero", "IsResource", "IsType", "IntAttrFilter", "InZone",
-    "IsAbilitySource",
+    "IsAbilitySource", "IsSubType",
 }
-SUPPORTED_MODIFIERS = {"DamageModifier", "CounterModifier"}
-SUPPORTED_TARGETS = {"AbilitySourceCardTargetTemplate", "AbilityTargetTemplate"}
+SUPPORTED_MODIFIERS = {"DamageModifier", "CounterModifier", "HealHeroModifier", "AttackModifier", "DefenseModifier"}
+# The clause durations a stat modifier runs with: Permanent (the card's permanent buffs) and EndOfTurn (its
+# temporary buffs), as the live stat path applies them. Other durations are refused.
+STAT_DURATIONS = {"Permanent", "EndOfTurn"}
+# The effect text the live stat path derives its operand from (equal to this troop's DEF, a voided troop's stat).
+# An effect with such text is refused, not computed differently.
+DERIVED_STAT_TEXT = ("troop's [def]", "voided troop's")
+SUPPORTED_TARGETS = {"AbilitySourceCardTargetTemplate", "AbilityTargetTemplate", "PlayerTargetTemplate"}
+# The player targets run without a choice: "You", and the one opponent (its random pick is that one player).
+SUPPORTED_PLAYER_TARGETS = {"Self", "SingleOpponent"}
 
 
 def _tagged_classes(value: Any, out: list[str]) -> list[str]:
@@ -633,6 +901,48 @@ def _tagged_classes(value: Any, out: list[str]) -> list[str]:
     elif isinstance(value, list):
         for item in value:
             _tagged_classes(item, out)
+    return out
+
+
+# The ability fields that name a cost, or make the ability optional.
+_COST_FIELDS = ("m_Optional", "m_ActivationCost", "m_ChargePointCost", "m_VariableActivationCost", "m_LifeCost",
+                "m_SpellPointCost", "m_CounterCosts")
+
+# A RequiresCardsControlled flag the interpreter evaluates only at its default. Any other value is refused:
+# the count would otherwise ignore it silently.
+_COUNT_FLAG_DEFAULTS = {
+    "m_PlayerFilter": {"Self"}, "m_SameOwner": {0, False, None}, "m_QuantityIsHighestOpposingChampionsMatch": {0, False, None},
+    "m_QuantityIsLowestOpposingChampionsMatch": {0, False, None}, "m_OnlyIncludeDifferentCosts": {0, False, None},
+    "m_OnlyIncludeDifferentNames": {0, False, None}, "m_OnlyIncludeDifferentRacesForFaction": {"Unknown", None},
+    "m_QuantityCardFilter": {None},
+}
+
+
+def _unsupported_count_flags(value: Any, out: list[str]) -> list[str]:
+    """Every RequiresCardsControlled flag set away from its default in a stored value."""
+    if isinstance(value, dict):
+        if _short(value.get("_t")) == "RequiresCardsControlled":
+            for flag, defaults in _COUNT_FLAG_DEFAULTS.items():
+                if not any(value.get(flag) == default for default in defaults):
+                    out.append(f"count flag {flag}={value.get(flag)}")
+        for item in value.values():
+            _unsupported_count_flags(item, out)
+    elif isinstance(value, list):
+        for item in value:
+            _unsupported_count_flags(item, out)
+    return out
+
+
+def _comparison_ops(value: Any, out: list[str]) -> list[str]:
+    """Every comparison operator a stored value names (its ``m_ComparisonOp`` fields), in order."""
+    if isinstance(value, dict):
+        if isinstance(value.get("m_ComparisonOp"), str):
+            out.append(value["m_ComparisonOp"])
+        for item in value.values():
+            _comparison_ops(item, out)
+    elif isinstance(value, list):
+        for item in value:
+            _comparison_ops(item, out)
     return out
 
 
@@ -657,13 +967,35 @@ def coverage(guid: str) -> list[str]:
         kind = _short(template_type)
         if kind not in SUPPORTED_TARGETS:
             missing.append(f"target {kind}")
-        if kind == "AbilityTargetTemplate" and not template.get("m_IsAutoTarget"):
-            missing.append("chosen target")
+        if kind == "PlayerTargetTemplate":
+            player = str(template.get("m_PlayerFilter") or "")
+            if not template.get("m_IsAutoTarget"):
+                missing.append("chosen target")
+            if player not in SUPPORTED_PLAYER_TARGETS:
+                missing.append(f"player target {player}")
+            continue
+        if kind == "AbilityTargetTemplate" and str(template.get("m_PlayerFilter") or "") not in TARGET_PLAYER_FILTERS:
+            missing.append(f"target player filter {template.get('m_PlayerFilter')}")
         if template.get("m_IsRandomTarget"):
             missing.append("random target")
         for name in _tagged_classes(template.get("m_CardFilter"), []):
             if name not in SUPPORTED_FILTERS:
                 missing.append(f"filter {name}")
+    # A cost or an optional ability: the interpreter does not model paying, nor a player's choice to decline.
+    for field_name in _COST_FIELDS:
+        if raw.get(field_name) not in (None, 0, "", [], {}, "0"):
+            missing.append(f"cost or optional ({field_name})")
+    for operator in _comparison_ops(raw, []):
+        if operator not in _COMPARISONS:
+            missing.append(f"comparison {operator}")
+    missing.extend(_unsupported_count_flags(raw, []))
+    for clause in raw.get("m_AbilityEffectList") or []:
+        condition_guid = _guid(clause.get("m_ConditionId"))
+        if condition_guid and condition_guid != "00000000-0000-0000-0000-000000000000":
+            _cls, condition = _stored("AbilityEffectConditionTemplate", condition_guid)
+            kind = _short((condition.get("m_Condition") or {}).get("_t"))
+            if kind != "RequiresCardsControlled":
+                missing.append(f"effect condition {kind}")
     for variable in raw.get("m_Variables") or []:
         kind = _short((variable or {}).get("_t")) if isinstance(variable, dict) else ""
         if kind not in SUPPORTED_VARIABLES:
@@ -685,12 +1017,30 @@ def coverage(guid: str) -> list[str]:
     for clause in raw.get("m_AbilityEffectList") or []:
         effect_type, effect = _stored("AbilityEffectTemplate", _guid(clause.get("m_EffectTemplateId")))
         kind = _short(effect_type)
+        if kind == "SummonTokenTroopAbilityEffectTemplate":
+            # The summon itself is the live token primitive's (its random pick comes from the battle's RNG). A
+            # token's entry triggers are queued on the battle stack, as on the live path, for the chain to resolve.
+            continue
         if kind == "SacrificeCardAbilityEffectTemplate":
             continue
         if kind != "CardModifierAbilityEffectTemplate":
             missing.append(f"effect {kind}")
             continue
         modifier = _short((effect.get("m_Modifier") or {}).get("_t"))
+        if modifier in ("AttackModifier", "DefenseModifier"):
+            stat = effect.get("m_Modifier") or {}
+            clause_duration = str(clause.get("m_EffectDuration") or "")
+            if clause_duration not in STAT_DURATIONS:
+                missing.append(f"stat duration {clause_duration}")
+            if stat.get("m_ReplaceExistingValue"):
+                missing.append("stat replaces the existing value")
+            if str(stat.get("m_Property") or "Unknown") != "Unknown":
+                missing.append(f"stat property {stat.get('m_Property')}")
+            if _short((stat.get("m_InputValue") or {}).get("_t")) not in ("EffectInputVariable", "EffectConstant"):
+                missing.append("stat without a typed amount")
+            game_text = str(effect.get("m_GameText") or "").lower()
+            if any(phrase in game_text for phrase in DERIVED_STAT_TEXT):
+                missing.append("stat derived from another card")
         if modifier not in SUPPORTED_MODIFIERS:
             missing.append(f"modifier {modifier or '(untagged)'}")
         elif modifier == "CounterModifier" and (

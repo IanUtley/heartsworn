@@ -250,6 +250,93 @@ def test_named_guids_resolve_across_cards_and_refuse_clashes(db):
         ir_registry.clear()
 
 
+def test_is_subtype_matches_the_way_csharp_has_subtype(db):
+    """IsSubType: "*" matches any card; a single word matches a whole word, ignoring case; a multi-word
+    subtype matches as a substring; an empty subtype line matches nothing but "*"."""
+    from rules_port import ir_exec
+
+    def card(subtype):
+        return ir_exec.Card(uid=1, owner=5, zone="warzone", is_champion=False, card_type="Troop",
+                            counters={}, subtype=subtype)
+
+    assert ir_exec._is_subtype("*", card(""))
+    assert ir_exec._is_subtype("Plant", card("Plant Wormoid"))
+    assert ir_exec._is_subtype("plant", card("Plant Wormoid"))
+    assert not ir_exec._is_subtype("Plan", card("Plant Wormoid"))
+    assert ir_exec._is_subtype("Human Cleric", card("Human Cleric"))
+    assert not ir_exec._is_subtype("Cleric Human", card("Human Cleric"))
+    assert not ir_exec._is_subtype("Plant", card(""))
+
+
+PLAYER_DAMAGE_ABILITY = "862684d8-ae12-f328-d385-3605d5a1b28e"   # "At the start of your turn, #SELF# deals 2 damage to you."
+FIXED_SUMMON_ABILITY = "8c275413-824d-a72b-bbf1-c206f27f645a"     # "Deploy - Summon an <token>."
+FIXED_TOKEN_TEMPLATE = "b325a831-b111-4c27-9901-15c73f8a333b"
+
+
+def test_an_automatic_player_target_is_the_controllers_champion(db):
+    """"You" is an automatic player target: the controller's champion takes the damage, the opponent's does not."""
+    from rules_port.context import EffectContext
+    from rules_port.ir_exec import run_ability
+
+    pl_t, ai_t, game, handler, bstate, _player_champ, _ai_champ = _setup(db)
+    add_card(db, 900, 5, TPL_GLADIATOR, loc="warzone")
+    db.commit()
+    context = EffectContext.from_rules_port(game, SessionStub(), db, handler, pl_t, ai_t, bstate, "")
+    assert run_ability(PLAYER_DAMAGE_ABILITY, "TurnStartedEvent", context=context,
+                       source_uid=900, owner_uid=5, event={"player": 5})
+    assert bstate["player_health"] == 18 and bstate["ai_health"] == 20, bstate
+
+
+def test_a_fixed_token_summon_creates_the_token_for_the_controller(db):
+    """A summon with no choice creates its token in the controller's warzone, through the live token primitive."""
+    from rules_port.context import EffectContext
+    from rules_port.ir_exec import run_ability
+
+    pl_t, ai_t, game, handler, bstate, _player_champ, _ai_champ = _setup(db)
+    add_card(db, 900, 5, TPL_GLADIATOR, loc="warzone")
+    db.commit()
+    context = EffectContext.from_rules_port(game, SessionStub(), db, handler, pl_t, ai_t, bstate, "")
+    assert run_ability(FIXED_SUMMON_ABILITY, "CardEnteredZoneEvent", context=context, source_uid=900,
+                       owner_uid=5, event={"player": 5, "card": 900, "from": "hand", "to": "warzone"})
+    tokens = db.execute("SELECT user_id, location FROM game_cards WHERE template_guid=? AND card_uid!=900",
+                        (FIXED_TOKEN_TEMPLATE,)).fetchall()
+    assert tokens == [(5, "warzone")], tokens
+
+
+SACRIFICE_CHOICE_ABILITY = "0d6e4d1f-58ce-93b1-50d5-33d114d332a9"   # "At the start of your turn, sacrifice another troop."
+
+
+def test_a_chosen_target_pauses_and_resumes_from_its_continuation(db):
+    """A target the player picks pauses the ability with a continuation that survives a JSON round trip; the
+    answer resumes it, and an answer that is not a candidate is refused."""
+    import json
+    from rules_port import ir_exec
+    from rules_port.context import EffectContext
+
+    pl_t, ai_t, game, handler, bstate, _player_champ, _ai_champ = _setup(db)
+    add_card(db, 900, 5, TPL_GLADIATOR, loc="warzone")
+    add_card(db, 600, 5, TPL_GLADIATOR, loc="warzone")
+    add_card(db, 601, 5, TPL_GLADIATOR, loc="warzone")
+    db.commit()
+    context = EffectContext.from_rules_port(game, SessionStub(), db, handler, pl_t, ai_t, bstate, "")
+    try:
+        ir_exec.run_ability(SACRIFICE_CHOICE_ABILITY, "TurnStartedEvent", context=context,
+                            source_uid=900, owner_uid=5, event={"player": 5})
+        raise AssertionError("the ability did not pause for its choice")
+    except ir_exec.NeedsChoice as pause:
+        candidates = sorted(pause.candidates)
+        continuation = json.loads(json.dumps(pause.continuation))
+    assert candidates == [600, 601], candidates
+    try:
+        ir_exec.resume_ability(continuation, 999, context=context)
+        raise AssertionError("a non-candidate answer was accepted")
+    except ValueError:
+        pass
+    ir_exec.resume_ability(continuation, 601, context=context)
+    locations = dict(db.execute("SELECT card_uid, location FROM game_cards WHERE card_uid IN (600, 601)").fetchall())
+    assert locations == {600: "warzone", 601: "discard"}, locations
+
+
 if __name__ == "__main__":
     import db as dbmod
     for run in (test_burning_ability_runs_from_its_ir, test_dazed_and_vulnerable_removals_match_the_live_engine,
@@ -258,7 +345,11 @@ if __name__ == "__main__":
                 test_spitfire_elemental_damages_each_opposing_champion_and_troop,
                 test_burning_runs_from_the_loaded_card_file,
                 test_a_python_only_card_runs_in_the_interpreter,
-                test_named_guids_resolve_across_cards_and_refuse_clashes):
+                test_named_guids_resolve_across_cards_and_refuse_clashes,
+                test_is_subtype_matches_the_way_csharp_has_subtype,
+                test_an_automatic_player_target_is_the_controllers_champion,
+                test_a_fixed_token_summon_creates_the_token_for_the_controller,
+                test_a_chosen_target_pauses_and_resumes_from_its_continuation):
         dbmod._db = make_db()
         run(dbmod._db)
     print("ok")
