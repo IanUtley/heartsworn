@@ -2330,6 +2330,10 @@ class CardEvaluator:
                 # filter permits the opposite side.
                 if preferred_candidates:
                     candidates = preferred_candidates
+                elif intent == "friendly":
+                    # A beneficial effect never lands on an opposing troop: with no friendly candidate the slot is empty
+                    # (Seeing Red's "+3 ATK" is not cast on the opponent's troop when the AI has none).
+                    candidates = []
                 if prefers_highest_cost:
                     # Hand CardInfo.cost is the current effective cost. Keep
                     # legal-target order for ties, then preserve the existing
