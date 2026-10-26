@@ -561,14 +561,14 @@ class EffectContext:
         value.update(overrides)
         return value
 
-    def put_top_into_hand(self) -> str:
+    def put_top_into_hand(self, target: int | None = None) -> str:
         """Put typed-count deck cards into the caster's hand."""
         import game_engine
 
         from rules_port.runtime_helpers import owner_uid, raw_uid
 
         count = self.value("m_InputValue", default=1)
-        target = self.resolved_target()
+        target = self.resolved_target() if target is None else target
         if self.native_context or self.bstate.get("_rules_port_native_effect"):
             deck_owner = self.target_owner(
                 target, default=self.bstate.get("resolving_owner_id", 0))
@@ -634,13 +634,13 @@ class EffectContext:
             moved += 1
         return f"put {moved} deck card(s) into hand"
 
-    def bury(self) -> str:
+    def bury(self, target: int | None = None) -> str:
         """Move the typed number of cards from a deck into its discard."""
         import game_engine
 
         from pvp_db import db_discard_card
         from rules_port.runtime_helpers import owner_uid
-        target = self.resolved_target()
+        target = self.resolved_target() if target is None else target
         if self.native_context or self.bstate.get("_rules_port_native_effect"):
             deck_owner = self.target_owner(
                 target, default=self.bstate.get("resolving_owner_id", 0))
@@ -744,13 +744,13 @@ class EffectContext:
             total += 1
         return f"bury {total} cards"
 
-    def void_card(self) -> str:
+    def void_card(self, target: int | None = None) -> str:
         """Move a resolved card to Void and publish its exit relationship."""
         import game_engine
 
         from rules_port.runtime_helpers import owner_uid
 
-        target = self.target()
+        target = self.target() if target is None else target
         if target is None:
             # The authored target is a player-chosen card ("up to three troops
             # in a crypt").  With no selection, do not fall back to the source:
@@ -2046,7 +2046,10 @@ class EffectContext:
             amount = int(self.bstate.get("x_cost", 0) or 0)
         else:
             amount = self.modifier_value(param, metadata, "damage")
-        if amount <= 0:
+        # A typed amount that evaluates to 0 is the card's answer (for example, 1 damage for each troop in
+        # the crypt with none there). The printed "deal N damage" fallback is only for an untyped amount.
+        typed = bool((metadata or {}).get("input_variable") or param.get("input_variable"))
+        if amount <= 0 and not typed:
             match = re.search(r"deal\s+(\d+)\s+damage", lower)
             if match:
                 amount = int(match.group(1))
