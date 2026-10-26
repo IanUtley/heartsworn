@@ -2046,7 +2046,10 @@ class EffectContext:
             amount = int(self.bstate.get("x_cost", 0) or 0)
         else:
             amount = self.modifier_value(param, metadata, "damage")
-        if amount <= 0:
+        # A typed amount that evaluates to 0 is the card's answer (for example, 1 damage for each troop in
+        # the crypt with none there). The printed "deal N damage" fallback is only for an untyped amount.
+        typed = bool((metadata or {}).get("input_variable") or param.get("input_variable"))
+        if amount <= 0 and not typed:
             match = re.search(r"deal\s+(\d+)\s+damage", lower)
             if match:
                 amount = int(match.group(1))
