@@ -96,10 +96,10 @@ def _store_class_of(value: Any) -> str | None:
 
 @functools.lru_cache(maxsize=None)
 def _stored_record(store_class: str, guid: str) -> tuple[str, dict[str, Any]]:
-    for record in STORE.load(store_class):
-        if record.guid.lower() == guid:
-            return record.type_name, _plain(record.to_dict(include_metadata=True))
-    raise KeyError(f"no {store_class} {guid}")
+    record = STORE.get(store_class, guid)   # the store's index: a lookup, not a scan of every record
+    if record is None:
+        raise KeyError(f"no {store_class} {guid}")
+    return record.type_name, _plain(record.to_dict(include_metadata=True))
 
 
 def _stored(store_class: str, guid: str) -> tuple[str, dict[str, Any]]:

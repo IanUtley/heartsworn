@@ -13,6 +13,7 @@ interpreter does not cover are listed as uncovered, not run.
 """
 
 import copy
+import functools
 import json
 import os
 import sys
@@ -35,14 +36,19 @@ def _any_template(db, ability_guid):
     return row[0] if row else None
 
 
+_EVENTS = {}
+
+
 def _event_of(ability_guid):
-    """The trigger event an ability names (its short name), or "" for a static ability."""
+    """The trigger event an ability names (its short name), or "" for a static ability. The events of all abilities
+    are read once, so a lookup costs a dictionary access."""
     from gamedata import DEFAULT_RECORD_STORE as STORE
-    for record in STORE.load("AbilityTemplate"):
-        if record.guid.lower() == ability_guid:
+    if not _EVENTS:
+        for record in STORE.load("AbilityTemplate"):
             raw = record.to_dict(include_metadata=True)
-            return str((raw.get("m_TriggerEventType") or {}).get("m_InternalType") or "").rsplit(".", 1)[-1]
-    return ""
+            _EVENTS[record.guid.lower()] = str(
+                (raw.get("m_TriggerEventType") or {}).get("m_InternalType") or "").rsplit(".", 1)[-1]
+    return _EVENTS.get(ability_guid, "")
 
 
 def _template_for(db, ability_guid, event):
@@ -66,8 +72,9 @@ MOVED_UID = 503
 SOURCE_UID = 900
 
 
+@functools.lru_cache(maxsize=None)
 def _test_champion_guid():
-    """A champion template with a subtype line, for the battle's champions."""
+    """A champion template with a subtype line, for the battle's champions (the same one every time)."""
     from gamedata import DEFAULT_RECORD_STORE as STORE
     for record in sorted(STORE.load("ChampionTemplate"), key=lambda r: r.guid.lower()):
         if str(record.to_dict(include_metadata=True).get("m_SubType") or ""):
@@ -90,8 +97,12 @@ def _scenario(ability_guid, opposing_troops, moved=None, extra=(), champion=Fals
     """A fresh battle with the ability's troop in play for its owner, and the opposing troops.
     ``extra`` places more cards: (uid, owner, zone, permanent_buffs)."""
     import zlib
+    # The previous scenario's database is closed, so a long run does not keep every copy in memory.
+    previous = dbmod._db
     dbmod._db = make_db()
     db = dbmod._db
+    if previous is not None and previous is not db:
+        previous.close()
     pl_t, ai_t, game, handler, bstate, player_champ, ai_champ = scenarios._setup(db)
     bstate["_rules_rng"] = _SeededRng(zlib.crc32(ability_guid.encode()))
     # The battle's champions have templates, as a live battle's do: a subtype filter reads its champion's subtype.
@@ -367,6 +378,21 @@ def _moved_template(moved):
     return moved[4] if len(moved) > 4 and moved[4] else scenarios.TPL_GLADIATOR
 
 
+def _prepare_spec(prepare):
+    """A case's setup as plain data (it is cached as JSON): None for nothing, or the threshold it sets."""
+    return None if prepare is _nothing else list(getattr(prepare, "threshold", ()))
+
+
+def _prepare_from_spec(spec):
+    if not spec:
+        return _nothing
+    flag, required = spec
+
+    def prepare(db, bstate, player_champ, ai_champ):
+        bstate["player_threshold"] = {flag: required}
+    return prepare
+
+
 def _threshold_prepare(raw):
     """A threshold ability's requirement: the controller has the required count of the shard. Other abilities
     need nothing set up."""
@@ -380,7 +406,47 @@ def _threshold_prepare(raw):
 
     def prepare(db, bstate, player_champ, ai_champ):
         bstate["player_threshold"] = {flag: required}
+    prepare.threshold = (flag, required)
     return prepare
+
+
+def _case_cache_path(limit):
+    """Where the listed cases are cached: keyed by the harness, the interpreter's coverage code and the limit, so a
+    change to either lists the cases again."""
+    import hashlib
+    import tempfile
+    root = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
+    digest = hashlib.sha256()
+    for path in (os.path.abspath(__file__), os.path.join(root, "rules_port", "ir_exec.py")):
+        with open(path, "rb") as stream:
+            digest.update(stream.read())
+    digest.update(str(limit).encode())
+    return os.path.join(tempfile.gettempdir(), f"hex-ir-equivalence-cases-{digest.hexdigest()[:16]}.json")
+
+
+def cached_auto_cases(limit):
+    """auto_cases, from a cache keyed by the harness and the coverage code. Listing the cases reads and indexes the
+    whole Records, which is most of a run's startup; each chunk of a run loads the cached list instead."""
+    import json
+    path = _case_cache_path(limit)
+    if os.path.exists(path):
+        with open(path) as stream:
+            stored = json.load(stream)
+        SKIPPED_BY_COVERAGE[:] = [tuple(item) for item in stored["skipped"]]
+        return [{"name": item["name"], "ability": item["ability"], "event": item["event"],
+                 "opposing": [tuple(entry) for entry in item["opposing"]],
+                 "prepare": _prepare_from_spec(item["prepare"]),
+                 "moved": tuple(item["moved"]) if item["moved"] else None}
+                for item in stored["cases"]]
+    cases = auto_cases(limit)
+    stored = {"skipped": [list(item) for item in SKIPPED_BY_COVERAGE],
+              "cases": [{"name": case["name"], "ability": case["ability"], "event": case["event"],
+                         "opposing": [list(entry) for entry in case["opposing"]],
+                         "prepare": _prepare_spec(case["prepare"]),
+                         "moved": list(case["moved"]) if case["moved"] else None} for case in cases]}
+    with open(path, "w") as stream:
+        json.dump(stored, stream)
+    return cases
 
 
 def auto_cases(limit):
@@ -449,10 +515,9 @@ def _counter_guids_of(ability_guid):
             for item in value:
                 walk(item)
 
-    for record in STORE.load("AbilityTemplate"):
-        if record.guid.lower() == ability_guid:
-            walk(record.to_dict(include_metadata=True))
-            break
+    record = STORE.get("AbilityTemplate", ability_guid)
+    if record is not None:
+        walk(record.to_dict(include_metadata=True))
     return sorted(guid for guid in found if guid and guid != "00000000-0000-0000-0000-000000000000")
 
 
@@ -635,6 +700,50 @@ def choice_cases(limit):
     return cases
 
 
+# The work a parallel run shares with its forked workers (set before the pool starts).
+_WORK: list = []
+
+
+def _evaluate_case_in_worker(index):
+    cases, from_cards, card_roots = _WORK
+    return _evaluate_case(cases[index], from_cards, card_roots)
+
+
+def _evaluate_case(case, from_cards, card_roots):
+    """One case on both sides: ("uncovered", (name, reasons)), ("failed", (name, live, detail)) or
+    ("passed", (name, live, interpreted, live_seconds, interpreted_seconds))."""
+    from rules_port.ir_exec import coverage
+    if from_cards and case["ability"] not in card_roots:
+        return "uncovered", (case["name"], ["no card file for this ability"])
+    missing = coverage(case["ability"])
+    if missing:
+        return "uncovered", (case["name"], missing)
+    if os.environ.get("IR_EQ_PROGRESS") == "1":
+        print("CASE", case["name"], flush=True)
+    _generated[0] = 0
+    try:
+        with _time_limit(CASE_SECONDS):
+            live = _live(case)
+            live_seconds = LAST_TIMING[0]
+            if live is None:
+                return "uncovered", (case["name"], ["no card template carries this ability"])
+            _generated[0] = 0
+            interpreted = _interpreted(case)
+            interpreted_seconds = LAST_TIMING[0]
+    except CaseTimeout:
+        # A chain that does not settle (a summon whose tokens summon more) is reported, not compared.
+        return "uncovered", (case["name"], [f"the live chain did not settle within {CASE_SECONDS}s"])
+    except NotImplementedError as exc:
+        return "uncovered", (case["name"], [str(exc)])
+    except NotRunByInterpreter as exc:
+        return "uncovered", (case["name"], [str(exc)])
+    except Exception as exc:  # a crash is a failure, reported with its cause
+        return "failed", (case["name"], "", f"{type(exc).__name__}: {exc}")
+    if live == interpreted:
+        return "passed", (case["name"], live, interpreted, live_seconds, interpreted_seconds)
+    return "failed", (case["name"], live, interpreted)
+
+
 def main():
     from rules_port.ir_exec import coverage, clear_cards
     _count_generated_cards()
@@ -642,7 +751,7 @@ def main():
     card_roots = _card_roots() if from_cards else {}
     resolved = _find_abilities([case["ability"][:8] for case in CASES + CHAMPION_CASES])
     passed, failed, uncovered = [], [], []
-    turn_cases = auto_cases(int(os.environ.get("IR_EQ_LIMIT", "40")))
+    turn_cases = cached_auto_cases(int(os.environ.get("IR_EQ_LIMIT", "40")))
     random_count = int(os.environ.get("IR_EQ_RANDOM", "0"))
     seed = os.environ.get("IR_EQ_SEED", "0")
     expanded = []
@@ -653,43 +762,27 @@ def main():
     start, end = (int(part) for part in os.environ.get("IR_EQ_CHUNK", f"0:{len(expanded) + 9}").split(":"))
     everything = CHAMPION_CASES + CASES + expanded
     print("CASES", len(everything), flush=True)
-    for case in everything[start:end]:
+    cases = everything[start:end]
+    for case in cases:
         case["ability"] = resolved.get(case["ability"][:8], case["ability"])
-        if from_cards and case["ability"] not in card_roots:
-            uncovered.append((case["name"], ["no card file for this ability"]))
-            continue
-        missing = coverage(case["ability"])
-        if missing:
-            uncovered.append((case["name"], missing))
-            continue
-        if os.environ.get("IR_EQ_PROGRESS") == "1":
-            print("CASE", case["name"], flush=True)
-        _generated[0] = 0
-        try:
-            with _time_limit(CASE_SECONDS):
-                live = _live(case)
-                live_seconds = LAST_TIMING[0]
-                if live is None:
-                    uncovered.append((case["name"], ["no card template carries this ability"]))
-                    continue
-                _generated[0] = 0
-                interpreted = _interpreted(case)
-                interpreted_seconds = LAST_TIMING[0]
-        except CaseTimeout:
-            # A chain that does not settle (a summon whose tokens summon more) is reported, not compared.
-            uncovered.append((case["name"], [f"the live chain did not settle within {CASE_SECONDS}s"]))
-            continue
-        except NotImplementedError as exc:
-            uncovered.append((case["name"], [str(exc)]))
-            continue
-        except NotRunByInterpreter as exc:
-            uncovered.append((case["name"], [str(exc)]))
-            continue
-        except Exception as exc:  # a crash is a failure, reported with its cause
-            failed.append((case["name"], "", f"{type(exc).__name__}: {exc}"))
-            continue
-        (passed if live == interpreted else failed).append((case["name"], live, interpreted))
-        if live == interpreted:
+    workers = int(os.environ.get("IR_EQ_WORKERS", "1"))
+    if workers > 1:
+        # Forked workers inherit the built case list and the warm caches, so each case costs no startup.
+        import multiprocessing
+        # The cases hold closures, so the workers receive indices and read the cases they inherited at the fork.
+        _WORK[:] = [cases, from_cards, card_roots]
+        with multiprocessing.get_context("fork").Pool(workers) as pool:
+            outcomes = list(pool.imap(_evaluate_case_in_worker, range(len(cases)), chunksize=4))
+    else:
+        outcomes = [_evaluate_case(case, from_cards, card_roots) for case in cases]
+    for outcome, record in outcomes:
+        if outcome == "uncovered":
+            uncovered.append(record)
+        elif outcome == "failed":
+            failed.append(record)
+        elif outcome == "passed":
+            name, live, interpreted, live_seconds, interpreted_seconds = record
+            passed.append((name, live, interpreted))
             TIMINGS.append((live_seconds, interpreted_seconds))
     for name, _live_state, _ir_state in passed:
         print("PASS", name)
