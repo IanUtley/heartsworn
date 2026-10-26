@@ -27,6 +27,8 @@ from gamedata.mechanics_fields import current_fields
 from gamedata.mechanics_objects import MechanicsObject, from_record
 from gamedata.records import RecordObject
 
+from . import ir_triggers
+
 # A CounterModifier's operation, as the live counter primitive names it.
 COUNTER_OPERATIONS = {"Add": "add", "Remove": "remove", "Set": "set"}
 
@@ -382,6 +384,8 @@ def _condition_holds(condition: Any, scope: Scope) -> bool:
     if cls == "TriggerCardMatchesFilter":
         card = _card_by_uid(scope, scope.event.get("card"))
         return card is not None and _filter_holds(condition.m_CardFilter, card, scope)
+    if cls in ir_triggers.CONDITIONS:
+        return ir_triggers.condition_holds(cls, condition, scope, _condition_holds)
     if getattr(condition, "m_CardCollection", None) is not None:
         return _count_holds(condition, scope)
     raise NotImplementedError(f"trigger condition {cls}")
@@ -812,10 +816,12 @@ def _pauses_for_choice(guid: str, seen: set[str]) -> bool:
     return False
 
 
-def live_event(event_type: str, owner_uid: int, data: dict[str, Any], trigger_source_uid: Any) -> dict[str, Any]:
-    """The interpreter's event for a live trigger: its player, and for a zone move the card and zones
-    the live dispatch recorded (``event_source_collection`` and ``event_destination_collection``)."""
-    event: dict[str, Any] = {"player": owner_uid}
+def live_event(event_type: str, owner_uid: int, data: dict[str, Any], trigger_source_uid: Any,
+               target_player_uid: Any = None) -> dict[str, Any]:
+    """The interpreter's event for a live trigger: its player, its card and target player, and for a zone move the
+    card and zones the live dispatch recorded (``event_source_collection`` and ``event_destination_collection``)."""
+    event: dict[str, Any] = {"player": owner_uid, **ir_triggers.event_fields(event_type, trigger_source_uid,
+                                                                             target_player_uid)}
     if event_type == "CardEnteredZoneEvent":
         event["card"] = trigger_source_uid
         event["from"] = data.get("event_source_collection")
@@ -1148,12 +1154,12 @@ def resume_ability(continuation: dict[str, Any], answer: int | None, *, context:
 
 # What the interpreter runs. A construct outside these sets is uncovered: its ability raises
 # NotImplementedError when run, and the coverage report lists it.
-SUPPORTED_TRIGGERS = {"TurnEndedEvent", "TurnStartedEvent", "CardEnteredZoneEvent"}
+SUPPORTED_TRIGGERS = {"TurnEndedEvent", "TurnStartedEvent", "CardEnteredZoneEvent"} | ir_triggers.TRIGGER_EVENTS
 SUPPORTED_CONDITIONS = {
     "AndTriggerCondition", "TriggerCondition", "TriggerSource", "TriggerPlayerControlsAbilitySource",
     "TriggerCardEnteredZone", "TriggerCardMatchesFilter", "RequiresCardsControlled",
     "TriggerCardIsAbilitySource",
-}
+} | ir_triggers.CONDITIONS
 SUPPORTED_FILTERS = {
     "AndCardFilter", "OrCardFilter", "NotCardFilter", "IsControlledBy", "IsNotControlledBy",
     "HasCountersValue", "IsTroop", "IsHero", "IsResource", "IsType", "IntAttrFilter", "InZone",
