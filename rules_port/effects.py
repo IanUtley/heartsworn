@@ -1174,9 +1174,9 @@ def _targets(context):
     return None
 
 
-def _untap(context):
+def _untap(context, targets=None):
     import game_engine
-    targets = _targets(context)
+    targets = _targets(context) if targets is None else list(targets)
     if targets is None:
         return None
     for target in targets:
@@ -1186,9 +1186,9 @@ def _untap(context):
     return f"readied {len(targets)}"
 
 
-def _tap(context):
+def _tap(context, targets=None):
     import game_engine
-    targets = _targets(context)
+    targets = _targets(context) if targets is None else list(targets)
     if targets is None:
         return None
     from pvp_db import db_card_owner_id
