@@ -26,6 +26,7 @@ from gamedata.mechanics import CLASSES
 from gamedata.mechanics_fields import current_fields
 from gamedata.mechanics_objects import MechanicsObject, from_record
 from gamedata.records import RecordObject
+from rules_port.ir_exec_zones import ZONE_EFFECTS, run_zone_effect, zone_effect_gaps
 
 # A CounterModifier's operation, as the live counter primitive names it.
 COUNTER_OPERATIONS = {"Add": "add", "Remove": "remove", "Set": "set"}
@@ -667,6 +668,9 @@ def _heal_owners(root: MechanicsObject, index: int, scope: Scope) -> list[int]:
 def _run_clause(root: MechanicsObject, clause: Any, scope: Scope) -> None:
     effect_guid = _guid(_field(clause, "m_EffectTemplateId"))
     effect_type, effect_raw = _stored("AbilityEffectTemplate", effect_guid)
+    if _short(effect_type) in ZONE_EFFECTS:
+        run_zone_effect(_short(effect_type), root, clause, effect_raw, scope)
+        return
     if _short(effect_type) == "SacrificeCardAbilityEffectTemplate":
         from rules_port.death_effects import kill_troop
         for target in _targets(root, int(_field(clause, "m_TargetTemplateIndex") or 0), scope):
@@ -1339,6 +1343,9 @@ def coverage(guid: str) -> list[str]:
             # token's entry triggers are queued on the battle stack, as on the live path, for the chain to resolve.
             continue
         if kind == "SacrificeCardAbilityEffectTemplate":
+            continue
+        if kind in ZONE_EFFECTS:
+            missing.extend(zone_effect_gaps(kind, raw, clause, effect))
             continue
         if kind == "MoveCardToZoneEffectTemplate":
             destination = _short(effect.get("m_DestinationCollection")).lower()
