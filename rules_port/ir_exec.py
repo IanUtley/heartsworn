@@ -26,6 +26,7 @@ from gamedata.mechanics import CLASSES
 from gamedata.mechanics_fields import current_fields
 from gamedata.mechanics_objects import MechanicsObject, from_record
 from gamedata.records import RecordObject
+from rules_port.ir_event_effects import NATIVE_LEAF_EFFECTS, coverage_of as event_effect_coverage, run_native_leaf
 
 # A CounterModifier's operation, as the live counter primitive names it.
 COUNTER_OPERATIONS = {"Add": "add", "Remove": "remove", "Set": "set"}
@@ -191,6 +192,7 @@ class Scope:
     table: list[dict[str, int]] | None = None
     event: dict[str, Any] = field(default_factory=dict)   # player, card, from, to
     chosen: dict[int, int | None] = field(default_factory=dict)   # target index -> the card the player chose
+    applied: dict[int, bool] = field(default_factory=dict)   # effect position -> whether it applied (C# applied_effects)
 
 
 class NeedsChoice(Exception):
@@ -675,6 +677,22 @@ def _run_clause(root: MechanicsObject, clause: Any, scope: Scope) -> None:
     if _short(effect_type) == "SummonTokenTroopAbilityEffectTemplate":
         _summon_tokens(root, clause, effect_raw, scope)
         return
+    if _short(effect_type) in NATIVE_LEAF_EFFECTS:
+        # TAC and event-firing leaves run on the native path, once per target as the resolver runs them.
+        run_native_leaf(scope.context, _short(effect_type), effect_raw,
+                        _targets(root, int(_field(clause, "m_TargetTemplateIndex") or 0), scope))
+        return
+    if _short(effect_type) == "SetCardIntegerVariableEffectTemplate":
+        # The native leaf reads the ability's variables and writes its new value to the battle state, so the
+        # variables are published for it and the value it wrote is read back into the interpreter's scope.
+        name = str(effect_raw.get("m_VariableName") or "")
+        with _bridge_caster(scope.context.bstate, variables=scope.variables):
+            run_native_leaf(scope.context, _short(effect_type), effect_raw,
+                            _targets(root, int(_field(clause, "m_TargetTemplateIndex") or 0), scope))
+            written = scope.context.bstate.get("ability_variables", {})
+            if name in written:
+                scope.variables[name] = int(written[name])
+        return
     if _short(effect_type) != "CardModifierAbilityEffectTemplate":
         raise NotImplementedError(f"effect {_short(effect_type)}")
     modifier = _typed(effect_raw["m_Modifier"], "Modifier", effect_raw.get("_v"))
@@ -836,6 +854,11 @@ def _clause_condition_holds(clause: Any, scope: Scope) -> bool:
         return True
     _cls, raw = _stored("AbilityEffectConditionTemplate", guid)
     stored = raw.get("m_Condition") or {}
+    if _short(stored.get("_t")) == "NotContingentAbilityCondition":
+        # C# NotContingentAbilityCondition: holds when the earlier effect at m_EffectIndex did not apply.
+        if stored.get("m_EffectIndex") is None:
+            return True
+        return not scope.applied.get(int(stored["m_EffectIndex"]), False)
     if _short(stored.get("_t")) == "AbilityVariableCondition":
         # C# AbilityVariableCondition: the named variable compared with a constant.
         name = str(stored.get("m_Lhs") or "")
@@ -955,6 +978,7 @@ def _run_effects(guid: str, root: MechanicsObject, scope: Scope, start: int) -> 
             _bind_variables(root, scope)
             # An effect runs only when its own condition holds (its m_ConditionId, as C# checks it).
             if not _clause_condition_holds(clause, scope):
+                scope.applied[position] = False
                 continue
             index = int(_field(clause, "m_TargetTemplateIndex") or 0)
             if index not in scope.chosen and _needs_choice(root, index):
@@ -970,7 +994,8 @@ def _run_effects(guid: str, root: MechanicsObject, scope: Scope, start: int) -> 
                                     "position": position, "target_index": index,
                                     "candidates": candidates, "optional": optional,
                                     "chosen": {str(k): v for k, v in scope.chosen.items()},
-                                    "variables": dict(scope.variables)}
+                                    "variables": dict(scope.variables),
+                                    "applied": {str(k): v for k, v in scope.applied.items()}}
                     template = _load("AbilityTargetTemplate", _guid(root.m_AbilityTargetTemplateIds[index]))
                     revealed = _short(template.type_name) == "SourceRevealedTargetTemplate"
                     raise NeedsChoice(continuation, candidates, optional, revealed=revealed)
@@ -981,6 +1006,8 @@ def _run_effects(guid: str, root: MechanicsObject, scope: Scope, start: int) -> 
             if _short(effect_type) in ("MoveCardToZoneEffectTemplate", "RevealCardsAbilityEffectTemplate") and \
                     _revealed_target_empty(root, int(_field(clause, "m_TargetTemplateIndex") or 0), scope):
                 break
+            # The effect applies from here on: a later NotContingent condition reads it (C# applied_effects).
+            scope.applied[position] = True
             if _short(effect_type) == "ActivateAbilityEffectTemplate":
                 _invoke(guid, position, effect_raw, scope)
                 continue
@@ -1089,7 +1116,8 @@ def _invoke(parent_guid: str, position: int, effect_raw: dict[str, Any], scope: 
         frame = {"ability_guid": parent_guid, "event": dict(scope.event), "source_uid": int(scope.source_uid),
                  "owner_uid": int(scope.owner_uid), "position": position,
                  "chosen": {str(k): v for k, v in scope.chosen.items()},
-                 "variables": dict(scope.variables)}
+                 "variables": dict(scope.variables),
+                 "applied": {str(k): v for k, v in scope.applied.items()}}
         _append_chain(pause.continuation, frame)
         raise
 
@@ -1111,6 +1139,7 @@ def _frame_scope(frame: dict[str, Any], context: Any) -> tuple[MechanicsObject, 
     # The variables the frame had bound (a random branch's number, say) are part of its state, so the resumed effects
     # see the same values the paused run did.
     scope.variables = dict(frame.get("variables") or {})
+    scope.applied = {int(k): bool(v) for k, v in (frame.get("applied") or {}).items()}
     return root, scope
 
 
@@ -1311,7 +1340,7 @@ def coverage(guid: str) -> list[str]:
                     missing.append(f"variable condition on {stored.get('m_Lhs')}")
                 elif not rhs.lstrip("-").isdigit() and rhs not in declared:
                     missing.append(f"variable condition against {rhs}")
-            elif kind != "RequiresCardsControlled":
+            elif kind not in ("RequiresCardsControlled", "NotContingentAbilityCondition"):
                 missing.append(f"effect condition {kind}")
     for variable in raw.get("m_Variables") or []:
         kind = _short((variable or {}).get("_t")) if isinstance(variable, dict) else ""
@@ -1339,6 +1368,14 @@ def coverage(guid: str) -> list[str]:
             # token's entry triggers are queued on the battle stack, as on the live path, for the chain to resolve.
             continue
         if kind == "SacrificeCardAbilityEffectTemplate":
+            continue
+        if kind in NATIVE_LEAF_EFFECTS:
+            missing.extend(event_effect_coverage(kind, effect))
+            continue
+        if kind == "SetCardIntegerVariableEffectTemplate":
+            operation = str(effect.get("m_Operation") or "Set").rsplit(".", 1)[-1]
+            if operation not in ("Add", "Remove", "Set"):
+                missing.append(f"card integer operation {operation}")
             continue
         if kind == "MoveCardToZoneEffectTemplate":
             destination = _short(effect.get("m_DestinationCollection")).lower()
