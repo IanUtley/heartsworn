@@ -1073,6 +1073,10 @@ def _run_effects(guid: str, root: MechanicsObject, scope: Scope, start: int) -> 
             clause = root.m_AbilityEffectList[position]
             # Counts are read when the effect runs, after the effects before it (C# evaluates a variable lazily).
             _bind_variables(root, scope, _clause_names(clause))
+            # A contingent effect runs only when the effect it names applied (C# ContingentEffectInstanceId).
+            if not _contingency_holds(root, clause, scope):
+                scope.applied[position] = False
+                continue
             # An effect runs only when its own condition holds (its m_ConditionId, as C# checks it). A condition
             # on the effect's targets is tested as each target is picked (scope.gate).
             scope.gate = _target_gate(clause, scope)
@@ -1128,6 +1132,18 @@ def _run_effects(guid: str, root: MechanicsObject, scope: Scope, start: int) -> 
                 continue
             _run_clause(root, clause, scope)
     scope.gate = None
+    return True
+
+
+def _contingency_holds(root: MechanicsObject, clause: Any, scope: Scope) -> bool:
+    """Whether the effect the clause is contingent on applied. A clause with no contingency, or one naming an
+    effect the ability does not have, is not held back."""
+    wanted = _field(clause, "m_ContingentEffectInstanceId")
+    if wanted is None or int(wanted) == -1:
+        return True
+    for position, other in enumerate(root.m_AbilityEffectList):
+        if int(_field(other, "m_EffectInstanceId") or -1) == int(wanted):
+            return bool(scope.applied.get(position, False))
     return True
 
 
