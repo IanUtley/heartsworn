@@ -969,7 +969,8 @@ def _run_effects(guid: str, root: MechanicsObject, scope: Scope, start: int) -> 
                                     "source_uid": int(scope.source_uid), "owner_uid": int(scope.owner_uid),
                                     "position": position, "target_index": index,
                                     "candidates": candidates, "optional": optional,
-                                    "chosen": {str(k): v for k, v in scope.chosen.items()}}
+                                    "chosen": {str(k): v for k, v in scope.chosen.items()},
+                                    "variables": dict(scope.variables)}
                     template = _load("AbilityTargetTemplate", _guid(root.m_AbilityTargetTemplateIds[index]))
                     revealed = _short(template.type_name) == "SourceRevealedTargetTemplate"
                     raise NeedsChoice(continuation, candidates, optional, revealed=revealed)
@@ -1087,7 +1088,8 @@ def _invoke(parent_guid: str, position: int, effect_raw: dict[str, Any], scope: 
     except NeedsChoice as pause:
         frame = {"ability_guid": parent_guid, "event": dict(scope.event), "source_uid": int(scope.source_uid),
                  "owner_uid": int(scope.owner_uid), "position": position,
-                 "chosen": {str(k): v for k, v in scope.chosen.items()}}
+                 "chosen": {str(k): v for k, v in scope.chosen.items()},
+                 "variables": dict(scope.variables)}
         _append_chain(pause.continuation, frame)
         raise
 
@@ -1106,6 +1108,9 @@ def _frame_scope(frame: dict[str, Any], context: Any) -> tuple[MechanicsObject, 
     scope = Scope(context=context, source_uid=int(frame["source_uid"]), owner_uid=int(frame["owner_uid"]),
                   table=root.version_table, event=dict(frame["event"]))
     scope.chosen = {int(k): (None if v is None else int(v)) for k, v in frame["chosen"].items()}
+    # The variables the frame had bound (a random branch's number, say) are part of its state, so the resumed effects
+    # see the same values the paused run did.
+    scope.variables = dict(frame.get("variables") or {})
     return root, scope
 
 
