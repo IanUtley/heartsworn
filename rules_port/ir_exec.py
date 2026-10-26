@@ -28,6 +28,9 @@ from gamedata.mechanics_fields import current_fields
 from gamedata.mechanics_objects import MechanicsObject, from_record
 from gamedata.records import RecordObject
 from rules_port.ir_exec_transform import AMOUNT_FIELDS as TRANSFORM_AMOUNT_FIELDS
+from rules_port import ir_exec_targets
+from rules_port.ir_exec_targets import FOLLOW_UP_KINDS, follow_up_gaps
+from rules_port.ir_exec_targets import capped, random_picks, target_count
 from rules_port.ir_exec_transform import EFFECTS as TRANSFORM_EFFECTS
 from rules_port.ir_exec_transform import refusals as transform_refusals
 from rules_port.ir_exec_transform import run as run_transform_effect
@@ -39,6 +42,7 @@ from rules_port.ir_event_effects import NATIVE_LEAF_EFFECTS, coverage_of as even
 from rules_port.ir_exec_costs import unsupported_costs
 
 from . import ir_triggers
+from rules_port import granted_abilities
 
 # A CounterModifier's operation, as the live counter primitive names it.
 COUNTER_OPERATIONS = {"Add": "add", "Remove": "remove", "Set": "set"}
@@ -204,6 +208,11 @@ class Scope:
     table: list[dict[str, int]] | None = None
     event: dict[str, Any] = field(default_factory=dict)   # player, card, from, to
     chosen: dict[int, int | None] = field(default_factory=dict)   # target index -> the card the player chose
+    # The clause the interpreter is running, and the targets each effect instance resolved to (for a later
+    # clause's secondary target).
+    clause: Any = None
+    resolved_by_instance: dict[int, list[int]] = field(default_factory=dict)
+    picked: dict[int, list[int]] = field(default_factory=dict)   # random target index -> the cards it drew
     # The test each of the running clause's targets must pass (its RequiresTargetPassesFilterCondition), or None.
     gate: Any = None
     applied: dict[int, bool] = field(default_factory=dict)   # effect position -> whether it applied (C# applied_effects)
@@ -233,15 +242,18 @@ def _battle_cards(scope: Scope) -> list[Card]:
     bstate = context.bstate
     cards: list[Card] = []
     counters = bstate.get("champion_counters") or {}
-    for uid, owner in _champion_owners(bstate).items():
-        cards.append(Card(uid=uid, owner=owner, zone="champions", is_champion=True,
-                          card_type="Champion",
-                          counters={k: int(v) for k, v in (counters.get(str(uid)) or {}).items()},
-                          subtype=_champion_subtype(context, owner)))
     rows = context.db.execute(
         "SELECT card_uid, user_id, location, is_champion, card_type, permanent_buffs, template_guid, "
         "(SELECT name FROM card_templates WHERE guid = game_cards.template_guid), position "
         "FROM game_cards WHERE session_id=?", (context.session.session_id,)).fetchall()
+    # A champion is a game_cards row too: it is listed once, as its row, and only a champion without one is synthetic.
+    row_uids = {int(row[0]) for row in rows}
+    for uid, owner in _champion_owners(bstate).items():
+        if uid not in row_uids:
+            cards.append(Card(uid=uid, owner=owner, zone="champions", is_champion=True,
+                              card_type="Champion",
+                              counters={k: int(v) for k, v in (counters.get(str(uid)) or {}).items()},
+                              subtype=_champion_subtype(context, owner)))
     from pvp_db import db_template_subtype
     for card_uid, user_id, location, is_champion, card_type, buffs_json, template, template_name, position in rows:
         buffs = json.loads(buffs_json or "{}")
@@ -359,6 +371,8 @@ def _filter_holds(card_filter: Any, card: Card, scope: Scope) -> bool:
         return card.uid == scope.source_uid
     if cls == "IsSubType":
         return _is_subtype(str(typed.m_SubType or ""), card)
+    if cls == "IsStoredCardFilter":
+        return card.uid in ir_exec_targets.stored_card_uids(scope)
     if bridge.filter_accepted(cls):
         return bridge.filter_holds(typed, card.uid, scope)
     raise NotImplementedError(f"card filter {cls or type(typed).__name__}")
@@ -401,6 +415,8 @@ def _condition_holds(condition: Any, scope: Scope) -> bool:
                 return False
         mine = int(scope.event.get("player", -1)) == int(scope.owner_uid)
         return (not condition.m_Your or mine) and (not condition.m_Opposing or not mine)
+    if cls == "TriggerCardIsStoredTargetOfAbilitySource":
+        return ir_exec_targets.trigger_card_is_stored(scope)
     if cls == "TriggerCardMatchesFilter":
         card = _card_by_uid(scope, scope.event.get("card"))
         return card is not None and _filter_holds(condition.m_CardFilter, card, scope)
@@ -523,11 +539,18 @@ def _bind_variables(root: MechanicsObject, scope: Scope, wanted: set[str] | None
             scope.variables.setdefault(variable.m_Name, 0)
         elif kind == ir_variables.CARD_PROPERTY_VARIABLE:
             scope.variables[variable.m_Name] = ir_variables.card_property_value(scope, variable)
-        elif kind == ir_variables.EXPRESSION_VARIABLE:
+        elif kind == ir_variables.ABILITY_PROPERTY_VARIABLE:
+            scope.variables[variable.m_Name] = ir_variables.ability_property_value(scope)
+        elif kind == ir_variables.HIGHEST_CARD_VARIABLE:
+            scope.variables[variable.m_Name] = ir_variables.highest_card_value(scope, variable)
+        elif kind in (ir_variables.EXPRESSION_VARIABLE, ir_variables.THRESHOLD_VARIABLE):
             expressions[variable.m_Name] = variable
         else:
             raise NotImplementedError(f"variable {kind}")
-    ir_variables.bind_expressions(expressions, scope.variables, wanted)
+    if ir_variables.uses_escalation(expressions):
+        scope.variables[ir_variables.ESCALATION_NAME] = ir_variables.escalation_value(scope)
+    ir_variables.bind_expressions(expressions, scope.variables, wanted,
+                                  threshold=lambda variable: ir_variables.threshold_value(scope, variable))
 
 
 def _input_value(modifier: MechanicsObject, scope: Scope) -> int:
@@ -542,6 +565,18 @@ def _input_value(modifier: MechanicsObject, scope: Scope) -> int:
     if name not in scope.variables:
         raise KeyError(f"variable {name} is not bound")
     return scope.variables[name]
+
+
+def _auto_card_targets(template: MechanicsObject, index: int, scope: Scope) -> list[int]:
+    """The cards an automatic card target picks. A random one draws its cards once, when the ability first names
+    it, and its later effects reuse them (the live resolver keeps them on the activation). Any other one is
+    recomputed, then kept to its maximum count."""
+    count = target_count(template.m_MaxTargetCount, scope.variables)
+    if template.m_IsRandomTarget:
+        if index not in scope.picked:
+            scope.picked[index] = random_picks(_card_candidates(template, scope), count, scope.context.bstate)
+        return list(scope.picked[index])
+    return capped(_card_candidates(template, scope), count)
 
 
 def _targets(root: MechanicsObject, index: int, scope: Scope) -> list[int]:
@@ -560,7 +595,7 @@ def _resolved_targets(root: MechanicsObject, index: int, scope: Scope) -> list[i
     if kind == "AbilitySourceCardTargetTemplate":
         return [scope.source_uid]
     if kind == "AbilityTargetTemplate" and template.m_IsAutoTarget:
-        return _card_candidates(template, scope)
+        return _auto_card_targets(template, index, scope)
     if kind == "SourceRevealedTargetTemplate":
         return _revealed_candidates(template, index, scope)
     if kind in ("AbilityTargetTemplate", "SourceRevealedTargetTemplate") and not template.m_IsAutoTarget \
@@ -581,6 +616,9 @@ def _resolved_targets(root: MechanicsObject, index: int, scope: Scope) -> list[i
                 raise NotImplementedError("the opponent is not a single player")
             return [_player_champion(scope, others[0])]
         raise NotImplementedError(f"player target {player}")
+    if kind in FOLLOW_UP_KINDS:
+        return ir_exec_targets.follow_up_targets(template, _guid(root.m_AbilityTargetTemplateIds[index]),
+                                                 _guid(root.m_AbilityTemplateId), scope)
     raise NotImplementedError(f"target {kind}")
 
 
@@ -610,10 +648,13 @@ def _card_candidates(template: MechanicsObject, scope: Scope) -> list[int]:
     zones = _zones_of(template.m_CollectionFlags)
     player = str(template.m_PlayerFilter or "MultiplePlayers")
     top = _top_n_of_deck(template.m_CardFilter)
-    cards = [card for card in _battle_cards(scope)
-             if (not zones or card.zone in zones)
-             and _player_passes(player, card.owner, scope)
-             and _filter_holds(template.m_CardFilter, card, scope)]
+    # The live pool is the zones' cards in board order (the game_cards position), so a random pick or a cap of an
+    # automatic target takes the same cards the live resolver takes.
+    cards = sorted((card for card in _battle_cards(scope)
+                    if (not zones or card.zone in zones)
+                    and _player_passes(player, card.owner, scope)
+                    and _filter_holds(template.m_CardFilter, card, scope)),
+                   key=lambda card: card.position)
     if top is None:
         return [card.uid for card in cards]
     if top.m_CountFromBottom or top.m_TopHalfOfDeck:
@@ -664,6 +705,10 @@ def _player_passes(player_filter: str, owner: int, scope: Scope) -> bool:
     if player_filter in ("MultipleOpponents", "SingleOpponent"):
         return owner != controller
     if player_filter == "MultiplePlayers":
+        return True
+    # SinglePlayer is refused by coverage() except for a counter's chain cards (CastSpells), where the chosen card is the
+    # only candidate the filter has to admit.
+    if player_filter == "SinglePlayer":
         return True
     raise NotImplementedError(f"target player filter {player_filter}")
 
@@ -751,6 +796,10 @@ def _run_clause(root: MechanicsObject, clause: Any, scope: Scope) -> None:
         return
     if _short(effect_type) == "SummonTokenTroopAbilityEffectTemplate":
         _summon_tokens(root, clause, effect_raw, scope)
+        return
+    if _short(effect_type) == "StoreTargetsAbilityEffectTemplate":
+        targets = _targets(root, int(_field(clause, "m_TargetTemplateIndex") or 0), scope)
+        ir_exec_targets.store_targets(scope, _guid(root.m_AbilityTemplateId), effect_raw, targets)
         return
     if _short(effect_type) in ir_exec_resources.EFFECTS:
         ir_exec_resources.run_effect(_short(effect_type), effect_raw, root, clause, scope)
@@ -1072,9 +1121,10 @@ def _run_effects(guid: str, root: MechanicsObject, scope: Scope, start: int) -> 
     """Run the ability's effects from clause ``start``. A clause whose target the player picks either takes its
     one forced candidate, takes nothing, or pauses with NeedsChoice before it runs."""
     bstate = scope.context.bstate
-    with _bridge_caster(bstate, owner=scope.owner_uid, source=scope.source_uid):
+    with _bridge_caster(bstate, owner=scope.owner_uid, source=scope.source_uid, ability=guid):
         for position in range(start, len(root.m_AbilityEffectList)):
             clause = root.m_AbilityEffectList[position]
+            scope.clause = clause
             # Counts are read when the effect runs, after the effects before it (C# evaluates a variable lazily).
             _bind_variables(root, scope, _clause_names(clause))
             # A contingent effect runs only when the effect it names applied (C# ContingentEffectInstanceId).
@@ -1103,12 +1153,18 @@ def _run_effects(guid: str, root: MechanicsObject, scope: Scope, start: int) -> 
                                     "position": position, "target_index": index,
                                     "candidates": candidates, "optional": optional,
                                     "chosen": {str(k): v for k, v in scope.chosen.items()},
+                                    "picked": {str(k): list(v) for k, v in scope.picked.items()},
                                     "variables": dict(scope.variables),
+                                    "resolved": _resolved_json(scope),
                                     "applied": {str(k): v for k, v in scope.applied.items()}}
                     template = _load("AbilityTargetTemplate", _guid(root.m_AbilityTargetTemplateIds[index]))
                     revealed = _short(template.type_name) == "SourceRevealedTargetTemplate"
                     raise NeedsChoice(continuation, candidates, optional, revealed=revealed)
             effect_type, effect_raw = _stored("AbilityEffectTemplate", _guid(_field(clause, "m_EffectTemplateId")))
+            # The targets of an effect a later clause names as its secondary target, as they are when it runs.
+            instance = int(_field(clause, "m_EffectInstanceId") or 0)
+            if instance in ir_exec_targets.referenced_instances(root):
+                scope.resolved_by_instance[instance] = list(_targets(root, index, scope))
             # A chosen revealed target that finds no card ends the ability: the client disables that effect and
             # runs nothing after it (Oakhenge's remaining cards are not moved, and the random generator is not drawn).
             # An automatic revealed target that finds nothing only disables its own effect.
@@ -1119,6 +1175,10 @@ def _run_effects(guid: str, root: MechanicsObject, scope: Scope, start: int) -> 
             if _short(effect_type) == "PlayCardAbilityEffectTemplate":
                 from rules_port.ir_exec_play import play_for_free
                 play_for_free(scope.context, _targets(root, index, scope), effect_raw)
+                continue
+            if _short(effect_type) == "CounterSpellAbilityEffectTemplate":
+                from rules_port.ir_exec_counter import counter_targets
+                counter_targets(scope.context, _targets(root, index, scope), effect_raw)
                 continue
             # The effect applies from here on: a later NotContingent condition reads it (C# applied_effects).
             scope.applied[position] = True
@@ -1136,6 +1196,11 @@ def _run_effects(guid: str, root: MechanicsObject, scope: Scope, start: int) -> 
                 continue
             if _short(effect_type) == "RevealCardsAbilityEffectTemplate":
                 _reveal_cards(root, clause, effect_raw, scope)
+                continue
+            if _short(effect_type) in granted_abilities.GRANTED_EFFECTS:
+                granted_abilities.run(_short(effect_type), effect_raw, str(_field(clause, "m_EffectDuration") or ""),
+                                      _targets(root, int(_field(clause, "m_TargetTemplateIndex") or 0), scope),
+                                      scope.context)
                 continue
             _run_clause(root, clause, scope)
     scope.gate = None
@@ -1190,13 +1255,15 @@ def _reveal_cards(root: MechanicsObject, clause: Any, effect_raw: dict[str, Any]
 @contextmanager
 def _bridge_caster(bstate: dict[str, Any], *, owner: Any = None, source: Any = None,
                    variables: dict[str, Any] | None = None, ability: str | None = None) -> Iterator[None]:
-    """The one place the interpreter writes the caster, source, variables and ability into the battle state. The
-    shared resolver leaves read those from the battle state, so they are set here for the duration of one
-    interpreted call and restored after it. Every target the interpreter acts on is passed explicitly, not read from
-    this state."""
+    """The one place the interpreter writes the caster, source and variables into the battle state. The shared
+    resolver leaves read those from the battle state, so they are set here for the duration of one interpreted call
+    and restored after it. Every target the interpreter acts on is passed explicitly, not read from this state."""
     saved = {key: bstate.get(key) for key in ("resolving_owner_id", "resolving_source_uid", "ability_variables",
                                               "resolving_ability")}
     try:
+        if ability is not None:
+            # The lists an effect records (a created, moved or voided card) are kept for the resolving ability.
+            bstate["resolving_ability"] = str(ability).lower()
         if owner is not None:
             bstate["resolving_owner_id"] = int(owner)
         if source is not None:
@@ -1281,13 +1348,18 @@ def _invoke(parent_guid: str, position: int, effect_raw: dict[str, Any], scope: 
     for owner in owners:
         child_scope = Scope(context=scope.context, source_uid=int(scope.source_uid), owner_uid=int(owner),
                             table=child_root.version_table, event=dict(scope.event))
+        # The child starts from the lists the parent recorded so far (C# Session.CreateAbility appends the parent), so
+        # a stored-targets read in the child finds the parent's stored cards.
+        with _bridge_caster(scope.context.bstate, ability=parent_guid):
+            scope.context.inherit_child_lists(child_guid)
         try:
             _run_effects(child_guid, child_root, child_scope, start=0)
         except NeedsChoice as pause:
             frame = {"ability_guid": parent_guid, "event": dict(scope.event), "source_uid": int(scope.source_uid),
                      "owner_uid": int(scope.owner_uid), "position": position,
                      "chosen": {str(k): v for k, v in scope.chosen.items()},
-                     "variables": dict(scope.variables),
+                     "picked": {str(k): list(v) for k, v in scope.picked.items()},
+                     "variables": dict(scope.variables), "resolved": _resolved_json(scope),
                      "applied": {str(k): v for k, v in scope.applied.items()}}
             _append_chain(pause.continuation, frame)
             raise
@@ -1307,11 +1379,18 @@ def _frame_scope(frame: dict[str, Any], context: Any) -> tuple[MechanicsObject, 
     scope = Scope(context=context, source_uid=int(frame["source_uid"]), owner_uid=int(frame["owner_uid"]),
                   table=root.version_table, event=dict(frame["event"]))
     scope.chosen = {int(k): (None if v is None else int(v)) for k, v in frame["chosen"].items()}
+    scope.picked = {int(k): [int(uid) for uid in v] for k, v in (frame.get("picked") or {}).items()}
     # The variables the frame had bound (a random branch's number, say) are part of its state, so the resumed effects
     # see the same values the paused run did.
     scope.variables = dict(frame.get("variables") or {})
+    scope.resolved_by_instance = {int(k): [int(uid) for uid in v] for k, v in (frame.get("resolved") or {}).items()}
     scope.applied = {int(k): bool(v) for k, v in (frame.get("applied") or {}).items()}
     return root, scope
+
+
+def _resolved_json(scope: Scope) -> dict[str, list[int]]:
+    """The resolved targets of each effect instance so far, as a continuation keeps them."""
+    return {str(k): [int(uid) for uid in v] for k, v in scope.resolved_by_instance.items()}
 
 
 def resume_ability(continuation: dict[str, Any], answer: int | None, *, context: Any) -> bool:
@@ -1352,12 +1431,12 @@ SUPPORTED_TRIGGERS = {"TurnEndedEvent", "TurnStartedEvent", "CardEnteredZoneEven
 SUPPORTED_CONDITIONS = {
     "AndTriggerCondition", "TriggerCondition", "TriggerSource", "TriggerPlayerControlsAbilitySource",
     "TriggerCardEnteredZone", "TriggerCardMatchesFilter", "RequiresCardsControlled",
-    "TriggerCardIsAbilitySource",
+    "TriggerCardIsAbilitySource", "TriggerCardIsStoredTargetOfAbilitySource",
 } | ir_triggers.CONDITIONS
 SUPPORTED_FILTERS = {
     "AndCardFilter", "OrCardFilter", "NotCardFilter", "IsControlledBy", "IsNotControlledBy",
     "HasCountersValue", "IsTroop", "IsHero", "IsResource", "IsType", "IntAttrFilter", "InZone",
-    "IsAbilitySource", "IsSubType", "NameContainsFilter", "TopNOfDeck",
+    "IsAbilitySource", "IsSubType", "NameContainsFilter", "TopNOfDeck", "IsStoredCardFilter",
 }
 SUPPORTED_MODIFIERS = {"DamageModifier", "CounterModifier", "HealHeroModifier", "AttackModifier", "DefenseModifier",
                        "CurrentResourceModifier", "TotalResourceModifier", "ChargePointsModifier", "ThresholdModifier",
@@ -1369,7 +1448,7 @@ STAT_DURATIONS = {"Permanent", "EndOfTurn"}
 # An effect with such text is refused, not computed differently.
 DERIVED_STAT_TEXT = ("troop's [def]", "voided troop's")
 SUPPORTED_TARGETS = {"AbilitySourceCardTargetTemplate", "AbilityTargetTemplate", "PlayerTargetTemplate",
-                     "SourceRevealedTargetTemplate"}
+                     "SourceRevealedTargetTemplate"} | FOLLOW_UP_KINDS
 # The player targets run without a choice: "You", and the one opponent (its random pick is that one player).
 SUPPORTED_PLAYER_TARGETS = {"Self", "SingleOpponent"}
 
@@ -1484,10 +1563,20 @@ def coverage(guid: str) -> list[str]:
             if player not in SUPPORTED_PLAYER_TARGETS:
                 missing.append(f"player target {player}")
             continue
-        if kind == "AbilityTargetTemplate" and str(template.get("m_PlayerFilter") or "") not in TARGET_PLAYER_FILTERS:
+        player_filter = str(template.get("m_PlayerFilter") or "")
+        chain_card = player_filter == "SinglePlayer" and str(template.get("m_CollectionFlags") or "") == "CastSpells"
+        if kind == "AbilityTargetTemplate" and player_filter not in TARGET_PLAYER_FILTERS and not chain_card:
             missing.append(f"target player filter {template.get('m_PlayerFilter')}")
-        if template.get("m_IsRandomTarget"):
+        if kind == "AbilityTargetTemplate" and not template.get("m_IsAutoTarget") and \
+                target_count(_load("AbilityTargetTemplate", template_guid).m_MaxTargetCount, {}) != 1:
+            # The player picks one card; a chosen target of several cards (or no limit) is not modelled.
+            missing.append("chosen target of more than one card")
+        if template.get("m_IsRandomTarget") and kind != "MatchSecondaryTargetTemplate":
+            # The pick is drawn from the battle's RNG, but the interpreter's random pool does not yet match the live one
+            # (see ir_exec_targets.py), so a random target stays with the native resolver.
             missing.append("random target")
+        if kind in FOLLOW_UP_KINDS:
+            missing.extend(follow_up_gaps(template, kind))
         for name in _tagged_classes(template.get("m_CardFilter"), []):
             if name not in SUPPORTED_FILTERS and not bridge.filter_accepted(name):
                 missing.append(f"filter {name}")
@@ -1537,6 +1626,15 @@ def coverage(guid: str) -> list[str]:
         if kind == ir_variables.CARD_PROPERTY_VARIABLE:
             missing.extend(ir_variables.card_property_gaps(variable))
             continue
+        if kind == ir_variables.ABILITY_PROPERTY_VARIABLE:
+            missing.extend(ir_variables.ability_property_gaps(variable))
+            continue
+        if kind == ir_variables.HIGHEST_CARD_VARIABLE:
+            missing.extend(ir_variables.highest_card_gaps(variable))
+            continue
+        if kind == ir_variables.THRESHOLD_VARIABLE:
+            missing.extend(ir_variables.threshold_gaps(variable))
+            continue
         if kind == ir_variables.EXPRESSION_VARIABLE:
             expressions[str(variable.get("m_Name") or "")] = str(variable.get("m_ExpressionText") or "")
             continue
@@ -1571,6 +1669,11 @@ def coverage(guid: str) -> list[str]:
             operation = str(effect.get("m_Operation") or "Set").rsplit(".", 1)[-1]
             if operation not in ("Add", "Remove", "Set"):
                 missing.append(f"card integer operation {operation}")
+        if kind == "StoreTargetsAbilityEffectTemplate":
+            if effect.get("m_SetTargets"):
+                missing.append("store targets replacing the list")
+            if int(effect.get("m_TargetIndex") or 0):
+                missing.append("store target index")
             continue
         if kind == "MoveCardToZoneEffectTemplate":
             destination = _short(effect.get("m_DestinationCollection")).lower()
@@ -1578,6 +1681,13 @@ def coverage(guid: str) -> list[str]:
                 missing.append(f"move to {destination or 'no zone'}")
             if str(effect.get("m_AllCardsOfTargetInZone") or "None") not in ("None", ""):
                 missing.append("move of every card in a zone")
+            continue
+        if kind == "CounterSpellAbilityEffectTemplate":
+            # The counter is the live counter leaf's (it refuses a card no longer on the chain, or one that cannot be
+            # interrupted). The effect has no modifier of its own.
+            continue
+        if kind in granted_abilities.GRANTED_EFFECTS:
+            missing.extend(granted_abilities.gaps(kind, effect, str(clause.get("m_EffectDuration") or "")))
             continue
         if kind == "PlayCardAbilityEffectTemplate":
             # The free play is the live play leaf's; a play that is only an activation is not modelled.
@@ -1651,4 +1761,14 @@ def coverage(guid: str) -> list[str]:
                 or (effect.get("m_Modifier") or {}).get("m_RemoveAllCounters")):
             missing.append(f"counter operation {(effect.get('m_Modifier') or {}).get('m_Operation')}")
     missing.extend(ir_exec_resources.coverage_invocation_cost(raw))
+    # TODO(gap area B, follow-up): a reveal whose picked card the StoreTargets effect stores resolves to a different
+    # card on the engine than on the native path (Create four, Put into your hand), so the pair is refused until the
+    # engine's reveal pick matches the native one.
+    # TODO(gap area B, follow-up): a revert after StoreTargets emits a revert the native path skips (Valorous), so
+    # the pair is refused until the revert matches the native path.
+    effect_kinds = {_short(_stored("AbilityEffectTemplate", _guid(clause.get("m_EffectTemplateId")))[0])
+                    for clause in raw.get("m_AbilityEffectList") or []}
+    if "StoreTargetsAbilityEffectTemplate" in effect_kinds and \
+            effect_kinds & {"RevealCardsAbilityEffectTemplate", "RevertPermanentModificationsAbilityEffectTemplate"}:
+        missing.append("reveal or revert with store targets")
     return sorted(set(missing))

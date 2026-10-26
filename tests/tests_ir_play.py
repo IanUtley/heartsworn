@@ -5,12 +5,27 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 
+import pytest  # noqa: E402
+
 import tests.ir_equivalence as H  # noqa: E402
+import db as dbmod  # noqa: E402  (after the harness sets up the test database)
 from tests.tests_combat import SessionStub, add_card  # noqa: E402
 
 TRANSCEND_ABILITY = "f0104d23-f3c2-b457-fef5-af6eaa9c9b05"  # "Play all Standard resources in your deck."
 RESOURCE_TEMPLATE = "b253393b-fdde-47c4-9288-4b8efb0698b1"  # Blood Shard (a Standard resource)
 RESOURCE_UIDS = (950, 951)
+
+
+@pytest.fixture(autouse=True)
+def _own_database():
+    """_scenario replaces the module's database and closes the one it found. Start from none, then close this test's
+    own database and put the original back, so later tests keep a database that is open."""
+    original = dbmod._db
+    dbmod._db = None
+    yield
+    if dbmod._db is not None and dbmod._db is not original:
+        dbmod._db.close()
+    dbmod._db = original
 
 
 def _scenario_with_deck_resources():

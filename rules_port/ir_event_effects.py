@@ -10,8 +10,13 @@ from __future__ import annotations
 
 from typing import Any
 
-# The effect templates this module runs through the native leaves.
-NATIVE_LEAF_EFFECTS = frozenset({"FireEventEffectTemplate", "TACAbilityEffectTemplate"})
+# The effect templates this module runs through the native leaves. The bookkeeping ones remember a name, a keyword's
+# powers or a registered trigger on the battle state, and the keyword one activates the target's triggered ability.
+NATIVE_LEAF_EFFECTS = frozenset({
+    "FireEventEffectTemplate", "TACAbilityEffectTemplate",
+    "StoreNameAbilityEffectTemplate", "RememberKeywordPowersEffectTemplate",
+    "RegisterTriggerAbilityEffectTemplate", "ActivateTriggeredAbilityEffectTemplate",
+})
 
 # The TAC operations the native leaf (EffectContext.tac) implements. A TAC operation outside this set is refused by
 # coverage, so its ability is never half-run.
