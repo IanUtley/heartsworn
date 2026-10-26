@@ -1013,9 +1013,14 @@ def _run_effects(guid: str, root: MechanicsObject, scope: Scope, start: int) -> 
             # A chosen revealed target that finds no card ends the ability: the client disables that effect and
             # runs nothing after it (Oakhenge's remaining cards are not moved, and the random generator is not drawn).
             # An automatic revealed target that finds nothing only disables its own effect.
-            if _short(effect_type) in ("MoveCardToZoneEffectTemplate", "RevealCardsAbilityEffectTemplate") and \
+            if _short(effect_type) in ("MoveCardToZoneEffectTemplate", "RevealCardsAbilityEffectTemplate",
+                                       "PlayCardAbilityEffectTemplate") and \
                     _revealed_target_empty(root, int(_field(clause, "m_TargetTemplateIndex") or 0), scope):
                 break
+            if _short(effect_type) == "PlayCardAbilityEffectTemplate":
+                from rules_port.ir_exec_play import play_for_free
+                play_for_free(scope.context, _targets(root, index, scope), effect_raw)
+                continue
             # The effect applies from here on: a later NotContingent condition reads it (C# applied_effects).
             scope.applied[position] = True
             if _short(effect_type) == "ActivateAbilityEffectTemplate":
@@ -1387,6 +1392,11 @@ def coverage(guid: str) -> list[str]:
                 missing.append(f"move to {destination or 'no zone'}")
             if str(effect.get("m_AllCardsOfTargetInZone") or "None") not in ("None", ""):
                 missing.append("move of every card in a zone")
+            continue
+        if kind == "PlayCardAbilityEffectTemplate":
+            # The free play is the live play leaf's; a play that is only an activation is not modelled.
+            if effect.get("m_JustActivate"):
+                missing.append("play that only activates")
             continue
         if kind == "RevealCardsAbilityEffectTemplate":
             if str(effect.get("m_PlayerRevealTargets") or "Unknown") not in ("Unknown", "Everyone", "Self"):
