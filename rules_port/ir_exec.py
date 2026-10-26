@@ -1701,4 +1701,14 @@ def coverage(guid: str) -> list[str]:
                 or (effect.get("m_Modifier") or {}).get("m_RemoveAllCounters")):
             missing.append(f"counter operation {(effect.get('m_Modifier') or {}).get('m_Operation')}")
     missing.extend(ir_exec_resources.coverage_invocation_cost(raw))
+    # TODO(gap area B, follow-up): a reveal whose picked card the StoreTargets effect stores resolves to a different
+    # card on the engine than on the native path (Create four, Put into your hand), so the pair is refused until the
+    # engine's reveal pick matches the native one.
+    # TODO(gap area B, follow-up): a revert after StoreTargets emits a revert the native path skips (Valorous), so
+    # the pair is refused until the revert matches the native path.
+    effect_kinds = {_short(_stored("AbilityEffectTemplate", _guid(clause.get("m_EffectTemplateId")))[0])
+                    for clause in raw.get("m_AbilityEffectList") or []}
+    if "StoreTargetsAbilityEffectTemplate" in effect_kinds and \
+            effect_kinds & {"RevealCardsAbilityEffectTemplate", "RevertPermanentModificationsAbilityEffectTemplate"}:
+        missing.append("reveal or revert with store targets")
     return sorted(set(missing))
