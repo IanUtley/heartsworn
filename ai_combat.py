@@ -447,7 +447,8 @@ def solve_block(attackers, blockers, defender_defense, evaluator, *,
     uids]}``; attackers that are not in the result are unblocked.
 
     ``attacker_resources`` is the attacking player's available resources. With none left they cannot respond to the
-    block, so a single block is not gated by value (a deliberate departure from the client's SolveBlock)."""
+    block, and an Invincible blocker survives it, so a single block is not gated by value in either case (both are
+    deliberate departures from the client's SolveBlock)."""
     personality = evaluator.personality
     attacker_window = WindowList(attackers)
     blocker_window = WindowList(blockers)
@@ -483,7 +484,9 @@ def solve_block(attackers, blockers, defender_defense, evaluator, *,
         if len(blocker_uids) == 1:
             attacker = next((a for a in attackers if a.uid == attacker_uid), None)
             blocker = next((b for b in blockers if b.uid == blocker_uids[0]), None)
-            if attacker is not None and blocker is not None and \
+            # An Invincible blocker (ECardAttributes.Immortal) survives the damage, so its block is never gated by value.
+            invincible = blocker is not None and blocker.has_attribute(ECardAttributes.Immortal)
+            if attacker is not None and blocker is not None and not invincible and \
                     attacker.value < blocker.value * 2.0:
                 assignment.clear()
     return {uid: uids for uid, uids in assignment.items() if uids}
