@@ -1764,6 +1764,41 @@ class PendingChoicesMixin:
         if pend.get("kind") == "matching_target":
             return self._resolve_pending_matching_target(
                 session, pl_t, ai_t, bstate, pend, chosen_uid)
+        native_continuation = pend.get("continuation")
+        if (chosen_uid and chosen_uid in pend["candidates"]
+                and isinstance(native_continuation, dict)
+                and isinstance(native_continuation.get("interpreter"), dict)):
+            # The interpreter paused for this deck pick (rules_port/ir_exec.py). The interpreter moves the chosen card
+            # itself; resume it from the continuation with the pick, then finish the chain as the revealed branch does.
+            from rules_port import ir_exec
+            from rules_port.context import EffectContext
+            from rules_port.resolution import prompt_interpreted_reveal
+            _hc.log_req(f"    Deck-search choice {hex(int(chosen_uid))}: resuming the interpreter")
+            g = self._fresh_game(session, pl_t, ai_t, bstate)
+            self._hide_candidates_to_deck(
+                g, session, pl_t, ai_t,
+                [cu for cu in pend["candidates"] if int(cu) != int(chosen_uid)])
+            bstate.pop("pending_deck_search", None)
+            bstate.pop("resolution_paused", None)
+            try:
+                ir_exec.resume_ability(
+                    native_continuation["interpreter"], int(chosen_uid),
+                    context=EffectContext.from_rules_port(
+                        g, session, _hc._db, self, pl_t, ai_t, bstate, ""))
+            except ir_exec.NeedsChoice as pause:
+                prompt_interpreted_reveal(self, g, session, _hc._db, pl_t, ai_t, bstate, pause)
+                _be.save_state(session, bstate)
+                self._send_battle_events(session, g, pl_t)
+                self._push_transaction_ack(session)
+                return True
+            _be.save_state(session, bstate)
+            self._send_battle_events(session, g, pl_t)
+            if self._resume_completed_rules_port_chain(session, bstate):
+                if not self._advance_rules_port_to_priority(session, pl_t, ai_t, bstate):
+                    self._push_transaction_ack(session)
+            else:
+                self._push_transaction_ack(session)
+            return True
         if chosen_uid and chosen_uid in pend["candidates"]:
             g = self._fresh_game(session, pl_t, ai_t, bstate)
             if bstate.get("_rules_port_attached"):

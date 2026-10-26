@@ -2043,12 +2043,10 @@ def _answers_from_target_map(target_map: dict[Any, Any]) -> dict[int, int | None
 
 
 def prompt_interpreted_reveal(handler, game, session, db, player_uid, ai_uid, battle_state, pause):
-    """Show the player the cards an interpreted ability's reveal offers, through the client's revealed-card picker, and
-    keep the interpreter's continuation with the prompt. The answer resumes the interpreter (see
-    application/pending_choices.py _resolve_pending_revealed_choice). Returns "waiting"."""
-    prompt = getattr(handler, "_prompt_revealed_choice", None)
-    if not callable(prompt):
-        raise RuntimeError("the interpreter paused for a revealed choice, with no picker to show it")
+    """Show the player an interpreted ability's pick: among the cards a reveal showed, through the client's
+    revealed-card picker; or, from the deck, through the deck-search picker (Darkspire Priestess's search). The
+    interpreter's continuation is kept with the prompt. The answer resumes the interpreter (see
+    application/pending_choices.py). Returns "waiting"."""
     continuation = pause.continuation
     target_index = int(continuation["target_index"])
     native_shape = {
@@ -2057,10 +2055,21 @@ def prompt_interpreted_reveal(handler, game, session, db, player_uid, ai_uid, ba
         "variables": {}, "resume_effect_order": int(continuation["position"]), "ability_instance_id": 1,
         "interpreter": continuation,
     }
-    prompt(game, session, player_uid, ai_uid, battle_state, continuation["ability_guid"],
-           int(continuation["source_uid"]), int(continuation["owner_uid"]),
-           list(pause.candidates), [int(uid) for uid in (battle_state.get("revealed_cards") or [])],
-           optional=bool(pause.optional), continuation=native_shape)
+    if pause.revealed:
+        prompt = getattr(handler, "_prompt_revealed_choice", None)
+        if not callable(prompt):
+            raise RuntimeError("the interpreter paused for a revealed choice, with no picker to show it")
+        prompt(game, session, player_uid, ai_uid, battle_state, continuation["ability_guid"],
+               int(continuation["source_uid"]), int(continuation["owner_uid"]),
+               list(pause.candidates), [int(uid) for uid in (battle_state.get("revealed_cards") or [])],
+               optional=bool(pause.optional), continuation=native_shape)
+    else:
+        prompt = getattr(handler, "_prompt_deck_search", None)
+        if not callable(prompt):
+            raise RuntimeError("the interpreter paused for a deck choice, with no deck-search picker to show it")
+        prompt(game, session, player_uid, ai_uid, battle_state, continuation["ability_guid"],
+               int(continuation["source_uid"]), int(continuation["owner_uid"]),
+               list(pause.candidates), kind="search", continuation=native_shape)
     battle_state["resolution_paused"] = True
     return "waiting"
 

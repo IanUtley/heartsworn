@@ -794,7 +794,10 @@ def _invoked_non_revealed_choice(root: MechanicsObject, seen: set[str]) -> bool:
         for index in range(len(child_root.m_AbilityTargetTemplateIds or [])):
             if _needs_choice(child_root, index):
                 template = _load("AbilityTargetTemplate", _guid(child_root.m_AbilityTargetTemplateIds[index]))
-                if _short(template.type_name) != "SourceRevealedTargetTemplate":
+                if _short(template.type_name) != "SourceRevealedTargetTemplate" and \
+                        "deck" not in _zones_of(template.m_CollectionFlags):
+                    # Only a pick from the deck has its picker wired (the deck-search prompt); any other pick stays
+                    # on the native path.
                     return True
         if _invoked_non_revealed_choice(child_root, seen | {child}):
             return True
