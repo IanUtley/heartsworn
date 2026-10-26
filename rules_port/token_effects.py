@@ -621,8 +621,9 @@ def _creation_replacement_guid(context, token_guid):
     return None
 
 
-def summon_token(context, payload=None):
-    """Create typed token cards and dispatch their authored entry events."""
+def summon_token(context, payload=None, *, target=None, owner=None):
+    """Create typed token cards and dispatch their authored entry events. ``target`` and ``owner`` name the card and
+    the caster explicitly (the interpreter's); without them they are the resolver's target and owner."""
     from pvp_db import (db_copy_template_payload, db_insert_generated_card,
                         db_next_game_card_row_id, db_template_exists)
     payload = payload if isinstance(payload, dict) else {}
@@ -713,8 +714,10 @@ def summon_token(context, payload=None):
             # must happen before the talent-modified lookup and the payload
             # copy: the substitute's own type/abilities/stats are created.
             guid = str(replacement).lower()
-    owner = int(context.bstate.get("resolving_owner_id", 0) or 0)
-    target = context.resolved_target()
+    if owner is None:
+        owner = int(context.bstate.get("resolving_owner_id", 0) or 0)
+    if target is None:
+        target = context.resolved_target()
     target_owner = context.target_owner(target, default=owner)
     # Some token effects target a champion other than the ability's
     # controller ("a random opposing champion summons ..."), so the resolved

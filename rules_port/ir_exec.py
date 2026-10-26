@@ -633,16 +633,14 @@ def _summon_tokens(root: MechanicsObject, clause: Any, effect_raw: dict[str, Any
     # The live resolver creates the controller's tokens first, then the others'.
     targets = sorted(_targets(root, int(_field(clause, "m_TargetTemplateIndex") or 0), scope),
                      key=lambda uid: (_card_owner(scope, uid) != int(scope.owner_uid), uid))
-    saved = {key: context.bstate.get(key) for key in
-             ("resolving_owner_id", "resolving_target_uid", "ability_variables")}
+    saved = {key: context.bstate.get(key) for key in ("resolving_owner_id", "ability_variables")}
     previous_template = context.effect_template_override
     context.effect_template_override = effect_raw
     context.bstate["resolving_owner_id"] = int(scope.owner_uid)
     context.bstate["ability_variables"] = dict(scope.variables)
     try:
         for target in targets:
-            context.bstate["resolving_target_uid"] = int(target)
-            token_effects.summon_token(context)
+            token_effects.summon_token(context, target=int(target), owner=int(scope.owner_uid))
     finally:
         context.effect_template_override = previous_template
         for key, value in saved.items():
