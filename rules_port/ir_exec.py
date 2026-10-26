@@ -497,7 +497,9 @@ def _targets(root: MechanicsObject, index: int, scope: Scope) -> list[int]:
     if kind == "AbilitySourceCardTargetTemplate":
         return [scope.source_uid]
     if kind == "AbilityTargetTemplate" and template.m_IsAutoTarget:
-        return _card_candidates(template, scope)
+        # The client adds the matching cards to a stack and pops them, so an automatic target's cards act last
+        # in first-out order (a Deathcry's troops act before the champion that is listed first).
+        return list(reversed(_card_candidates(template, scope)))
     if kind == "SourceRevealedTargetTemplate":
         return _revealed_candidates(template, index, scope)
     if kind in ("AbilityTargetTemplate", "SourceRevealedTargetTemplate") and not template.m_IsAutoTarget \
