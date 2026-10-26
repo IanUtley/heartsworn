@@ -654,11 +654,14 @@ class NativeTriggerBackend:
                     battle_state["resolving_trigger_event_data"] = dict(
                         event.data or {})
                     try:
+                        interpreted = None
                         if ir_exec.engine_runs(key[1], source_uid, source_card_owner):
-                            result = run_interpreted_trigger(
+                            interpreted = run_interpreted_trigger(
                                 handler, game, session, db, player_uid, ai_uid,
                                 battle_state, key[1], source_uid, source_card_owner,
                                 event_name, event.source_card_id, dict(event.data or {}))
+                        if interpreted is not None:
+                            result = interpreted
                         else:
                             result = resolve_port_ability(
                                 handler, game, session, db, player_uid, ai_uid,

@@ -493,6 +493,38 @@ def test_a_random_branch_searches_the_deck_for_a_named_card_and_moves_the_choice
     assert locations == {700: "deck", 701: "hand", 702: "deck"}, locations
 
 
+OAKHENGE_CEREMONY = "200337da-9971-cf13-7e98-011a78b9ac64"   # an activation: look at the top five, take a revealed troop
+
+
+def test_a_revealed_choice_takes_one_card_and_the_rest_go_back_in_random_places(db):
+    """Revealing the top five and taking one revealed troop: the chosen troop goes to hand, and the remaining
+    revealed cards go back into the deck at random positions without a shuffle of the other cards."""
+    from rules_port import ir_exec
+    from rules_port.context import EffectContext
+
+    pl_t, ai_t, game, handler, bstate, _player_champ, _ai_champ = _setup(db)
+    bstate["_rules_rng"] = _FixedRng(0)
+    add_card(db, 900, 5, TPL_GLADIATOR, loc="warzone")
+    for offset in range(6):
+        add_card(db, 800 + offset, 5, TPL_GLADIATOR, loc="deck")
+        db.execute("UPDATE game_cards SET position=? WHERE card_uid=?", (offset, 800 + offset))
+    db.commit()
+    context = EffectContext.from_rules_port(game, SessionStub(), db, handler, pl_t, ai_t, bstate, "")
+    try:
+        ir_exec.run_ability(OAKHENGE_CEREMONY, None, context=context, source_uid=900, owner_uid=5,
+                            event={"player": 5})
+        raise AssertionError("the revealed choice did not pause")
+    except ir_exec.NeedsChoice as pause:
+        candidates = sorted(pause.candidates)
+        continuation = pause.continuation
+    assert candidates == [800, 801, 802, 803, 804], candidates
+    assert sorted(bstate["revealed_cards"]) == candidates, bstate.get("revealed_cards")
+    ir_exec.resume_ability(continuation, 802, context=context)
+    rows = dict(db.execute("SELECT card_uid, location FROM game_cards WHERE card_uid BETWEEN 800 AND 805").fetchall())
+    assert rows[802] == "hand", rows
+    assert sorted(uid for uid, loc in rows.items() if loc == "deck") == [800, 801, 803, 804, 805], rows
+
+
 if __name__ == "__main__":
     import db as dbmod
     for run in (test_burning_ability_runs_from_its_ir, test_dazed_and_vulnerable_removals_match_the_live_engine,
@@ -508,7 +540,8 @@ if __name__ == "__main__":
                 test_a_chosen_target_pauses_and_resumes_from_its_continuation,
                 test_an_invoked_choice_pauses_and_resumes_the_invoking_ability,
                 test_a_random_variable_picks_the_branch_its_condition_tests,
-                test_a_random_branch_searches_the_deck_for_a_named_card_and_moves_the_choice):
+                test_a_random_branch_searches_the_deck_for_a_named_card_and_moves_the_choice,
+                test_a_revealed_choice_takes_one_card_and_the_rest_go_back_in_random_places):
         dbmod._db = make_db()
         run(dbmod._db)
     print("ok")

@@ -174,6 +174,8 @@ class Card:
     subtype: str | None = None
     # The card's template name; None for a synthetic champion, whose name the battle does not carry.
     name: str | None = None
+    # The card's position in its zone (the deck's top is the lowest).
+    position: int = 0
 
 
 @dataclass
@@ -219,10 +221,10 @@ def _battle_cards(scope: Scope) -> list[Card]:
                           subtype=_champion_subtype(context, owner)))
     rows = context.db.execute(
         "SELECT card_uid, user_id, location, is_champion, card_type, permanent_buffs, template_guid, "
-        "(SELECT name FROM card_templates WHERE guid = game_cards.template_guid) "
+        "(SELECT name FROM card_templates WHERE guid = game_cards.template_guid), position "
         "FROM game_cards WHERE session_id=?", (context.session.session_id,)).fetchall()
     from pvp_db import db_template_subtype
-    for card_uid, user_id, location, is_champion, card_type, buffs_json, template, template_name in rows:
+    for card_uid, user_id, location, is_champion, card_type, buffs_json, template, template_name, position in rows:
         buffs = json.loads(buffs_json or "{}")
         names = buffs.get("counter_guids") or {}
         values = buffs.get("counters") or {}
@@ -235,7 +237,8 @@ def _battle_cards(scope: Scope) -> list[Card]:
                           card_type=str(card_type or ""),
                           counters={str(names[name]).lower(): int(count)
                                     for name, count in values.items() if name in names},
-                          subtype=str(subtype or ""), name=str(template_name or "")))
+                          subtype=str(subtype or ""), name=str(template_name or ""),
+                          position=int(position or 0)))
     return cards
 
 
@@ -325,6 +328,8 @@ def _filter_holds(card_filter: Any, card: Card, scope: Scope) -> bool:
     if cls == "InZone":
         zones = {part.strip().lower() for part in typed.m_Collection.split("|")}
         return card.zone in zones
+    if cls == "TopNOfDeck":
+        return True   # the selection is the candidate list's (_card_candidates)
     if cls == "NameContainsFilter":
         return _name_contains(typed, card)
     if cls == "IsAbilitySource":
@@ -493,7 +498,10 @@ def _targets(root: MechanicsObject, index: int, scope: Scope) -> list[int]:
         return [scope.source_uid]
     if kind == "AbilityTargetTemplate" and template.m_IsAutoTarget:
         return _card_candidates(template, scope)
-    if kind == "AbilityTargetTemplate" and index in scope.chosen:
+    if kind == "SourceRevealedTargetTemplate":
+        return _revealed_candidates(template, index, scope)
+    if kind in ("AbilityTargetTemplate", "SourceRevealedTargetTemplate") and not template.m_IsAutoTarget \
+            and index in scope.chosen:
         # A chosen target the player has answered: the card, or nothing when the player chose none.
         chosen = scope.chosen[index]
         return [] if chosen is None else [int(chosen)]
@@ -517,26 +525,71 @@ def _targets(root: MechanicsObject, index: int, scope: Scope) -> list[int]:
 TARGET_PLAYER_FILTERS = {"Self", "MultipleOpponents", "SingleOpponent", "MultiplePlayers"}
 
 
+def _top_n_of_deck(card_filter: Any) -> MechanicsObject | None:
+    """The TopNOfDeck node of a target's card filter (at its top level or in an AND), if it has one."""
+    typed = card_filter if isinstance(card_filter, MechanicsObject) else None
+    if typed is None:
+        return None
+    if _short(typed.type_name) == "TopNOfDeck":
+        return typed
+    if _short(typed.type_name) == "AndCardFilter":
+        for part in typed.m_TargetFilters:
+            found = _top_n_of_deck(part)
+            if found is not None:
+                return found
+    return None
+
+
 def _card_candidates(template: MechanicsObject, scope: Scope) -> list[int]:
     """The cards an AbilityTargetTemplate's zones, player filter and card filter pass: the automatic targets,
-    and the candidates a chosen target is answered from."""
-    zones = {part.strip().lower() for part in str(template.m_CollectionFlags or "").split("|") if part.strip()}
+    and the candidates a chosen target is answered from. A TopNOfDeck filter keeps the first cards of the deck (by
+    position) of each player the player filter admits, in deck order."""
+    zones = _zones_of(template.m_CollectionFlags)
     player = str(template.m_PlayerFilter or "MultiplePlayers")
-    return [card.uid for card in _battle_cards(scope)
-            if (not zones or card.zone in zones)
-            and _player_passes(player, card.owner, scope)
-            and _filter_holds(template.m_CardFilter, card, scope)]
+    top = _top_n_of_deck(template.m_CardFilter)
+    cards = [card for card in _battle_cards(scope)
+             if (not zones or card.zone in zones)
+             and _player_passes(player, card.owner, scope)
+             and _filter_holds(template.m_CardFilter, card, scope)]
+    if top is None:
+        return [card.uid for card in cards]
+    if top.m_CountFromBottom or top.m_TopHalfOfDeck:
+        raise NotImplementedError("a top-of-deck filter counted from the bottom or the half")
+    chosen: list[int] = []
+    for owner in sorted({card.owner for card in cards}):
+        deck = sorted((card for card in cards if card.owner == owner and card.zone == "deck"),
+                      key=lambda card: card.position)
+        chosen.extend(card.uid for card in deck[:int(top.m_Amount or 0)])
+    return chosen
+
+
+def _revealed_candidates(template: MechanicsObject, index: int, scope: Scope) -> list[int]:
+    """The cards a SourceRevealedTargetTemplate names: the cards the source's reveal showed, in the template's zones,
+    that pass its filter. A later target of the same ability does not name a card an earlier target took (the
+    "remaining cards" of an effect are the revealed cards the first target did not take)."""
+    revealed = [int(uid) for uid in (scope.context.bstate.get("revealed_cards") or [])]
+    zones = _zones_of(template.m_CollectionFlags)
+    taken = {int(value) for position, value in scope.chosen.items()
+             if position != index and value is not None}
+    cards = {card.uid: card for card in _battle_cards(scope)}
+    return [uid for uid in revealed
+            if uid in cards and uid not in taken
+            and (not zones or cards[uid].zone in zones)
+            and _filter_holds(template.m_CardFilter, cards[uid], scope)]
 
 
 def _needs_choice(root: MechanicsObject, index: int) -> bool:
-    """Whether a clause's target is a card the player picks (a non-automatic AbilityTargetTemplate)."""
+    """Whether a clause's target is a card the player picks (a non-automatic card target)."""
     template = _load("AbilityTargetTemplate", _guid(root.m_AbilityTargetTemplateIds[index]))
-    return _short(template.type_name) == "AbilityTargetTemplate" and not template.m_IsAutoTarget
+    return _short(template.type_name) in ("AbilityTargetTemplate", "SourceRevealedTargetTemplate") \
+        and not template.m_IsAutoTarget
 
 
 def _choice_candidates(root: MechanicsObject, index: int, scope: Scope) -> tuple[list[int], bool]:
     """The cards a chosen target may name, and whether the player may choose none (its m_Optional)."""
     template = _load("AbilityTargetTemplate", _guid(root.m_AbilityTargetTemplateIds[index]))
+    if _short(template.type_name) == "SourceRevealedTargetTemplate":
+        return _revealed_candidates(template, index, scope), bool(template.m_Optional)
     return _card_candidates(template, scope), bool(template.m_Optional)
 
 
@@ -837,7 +890,7 @@ def run_ability(guid: str, event_type: str, *, context: Any, source_uid: int,
     if _field(root, "m_Threshold"):
         raise NotImplementedError("ability threshold requirement")
     trigger = _field(root, "m_TriggerEventType")
-    if _short(_field(trigger, "m_InternalType")) != event_type:
+    if event_type is not None and _short(_field(trigger, "m_InternalType")) != event_type:
         return False
     event = {"player": owner_uid, **(event or {})}
     scope = Scope(context=context, source_uid=int(source_uid), owner_uid=int(owner_uid),
@@ -901,6 +954,9 @@ def _run_effects(guid: str, root: MechanicsObject, scope: Scope, start: int) -> 
             if _short(effect_type) == "MoveCardToZoneEffectTemplate":
                 _move_cards(root, clause, effect_raw, scope)
                 continue
+            if _short(effect_type) == "RevealCardsAbilityEffectTemplate":
+                _reveal_cards(root, clause, effect_raw, scope)
+                continue
             _run_clause(root, clause, scope)
     finally:
         if previous is None:
@@ -908,6 +964,29 @@ def _run_effects(guid: str, root: MechanicsObject, scope: Scope, start: int) -> 
         else:
             bstate["resolving_source_uid"] = previous
     return True
+
+
+def _reveal_cards(root: MechanicsObject, clause: Any, effect_raw: dict[str, Any], scope: Scope) -> None:
+    """C# RevealCardsAbilityEffectTemplate: the targets are shown through the live reveal leaf
+    (rules_port.reveal_effects.reveal_cards), which sets the revealed cards the ability's later targets name."""
+    from rules_port.reveal_effects import reveal_cards
+    context = scope.context
+    targets = _targets(root, int(_field(clause, "m_TargetTemplateIndex") or 0), scope)
+    saved = {key: context.bstate.get(key) for key in ("resolving_owner_id",)}
+    previous_template, previous_targets = context.effect_template_override, context.effect_targets
+    context.effect_template_override = effect_raw
+    context.effect_targets = tuple(int(target) for target in targets)
+    context.bstate["resolving_owner_id"] = int(scope.owner_uid)
+    try:
+        reveal_cards(context)
+    finally:
+        context.effect_template_override = previous_template
+        context.effect_targets = previous_targets
+        for key, value in saved.items():
+            if value is None:
+                context.bstate.pop(key, None)
+            else:
+                context.bstate[key] = value
 
 
 def _move_cards(root: MechanicsObject, clause: Any, effect_raw: dict[str, Any], scope: Scope) -> None:
@@ -1024,7 +1103,7 @@ SUPPORTED_CONDITIONS = {
 SUPPORTED_FILTERS = {
     "AndCardFilter", "OrCardFilter", "NotCardFilter", "IsControlledBy", "IsNotControlledBy",
     "HasCountersValue", "IsTroop", "IsHero", "IsResource", "IsType", "IntAttrFilter", "InZone",
-    "IsAbilitySource", "IsSubType", "NameContainsFilter",
+    "IsAbilitySource", "IsSubType", "NameContainsFilter", "TopNOfDeck",
 }
 SUPPORTED_MODIFIERS = {"DamageModifier", "CounterModifier", "HealHeroModifier", "AttackModifier", "DefenseModifier"}
 # The clause durations a stat modifier runs with: Permanent (the card's permanent buffs) and EndOfTurn (its
@@ -1033,7 +1112,8 @@ STAT_DURATIONS = {"Permanent", "EndOfTurn"}
 # The effect text the live stat path derives its operand from (equal to this troop's DEF, a voided troop's stat).
 # An effect with such text is refused, not computed differently.
 DERIVED_STAT_TEXT = ("troop's [def]", "voided troop's")
-SUPPORTED_TARGETS = {"AbilitySourceCardTargetTemplate", "AbilityTargetTemplate", "PlayerTargetTemplate"}
+SUPPORTED_TARGETS = {"AbilitySourceCardTargetTemplate", "AbilityTargetTemplate", "PlayerTargetTemplate",
+                     "SourceRevealedTargetTemplate"}
 # The player targets run without a choice: "You", and the one opponent (its random pick is that one player).
 SUPPORTED_PLAYER_TARGETS = {"Self", "SingleOpponent"}
 
@@ -1052,7 +1132,7 @@ def _tagged_classes(value: Any, out: list[str]) -> list[str]:
 
 
 # The destinations the live move leaf moves a card to (its deck reinsertion is not ported).
-MOVE_DESTINATIONS = {"hand", "discard", "void", "warzone", "underground"}
+MOVE_DESTINATIONS = {"hand", "discard", "void", "warzone", "underground", "deck"}
 
 # The ability fields that name a cost, or make the ability optional.
 _COST_FIELDS = ("m_Optional", "m_ActivationCost", "m_ChargePointCost", "m_VariableActivationCost", "m_LifeCost",
@@ -1212,6 +1292,10 @@ def coverage(guid: str) -> list[str]:
                 missing.append(f"move to {destination or 'no zone'}")
             if str(effect.get("m_AllCardsOfTargetInZone") or "None") not in ("None", ""):
                 missing.append("move of every card in a zone")
+            continue
+        if kind == "RevealCardsAbilityEffectTemplate":
+            if str(effect.get("m_PlayerRevealTargets") or "Unknown") not in ("Unknown", "Everyone", "Self"):
+                missing.append(f"reveal to {effect.get('m_PlayerRevealTargets')}")
             continue
         if kind == "RandomizeVariableEffectTemplate":
             if effect.get("m_SecondValue") or effect.get("m_MaxValueField"):

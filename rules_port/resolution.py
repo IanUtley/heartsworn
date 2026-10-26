@@ -2037,15 +2037,25 @@ def run_interpreted_trigger(handler, game, session, db, player_uid, ai_uid, batt
     """Resolve a trigger's ability with the interpreter (rules_port/ir_exec.py) on the live battle state.
 
     Its effects go through the live primitives, so the outcome is the native resolver's. Returns the
-    marker ``"interpreter"`` in place of the native resolver's state."""
+    marker ``"interpreter"`` in place of the native resolver's state.
+
+    An ability the interpreter refuses at run time before it has sent any client event (a name or subtype it cannot
+    read for a champion, say) returns None, and the caller resolves it on the native path. A refusal after an event
+    was sent is re-raised: the effects have started, so they cannot be replayed."""
     from . import ir_exec
     from .context import EffectContext
-    ir_exec.run_ability(
-        guid, event_name,
-        context=EffectContext.from_rules_port(
-            game, session, db, handler, player_uid, ai_uid, battle_state, ""),
-        source_uid=int(source_uid), owner_uid=int(owner_uid),
-        event=ir_exec.live_event(event_name, int(owner_uid), event_data, trigger_source_uid))
+    started = len(game.events)
+    try:
+        ir_exec.run_ability(
+            guid, event_name,
+            context=EffectContext.from_rules_port(
+                game, session, db, handler, player_uid, ai_uid, battle_state, ""),
+            source_uid=int(source_uid), owner_uid=int(owner_uid),
+            event=ir_exec.live_event(event_name, int(owner_uid), event_data, trigger_source_uid))
+    except NotImplementedError:
+        if len(game.events) != started:
+            raise
+        return None
     return "interpreter"
 
 
@@ -2143,12 +2153,15 @@ def resolve_port_trigger(handler, game, session, db, player_uid, ai_uid,
     try:
         from . import ir_exec
         event_name = str(item.get("trigger_event_type") or "").rsplit(".", 1)[-1]
+        interpreted = None
         if ir_exec.engine_runs(guid, source_uid, owner_id):
-            state = run_interpreted_trigger(
+            interpreted = run_interpreted_trigger(
                 handler, game, session, db, player_uid, ai_uid, battle_state,
                 guid, source_uid, owner_id, event_name,
                 item.get("trigger_source_uid"),
                 event_data if isinstance(event_data, dict) else {})
+        if interpreted is not None:
+            state = interpreted
         else:
             state = resolve_port_ability(
                 handler, game, session, db, player_uid, ai_uid, battle_state,
