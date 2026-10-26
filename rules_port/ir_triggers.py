@@ -1,0 +1,45 @@
+"""Trigger events and trigger conditions the interpreter runs (gap area C).
+
+rules_port/ir_exec.py asks this module three things: whether an event's trigger type is one the interpreter runs
+(``TRIGGER_EVENTS``), which fields that event adds to the interpreter's scope (``event_fields``), and whether one of
+its trigger conditions holds (``condition_holds``). Anything not listed here stays refused, so the native resolver
+keeps those abilities.
+"""
+from __future__ import annotations
+
+from typing import Any, Callable
+
+# Trigger types the interpreter runs. CardEnteredZoneEvent, TurnStartedEvent and TurnEndedEvent are in ir_exec.
+TRIGGER_EVENTS = {"CardDealtDamageEvent", "CardAttackedEvent", "CardCastEvent"}
+
+# Trigger condition classes this module evaluates.
+CONDITIONS = {"NotTriggerCondition", "TriggerPlayerControlsTarget", "TriggerEventIsCombatDamage"}
+
+
+def event_fields(event_type: str, trigger_source_uid: Any, target_player_uid: Any) -> dict[str, Any]:
+    """The fields a live event adds to the interpreter's scope.
+
+    ``card`` is the trigger source (the native ``ConditionContext.trigger_uid``), ``target_player`` is the event's
+    TargetPlayerId (the damaged card's controller for a damage event), and ``event_type`` is the event's class name."""
+    return {"event_type": event_type, "card": trigger_source_uid, "target_player": target_player_uid}
+
+
+def condition_holds(cls: str, condition: Any, scope: Any, holds: Callable[[Any, Any], bool]) -> bool:
+    """Whether a trigger condition of class ``cls`` holds for ``scope``. ``holds`` evaluates a nested condition, so a
+    ``NotTriggerCondition`` checks its child the way the interpreter checks any trigger condition."""
+    if cls == "NotTriggerCondition":
+        child = getattr(condition, "m_Condition", None)
+        if child is None:
+            raise NotImplementedError("NotTriggerCondition without a condition")
+        return not holds(child, scope)
+    if cls == "TriggerPlayerControlsTarget":
+        # The ability's source controller is the event's TargetPlayerId (C# TriggerPlayerControlsTarget.IsValid).
+        target = scope.event.get("target_player")
+        if target is None:
+            # The event carries no target player here; refuse it rather than guess a side (the native path decides).
+            raise NotImplementedError("the event names no target player")
+        return int(target) == int(scope.owner_uid)
+    if cls == "TriggerEventIsCombatDamage":
+        # A damage event is combat damage when it is CardDealtDamageEvent (the native check, for the events here).
+        return scope.event.get("event_type") == "CardDealtDamageEvent"
+    raise NotImplementedError(f"trigger condition {cls}")
