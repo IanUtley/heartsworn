@@ -497,8 +497,8 @@ OAKHENGE_CEREMONY = "200337da-9971-cf13-7e98-011a78b9ac64"   # an activation: lo
 
 
 def test_a_revealed_choice_takes_one_card_and_the_rest_go_back_in_random_places(db):
-    """Revealing the top five and taking one revealed troop: the chosen troop goes to hand, and the remaining
-    revealed cards go back into the deck at random positions without a shuffle of the other cards."""
+    """Revealing the top five and taking one revealed troop: the chosen troop goes to hand. The remaining revealed
+    cards never left the deck, so they stay where they are (the client does not move a card into the zone it is in)."""
     from rules_port import ir_exec
     from rules_port.context import EffectContext
 
@@ -525,6 +525,38 @@ def test_a_revealed_choice_takes_one_card_and_the_rest_go_back_in_random_places(
     assert sorted(uid for uid, loc in rows.items() if loc == "deck") == [800, 801, 803, 804, 805], rows
 
 
+def test_oakhenge_matches_the_client_oracle_run_when_the_revealed_cards_are_resources(db):
+    """The client ran Oakhenge Ceremony on a fixture whose deck holds two resources: both are revealed, none is a
+    troop, and nothing moves. The client drew no random number. The interpreter, from the same deck and the same
+    generator seed, leaves the deck order and the random generator as the client did."""
+    import json
+    import os
+    from rules_port.kernel import MultiplyWithCarryRng
+    from rules_port.context import EffectContext
+
+    capture = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures", "oakhenge_oracle_v1.json")
+    oracle = json.load(open(capture))
+    assert oracle["final_state"]["rng_state"] == oracle["initial_state"]["rng_state"] and not oracle["rng_draws"]
+
+    pl_t, ai_t, game, handler, bstate, _player_champ, _ai_champ = _setup(db)
+    bstate["_rules_rng"] = MultiplyWithCarryRng(int(oracle["initial_seed"]["seed_z"]),
+                                                int(oracle["initial_seed"]["seed_w"]))
+    add_card(db, 23, 5, "03767d75-d226-0afb-2dbc-85b0bfbcac67", loc="hand")
+    add_card(db, 11, 5, TPL_GLADIATOR, loc="hand")
+    add_card(db, 16, 5, TPL_GLADIATOR, loc="discard")
+    for uid, position in ((12, 0), (13, 1)):
+        add_card(db, uid, 5, "b253393b-fdde-47c4-9288-4b8efb0698b1", loc="deck")
+        db.execute("UPDATE game_cards SET position=?, card_type='Resource' WHERE card_uid=?", (position, uid))
+    db.commit()
+    from rules_port.ir_exec import run_ability
+    context = EffectContext.from_rules_port(game, SessionStub(), db, handler, pl_t, ai_t, bstate, "")
+    assert run_ability(OAKHENGE_CEREMONY, None, context=context, source_uid=23, owner_uid=5, event={"player": 5})
+    deck = [row[0] for row in db.execute("SELECT card_uid FROM game_cards WHERE location='deck' ORDER BY position")]
+    assert deck == [12, 13], deck
+    assert bstate["_rules_rng"].get_seed() == (int(oracle["initial_seed"]["seed_z"]),
+                                               int(oracle["initial_seed"]["seed_w"]))
+
+
 if __name__ == "__main__":
     import db as dbmod
     for run in (test_burning_ability_runs_from_its_ir, test_dazed_and_vulnerable_removals_match_the_live_engine,
@@ -541,7 +573,8 @@ if __name__ == "__main__":
                 test_an_invoked_choice_pauses_and_resumes_the_invoking_ability,
                 test_a_random_variable_picks_the_branch_its_condition_tests,
                 test_a_random_branch_searches_the_deck_for_a_named_card_and_moves_the_choice,
-                test_a_revealed_choice_takes_one_card_and_the_rest_go_back_in_random_places):
+                test_a_revealed_choice_takes_one_card_and_the_rest_go_back_in_random_places,
+                test_oakhenge_matches_the_client_oracle_run_when_the_revealed_cards_are_resources):
         dbmod._db = make_db()
         run(dbmod._db)
     print("ok")

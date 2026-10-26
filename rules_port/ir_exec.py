@@ -905,7 +905,7 @@ def run_ability(guid: str, event_type: str, *, context: Any, source_uid: int,
     if _field(root, "m_UsesPreviousState") and event.get("card") is not None \
             and int(event["card"]) == int(source_uid) and event.get("from"):
         zone = str(event["from"]).lower()
-    if zones and zone not in zones:
+    if event_type is not None and zones and zone not in zones:
         return False
     if not _ability_condition_holds(root.m_AbilityCondition, scope):
         return False
@@ -1002,6 +1002,11 @@ def _move_cards(root: MechanicsObject, clause: Any, effect_raw: dict[str, Any], 
     bstate["_rules_port_native_effect"] = True
     try:
         for target in targets:
+            # A card already in the destination deck is not moved: the client draws no random slot for it (the
+            # oracle's revealed-and-returned cards keep their order and the RNG is untouched).
+            if str(effect_raw.get("m_DestinationCollection") or "").rsplit(".", 1)[-1].lower() == "deck" and \
+                    _card_by_uid(scope, target) is not None and _card_by_uid(scope, target).zone == "deck":
+                continue
             bstate["resolving_target_uid"] = int(target)
             context.move_card_to_zone()
     finally:
