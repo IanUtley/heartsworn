@@ -943,8 +943,9 @@ def summon_token(context, payload=None, *, target=None, owner=None):
     return f"summoned {len(made)} token(s)"
 
 
-def create_token_copy(context):
-    """Create authored replicas from the resolved target."""
+def create_token_copy(context, count=None):
+    """Create authored replicas from the resolved target. ``count`` is the interpreter's bound amount; without it
+    the count is read from the effect template."""
     target = context.resolved_target()
     if target is None:
         return "copy: no target"
@@ -958,7 +959,8 @@ def create_token_copy(context):
     # Count and destination are typed effect semantics. Never infer either
     # from display text: that would make native RulesPort behavior depend on a
     # second, legacy card-text rules source.
-    count = context.template_value("m_Count", None)
+    if count is None:
+        count = context.template_value("m_Count", None)
     if count is None:
         count = context.template_value("m_NumberOfCards", None)
     if count is None:
