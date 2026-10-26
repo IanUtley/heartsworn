@@ -56,7 +56,7 @@ _CARD_RECORDS: dict[tuple[str, str], tuple[str, dict[str, Any]]] = {}
 
 # The GUID field each store class is keyed by, and the store class a card object belongs to.
 _KEY_FIELD = {"AbilityTemplate": "m_AbilityTemplateId", "AbilityEffectTemplate": "m_TemplateId",
-              "AbilityTargetTemplate": "m_TemplateId"}
+              "AbilityTargetTemplate": "m_TemplateId", "AbilityEffectConditionTemplate": "m_TemplateId"}
 
 
 def register_card(names: dict[str, Any]) -> None:
@@ -89,6 +89,8 @@ def _store_class_of(value: Any) -> str | None:
         return "AbilityEffectTemplate"
     if name.endswith("TargetTemplate"):
         return "AbilityTargetTemplate"
+    if name == "AbilityEffectConditionTemplate":
+        return "AbilityEffectConditionTemplate"
     return None
 
 
@@ -430,7 +432,7 @@ def _counter_variable(variable: Any, counter: str | None, scope: Scope) -> int:
 
 
 # The ability variables the interpreter binds (coverage refuses an ability with any other kind).
-SUPPORTED_VARIABLES = {"AbilityConstant", "CounterVariable", "CardCountAbilityVariable"}
+SUPPORTED_VARIABLES = {"AbilityConstant", "AbilityVariable", "CounterVariable", "CardCountAbilityVariable"}
 
 
 def _bind_variables(root: MechanicsObject, scope: Scope) -> None:
@@ -444,6 +446,9 @@ def _bind_variables(root: MechanicsObject, scope: Scope) -> None:
             scope.variables[variable.m_Name] = _counter_variable(variable, None, scope)
         elif kind == "AbilityConstant":
             scope.variables[variable.m_Name] = int(variable.m_DefaultValue or 0)
+        elif kind == "AbilityVariable":
+            # Set by an effect (RandomizeVariable): keep the value it gave, else start at zero.
+            scope.variables.setdefault(variable.m_Name, 0)
         else:
             raise NotImplementedError(f"variable {kind}")
 
@@ -731,10 +736,27 @@ def _clause_condition_holds(clause: Any, scope: Scope) -> bool:
     if not guid or guid == "00000000-0000-0000-0000-000000000000":
         return True
     _cls, raw = _stored("AbilityEffectConditionTemplate", guid)
+    stored = raw.get("m_Condition") or {}
+    if _short(stored.get("_t")) == "AbilityVariableCondition":
+        # C# AbilityVariableCondition: the named variable compared with a constant.
+        name = str(stored.get("m_Lhs") or "")
+        if name not in scope.variables:
+            raise KeyError(f"variable {name} is not bound")
+        return _COMPARISONS[stored["m_ComparisonOp"]](scope.variables[name], _variable_or_number(stored, scope))
     condition = _typed(raw.get("m_Condition"), "AbilityEffectCondition", raw.get("_v"))
     if not isinstance(condition, MechanicsObject) or not hasattr(condition, "m_CardCollection"):
         raise NotImplementedError(f"effect condition {guid}")
     return _count_holds(condition, scope)
+
+
+def _variable_or_number(stored: dict[str, Any], scope: Scope) -> int:
+    """The right-hand side of a variable condition: a number, or the value of a bound variable."""
+    rhs = str(stored.get("m_Rhs") or "0").strip()
+    if rhs.lstrip("-").isdigit():
+        return int(rhs)
+    if rhs not in scope.variables:
+        raise KeyError(f"variable {rhs} is not bound")
+    return scope.variables[rhs]
 
 
 def static_int_set(context: Any, target: int, attribute: str) -> int | None:
@@ -856,6 +878,9 @@ def _run_effects(guid: str, root: MechanicsObject, scope: Scope, start: int) -> 
             if _short(effect_type) == "ActivateAbilityEffectTemplate":
                 _invoke(guid, position, effect_raw, scope)
                 continue
+            if _short(effect_type) == "RandomizeVariableEffectTemplate":
+                _randomize_variable(effect_raw, scope)
+                continue
             _run_clause(root, clause, scope)
     finally:
         if previous is None:
@@ -863,6 +888,18 @@ def _run_effects(guid: str, root: MechanicsObject, scope: Scope, start: int) -> 
         else:
             bstate["resolving_source_uid"] = previous
     return True
+
+
+def _randomize_variable(effect_raw: dict[str, Any], scope: Scope) -> None:
+    """C# RandomizeVariableEffectTemplate: a number from the minimum to the maximum, inclusive, drawn from the
+    session RNG (rules_port.context.randomize_variable), kept in the ability's variables under the name."""
+    from rules_port.runtime_helpers import rng_below
+    minimum, maximum = int(effect_raw.get("m_MinValue") or 0), int(effect_raw.get("m_MaxValue") or 0)
+    if minimum > maximum:
+        minimum, maximum = maximum, minimum
+    span = max(0, maximum - minimum) + 1
+    scope.variables[str(effect_raw.get("m_VariableName") or "RandomNumber")] = \
+        minimum + int(rng_below(scope.context.bstate, span)) % span
 
 
 def _invoke(parent_guid: str, position: int, effect_raw: dict[str, Any], scope: Scope) -> None:
@@ -1063,15 +1100,23 @@ def coverage(guid: str) -> list[str]:
         condition_guid = _guid(clause.get("m_ConditionId"))
         if condition_guid and condition_guid != "00000000-0000-0000-0000-000000000000":
             _cls, condition = _stored("AbilityEffectConditionTemplate", condition_guid)
-            kind = _short((condition.get("m_Condition") or {}).get("_t"))
-            if kind != "RequiresCardsControlled":
+            stored = condition.get("m_Condition") or {}
+            kind = _short(stored.get("_t"))
+            if kind == "AbilityVariableCondition":
+                declared = {str(v.get("m_Name") or "") for v in raw.get("m_Variables") or [] if isinstance(v, dict)}
+                rhs = str(stored.get("m_Rhs") or "0").strip()
+                if str(stored.get("m_Lhs") or "") not in declared:
+                    missing.append(f"variable condition on {stored.get('m_Lhs')}")
+                elif not rhs.lstrip("-").isdigit() and rhs not in declared:
+                    missing.append(f"variable condition against {rhs}")
+            elif kind != "RequiresCardsControlled":
                 missing.append(f"effect condition {kind}")
     for variable in raw.get("m_Variables") or []:
         kind = _short((variable or {}).get("_t")) if isinstance(variable, dict) else ""
         if kind not in SUPPORTED_VARIABLES:
             missing.append(f"variable {kind or 'untyped'}")
             continue
-        if kind == "AbilityConstant":
+        if kind in ("AbilityConstant", "AbilityVariable"):
             continue
         player = str(variable.get("m_PlayerFilter") or "Self")
         if player not in COUNTER_VARIABLE_PLAYERS:
@@ -1092,6 +1137,10 @@ def coverage(guid: str) -> list[str]:
             # token's entry triggers are queued on the battle stack, as on the live path, for the chain to resolve.
             continue
         if kind == "SacrificeCardAbilityEffectTemplate":
+            continue
+        if kind == "RandomizeVariableEffectTemplate":
+            if effect.get("m_SecondValue") or effect.get("m_MaxValueField"):
+                missing.append("random variable with a second value or a dynamic bound")
             continue
         if kind == "ActivateAbilityEffectTemplate":
             if effect.get("m_RandomlyLuckyOrUnlucky"):
