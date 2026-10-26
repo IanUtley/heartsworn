@@ -528,11 +528,18 @@ def _bind_variables(root: MechanicsObject, scope: Scope, wanted: set[str] | None
             scope.variables.setdefault(variable.m_Name, 0)
         elif kind == ir_variables.CARD_PROPERTY_VARIABLE:
             scope.variables[variable.m_Name] = ir_variables.card_property_value(scope, variable)
-        elif kind == ir_variables.EXPRESSION_VARIABLE:
+        elif kind == ir_variables.ABILITY_PROPERTY_VARIABLE:
+            scope.variables[variable.m_Name] = ir_variables.ability_property_value(scope)
+        elif kind == ir_variables.HIGHEST_CARD_VARIABLE:
+            scope.variables[variable.m_Name] = ir_variables.highest_card_value(scope, variable)
+        elif kind in (ir_variables.EXPRESSION_VARIABLE, ir_variables.THRESHOLD_VARIABLE):
             expressions[variable.m_Name] = variable
         else:
             raise NotImplementedError(f"variable {kind}")
-    ir_variables.bind_expressions(expressions, scope.variables, wanted)
+    if ir_variables.uses_escalation(expressions):
+        scope.variables[ir_variables.ESCALATION_NAME] = ir_variables.escalation_value(scope)
+    ir_variables.bind_expressions(expressions, scope.variables, wanted,
+                                  threshold=lambda variable: ir_variables.threshold_value(scope, variable))
 
 
 def _input_value(modifier: MechanicsObject, scope: Scope) -> int:
@@ -1570,6 +1577,15 @@ def coverage(guid: str) -> list[str]:
             continue
         if kind == ir_variables.CARD_PROPERTY_VARIABLE:
             missing.extend(ir_variables.card_property_gaps(variable))
+            continue
+        if kind == ir_variables.ABILITY_PROPERTY_VARIABLE:
+            missing.extend(ir_variables.ability_property_gaps(variable))
+            continue
+        if kind == ir_variables.HIGHEST_CARD_VARIABLE:
+            missing.extend(ir_variables.highest_card_gaps(variable))
+            continue
+        if kind == ir_variables.THRESHOLD_VARIABLE:
+            missing.extend(ir_variables.threshold_gaps(variable))
             continue
         if kind == ir_variables.EXPRESSION_VARIABLE:
             expressions[str(variable.get("m_Name") or "")] = str(variable.get("m_ExpressionText") or "")

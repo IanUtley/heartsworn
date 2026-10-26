@@ -17,6 +17,7 @@ WORKER_BOT_FACTORY_ABILITY_GUID = "0a1766d9-af3c-a4e2-2188-eb5369c9d0f0"
 YOU_MAY_PAY_ABILITY_GUID = "a1b7ce40-4dc9-86ed-6dde-be332ac1ed65"
 PUCID_ABILITY_GUID = "27204a54-4781-d9ba-2b19-35a8d91de52f"
 COLDHEART_REAVER_ABILITY_GUID = "7272ba75-60ae-0611-3897-74a7a3c6551f"
+X_COST_ABILITY_GUID = "2fbbc43a-2487-c3dc-b44a-69cc26b2a1e2"
 
 
 def test_burning_ability_runs_from_its_ir(db):
@@ -631,21 +632,28 @@ def test_an_optional_ability_runs_once_its_opt_in_is_accepted():
     assert coverage(YOU_MAY_PAY_ABILITY_GUID) == []
 
 
-def test_a_cost_that_selects_cards_stays_on_the_native_path():
-    """A sacrifice, discard or exhaust cost selects cards that the effects may count, so the interpreter refuses it."""
+def test_a_cost_that_selects_cards_runs_once_the_cards_are_paid():
+    """A sacrifice, discard or exhaust cost is paid before the chain; its cards reach the effects only through list
+    variables, which the interpreter refuses by their kind."""
     from rules_port.ir_exec import coverage
 
-    assert "cost or optional (m_ExhaustTarget)" in coverage(PUCID_ABILITY_GUID)
-    assert "cost or optional (m_DiscardTargets)" in coverage(COLDHEART_REAVER_ABILITY_GUID)
+    assert coverage(PUCID_ABILITY_GUID) == []
+    assert coverage(COLDHEART_REAVER_ABILITY_GUID) == []
 
 
-def test_a_zero_resource_id_names_no_cost_target():
+def test_a_variable_activation_cost_stays_on_the_native_path():
+    """The X value of a variable activation cost is not passed to the interpreter."""
+    from rules_port.ir_exec import coverage
+
+    assert "cost or optional (m_VariableActivationCost)" in coverage(X_COST_ABILITY_GUID)
+
+
+def test_a_zero_resource_id_is_not_a_set_cost():
     from rules_port.ir_exec_costs import unsupported_costs
 
     assert unsupported_costs({"m_ExhaustTarget": {"m_Guid": "00000000-0000-0000-0000-000000000000"},
                               "m_DiscardTargets": []}) == []
-    assert unsupported_costs({"m_DiscardTargets": [{"m_Guid": "84e4acf1-1f2e-abac-069d-8c6eb18b2b12"}]}) == [
-        "cost or optional (m_DiscardTargets)"]
+    assert unsupported_costs({"m_DiscardTargets": [{"m_Guid": "84e4acf1-1f2e-abac-069d-8c6eb18b2b12"}]}) == []
     assert unsupported_costs({"m_VariableActivationCost": True}) == [
         "cost or optional (m_VariableActivationCost)"]
     assert unsupported_costs({"m_ActivationCost": 2, "m_LifeCost": 1, "m_CounterCosts": []}) == []
