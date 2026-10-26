@@ -26,6 +26,7 @@ from gamedata.mechanics import CLASSES
 from gamedata.mechanics_fields import current_fields
 from gamedata.mechanics_objects import MechanicsObject, from_record
 from gamedata.records import RecordObject
+from rules_port import granted_abilities
 
 # A CounterModifier's operation, as the live counter primitive names it.
 COUNTER_OPERATIONS = {"Add": "add", "Remove": "remove", "Set": "set"}
@@ -993,6 +994,11 @@ def _run_effects(guid: str, root: MechanicsObject, scope: Scope, start: int) -> 
             if _short(effect_type) == "RevealCardsAbilityEffectTemplate":
                 _reveal_cards(root, clause, effect_raw, scope)
                 continue
+            if _short(effect_type) in granted_abilities.GRANTED_EFFECTS:
+                granted_abilities.run(_short(effect_type), effect_raw, str(_field(clause, "m_EffectDuration") or ""),
+                                      _targets(root, int(_field(clause, "m_TargetTemplateIndex") or 0), scope),
+                                      scope.context)
+                continue
             _run_clause(root, clause, scope)
     return True
 
@@ -1346,6 +1352,9 @@ def coverage(guid: str) -> list[str]:
                 missing.append(f"move to {destination or 'no zone'}")
             if str(effect.get("m_AllCardsOfTargetInZone") or "None") not in ("None", ""):
                 missing.append("move of every card in a zone")
+            continue
+        if kind in granted_abilities.GRANTED_EFFECTS:
+            missing.extend(granted_abilities.gaps(kind, effect, str(clause.get("m_EffectDuration") or "")))
             continue
         if kind == "RevealCardsAbilityEffectTemplate":
             if str(effect.get("m_PlayerRevealTargets") or "Unknown") not in ("Unknown", "Everyone", "Self"):
