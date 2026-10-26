@@ -1924,6 +1924,7 @@ class PendingChoicesMixin:
                 from rules_port import ir_exec
                 from rules_port.context import EffectContext
                 from rules_port.resolution import prompt_interpreted_reveal
+                _hc.log_req(f"    Revealed choice {hex(int(chosen_uid))}: resuming the interpreter")
                 self._hide_candidates_to_deck(g, session, pl_t, ai_t, revealed)
                 bstate.pop("pending_deck_search", None)
                 bstate.pop("resolution_paused", None)
