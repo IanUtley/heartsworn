@@ -497,9 +497,7 @@ def _targets(root: MechanicsObject, index: int, scope: Scope) -> list[int]:
     if kind == "AbilitySourceCardTargetTemplate":
         return [scope.source_uid]
     if kind == "AbilityTargetTemplate" and template.m_IsAutoTarget:
-        # The client adds the matching cards to a stack and pops them, so an automatic target's cards act last
-        # in first-out order (a Deathcry's troops act before the champion that is listed first).
-        return list(reversed(_card_candidates(template, scope)))
+        return _card_candidates(template, scope)
     if kind == "SourceRevealedTargetTemplate":
         return _revealed_candidates(template, index, scope)
     if kind in ("AbilityTargetTemplate", "SourceRevealedTargetTemplate") and not template.m_IsAutoTarget \
@@ -706,7 +704,12 @@ def _run_clause(root: MechanicsObject, clause: Any, scope: Scope) -> None:
         for owner in _heal_owners(root, index, scope):
             scope.context.gain_health(int(owner), amount)
         return
-    for target in _targets(root, index, scope):
+    # Damage is dealt to the cards in last-in-first-out order: the client pushes the matching cards on a stack and
+    # pops them (a Deathcry's troops are hit before the champion that is listed first).
+    targets = _targets(root, index, scope)
+    if kind == "DamageModifier":
+        targets = list(reversed(targets))
+    for target in targets:
         if kind == "DamageModifier":
             from rules_port.damage_effects import deal_damage
             deal_damage(scope.context, target, _input_value(modifier, scope))
