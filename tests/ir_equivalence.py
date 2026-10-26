@@ -138,8 +138,78 @@ def _scenario(ability_guid, opposing_troops, moved=None, extra=(), champion=Fals
         db.execute("UPDATE game_cards SET location=? WHERE card_uid=?", (destination, uid))
     elif moved:
         db.execute("UPDATE game_cards SET location=? WHERE card_uid=900", (moved[3],))
+    if not moved:
+        _satisfy_own_conditions(db, bstate, ability_guid, template)
     db.commit()
     return db, pl_t, ai_t, game, handler, bstate, player_champ, ai_champ
+
+
+def _nodes(value):
+    """Every Records object under ``value``, the node itself first."""
+    if isinstance(value, dict):
+        yield value
+        for item in value.values():
+            yield from _nodes(item)
+    elif isinstance(value, list):
+        for item in value:
+            yield from _nodes(item)
+
+
+def _template_with_faction(db, faction):
+    """A troop template of ``faction`` that the test database holds, from the Records (None when there is none)."""
+    from gamedata import DEFAULT_RECORD_STORE as STORE
+    for record in STORE.load("CardTemplate"):
+        data = record.to_dict()
+        if data.get("m_Faction") == faction and data.get("m_CardType") == "Troop" and \
+                db.execute("SELECT 1 FROM card_templates WHERE guid=?", (record.guid.lower(),)).fetchone():
+            return record.guid.lower()
+    return None
+
+
+def _satisfy_own_conditions(db, bstate, ability_guid, template):
+    """Make the battle meet the ability's own conditions, as a battle in play would. The conditions are read from the
+    ability's stored Records, not from a card name:
+
+    - a count of the controller's cards (RequiresCardsControlled) gets that many copies of the source's template in
+      hand, so the count can pass a filter the source itself fails;
+    - a source-zone test (RequiresSourcePassesFilterCondition with InZone) puts the source in that zone;
+    - a this-turn champion stat ("You>..." IntAttrFilter, above zero) is recorded with the live stat writer.
+
+    The live path (rules_port.resolution) and the interpreter then both see a battle where the ability may run."""
+    from game_engine import SHARD_TO_FLAG
+    from rules_port import ir_exec
+    from rules_port.runtime_helpers import participant_side
+    from rules_port.statistics import add_champion_card_stat
+    root = ir_exec._load("AbilityTemplate", ability_guid)
+    conditions = [node.to_record() for node in (root.m_AbilityCondition, root.m_TriggerCondition)
+                  if node is not None]
+    copies = 0
+    for condition in conditions:
+        for node in _nodes(condition):
+            kind = str(node.get("_t", "")).rsplit(".", 1)[-1]
+            if kind == "RequiresCardsControlled" and str(node.get("m_PlayerFilter")) == "Self":
+                # A copy of a template of the filter's faction, when it names one: the source may not be that faction.
+                faction = next((item.get("m_Faction") for item in _nodes(node.get("m_CardFilter"))
+                                if str(item.get("_t", "")).rsplit(".", 1)[-1] == "InFaction"), None)
+                copy_of = (_template_with_faction(db, faction) if faction else None) or template
+                for _ in range(int(node.get("m_RequiredQuantity") or 1)):
+                    copies += 1
+                    add_card(db, 2000 + copies, TROOP_OWNER, copy_of, loc="hand")
+            if kind == "AbilityControllerHasThresholdAbilityCondition":
+                # The controller's threshold, in the side key the live condition reads.
+                side = participant_side(bstate, TROOP_OWNER)
+                flag = int(SHARD_TO_FLAG[str(node["m_ColorFlags"]).lower()])
+                thresholds = dict(bstate.get(f"{side}_threshold") or {})
+                thresholds[flag] = int(node.get("m_RequiredQuantity") or 1)
+                bstate[f"{side}_threshold"] = thresholds
+            if kind == "RequiresSourcePassesFilterCondition":
+                for zone in _nodes(node.get("m_Filter")):
+                    if str(zone.get("_t", "")).rsplit(".", 1)[-1] == "InZone":
+                        db.execute("UPDATE game_cards SET location=? WHERE card_uid=900",
+                                   (str(zone["m_Collection"]).lower(),))
+            if kind == "IntAttrFilter" and str(node.get("m_Attribute", "")).startswith("You>") and \
+                    node.get("m_ComparisonOp") in ("GreaterThan", "GreaterThanOrEqual"):
+                add_champion_card_stat(bstate, TROOP_OWNER, str(node["m_Attribute"]).split(">")[-1], 1)
 
 
 # Chain bookkeeping: the ability's place on the chain, which the engine (not the effect) sends. The effects are
