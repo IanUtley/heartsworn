@@ -600,6 +600,23 @@ if __name__ == "__main__":
     print("ok")
 
 
+def test_expression_variable_reads_others_and_refuses_a_cycle():
+    from rules_port import ir_variables
+
+    class Variable:
+        def __init__(self, text, default=0, dont_recalculate=False):
+            self.m_ExpressionText = text
+            self.m_DefaultValue = default
+            self.m_DontRecalculate = dont_recalculate
+
+    # A name another expression variable gives is worked out first, and a division by zero takes the default.
+    values = {"Base": 4}
+    variables = {"Doubled": Variable("Base * 2 + 1"), "Ratio": Variable("Doubled / 0", default=9)}
+    ir_variables.bind_expressions(variables, values)
+    assert values["Doubled"] == 9 and values["Ratio"] == 9
+    assert ir_variables.expression_gaps({"A": "B + 1", "B": "A * 2"}, {"A", "B"}) == ["expression cycle on A",
+                                                                                 "expression cycle on B"]
+    assert ir_variables.expression_gaps({"A": "Count * 2"}, {"A"}) == ["expression name Count"]
 def test_a_paid_activation_cost_does_not_block_the_interpreter():
     """The activation's cost is paid before the ability reaches the chain, so the interpreter runs its effects alone."""
     from rules_port.ir_exec import coverage
