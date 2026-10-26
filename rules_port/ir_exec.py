@@ -16,9 +16,10 @@ from __future__ import annotations
 import functools
 import json
 import os
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, Iterator
 
 from gamedata import DEFAULT_RECORD_STORE as STORE
 from gamedata.mechanics import CLASSES
@@ -633,21 +634,14 @@ def _summon_tokens(root: MechanicsObject, clause: Any, effect_raw: dict[str, Any
     # The live resolver creates the controller's tokens first, then the others'.
     targets = sorted(_targets(root, int(_field(clause, "m_TargetTemplateIndex") or 0), scope),
                      key=lambda uid: (_card_owner(scope, uid) != int(scope.owner_uid), uid))
-    saved = {key: context.bstate.get(key) for key in ("resolving_owner_id", "ability_variables")}
     previous_template = context.effect_template_override
     context.effect_template_override = effect_raw
-    context.bstate["resolving_owner_id"] = int(scope.owner_uid)
-    context.bstate["ability_variables"] = dict(scope.variables)
     try:
-        for target in targets:
-            token_effects.summon_token(context, target=int(target), owner=int(scope.owner_uid))
+        with _bridge_caster(context.bstate, owner=scope.owner_uid, variables=scope.variables):
+            for target in targets:
+                token_effects.summon_token(context, target=int(target), owner=int(scope.owner_uid))
     finally:
         context.effect_template_override = previous_template
-        for key, value in saved.items():
-            if value is None:
-                context.bstate.pop(key, None)
-            else:
-                context.bstate[key] = value
 
 
 def _heal_owners(root: MechanicsObject, index: int, scope: Scope) -> list[int]:
@@ -954,9 +948,7 @@ def _run_effects(guid: str, root: MechanicsObject, scope: Scope, start: int) -> 
     """Run the ability's effects from clause ``start``. A clause whose target the player picks either takes its
     one forced candidate, takes nothing, or pauses with NeedsChoice before it runs."""
     bstate = scope.context.bstate
-    previous = bstate.get("resolving_source_uid")
-    bstate["resolving_source_uid"] = int(scope.source_uid)
-    try:
+    with _bridge_caster(bstate, owner=scope.owner_uid, source=scope.source_uid):
         for position in range(start, len(root.m_AbilityEffectList)):
             clause = root.m_AbilityEffectList[position]
             # Counts are read when the effect runs, after the effects before it (C# evaluates a variable lazily).
@@ -1001,11 +993,6 @@ def _run_effects(guid: str, root: MechanicsObject, scope: Scope, start: int) -> 
                 _reveal_cards(root, clause, effect_raw, scope)
                 continue
             _run_clause(root, clause, scope)
-    finally:
-        if previous is None:
-            bstate.pop("resolving_source_uid", None)
-        else:
-            bstate["resolving_source_uid"] = previous
     return True
 
 
@@ -1019,44 +1006,53 @@ def _reveal_cards(root: MechanicsObject, clause: Any, effect_raw: dict[str, Any]
     if not targets:
         scope.context.bstate["revealed_cards"] = []
         return
-    saved = {key: context.bstate.get(key) for key in ("resolving_owner_id",)}
     previous_template, previous_targets = context.effect_template_override, context.effect_targets
     context.effect_template_override = effect_raw
     context.effect_targets = tuple(int(target) for target in targets)
-    context.bstate["resolving_owner_id"] = int(scope.owner_uid)
     try:
-        reveal_cards(context)
+        with _bridge_caster(context.bstate, owner=scope.owner_uid):
+            reveal_cards(context)
     finally:
         context.effect_template_override = previous_template
         context.effect_targets = previous_targets
-        for key, value in saved.items():
-            if value is None:
-                context.bstate.pop(key, None)
-            else:
-                context.bstate[key] = value
 
 
-def _move_cards(root: MechanicsObject, clause: Any, effect_raw: dict[str, Any], scope: Scope) -> None:
-    """C# MoveCardToZoneEffectTemplate: each target moves to the authored zone, through the live move leaf
-    (rules_port.context move_card_to_zone), with the owner and the target passed explicitly for this effect."""
-    context = scope.context
-    bstate = context.bstate
-    targets = _targets(root, int(_field(clause, "m_TargetTemplateIndex") or 0), scope)
-    saved = {key: bstate.get(key) for key in ("resolving_owner_id", "resolving_target_uid", "_rules_port_native_effect")}
-    previous_template = context.effect_template_override
-    context.effect_template_override = effect_raw
-    bstate["resolving_owner_id"] = int(scope.owner_uid)
-    bstate["_rules_port_native_effect"] = True
+@contextmanager
+def _bridge_caster(bstate: dict[str, Any], *, owner: Any = None, source: Any = None,
+                   variables: dict[str, Any] | None = None) -> Iterator[None]:
+    """The one place the interpreter writes the caster, source and variables into the battle state. The shared
+    resolver leaves read those from the battle state, so they are set here for the duration of one interpreted call
+    and restored after it. Every target the interpreter acts on is passed explicitly, not read from this state."""
+    saved = {key: bstate.get(key) for key in ("resolving_owner_id", "resolving_source_uid", "ability_variables")}
     try:
-        for target in targets:
-            context.move_card_to_zone(target=int(target))
+        if owner is not None:
+            bstate["resolving_owner_id"] = int(owner)
+        if source is not None:
+            bstate["resolving_source_uid"] = int(source)
+        if variables is not None:
+            bstate["ability_variables"] = dict(variables)
+        yield
     finally:
-        context.effect_template_override = previous_template
         for key, value in saved.items():
             if value is None:
                 bstate.pop(key, None)
             else:
                 bstate[key] = value
+
+
+def _move_cards(root: MechanicsObject, clause: Any, effect_raw: dict[str, Any], scope: Scope) -> None:
+    """C# MoveCardToZoneEffectTemplate: each target moves to the authored zone, through the live move leaf
+    (rules_port.context move_card_to_zone), with the target passed explicitly and the caster bridged for the leaf."""
+    context = scope.context
+    targets = _targets(root, int(_field(clause, "m_TargetTemplateIndex") or 0), scope)
+    previous_template = context.effect_template_override
+    context.effect_template_override = effect_raw
+    try:
+        with _bridge_caster(context.bstate, owner=scope.owner_uid):
+            for target in targets:
+                context.move_card_to_zone(target=int(target))
+    finally:
+        context.effect_template_override = previous_template
 
 
 def _randomize_variable(effect_raw: dict[str, Any], scope: Scope) -> None:
