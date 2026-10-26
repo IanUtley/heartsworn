@@ -665,6 +665,7 @@ def _heal_owners(root: MechanicsObject, index: int, scope: Scope) -> list[int]:
 
 
 def _run_clause(root: MechanicsObject, clause: Any, scope: Scope) -> None:
+    from rules_port import ir_exec_resources
     effect_guid = _guid(_field(clause, "m_EffectTemplateId"))
     effect_type, effect_raw = _stored("AbilityEffectTemplate", effect_guid)
     if _short(effect_type) == "SacrificeCardAbilityEffectTemplate":
@@ -675,6 +676,9 @@ def _run_clause(root: MechanicsObject, clause: Any, scope: Scope) -> None:
     if _short(effect_type) == "SummonTokenTroopAbilityEffectTemplate":
         _summon_tokens(root, clause, effect_raw, scope)
         return
+    if _short(effect_type) in ir_exec_resources.EFFECTS:
+        ir_exec_resources.run_effect(_short(effect_type), effect_raw, root, clause, scope)
+        return
     if _short(effect_type) != "CardModifierAbilityEffectTemplate":
         raise NotImplementedError(f"effect {_short(effect_type)}")
     modifier = _typed(effect_raw["m_Modifier"], "Modifier", effect_raw.get("_v"))
@@ -682,6 +686,9 @@ def _run_clause(root: MechanicsObject, clause: Any, scope: Scope) -> None:
         raise NotImplementedError(f"effect {effect_guid} has an untyped modifier")
     kind = _short(modifier.type_name)
     index = int(_field(clause, "m_TargetTemplateIndex") or 0)
+    if kind in ir_exec_resources.MODIFIERS:
+        ir_exec_resources.run_modifier(kind, modifier, root, clause, scope)
+        return
     if kind in ("AttackModifier", "DefenseModifier"):
         # The shared stat primitive, with the live path's choice of buffs (EndOfTurn is this turn only).
         from rules_port.stat_effects import apply_stat_mod
@@ -1159,7 +1166,9 @@ SUPPORTED_FILTERS = {
     "HasCountersValue", "IsTroop", "IsHero", "IsResource", "IsType", "IntAttrFilter", "InZone",
     "IsAbilitySource", "IsSubType", "NameContainsFilter", "TopNOfDeck",
 }
-SUPPORTED_MODIFIERS = {"DamageModifier", "CounterModifier", "HealHeroModifier", "AttackModifier", "DefenseModifier"}
+SUPPORTED_MODIFIERS = {"DamageModifier", "CounterModifier", "HealHeroModifier", "AttackModifier", "DefenseModifier",
+                       "CurrentResourceModifier", "TotalResourceModifier", "ChargePointsModifier", "ThresholdModifier",
+                       "LoseLifeModifier", "SpellPointsModifier", "CardCostModifier"}
 # The clause durations a stat modifier runs with: Permanent (the card's permanent buffs) and EndOfTurn (its
 # temporary buffs), as the live stat path applies them. Other durations are refused.
 STAT_DURATIONS = {"Permanent", "EndOfTurn"}
@@ -1256,11 +1265,17 @@ _COVERAGE_STACK: set[str] = set()
 
 def coverage(guid: str) -> list[str]:
     """The constructs in an ability the interpreter does not run (empty when it runs them all)."""
+    from rules_port import ir_exec_resources
     _cls, raw = _stored("AbilityTemplate", guid)
     missing: list[str] = []
     trigger = _short((raw.get("m_TriggerEventType") or {}).get("m_InternalType"))
     if trigger and trigger not in SUPPORTED_TRIGGERS:
         missing.append(f"trigger {trigger}")
+    top_condition = _short((raw.get("m_TriggerCondition") or {}).get("_t"))
+    if top_condition in SUPPORTED_FILTERS:
+        # A card filter on its own as the trigger condition: there is no card of the event to test it against, and
+        # the runtime does not evaluate it (Feralroot Archdruid's health-gained check).
+        missing.append(f"trigger condition {top_condition}")
     if raw.get("m_Threshold"):
         missing.append("ability threshold")
     ability_condition = _short((raw.get("m_AbilityCondition") or {}).get("_t"))
@@ -1368,10 +1383,16 @@ def coverage(guid: str) -> list[str]:
                 finally:
                     _COVERAGE_STACK.discard(child)
             continue
+        if kind in ir_exec_resources.EFFECTS:
+            missing.extend(ir_exec_resources.coverage_effect(kind, effect, clause, raw))
+            continue
         if kind != "CardModifierAbilityEffectTemplate":
             missing.append(f"effect {kind}")
             continue
         modifier = _short((effect.get("m_Modifier") or {}).get("_t"))
+        if modifier in ir_exec_resources.MODIFIERS:
+            missing.extend(ir_exec_resources.coverage_modifier(modifier, effect, clause, raw))
+            continue
         if modifier in ("AttackModifier", "DefenseModifier"):
             stat = effect.get("m_Modifier") or {}
             clause_duration = str(clause.get("m_EffectDuration") or "")
@@ -1392,4 +1413,5 @@ def coverage(guid: str) -> list[str]:
                 (effect.get("m_Modifier") or {}).get("m_Operation") not in COUNTER_OPERATIONS
                 or (effect.get("m_Modifier") or {}).get("m_RemoveAllCounters")):
             missing.append(f"counter operation {(effect.get('m_Modifier') or {}).get('m_Operation')}")
+    missing.extend(ir_exec_resources.coverage_invocation_cost(raw))
     return sorted(set(missing))

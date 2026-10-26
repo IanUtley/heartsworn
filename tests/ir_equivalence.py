@@ -83,14 +83,17 @@ def _test_champion_guid():
 
 
 class _SeededRng:
-    """The battle's session RNG (``next(bound)``), seeded per ability so both sides draw the same numbers."""
+    """The battle's session RNG (``next(bound)`` and ``next(min, max)``, as the kernel's), seeded per ability so both
+    sides draw the same numbers."""
 
     def __init__(self, seed):
         import random
         self._random = random.Random(seed)
 
-    def next(self, bound):
-        return self._random.randrange(bound)
+    def next(self, *bounds):
+        if len(bounds) == 2:
+            return self._random.randrange(int(bounds[0]), int(bounds[1]))
+        return self._random.randrange(bounds[0])
 
 
 def _scenario(ability_guid, opposing_troops, moved=None, extra=(), champion=False, any_template=False):
