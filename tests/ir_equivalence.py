@@ -83,14 +83,17 @@ def _test_champion_guid():
 
 
 class _SeededRng:
-    """The battle's session RNG (``next(bound)``), seeded per ability so both sides draw the same numbers."""
+    """The battle's session RNG (``next(bound)`` and ``next(min, max)``, as the kernel's), seeded per ability so both
+    sides draw the same numbers."""
 
     def __init__(self, seed):
         import random
         self._random = random.Random(seed)
 
-    def next(self, bound):
-        return self._random.randrange(bound)
+    def next(self, *bounds):
+        if len(bounds) == 2:
+            return self._random.randrange(int(bounds[0]), int(bounds[1]))
+        return self._random.randrange(bounds[0])
 
 
 def _scenario(ability_guid, opposing_troops, moved=None, extra=(), champion=False, any_template=False):
@@ -279,7 +282,8 @@ def _live(case):
         dispatch_native_trigger(db=db, handler=handler, game=game, session=SessionStub(),
                                 player_uid=pl_t, ai_uid=ai_t, battle_state=bstate,
                                 event_type=case["event"], source_card_id=source,
-                                source_player_id=TROOP_OWNER)
+                                source_player_id=TROOP_OWNER,
+                                target_player_id=case.get("target_player"))
     # The live trigger goes on the battle stack; the chain resolves it (and anything it queues).
     for _ in range(8):
         if not bstate.get("stack"):
@@ -391,6 +395,8 @@ CHAMPION_CASES = [
 ]
 
 TURN_EVENTS = {"TurnStartedEvent", "TurnEndedEvent", "CardEnteredZoneEvent"}
+# The live events the interpreter runs beyond the turn and zone events (rules_port/ir_triggers.py).
+TRIGGER_EVENTS = {"CardDealtDamageEvent", "CardAttackedEvent", "CardCastEvent"}
 # Turn-event abilities with a card template that the interpreter refuses (name, missing constructs).
 SKIPPED_BY_COVERAGE = []
 
@@ -529,7 +535,7 @@ def auto_cases(limit):
     for record in STORE.load("AbilityTemplate"):
         raw = record.to_dict(include_metadata=True)
         event = str((raw.get("m_TriggerEventType") or {}).get("m_InternalType") or "").rsplit(".", 1)[-1]
-        if event not in TURN_EVENTS:
+        if event not in TURN_EVENTS and event not in TRIGGER_EVENTS:
             continue
         if _template_for(db, record.guid.lower(), event) is None:
             SKIPPED_BY_COVERAGE.append((f"{event}: {raw.get('m_GameText', '')[:70]}",
@@ -542,9 +548,14 @@ def auto_cases(limit):
         moved = None
         if event == "CardEnteredZoneEvent":
             moved = _zone_move(db, raw)
-        cases.append({"name": f"{event}: {raw.get('m_GameText', '')[:70]}",
-                      "ability": record.guid.lower(), "event": event,
-                      "opposing": [], "prepare": _threshold_prepare(raw), "moved": moved})
+        # A damage event names the damaged card's controller: the player's own troop's owner and the opposing one,
+        # so a "when you are dealt damage" ability runs on one and not the other.
+        targets = [TROOP_OWNER, OPPOSING_OWNER] if event in TRIGGER_EVENTS else [None]
+        for target in targets:
+            cases.append({"name": f"{event}: {raw.get('m_GameText', '')[:70]}",
+                          "ability": record.guid.lower(), "event": event,
+                          "opposing": [], "prepare": _threshold_prepare(raw), "moved": moved,
+                          "target_player": target})
         if len(cases) >= limit:
             break
     return cases
