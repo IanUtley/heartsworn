@@ -256,6 +256,17 @@ TIMINGS: list[tuple[float, float]] = []
 LAST_TIMING = [0.0]
 
 
+def _uses_trigger_target(ability_guid):
+    """Whether the ability names its trigger target card (a TriggerTarget selector on one of its target templates)."""
+    from gamedata import DEFAULT_RECORD_STORE as STORE
+    record = STORE.get("AbilityTemplate", ability_guid)
+    for ref in (record.m_AbilityTargetTemplateIds or []) if record is not None else []:
+        template = STORE.get("AbilityTargetTemplate", str(ref.get("m_Guid")).lower())
+        if template is not None and "TriggerTarget" in str(getattr(template, "m_TriggerSelector", "") or ""):
+            return True
+    return False
+
+
 def _live(case):
     from rules_port.context import EffectContext  # noqa: F401
     from rules_port.triggers import dispatch_native_trigger
@@ -286,10 +297,13 @@ def _live(case):
                                 data={"event_source_collection": zone_from,
                                       "event_destination_collection": zone_to})
     else:
+        # An ability whose selector is the event's target card ("create a copy of it" on a played troop) gets the
+        # event's card as its target, as the live event names it.
+        target_card = source if _uses_trigger_target(case["ability"]) else None
         dispatch_native_trigger(db=db, handler=handler, game=game, session=SessionStub(),
                                 player_uid=pl_t, ai_uid=ai_t, battle_state=bstate,
                                 event_type=case["event"], source_card_id=source,
-                                source_player_id=TROOP_OWNER,
+                                source_player_id=TROOP_OWNER, target_card_id=target_card,
                                 target_player_id=case.get("target_player"),
                                 data={"event_int_attribute": case.get("int_attribute"),
                                       "zones": SETUP_ZONES.get(case["event"])})

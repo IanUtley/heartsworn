@@ -9,8 +9,8 @@ interpreter never half-runs an ability.
 
 Measured with `AssetExtraction/ir_gap_report.py` over all 8,996 `AbilityTemplate` records:
 
-- Covered by the interpreter: 7,207
-- Refused: 1,788
+- Covered by the interpreter: 7,348
+- Refused: 1,647
 - Coverage check raises on bad Records data: 1 (see Data below)
 
 Regenerate the numbers and the full reason list from the current code and Records:
@@ -24,7 +24,8 @@ The counts below are one ability's refusal reasons each. An ability with several
 Closed so far: chosen `SinglePlayer` targets, random targets with a card filter, `PlayedResources` moves,
 turn-boundary durations on attribute and int-attribute modifiers, and the `IntAttrAbilityVariable`,
 `CountListAttrAbilityVariable` and `SumVariableInListAttrCardsAbilityVariable` variables, and the
-`GameStartedEvent` and `PreGameEvent` setup triggers (see Triggers for what is not yet validated).
+`GameStartedEvent` and `PreGameEvent` setup triggers (see Triggers for what is not yet validated), the
+`CardIntegerVariable` variable, valid `SetCardIntegerVariable` operations, and the `TriggerTarget` selector.
 
 ## Triggers
 
@@ -83,7 +84,12 @@ entered-zone events in `ir_exec.py`. Other trigger types are refused as `trigger
 
 ## Effects
 
-- `effect RepeatingAbilityEffectTemplate` (23) and `effect ConversationAbilityEffectTemplate` (23).
+- `effect RepeatingAbilityEffectTemplate` (23): running the repeat as a native leaf was tried and reverted. The two
+  "Repeat ... choose one at random" abilities then differed from the live path in the equivalence harness, so the
+  repeat stays refused until the nested random choice is shown to match.
+- `effect ConversationAbilityEffectTemplate` (23): a conversation pauses the ability for a client transaction. The
+  pause and resume live in the battle handler, not in the interpreter, so this needs a continuation the interpreter
+  can persist and resume.
 - `TransformCardAbilityEffectTemplate of a player` (41, plus 9 and 9 invoked), `with a serialized TAC` (16),
   `transform to no template` (12): `rules_port/ir_exec_transform.py`.
 - `resource set (not add)` (13) and `effect SetCardIntegerVariableEffectTemplate` (13): operations the interpreter

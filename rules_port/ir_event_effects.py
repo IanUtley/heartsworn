@@ -16,7 +16,6 @@ NATIVE_LEAF_EFFECTS = frozenset({
     "FireEventEffectTemplate", "TACAbilityEffectTemplate",
     "StoreNameAbilityEffectTemplate", "RememberKeywordPowersEffectTemplate",
     "RegisterTriggerAbilityEffectTemplate", "ActivateTriggeredAbilityEffectTemplate",
-    "RepeatingAbilityEffectTemplate",
 })
 
 # The TAC operations the native leaf (EffectContext.tac) implements. A TAC operation outside this set is refused by
@@ -73,9 +72,5 @@ def coverage_of(kind: str, effect: dict[str, Any]) -> list[str]:
         function = tac_function_of(effect)
         if function not in TAC_FUNCTIONS:
             return [f"TAC {function or 'untyped'}"]
-    if kind == "RepeatingAbilityEffectTemplate" and not effect.get("m_RepeatingEffect"):
-        # The repeat runs its nested effect through the native dispatch (EffectContext.apply_repeating_effect), so the
-        # interpreter only needs the nested effect to be there to run.
-        return ["repeat without a nested effect"]
     return []
 

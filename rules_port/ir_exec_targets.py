@@ -113,7 +113,7 @@ def follow_up_targets(template: Any, template_guid: str, root_guid: str, scope: 
         # The card the event names for its selector: the trigger source (the card that moved, the native
         # resolving_trigger_source_uid), or the trigger target (the native resolving_trigger_target_uid). The card
         # filter must pass it.
-        if _short(template.get("m_TriggerSelector") or "TriggerSource") == "TriggerTarget":
+        if _short(getattr(template, "m_TriggerSelector", None) or "TriggerSource") == "TriggerTarget":
             uid = context.bstate.get("resolving_trigger_target_uid")
         else:
             uid = scope.event.get("card")
