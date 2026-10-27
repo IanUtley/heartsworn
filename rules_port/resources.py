@@ -702,6 +702,9 @@ def project_resource_change(game, session, state: MutableMapping, player_uid,
         event_type = game_engine.PlayerResourceThresholdChangedSessionEventArgs
     else:
         raise ValueError(f"unsupported resource property: {property}")
+    if property == "chargepoints" and int(change.new_value) == int(change.old_value):
+        # C# Session.SetChampionChargePoints returns before it sends anything when the value does not change.
+        return change
     event = event_type()
     event.player_id = player_uid if change.side == "player" else ai_uid
     event.operation = 1 if amount >= 0 else 2

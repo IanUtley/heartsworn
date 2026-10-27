@@ -213,6 +213,8 @@ class ConditionContext:
                 # reads Card.ActiveGem); without them every card looked
                 # unsocketed to conditions.
                 "gems": int(row[20] or 0) if len(row) > 20 else 0,
+                # IsSocketable reads the template's socket count (C# Card.m_CardTemplate.m_SocketCount).
+                "socket_count": int(row[22] or 0) if len(row) > 22 else 0,
                 # The template's rarity: IsRarity (and the shared-rarity filter) read it from this view.
                 "rarity": row[21] if len(row) > 21 else "",
                 "cost": int(effective_cost or 0),

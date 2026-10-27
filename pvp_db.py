@@ -1560,8 +1560,10 @@ def db_card_current_damage(session_id, card_uid, conn=None):
 
 
 def db_condition_card_row(session_id, card_uid, conn=None):
-    """Return the full mutable/template projection used by conditions."""
-    return (conn or _db_layer._db).execute(
+    """Return the full mutable/template projection used by conditions. Index 22 is the template's socket count."""
+    connection = conn or _db_layer._db
+    sockets = _target_projection_columns(connection)[1]
+    return connection.execute(
         "SELECT gc.card_uid, COALESCE(gc.card_type, ct.card_type), "
         "gc.location, gc.user_id, gc.card_state, "
         "COALESCE(ct.attack,0), COALESCE(ct.defense,0), gc.template_guid, "
@@ -1570,7 +1572,7 @@ def db_condition_card_row(session_id, card_uid, conn=None):
         "gc.card_defense_mod, COALESCE(gc.permanent_buffs,'{}') "
         ", COALESCE(gc.card_abilities, '[]'), gc.position, "
         "COALESCE(gc.original_template_guid,''), COALESCE(gc.gems,0), "
-        "COALESCE(ct.rarity,'') "
+        "COALESCE(ct.rarity,''), " + sockets + " "
         "FROM game_cards gc LEFT JOIN card_templates ct "
         "ON ct.guid = gc.template_guid "
         "WHERE gc.session_id=? AND gc.card_uid=?",
@@ -3250,7 +3252,7 @@ def db_target_source_row(session_id, card_uid, conn=None):
     sql = ("SELECT gc.card_uid, gc.card_type, gc.location, gc.user_id, "
            + "gc.card_state, COALESCE(ct.attack,0), COALESCE(ct.defense,0), "
            + "gc.template_guid, ct.name, COALESCE(ct.cost,0), ct.subtype, "
-           + "ct.threshold_json, gc.card_attributes, " + rarity + ", "
+           + "ct.threshold_json, COALESCE(gc.card_attributes,0) | COALESCE(ct.attributes,0), " + rarity + ", "
            + sockets + ", " + gems + ", " + original + ", " + abilities + ", "
            + "gc.permanent_buffs FROM game_cards gc LEFT JOIN card_templates ct "
            + "ON ct.guid=gc.template_guid WHERE gc.session_id=? AND gc.card_uid=?")
@@ -3273,7 +3275,7 @@ def db_target_candidate_rows(session_id, zones, controller_uid=None,
         "COALESCE(ct.defense,0), ct.name, COALESCE(ct.cost,0), ct.subtype, "
         "ct.threshold_json, gc.card_abilities, gc.permanent_buffs, "
         + rarity + ", " + sockets + ", " + gems + ", " + original + ", "
-        + "COALESCE(gc.card_attributes,0) "
+        + "COALESCE(gc.card_attributes,0) | COALESCE(ct.attributes,0) "
         + "FROM game_cards gc JOIN card_templates ct ON ct.guid=gc.template_guid "
         + "WHERE gc.session_id=? AND gc.location IN (" + marks + ")"
     )
