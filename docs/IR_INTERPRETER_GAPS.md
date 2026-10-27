@@ -9,8 +9,8 @@ interpreter never half-runs an ability.
 
 Measured with `AssetExtraction/ir_gap_report.py` over all 8,996 `AbilityTemplate` records:
 
-- Covered by the interpreter: 6,965
-- Refused: 2,030
+- Covered by the interpreter: 7,207
+- Refused: 1,788
 - Coverage check raises on bad Records data: 1 (see Data below)
 
 Regenerate the numbers and the full reason list from the current code and Records:
@@ -23,16 +23,20 @@ The counts below are one ability's refusal reasons each. An ability with several
 
 Closed so far: chosen `SinglePlayer` targets, random targets with a card filter, `PlayedResources` moves,
 turn-boundary durations on attribute and int-attribute modifiers, and the `IntAttrAbilityVariable`,
-`CountListAttrAbilityVariable` and `SumVariableInListAttrCardsAbilityVariable` variables.
+`CountListAttrAbilityVariable` and `SumVariableInListAttrCardsAbilityVariable` variables, and the
+`GameStartedEvent` and `PreGameEvent` setup triggers (see Triggers for what is not yet validated).
 
 ## Triggers
 
 The interpreter runs only the trigger events in `TRIGGER_EVENTS` (`rules_port/ir_triggers.py`), plus the turn and
 entered-zone events in `ir_exec.py`. Other trigger types are refused as `trigger <Event>`.
 
-- `GameStartedEvent` (221) and `PreGameEvent` (68): pregame setup. Discovery and skip rules live in
-  `rules_port/pregame.py`, `rules_port/triggers.py` and `rules_port/trigger_discovery.py`. The timing is tied to
-  the opening priority window.
+- Setup triggers now run in the interpreter: `GameStartedEvent` and `PreGameEvent` are in `TRIGGER_EVENTS`.
+  Discovery, the zone and collection checks, and the setup ordering stay on the native path (`rules_port/triggers.py`,
+  `rules_port/pregame.py`, `services/tournament_game.py`). Only the effects of a setup ability are interpreted.
+  Not yet validated against the live result: the equivalence harness (`tests/ir_equivalence.py`) cannot build a
+  scenario for most setup abilities, because they share their card with other setup abilities and so never fire
+  alone. Two covered setup cases did not reach the interpreter in the harness, so their discovery is unverified.
 - `trigger selector TriggerTarget` (135): the trigger's target is chosen by the trigger, not the event.
 - `CardReadiedEvent` (76), `CardExitedZoneEvent` (37), `GainThresholdEvent` (37), `GainChargeEvent` (31),
   `CardBlockedEvent` (28), `ChampionHealedEvent` (25), and about 40 more event types with fewer than 20 abilities each.

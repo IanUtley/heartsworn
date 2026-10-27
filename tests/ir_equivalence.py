@@ -268,6 +268,13 @@ def _live(case):
     case["prepare"](db, bstate, player_champ, ai_champ)
     start_events = len(game.events)
     source = player_champ if case.get("champion") else SOURCE_UID
+    if case["event"] in SETUP_ZONES and not case.get("champion"):
+        # Encounter setup abilities live on a card in the hidden mod collection, which is the only place their trigger
+        # collection (Mod) admits them, as the live setup finds them.
+        from gamedata import DEFAULT_RECORD_STORE, ability_graph
+        if "Mod" in str(ability_graph(DEFAULT_RECORD_STORE, case["ability"]).trigger_collection_flags or ""):
+            db.execute("UPDATE game_cards SET location='mod' WHERE card_uid=?", (SOURCE_UID,))
+            db.commit()
     from rules_port.resolution import resolve_port_trigger
     started = time.perf_counter()
     if case.get("moved"):
@@ -284,7 +291,8 @@ def _live(case):
                                 event_type=case["event"], source_card_id=source,
                                 source_player_id=TROOP_OWNER,
                                 target_player_id=case.get("target_player"),
-                                data={"event_int_attribute": case.get("int_attribute")})
+                                data={"event_int_attribute": case.get("int_attribute"),
+                                      "zones": SETUP_ZONES.get(case["event"])})
     # The live trigger goes on the battle stack; the chain resolves it (and anything it queues).
     for _ in range(8):
         if not bstate.get("stack"):
@@ -396,6 +404,8 @@ CHAMPION_CASES = [
 ]
 
 TURN_EVENTS = {"TurnStartedEvent", "TurnEndedEvent", "CardEnteredZoneEvent"}
+# The zones each setup event is dispatched over, as the live setup calls dispatch them (services/tournament_game.py).
+SETUP_ZONES = {"GameStartedEvent": ("hand", "warzone"), "PreGameEvent": ("deck",)}
 # The live events the interpreter runs beyond the turn and zone events (rules_port/ir_triggers.py).
 from rules_port.ir_triggers import TRIGGER_EVENTS  # noqa: E402
 # Turn-event abilities with a card template that the interpreter refuses (name, missing constructs).

@@ -597,6 +597,16 @@ def test_an_int_attr_variable_is_bound_by_the_native_evaluator():
     assert coverage(RAGE_X_ABILITY_GUID) == []
 
 
+SETUP_CHAMPION_SUMMON_ABILITY_GUID = "d8869683-9c39-12e3-a97e-590f332275d3"
+
+
+def test_a_game_started_setup_ability_is_covered():
+    """A GameStarted setup ability (encounter setup, hidden mod collection) is covered as any trigger is."""
+    from rules_port.ir_exec import coverage
+
+    assert coverage(SETUP_CHAMPION_SUMMON_ABILITY_GUID) == []
+
+
 if __name__ == "__main__":
     import db as dbmod
     for run in (test_burning_ability_runs_from_its_ir, test_dazed_and_vulnerable_removals_match_the_live_engine,
