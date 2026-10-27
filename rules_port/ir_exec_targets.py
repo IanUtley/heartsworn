@@ -72,6 +72,10 @@ def constant_count(template: Any, name: str) -> int:
     return int(_get(value, "m_Value", 0) or 0)
 
 
+# The trigger selectors a trigger card target reads: the event's source card and its target card.
+TRIGGER_SELECTORS = {"TriggerSource", "TriggerTarget"}
+
+
 def follow_up_gaps(template: Any, kind: str) -> list[str]:
     """The constructs of a follow-up target the interpreter does not run, for ``coverage`` (``template`` is the
     stored value). The trigger target (the card the event's other side names) is not wired. A chosen secondary or
@@ -79,7 +83,7 @@ def follow_up_gaps(template: Any, kind: str) -> list[str]:
     by a count only where the live resolver limits it, so a count is refused on the others."""
     gaps = []
     if kind == "AbilityTriggerCardTargetTemplate" and \
-            _short(template.get("m_TriggerSelector") or "TriggerSource") != "TriggerSource":
+            _short(template.get("m_TriggerSelector") or "TriggerSource") not in TRIGGER_SELECTORS:
         gaps.append(f"trigger selector {_short(template.get('m_TriggerSelector'))}")
     if kind in COUNTED_KINDS and not template.get("m_IsAutoTarget"):
         gaps.append("chosen follow-up target")
@@ -106,8 +110,13 @@ def follow_up_targets(template: Any, template_guid: str, root_guid: str, scope: 
     bstate = context.bstate
     kind = _short(template.type_name)
     if kind == "AbilityTriggerCardTargetTemplate":
-        # The card that moved in the event that fired the ability; the card filter must pass it.
-        uid = scope.event.get("card")
+        # The card the event names for its selector: the trigger source (the card that moved, the native
+        # resolving_trigger_source_uid), or the trigger target (the native resolving_trigger_target_uid). The card
+        # filter must pass it.
+        if _short(template.get("m_TriggerSelector") or "TriggerSource") == "TriggerTarget":
+            uid = context.bstate.get("resolving_trigger_target_uid")
+        else:
+            uid = scope.event.get("card")
         if uid is None:
             return []
         if template.m_CardFilter is not None:

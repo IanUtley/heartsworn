@@ -607,6 +607,16 @@ def test_a_game_started_setup_ability_is_covered():
     assert coverage(SETUP_CHAMPION_SUMMON_ABILITY_GUID) == []
 
 
+TRIGGER_TARGET_ABILITY_GUID = "7a43686f-537e-9c29-22cb-01acd457fec6"
+
+
+def test_a_trigger_target_selector_is_covered():
+    """A follow-up target chosen by the TriggerTarget selector reads the event's target card, as the live path does."""
+    from rules_port.ir_exec import coverage
+
+    assert coverage(TRIGGER_TARGET_ABILITY_GUID) == []
+
+
 if __name__ == "__main__":
     import db as dbmod
     for run in (test_burning_ability_runs_from_its_ir, test_dazed_and_vulnerable_removals_match_the_live_engine,
