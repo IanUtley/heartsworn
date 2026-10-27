@@ -213,6 +213,8 @@ class ConditionContext:
                 # reads Card.ActiveGem); without them every card looked
                 # unsocketed to conditions.
                 "gems": int(row[20] or 0) if len(row) > 20 else 0,
+                # The template's rarity: IsRarity (and the shared-rarity filter) read it from this view.
+                "rarity": row[21] if len(row) > 21 else "",
                 "cost": int(effective_cost or 0),
                 "subtype": row[10] or "",
                 "shards": _shards(row[11]),
