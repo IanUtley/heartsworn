@@ -2525,7 +2525,17 @@
      "tags": [
       "talkedAt(Node057)",
       "counter(gnomes_unsafe,1)"
-     ]
+     ],
+     "actions": {
+      "A0": [
+       "clear_flag(beat_worm_w1)",
+       "clear_flag(beat_work_w2)",
+       "clear_flag(beat_worm_queen)",
+       "clear_flag(beat_worm_e1)",
+       "clear_flag(beat_worm_e2)",
+       "clear_flag(beat_worm_e3)"
+      ]
+     }
     }
    },
    {

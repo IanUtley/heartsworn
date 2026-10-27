@@ -1596,7 +1596,12 @@
      "xp": 60,
      "one_time": false
     },
-    "ai_deck_personality": "Default"
+    "ai_deck_personality": "Default",
+    "actions_json": {
+     "victory": [
+      "set_flag(beat_worm_e1)"
+     ]
+    }
    },
    {
     "guid": "48a4b527-5f7a-40c8-b7cf-64a6b40561c3",
@@ -1610,7 +1615,12 @@
      "xp": 60,
      "one_time": false
     },
-    "ai_deck_personality": "Burn"
+    "ai_deck_personality": "Burn",
+    "actions_json": {
+     "victory": [
+      "set_flag(beat_worm_e2)"
+     ]
+    }
    },
    {
     "guid": "3897cae8-bbd4-4cd0-b8f4-183b55c46aa5",
@@ -1624,7 +1634,12 @@
      "xp": 60,
      "one_time": false
     },
-    "ai_deck_personality": "Default"
+    "ai_deck_personality": "Default",
+    "actions_json": {
+     "victory": [
+      "set_flag(beat_worm_e3)"
+     ]
+    }
    },
    {
     "guid": "37780748-362a-4153-82f2-6864496d4af0",

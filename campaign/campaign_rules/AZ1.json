@@ -721,6 +721,14 @@
     "flag": "tamed:06c14db8"
    }
   },
+  "Node055": {
+   "impassable": [
+    "counter(gnomes_carried,1)"
+   ],
+   "completed": [
+    "counter(gnomes_safe,20)"
+   ]
+  },
   "Node057": {
    "completed": [
     "counter(gnomes_safe,20)"
@@ -728,26 +736,46 @@
   },
   "Node058": {
    "completed": [
-    "!counter(gnomes_carried,1)"
+    [
+     "counter(gnomes_safe,20)"
+    ],
+    [
+     "flag(beat_worm_e1)"
+    ]
    ],
    "hidden": [
     "!visited(Node057)"
+   ],
+   "impassable": [
+    "counter(gnomes_carried,1)"
    ]
   },
   "Node059": {
    "completed": [
-    "!counter(gnomes_carried,1)"
+    [
+     "counter(gnomes_safe,20)"
+    ],
+    [
+     "flag(beat_worm_e2)"
+    ]
    ],
    "hidden": [
     "!visited(Node057)"
+   ],
+   "impassable": [
+    "counter(gnomes_carried,1)"
    ]
   },
   "Node060": {
    "completed": [
-    "!counter(gnomes_carried,1)"
+    "counter(gnomes_safe,20)",
+    "flag(beat_worm_e3)"
    ],
    "hidden": [
     "!visited(Node057)"
+   ],
+   "impassable": [
+    "counter(gnomes_carried,1)"
    ]
   },
   "Node061": {
@@ -757,18 +785,24 @@
   },
   "Node062": {
    "completed": [
-    "!counter(gnomes_carried,1)"
+    "counter(gnomes_safe,20)"
    ],
    "hidden": [
     "!visited(Node057)"
+   ],
+   "impassable": [
+    "counter(gnomes_carried,1)"
    ]
   },
   "Node063": {
    "completed": [
-    "!counter(gnomes_carried,1)"
+    "counter(gnomes_safe,20)"
    ],
    "hidden": [
     "!visited(Node057)"
+   ],
+   "impassable": [
+    "counter(gnomes_carried,1)"
    ]
   },
   "Node066": {
@@ -988,7 +1022,8 @@
   "Node063": [
    "completed",
    "visible",
-   "hidden"
+   "hidden",
+   "impassable"
   ],
   "Node060": [
    "impassable",
@@ -1011,7 +1046,8 @@
   "Node062": [
    "completed",
    "visible",
-   "hidden"
+   "hidden",
+   "impassable"
   ],
   "Node061": [
    "completed",
@@ -1049,6 +1085,10 @@
    "visible"
   ],
   "Node057": [
+   "completed"
+  ],
+  "Node055": [
+   "impassable",
    "completed"
   ]
  },
