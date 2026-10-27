@@ -610,7 +610,8 @@ class NativeTriggerBackend:
                                 source_uid, key[1],
                                 tuple(graph.targets[index].guid for index in explicit),
                                 candidates, owner_id=source_card_owner,
-                                trigger_target_uid=event.target_card_id)
+                                trigger_target_uid=event.target_card_id,
+                                trigger_event=_trigger_event_record(event, event_name))
                             logs.append(
                                 f"{event_name} {key[1][:8]} -> awaiting "
                                 f"{'optional choice' if graph.optional else 'target'}")
@@ -628,7 +629,8 @@ class NativeTriggerBackend:
                     handler._prompt_optional_trigger(
                         game, player_uid, ai_uid, session, battle_state,
                         source_uid, key[1], (), [], owner_id=source_card_owner,
-                        trigger_target_uid=event.target_card_id)
+                        trigger_target_uid=event.target_card_id,
+                        trigger_event=_trigger_event_record(event, event_name))
                     logs.append(f"{event_name} {key[1][:8]} -> awaiting optional choice")
                     continue
 
@@ -943,6 +945,16 @@ def _opponents_block_deathcries(battle_state, owner):
     """Session.CheckOpponentsForIntAttr(OpposingDeathcriesCantTrigger)."""
     return opponents_have_int_attr(
         battle_state, owner, "OpposingDeathcriesCantTrigger")
+
+
+def _trigger_event_record(event, event_name):
+    """The event that raised a trigger, in the plain form a pending trigger keeps. The chain item that resolves a
+    chosen trigger reads it back, so the interpreter's trigger conditions see the same event the dispatch did."""
+    data = {key: value for key, value in dict(event.data or {}).items()
+            if value is None or isinstance(value, (str, int, bool))}
+    return {"event_type": event_name, "source_card_id": event.source_card_id,
+            "source_player_id": event.source_player_id, "target_player_id": event.target_player_id,
+            "data": data}
 
 
 def dispatch_native_trigger(*, db, handler, game, session, player_uid, ai_uid,

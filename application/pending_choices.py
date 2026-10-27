@@ -83,7 +83,7 @@ class PendingChoicesMixin:
     def _prompt_optional_trigger(self, game, pl_t, ai_t, session, bstate,
                                  source_uid, ability_guid, target_template_ids,
                                  candidates, owner_id=None,
-                                 trigger_target_uid=None):
+                                 trigger_target_uid=None, trigger_event=None):
         """Prompt a human controller for an authored optional trigger.
 
         Optional triggers use the same class-39 continuation as triggered
@@ -95,12 +95,14 @@ class PendingChoicesMixin:
         return self._prompt_trigger_targets(
             game, pl_t, ai_t, session, bstate, source_uid, ability_guid,
             target_template_ids, candidates, owner_id=owner_id,
-            trigger_target_uid=trigger_target_uid, optional=True)
+            trigger_target_uid=trigger_target_uid, optional=True,
+            trigger_event=trigger_event)
 
     def _prompt_trigger_targets(self, game, pl_t, ai_t, session, bstate,
                                 source_uid, ability_guid, target_template_ids,
                                 candidates, owner_id=None,
-                                trigger_target_uid=None, optional=False):
+                                trigger_target_uid=None, optional=False,
+                                trigger_event=None):
         """Prompt for an optional trigger and/or its explicit targets.
 
         Mirrors the client's WaitForTriggeredAbilitiesAction: a
@@ -181,6 +183,7 @@ class PendingChoicesMixin:
                 for index, tid, _uids, minimum, maximum in entries],
             "trigger_target_uid": (None if trigger_target_uid is None
                                    else int(trigger_target_uid)),
+            "trigger_event": trigger_event,
             "optional": bool(optional),
         }
         # PvP: the trigger choice lives in the PvP state (not the battle
@@ -1310,6 +1313,9 @@ class PendingChoicesMixin:
                 str(index): uids for index, uids in target_map.items()}
             selected_uids = [uid for uids in target_map.values()
                              for uid in uids]
+            # The event that raised the trigger: the interpreter's trigger conditions (TriggerCardEnteredZone, say) read
+            # it when the chain item resolves, so the descriptor must carry it as the dispatch's chain item does.
+            trigger_event = pend.get("trigger_event") or {}
             descriptor = {
                 "kind": "trigger",
                 "ability_guid": ag,
@@ -1318,6 +1324,11 @@ class PendingChoicesMixin:
                 "target_uid": (None if chosen_uid is None
                                else int(chosen_uid)),
                 "trigger_target_uid": pend.get("trigger_target_uid"),
+                "trigger_event_type": trigger_event.get("event_type"),
+                "trigger_event_data": dict(trigger_event.get("data") or {}),
+                "trigger_source_uid": trigger_event.get("source_card_id"),
+                "trigger_source_player_uid": trigger_event.get("source_player_id"),
+                "trigger_target_player_uid": trigger_event.get("target_player_id"),
                 "activation_data": activation_data,
                 "instance_id": inst_id,
             }
