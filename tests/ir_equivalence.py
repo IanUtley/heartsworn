@@ -70,6 +70,7 @@ MOVED_UID = 503
 
 
 SOURCE_UID = 900
+OTHER_UID = 901
 
 
 @functools.lru_cache(maxsize=None)
@@ -285,6 +286,16 @@ def _live(case):
     if case.get("event_source"):
         own = case["event_source"] == "player"
         event_card, event_owner = (player_champ if own else ai_champ), (TROOP_OWNER if own else OPPOSING_OWNER)
+    if "another" in str(case.get("name") or "").lower() and not case.get("champion") and not case.get("event_source"):
+        # "When another troop ..." is about a different card: a second troop does the event, and the ability's card
+        # watches it.
+        db.execute("INSERT INTO game_cards (session_id, user_id, card_uid, template_guid, card_template_id, location,"
+                   " position, card_state, card_abilities, card_type, card_attributes, card_attack_mod, card_defense_mod,"
+                   " card_cost_mod, card_damage, permanent_buffs, temporary_buffs, card_uses, resolved_at,"
+                   " original_template_guid) VALUES (1,?,?,?,?,'warzone',0,0,'[]','Troop',0,0,0,0,0,'{}','{}','{}',0,?)",
+                   (TROOP_OWNER, OTHER_UID, scenarios.TPL_GLADIATOR, scenarios.TPL_GLADIATOR, scenarios.TPL_GLADIATOR))
+        db.commit()
+        event_card, event_owner = OTHER_UID, TROOP_OWNER
     if case["event"] in SETUP_ZONES and not case.get("champion"):
         # Encounter setup abilities live on a card in the hidden mod collection, which is the only place their trigger
         # collection (Mod) admits them, as the live setup finds them.
