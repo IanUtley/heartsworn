@@ -9,8 +9,8 @@ interpreter never half-runs an ability.
 
 Measured with `AssetExtraction/ir_gap_report.py` over all 8,996 `AbilityTemplate` records:
 
-- Covered by the interpreter: 8,084
-- Refused: 911
+- Covered by the interpreter: 8,092
+- Refused: 903
 - Coverage check raises on bad Records data: 1 (see Data below)
 
 Regenerate the numbers and the full reason list from the current code and Records:
@@ -27,7 +27,8 @@ turn-boundary durations on attribute and int-attribute modifiers, and the `IntAt
 `GameStartedEvent` and `PreGameEvent` setup triggers (see Triggers for what is not yet validated), the
 `CardIntegerVariable` variable, valid `SetCardIntegerVariable` operations, the `TriggerTarget` selector, and the
 `CardReadiedEvent` trigger (68 harness cases pass; 51 are harness-blocked), and the `CardBlockedEvent` trigger
-(21 harness cases pass; 21 are harness-blocked), and the `WhileCardInPlay` continuous clauses: 370 the static scan
+(21 harness cases pass; 21 are harness-blocked), the `CardSacrificedEvent` trigger (8 harness cases pass;
+4 are harness-blocked), and the `WhileCardInPlay` continuous clauses: 370 the static scan
 can project, plus the 11 linked ones (triggered, player-activated or invoked) whose grant is now applied and recorded
 in the linked ledger (see that section), and the `CardExitedZoneEvent`, `GainChargeEvent` and `ChampionHealedEvent`
 triggers (88 abilities; 112 harness cases pass, and the event's own player is now the trigger's (see Triggers)), the
@@ -131,7 +132,6 @@ the battle.
 | `cost change in an ability that invokes another` | 9 | 9 |
 | `TransformCardAbilityEffectTemplate` of a player (invoked) | 9 | 9 |
 | `TransformCardAbilityEffectTemplate` of a player (invoked twice) | 9 | 9 |
-| `trigger CardSacrificedEvent` | 8 | 8 |
 | `trigger PowerShiftedEvent` | 8 | 8 |
 
 The remaining 148 node types each block fewer than eight abilities on their own (211 between them; 72 of them
