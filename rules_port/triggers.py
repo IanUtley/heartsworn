@@ -686,7 +686,8 @@ class NativeTriggerBackend:
                                 event_name, event.source_card_id, dict(event.data or {}),
                                 target_player_uid=event.target_player_id,
                                 source_player_uid=event.source_player_id,
-                                instance_id=instance_id)
+                                instance_id=instance_id,
+                                target_card_uid=trigger_target_uid)
                         if interpreted is not None:
                             result = interpreted
                         else:

@@ -2076,7 +2076,8 @@ def prompt_interpreted_reveal(handler, game, session, db, player_uid, ai_uid, ba
 
 def run_interpreted_trigger(handler, game, session, db, player_uid, ai_uid, battle_state, guid,
                             source_uid, owner_uid, event_name, trigger_source_uid, event_data, answers=None,
-                            target_player_uid=None, source_player_uid=None, instance_id=None):
+                            target_player_uid=None, source_player_uid=None, instance_id=None,
+                            target_card_uid=None):
     """Resolve a trigger's ability with the interpreter (rules_port/ir_exec.py) on the live battle state.
 
     Its effects go through the live primitives, so the outcome is the native resolver's. Returns the
@@ -2099,7 +2100,7 @@ def run_interpreted_trigger(handler, game, session, db, player_uid, ai_uid, batt
                 game, session, db, handler, player_uid, ai_uid, battle_state, ""),
             source_uid=int(source_uid), owner_uid=int(owner_uid),
             event=ir_exec.live_event(event_name, int(owner_uid), event_data, trigger_source_uid,
-                                     target_player_uid, source_player_uid),
+                                     target_player_uid, source_player_uid, target_card_uid=target_card_uid),
             answers=answers,
             instance_id=None if instance_id is None else int(instance_id))
     except NotImplementedError:
@@ -2215,7 +2216,8 @@ def resolve_port_trigger(handler, game, session, db, player_uid, ai_uid,
                 event_data if isinstance(event_data, dict) else {}, answers=answers,
                 target_player_uid=item.get("trigger_target_player_uid"),
                 source_player_uid=item.get("trigger_source_player_uid"),
-                instance_id=item.get("instance_id"))
+                instance_id=item.get("instance_id"),
+                target_card_uid=item.get("trigger_target_uid"))
         if interpreted is not None:
             state = interpreted
         else:

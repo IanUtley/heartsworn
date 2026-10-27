@@ -431,7 +431,12 @@ def _condition_holds(condition: Any, scope: Scope) -> bool:
     if cls == "TriggerCardIsStoredTargetOfAbilitySource":
         return ir_exec_targets.trigger_card_is_stored(scope)
     if cls == "TriggerCardMatchesFilter":
-        card = _card_by_uid(scope, scope.event.get("card"))
+        # The card the test names. A TriggerTarget test judges the event's target card and falls back to the trigger
+        # source when the event names none, as the native condition does (ConditionContext: extra_target, else trigger).
+        target = scope.event.get("target_card")
+        uid = target if str(getattr(condition, "m_TriggerTest", "") or "") == "TriggerTarget" and target is not None \
+            else scope.event.get("card")
+        card = _card_by_uid(scope, uid)
         return card is not None and _filter_holds(condition.m_CardFilter, card, scope)
     if cls in bridge.BRIDGED_CONDITIONS:
         return bridge.condition_holds(condition, scope)
@@ -1020,7 +1025,8 @@ def _pauses_for_choice(guid: str, seen: set[str]) -> bool:
 
 
 def live_event(event_type: str, owner_uid: int, data: dict[str, Any], trigger_source_uid: Any,
-               target_player_uid: Any = None, source_player_id: Any = None) -> dict[str, Any]:
+               target_player_uid: Any = None, source_player_id: Any = None,
+               target_card_uid: Any = None) -> dict[str, Any]:
     """The interpreter's event for a live trigger: its player, its card and target player, and for a zone move the
     card and zones the live dispatch recorded (``event_source_collection`` and ``event_destination_collection``).
 
@@ -1029,6 +1035,7 @@ def live_event(event_type: str, owner_uid: int, data: dict[str, Any], trigger_so
     a turn step. It is not the resolving ability's owner: "when an opposing champion gains health" has to see the
     opponent. Only a caller that has no source player (a synthetic event) falls back to the ability's owner."""
     event: dict[str, Any] = {"player": owner_uid if source_player_id is None else source_player_id,
+                             "target_card": None if target_card_uid is None else int(target_card_uid),
                              **ir_triggers.event_fields(
                                  event_type, trigger_source_uid, target_player_uid, data)}
     if event_type in ("CardEnteredZoneEvent", "CardExitedZoneEvent"):
