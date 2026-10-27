@@ -508,8 +508,11 @@ def _counter_variable(variable: Any, counter: str | None, scope: Scope) -> int:
 
 
 # The ability variables the interpreter binds (coverage refuses an ability with any other kind).
+# Variables the native variable evaluator computes (C# IntAttrAbilityVariable, CountListAttrAbilityVariable). The
+# interpreter binds them through that same evaluator, from the ability's authored metadata.
+NATIVE_VARIABLE_KINDS = {"IntAttrAbilityVariable", "CountListAttrAbilityVariable"}
 SUPPORTED_VARIABLES = {"AbilityConstant", "AbilityVariable", "CounterVariable", "CardCountAbilityVariable"} \
-    | ir_variables.VARIABLE_KINDS
+    | ir_variables.VARIABLE_KINDS | NATIVE_VARIABLE_KINDS
 
 
 def _clause_names(clause: Any) -> set[str]:
@@ -522,6 +525,18 @@ def _clause_names(clause: Any) -> set[str]:
     if condition and condition != "00000000-0000-0000-0000-000000000000":
         texts.append(json.dumps(_stored("AbilityEffectConditionTemplate", condition)[1], default=str))
     return set(re.findall(r'"([^"]+)"', "".join(texts)))
+
+
+def _native_variable_value(root: MechanicsObject, scope: Scope, name: str) -> int:
+    """A variable the native evaluator computes, read from the ability's authored metadata as the native path reads it:
+    the same function, so the interpreter and the live resolver give the same value."""
+    from pvp_db import db_ability_raw_json
+    from rules_port.static_rules import _expression_value
+    context = scope.context
+    raw = db_ability_raw_json(_guid(root.m_AbilityTemplateId), conn=context.db) or "{}"
+    value = _expression_value(context.db, context.session.session_id, context.bstate, scope.source_uid,
+                              scope.owner_uid, raw, name)
+    return int(value or 0)
 
 
 def _bind_variables(root: MechanicsObject, scope: Scope, wanted: set[str] | None = None) -> None:
@@ -547,6 +562,8 @@ def _bind_variables(root: MechanicsObject, scope: Scope, wanted: set[str] | None
             scope.variables[variable.m_Name] = ir_variables.ability_property_value(scope)
         elif kind == ir_variables.HIGHEST_CARD_VARIABLE:
             scope.variables[variable.m_Name] = ir_variables.highest_card_value(scope, variable)
+        elif kind in NATIVE_VARIABLE_KINDS:
+            scope.variables[variable.m_Name] = _native_variable_value(root, scope, variable.m_Name)
         elif kind in (ir_variables.EXPRESSION_VARIABLE, ir_variables.THRESHOLD_VARIABLE):
             expressions[variable.m_Name] = variable
         else:
@@ -1637,7 +1654,7 @@ def coverage(guid: str) -> list[str]:
         if kind not in SUPPORTED_VARIABLES:
             missing.append(f"variable {kind or 'untyped'}")
             continue
-        if kind in ("AbilityConstant", "AbilityVariable"):
+        if kind in ("AbilityConstant", "AbilityVariable") or kind in NATIVE_VARIABLE_KINDS:
             continue
         if kind == ir_variables.CARD_PROPERTY_VARIABLE:
             missing.extend(ir_variables.card_property_gaps(variable))
