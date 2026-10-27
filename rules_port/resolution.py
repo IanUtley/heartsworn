@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+
 import json
 
 from .actions import AbilityResolutionState
@@ -2208,7 +2210,12 @@ def resolve_port_trigger(handler, game, session, db, player_uid, ai_uid,
         from . import ir_exec
         event_name = str(item.get("trigger_event_type") or "").rsplit(".", 1)[-1]
         interpreted = None
-        if ir_exec.engine_runs(guid, source_uid, owner_id, answers=answers):
+        # TEMPORARY (diagnosing a fight that does nothing on the server): which route resolved this trigger, and the
+        # answers the route saw.
+        _runs = ir_exec.engine_runs(guid, source_uid, owner_id, answers=answers)
+        logging.warning("IR trigger route: guid=%s engine=%s runs=%s answers=%s coverage=%s",
+                        guid, ir_exec.ENGINE_ON, _runs, answers, ir_exec.coverage(guid))
+        if _runs:
             interpreted = run_interpreted_trigger(
                 handler, game, session, db, player_uid, ai_uid, battle_state,
                 guid, source_uid, owner_id, event_name,
