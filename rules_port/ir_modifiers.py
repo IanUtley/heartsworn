@@ -22,6 +22,9 @@ SHIELD_AND_SUBTYPE_MODIFIERS = {"DamageShieldModifier", "SubTypeModifier"}
 GROUP_G_MODIFIERS = KEYWORD_MODIFIERS | PROTECTION_MODIFIERS | SHIELD_AND_SUBTYPE_MODIFIERS
 # The clause durations this module runs. Others are refused by coverage().
 DURATIONS = {"Permanent", "EndOfTurn"}
+# Keyword and int attribute grants also run the turn-boundary durations their native leaves already expire.
+_TURN_BOUNDARY_DURATIONS = {"Permanent", "EndOfTurn", "BeginningOfOwnersTurn", "AfterCardsReadyOnPlayersTurn"}
+DURATIONS_BY_KIND = {"AttributeModifier": _TURN_BOUNDARY_DURATIONS, "IntAttrModifier": _TURN_BOUNDARY_DURATIONS}
 # A keyword is granted with Add; Remove is not ported yet. An int attribute is set or added.
 ATTRIBUTE_OPERATIONS = {"Add"}
 INT_ATTR_OPERATIONS = {"Set", "Add"}
@@ -61,7 +64,7 @@ def modifier_gaps(modifier: Any, duration: str) -> list[str]:
         return _damage_shield_gaps(modifier, duration)
     if kind == "SubTypeModifier":
         return _subtype_gaps(modifier, duration)
-    if duration not in DURATIONS:
+    if duration not in DURATIONS_BY_KIND.get(kind, DURATIONS):
         return [f"{kind} duration {duration}"]
     operation = _short(_get(modifier, "m_Operation"))
     if kind == "AttributeModifier":

@@ -1479,7 +1479,7 @@ def _tagged_classes(value: Any, out: list[str]) -> list[str]:
 
 
 # The destinations the live move leaf moves a card to (its deck reinsertion is not ported).
-MOVE_DESTINATIONS = {"hand", "discard", "void", "warzone", "underground", "deck"}
+MOVE_DESTINATIONS = {"hand", "discard", "void", "warzone", "underground", "deck", "playedresources"}
 
 
 _REGEX_CHARACTERS = set("\\.[](){}*+?|^$")

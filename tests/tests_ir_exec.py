@@ -595,7 +595,8 @@ if __name__ == "__main__":
                 test_a_random_branch_searches_the_deck_for_a_named_card_and_moves_the_choice,
                 test_a_revealed_choice_takes_one_card_and_the_rest_go_back_in_random_places,
                 test_oakhenge_matches_the_client_oracle_run_when_the_revealed_cards_are_resources,
-                test_the_engine_takes_a_chosen_target_only_once_it_is_answered):
+                test_the_engine_takes_a_chosen_target_only_once_it_is_answered,
+                test_a_move_to_played_resources_is_covered):
         dbmod._db = make_db()
         run(dbmod._db)
     print("ok")
@@ -657,3 +658,13 @@ def test_a_zero_resource_id_is_not_a_set_cost():
     assert unsupported_costs({"m_VariableActivationCost": True}) == [
         "cost or optional (m_VariableActivationCost)"]
     assert unsupported_costs({"m_ActivationCost": 2, "m_LifeCost": 1, "m_CounterCosts": []}) == []
+
+
+CHOOSE_ONE_PLAYED_RESOURCES_ABILITY_GUID = "fe6dcce6-cabb-e24e-ae4b-7a8248ee3a84"
+
+
+def test_a_move_to_played_resources_is_covered():
+    """A move to PlayedResources runs through the live move leaf (which clears the choice zone), so it is covered."""
+    from rules_port.ir_exec import coverage
+
+    assert coverage(CHOOSE_ONE_PLAYED_RESOURCES_ABILITY_GUID) == []
