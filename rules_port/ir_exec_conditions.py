@@ -28,7 +28,7 @@ BRIDGED_CONDITIONS = frozenset({
     "ChampionCardsCastCondition", "OrAbilityCondition", "OrEffectCondition", "RequiresCardsControlled",
     "RequiresChampionCharges", "RequiresChampionHealth", "RequiresResourceThreshold",
     "RequiresSourcePassesFilterCondition", "RequiresTotalResources", "SourceCardHasCounters",
-    "SourceCardHasKeywords",
+    "SourceCardHasKeywords", "TACTriggerCondition",
 })
 
 # Filter classes the live predicate set has, but whose result depends on state the interpreter does not set: the
@@ -97,15 +97,16 @@ def _champions(context: Any) -> list[tuple]:
     return rows
 
 
-def condition_context(scope: Any, *, target: int | None = None) -> ConditionContext:
+def condition_context(scope: Any, *, target: int | None = None, event_type: str | None = None) -> ConditionContext:
     """A condition context for the ability in ``scope``. The source and its controller are the ability's own; the
-    trigger is the event's card, or ``target`` when an effect condition tests a target. Built fresh for each use,
+    trigger is the event's card, or ``target`` when an effect condition tests a target. ``event_type`` is the event a
+    trigger condition is judged for (a threshold's colour is read from a GainThresholdEvent). Built fresh for each use,
     because a condition reads the battle as it stands when it is tested."""
     context = scope.context
     champions = _champions(context)
     event = scope.event or {}
     return ConditionContext(
-        context.db, context.session, context.bstate, event_type="AbilityEffectEvent",
+        context.db, context.session, context.bstate, event_type=event_type or "AbilityEffectEvent",
         ability_source_uid=int(scope.source_uid), ability_source_owner_id=int(scope.owner_uid),
         trigger_uid=target if target is not None else event.get("card"), extra_target=target,
         pl_t=getattr(context, "player_uid", None), ai_t=getattr(context, "ai_uid", None), champions=champions,
@@ -135,8 +136,13 @@ def trigger_card_holds(card_filter: Any, scope: Any) -> bool:
 
 
 def condition_holds(condition: Any, scope: Any, *, target: int | None = None) -> bool:
-    """Whether a Records condition holds, as the live condition check finds it for this ability."""
-    return bool(evaluate_condition(_record(condition), condition_context(scope, target=target)))
+    """Whether a Records condition holds, as the live condition check finds it for this ability. A TAC trigger condition
+    reads the event the trigger raised (a threshold's colour, say), so it is judged for that event's type."""
+    record = _record(condition)
+    event_type = None
+    if str((record or {}).get("_t") or "").rsplit(".", 1)[-1] == "TACTriggerCondition":
+        event_type = (scope.event or {}).get("event_type")
+    return bool(evaluate_condition(record, condition_context(scope, target=target, event_type=event_type)))
 
 
 def target_gate(stored: Any, scope: Any):

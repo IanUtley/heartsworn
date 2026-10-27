@@ -1706,8 +1706,12 @@ def coverage(guid: str) -> list[str]:
     ability_condition = _short((raw.get("m_AbilityCondition") or {}).get("_t"))
     if ability_condition and ability_condition != "AbilityControllerHasThresholdAbilityCondition":
         missing.extend(bridge.unsupported(raw.get("m_AbilityCondition"), "ability condition"))
-    for name in _tagged_classes(raw.get("m_TriggerCondition"), []):
-        # A ResourceId is a value (a counter's identity), not a construct.
+    trigger_names = _tagged_classes(raw.get("m_TriggerCondition"), [])
+    for name in trigger_names:
+        # A ResourceId is a value (a counter's identity), not a construct. The serialized TAC inside a TAC trigger
+        # condition is that condition's data, which the live evaluator decodes.
+        if name == "SerializableTAC" and "TACTriggerCondition" in trigger_names:
+            continue
         if name not in SUPPORTED_CONDITIONS and name not in SUPPORTED_FILTERS and name != "ResourceId" \
                 and name not in bridge.BRIDGED_CONDITIONS and not bridge.filter_accepted(name):
             missing.append(f"condition {name}")

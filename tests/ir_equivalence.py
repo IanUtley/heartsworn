@@ -53,7 +53,7 @@ def _event_of(ability_guid):
 
 # Events whose cards are rare enough that a card carrying another triggered ability is the only one that can stand in
 # for them (a charge power's card, an inspiring troop's, a battle's, a destroyed artifact's).
-RELAXED_TEMPLATE_EVENTS = {"CardActivatedEvent", "CardBattledEvent"}
+RELAXED_TEMPLATE_EVENTS = {"CardActivatedEvent", "CardBattledEvent", "GainThresholdEvent"}
 
 
 def _template_for(db, ability_guid, event):
@@ -287,6 +287,21 @@ def _is_charge_power_trigger(ability_guid):
     return record is not None and "TriggerAbilityIsChargePower" in repr(record.to_dict(include_metadata=True))
 
 
+_THRESHOLD_SHARDS = {"BLOOD": "blood", "RUBY": "ruby", "SAPPHIRE": "sapphire", "WILD": "wild", "DIAMOND": "diamond"}
+
+
+def _threshold_color(case):
+    """The colour a GainThresholdEvent carries: the one its ability names ("When you gain [WILD]"), else wild. Other
+    events carry no colour."""
+    if case["event"] != "GainThresholdEvent":
+        return None
+    import re
+    import game_engine
+    match = re.search(r"gain \[(\w+)\]", str(case.get("name") or ""), re.IGNORECASE)
+    shard = _THRESHOLD_SHARDS.get(match.group(1).upper() if match else "WILD", "wild")
+    return int(game_engine.SHARD_TO_FLAG[shard])
+
+
 def _live(case):
     from rules_port.context import EffectContext  # noqa: F401
     from rules_port.triggers import dispatch_native_trigger
@@ -345,6 +360,7 @@ def _live(case):
                                 source_player_id=event_owner, target_card_id=target_card,
                                 target_player_id=case.get("target_player"),
                                 data={"event_int_attribute": case.get("int_attribute"),
+                                      "gain_threshold_color": _threshold_color(case),
                                       "zones": SETUP_ZONES.get(case["event"])})
     # The live trigger goes on the battle stack; the chain resolves it (and anything it queues).
     for _ in range(8):
@@ -459,7 +475,7 @@ CHAMPION_CASES = [
 TURN_EVENTS = {"TurnStartedEvent", "TurnEndedEvent", "CardEnteredZoneEvent"}
 # Events whose own source card is a champion (Session.AddChargePoints, Session.HealChampion, and a Fateweave cast by
 # the champion): the ability that reacts is another card's, and the event belongs to the champion's owner.
-CHAMPION_SOURCE_EVENTS = {"GainChargeEvent", "ChampionHealedEvent", "FateweavedEvent"}
+CHAMPION_SOURCE_EVENTS = {"GainChargeEvent", "ChampionHealedEvent", "FateweavedEvent", "GainThresholdEvent"}
 # The zones each setup event is dispatched over, as the live setup calls dispatch them (services/tournament_game.py).
 SETUP_ZONES = {"GameStartedEvent": ("hand", "warzone"), "PreGameEvent": ("deck",)}
 # The live events the interpreter runs beyond the turn and zone events (rules_port/ir_triggers.py).
