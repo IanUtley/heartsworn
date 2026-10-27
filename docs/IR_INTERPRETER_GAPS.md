@@ -9,8 +9,8 @@ interpreter never half-runs an ability.
 
 Measured with `AssetExtraction/ir_gap_report.py` over all 8,996 `AbilityTemplate` records:
 
-- Covered by the interpreter: 7,415
-- Refused: 1,580
+- Covered by the interpreter: 7,442
+- Refused: 1,553
 - Coverage check raises on bad Records data: 1 (see Data below)
 
 Regenerate the numbers and the full reason list from the current code and Records:
@@ -26,7 +26,8 @@ turn-boundary durations on attribute and int-attribute modifiers, and the `IntAt
 `CountListAttrAbilityVariable` and `SumVariableInListAttrCardsAbilityVariable` variables, and the
 `GameStartedEvent` and `PreGameEvent` setup triggers (see Triggers for what is not yet validated), the
 `CardIntegerVariable` variable, valid `SetCardIntegerVariable` operations, the `TriggerTarget` selector, and the
-`CardReadiedEvent` trigger (68 harness cases pass; 51 are harness-blocked).
+`CardReadiedEvent` trigger (68 harness cases pass; 51 are harness-blocked), and the `CardBlockedEvent` trigger
+(21 harness cases pass; 21 are harness-blocked).
 
 ## Triggers
 
@@ -44,8 +45,10 @@ entered-zone events in `ir_exec.py`. Other trigger types are refused as `trigger
   for them, but the native trigger never fires there (50 cases), because the harness does not pass the event data
   a gain carries (the threshold colour or charge). The events stay refused until the harness fires them, and then
   they pass against the live result.
-- `CardExitedZoneEvent` (37),
-  `CardBlockedEvent` (28), `ChampionHealedEvent` (25), and about 40 more event types with fewer than 20 abilities each.
+- `CardExitedZoneEvent` (37): harness-blocked. 12 cases fail with the live path emitting an extra card update
+  that the interpreted side does not, and the harness passes no move data for zone-exit events. Refused until the
+  harness supplies that data and the difference is explained.
+- `ChampionHealedEvent` (25), and about 40 more event types with fewer than 20 abilities each.
 - Trigger conditions: `TACTriggerCondition` (38), `TriggerAbilityIsChargePower` (14), `trigger condition IntAttrFilter` (12).
 
 ## Targets
