@@ -179,7 +179,7 @@ def _literal_leaf(param, *, extra_properties=()):
     """Return a native literal leaf, or ``None`` for a dynamic leaf."""
     prop = str(param.get("property") or "").lower()
     if prop not in {"attack", "defense", "cardcost", "attribute", "intattr",
-                    "damagemultiplier", *extra_properties}:
+                    "damagemultiplier", "damageshield", *extra_properties}:
         return None
     if param.get("input_variable"):
         return None
