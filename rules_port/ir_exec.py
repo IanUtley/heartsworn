@@ -276,13 +276,17 @@ def _battle_cards(scope: Scope) -> list[Card]:
 def _champion_subtype(context: Any, owner: int) -> str | None:
     """A champion's subtype line from its template, by its controller: the AI's (owner 0) or the player's
     (the profile's id). None when the battle does not name that champion's template (a PvP opponent)."""
-    handler = context.handler
-    if int(owner) == 0:
-        guid = getattr(handler, "_ai_champ_guid", None)
-    else:
-        profile = getattr(handler, "user_profile", None) or {}
-        guid = (getattr(handler, "_player_champ_guid", None)
-                if int(profile.get("id", -1) or -1) == int(owner) else None)
+    # The battle state names every champion's template (PvP opponents included), as the live projection reads it.
+    guids = context.bstate.get("champ_guid_map") or {}
+    guid = guids.get(int(owner)) or guids.get(str(owner))
+    if not guid:
+        handler = context.handler
+        if int(owner) == 0:
+            guid = getattr(handler, "_ai_champ_guid", None)
+        else:
+            profile = getattr(handler, "user_profile", None) or {}
+            guid = (getattr(handler, "_player_champ_guid", None)
+                    if int(profile.get("id", -1) or -1) == int(owner) else None)
     if not guid:
         return None
     from rules_port.targeting import _champion_subtype as template_subtype
@@ -650,11 +654,16 @@ def _card_candidates(template: MechanicsObject, scope: Scope) -> list[int]:
     top = _top_n_of_deck(template.m_CardFilter)
     # The live pool is the zones' cards in board order (the game_cards position), so a random pick or a cap of an
     # automatic target takes the same cards the live resolver takes.
+    # Like the live pool, a champion with no game_cards row (synthetic: no name) comes after the cards, in the order the
+    # handler lists the champions.
+    champions = (getattr(scope.context.handler, "_champion_targets", lambda: [])() or [])
+    champion_order = {int(champ[0]): index for index, champ in enumerate(champions)}
     cards = sorted((card for card in _battle_cards(scope)
                     if (not zones or card.zone in zones)
                     and _player_passes(player, card.owner, scope)
                     and _filter_holds(template.m_CardFilter, card, scope)),
-                   key=lambda card: card.position)
+                   key=lambda card: (card.name is None,
+                                     champion_order.get(card.uid, 0) if card.name is None else card.position))
     if top is None:
         return [card.uid for card in cards]
     if top.m_CountFromBottom or top.m_TopHalfOfDeck:
@@ -1577,12 +1586,13 @@ def coverage(guid: str) -> list[str]:
                 target_count(_load("AbilityTargetTemplate", template_guid).m_MaxTargetCount, {}) != 1:
             # The player picks one card; a chosen target of several cards (or no limit) is not modelled.
             missing.append("chosen target of more than one card")
-        if template.get("m_IsRandomTarget") and kind != "MatchSecondaryTargetTemplate":
-            # The pick is drawn from the battle's RNG, but the interpreter's random pool does not yet match the live one
-            # (see ir_exec_targets.py), so a random target stays with the native resolver.
-            missing.append("random target")
         if kind in FOLLOW_UP_KINDS:
             missing.extend(follow_up_gaps(template, kind))
+        if template.get("m_IsRandomTarget") and template.get("m_CardFilter") is None \
+                and kind != "MatchSecondaryTargetTemplate":
+            # Without a card filter, the live pool drops every card (it reads the filter as "no card matches"), while C#
+            # takes all of them. The interpreter follows C#, so such a random target stays with the native resolver.
+            missing.append("random target without a card filter")
         for name in _tagged_classes(template.get("m_CardFilter"), []):
             if name not in SUPPORTED_FILTERS and not bridge.filter_accepted(name):
                 missing.append(f"filter {name}")
