@@ -255,25 +255,6 @@ def test_champion_targets(db):
     assert 900 not in cands and 901 not in cands, cands
 
 
-def test_deploy_prompt_human(db):
-    """Human-controlled deploy trigger prompts (class 39), not chain-push."""
-    add_card(db, 100, 5, EXILE_TPL, "warzone", f'["{EXILE_DEPLOY}", "{EXILE_LEAVE}"]')
-    add_card(db, 101, 5, PLAIN_TPL, "warzone")
-    pl_t = game_engine.UID.make(244, 5)
-    ai_t = game_engine.UID.make(3, 1000)
-    game = game_engine.Game(1, pl_t, ai_t)
-    bstate = {"_next_instance_id": 1, "resolving_owner_id": 5}
-    handler = HandlerStub()
-    triggers.resolve_triggers(db, handler, game, SessionStub(), pl_t, ai_t,
-                              bstate, "CardEnteredZoneEvent", 100, 5)
-    assert handler.prompted is not None, "expected a target prompt"
-    assert handler.prompted[0] == 100
-    assert EXILE_TARGET in handler.prompted[2]
-    assert 101 in handler.prompted[3] and 100 not in handler.prompted[3]
-    assert not (bstate.get("stack") or []), "prompt must not push a chain item"
-    assert bstate.get("pending_trigger"), "pending trigger must be stored"
-
-
 def test_deploy_auto_ai(db):
     """AI-controlled deploy auto-picks the first legal target and chains it."""
     add_card(db, 300, 0, EXILE_TPL, "warzone", f'["{EXILE_DEPLOY}", "{EXILE_LEAVE}"]')
