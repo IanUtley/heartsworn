@@ -51,6 +51,11 @@ def _event_of(ability_guid):
     return _EVENTS.get(ability_guid, "")
 
 
+# Events whose cards are rare enough that a card carrying another triggered ability is the only one that can stand in
+# for them (a charge power's card, an inspiring troop's, a battle's, a destroyed artifact's).
+RELAXED_TEMPLATE_EVENTS = {"CardActivatedEvent", "CardBattledEvent"}
+
+
 def _template_for(db, ability_guid, event):
     """A troop-first card template for this ability. Another triggered ability on the card can fire from this
     ability's effects (an Inspire on a summoning troop, say), and the live side would then run it too, so a
@@ -61,7 +66,11 @@ def _template_for(db, ability_guid, event):
         (f"%{ability_guid}%",)).fetchall()
     for guid, abilities in rows:
         others = [item for item in json.loads(abilities or "[]") if item.lower() != ability_guid]
-        if all(not _event_of(item.lower()) for item in others):
+        # The harness dispatches one event per case, so only another ability that fires on the same event would also
+        # run from it; an ability on another event is left to the live engine on both sides.
+        strict = event not in RELAXED_TEMPLATE_EVENTS
+        if (all(not _event_of(item.lower()) for item in others) if strict
+                else all(_event_of(item.lower()) != event for item in others)):
             return guid
     return None
 
@@ -268,6 +277,16 @@ def _uses_trigger_target(ability_guid):
     return False
 
 
+CHARGE_POWER_GUID = "81e34ad9-77eb-6e79-0778-ef1463e4fee2"
+
+
+def _is_charge_power_trigger(ability_guid):
+    """Whether the ability's trigger condition is "the activated ability is a charge power"."""
+    from gamedata import DEFAULT_RECORD_STORE as STORE
+    record = STORE.get("AbilityTemplate", ability_guid)
+    return record is not None and "TriggerAbilityIsChargePower" in repr(record.to_dict(include_metadata=True))
+
+
 def _live(case):
     from rules_port.context import EffectContext  # noqa: F401
     from rules_port.triggers import dispatch_native_trigger
@@ -279,6 +298,9 @@ def _live(case):
     db, pl_t, ai_t, game, handler, bstate, player_champ, ai_champ = setup
     case["prepare"](db, bstate, player_champ, ai_champ)
     start_events = len(game.events)
+    if case["event"] == "CardActivatedEvent" and _is_charge_power_trigger(case["ability"]):
+        # The activation that fires "When you use a charge power" names the charge power the player used.
+        bstate["activated_ability_guid"] = CHARGE_POWER_GUID
     source = player_champ if case.get("champion") else SOURCE_UID
     # An event sourced on a champion names the champion, not the ability's card, and belongs to the champion's
     # owner: Session.AddChargePoints and Session.HealChampion set SourcePlayerId from the champion's controller.

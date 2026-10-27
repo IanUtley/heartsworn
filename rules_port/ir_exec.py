@@ -50,7 +50,7 @@ COUNTER_OPERATIONS = {"Add": "add", "Remove": "remove", "Set": "set"}
 # Trigger conditions that judge the event rather than the board: which card moved, between which collections, and
 # which player the event belongs to. They are evaluated by the native shared evaluator, so both paths agree.
 SHARED_TRIGGER_CONDITIONS = frozenset({"TriggerCardIsAbilitySource", "TriggerPlayerControlsAbilitySource",
-                                       "TriggerCardEnteredZone"})
+                                       "TriggerCardEnteredZone", "TriggerAbilityIsChargePower"})
 
 # C# EComparisons. An operator outside this table is refused by coverage.
 _COMPARISONS = {
@@ -1576,7 +1576,7 @@ SUPPORTED_TRIGGERS = {"TurnEndedEvent", "TurnStartedEvent", "CardEnteredZoneEven
 SUPPORTED_CONDITIONS = {
     "AndTriggerCondition", "TriggerCondition", "TriggerSource", "TriggerPlayerControlsAbilitySource",
     "TriggerCardEnteredZone", "TriggerCardMatchesFilter", "RequiresCardsControlled",
-    "TriggerCardIsAbilitySource", "TriggerCardIsStoredTargetOfAbilitySource",
+    "TriggerCardIsAbilitySource", "TriggerCardIsStoredTargetOfAbilitySource", "TriggerAbilityIsChargePower",
 } | ir_triggers.CONDITIONS
 SUPPORTED_FILTERS = {
     "AndCardFilter", "OrCardFilter", "NotCardFilter", "IsControlledBy", "IsNotControlledBy",

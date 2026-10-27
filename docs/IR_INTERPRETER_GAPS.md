@@ -9,8 +9,8 @@ interpreter never half-runs an ability.
 
 Measured with `AssetExtraction/ir_gap_report.py` over all 8,996 `AbilityTemplate` records:
 
-- Covered by the interpreter: 8,110
-- Refused: 886
+- Covered by the interpreter: 8,122
+- Refused: 873
 - Coverage check raises on bad Records data: 1 (see Data below)
 
 Regenerate the numbers and the full reason list from the current code and Records:
@@ -158,7 +158,8 @@ entered-zone events in `ir_exec.py`. Other trigger types are refused as `trigger
   refused for unrelated constructs (a repeating effect, a three-card target, a conversation, a token that copies
   its target, a `BeginningOfOwnersTurn` duration).
 - About 40 more event types with fewer than 20 abilities each.
-- Trigger conditions: `TACTriggerCondition` (38), `TriggerAbilityIsChargePower` (14), `trigger condition IntAttrFilter` (12).
+- Trigger conditions: `TACTriggerCondition` (38), `trigger condition IntAttrFilter` (12). (`TriggerAbilityIsChargePower`
+  now runs through the shared evaluator, which reads the activated ability from the battle state.)
 
 ## Trigger event data, and the events' own player (implemented)
 
