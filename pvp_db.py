@@ -1569,7 +1569,8 @@ def db_condition_card_row(session_id, card_uid, conn=None):
         "gc.card_attributes, ct.attributes, gc.card_attack_mod, "
         "gc.card_defense_mod, COALESCE(gc.permanent_buffs,'{}') "
         ", COALESCE(gc.card_abilities, '[]'), gc.position, "
-        "COALESCE(gc.original_template_guid,''), COALESCE(gc.gems,0) "
+        "COALESCE(gc.original_template_guid,''), COALESCE(gc.gems,0), "
+        "COALESCE(ct.rarity,'') "
         "FROM game_cards gc LEFT JOIN card_templates ct "
         "ON ct.guid = gc.template_guid "
         "WHERE gc.session_id=? AND gc.card_uid=?",
