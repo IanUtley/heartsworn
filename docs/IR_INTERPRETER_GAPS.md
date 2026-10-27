@@ -9,8 +9,8 @@ interpreter never half-runs an ability.
 
 Measured with `AssetExtraction/ir_gap_report.py` over all 8,996 `AbilityTemplate` records:
 
-- Covered by the interpreter: 8,044
-- Refused: 952
+- Covered by the interpreter: 8,084
+- Refused: 911
 - Coverage check raises on bad Records data: 1 (see Data below)
 
 Regenerate the numbers and the full reason list from the current code and Records:
@@ -106,13 +106,12 @@ project them no matter what their Records say. None of them is referenced by a c
 ## Ruling queue
 
 The refusals grouped by the node type that causes them, ordered by how many abilities the node alone
-blocks (516 of the 952 refusals have exactly one node type). One ruling on a node type closes every ability
+blocks. (Counts from the 952-refusal run; the reveal-and-store row has been removed since.) One ruling on a node type closes every ability
 listed against it; a ruling is a statement of what the node means, when it fires or applies, and how it changes
 the battle.
 
 | Node type | sole | any |
 | --- | ---: | ---: |
-| `reveal or revert with store targets` | 37 | 43 |
 | `TransformCardAbilityEffectTemplate` of a player | 24 | 41 |
 | `stat duration BeginningOfOwnersTurn` | 21 | 23 |
 | `effect RepeatingAbilityEffectTemplate` | 20 | 23 |
@@ -321,8 +320,6 @@ grant reaching the clause's own targets, and the per-activation pick.
 - `chosen target of more than one card` (146, plus 39 invoked) and multi-card targets with a count other than one
   (about 400 across the min and max counts). The interpreter picks one card per target index.
 - `chosen follow-up target` (14): `follow_up_gaps` in `rules_port/ir_exec_targets.py`.
-- `reveal or revert with store targets` (43): the two TODOs at the `StoreTargets` pairing check in
-  `rules_port/ir_exec.py`. The engine's reveal pick and the native revert do not match yet.
 - `filter TACFilter` (8), `filter PlayersWhoControlMatchingFilter` (5), `filter EffectInputVariable` (5).
 - `random target without a card filter` (2): the live pool drops every card for these, while C# takes all of them.
   The interpreter follows C#, so these stay native until the live behaviour is confirmed.

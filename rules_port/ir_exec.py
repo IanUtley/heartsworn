@@ -681,6 +681,10 @@ def _card_candidates(template: MechanicsObject, scope: Scope) -> list[int]:
     and the candidates a chosen target is answered from. A TopNOfDeck filter keeps the first cards of the deck (by
     position) of each player the player filter admits, in deck order."""
     zones = _zones_of(template.m_CollectionFlags)
+    # C# EnumerateLegalTargets walks each collection the flags name, so a template with no collection enumerates nothing
+    # (its cards come from a reveal or a store, not from the battle).
+    if not zones and str(template.m_CollectionFlags or "None") in ("None", ""):
+        return []
     player = str(template.m_PlayerFilter or "MultiplePlayers")
     top = _top_n_of_deck(template.m_CardFilter)
     # The live pool is the zones' cards in board order (the game_cards position), so a random pick or a cap of an
@@ -1267,8 +1271,12 @@ def _run_effects(guid: str, root: MechanicsObject, scope: Scope, start: int) -> 
                 from rules_port.ir_exec_counter import counter_targets
                 counter_targets(scope.context, _targets(root, index, scope), effect_raw)
                 continue
-            # The effect applies from here on: a later NotContingent condition reads it (C# applied_effects).
-            scope.applied[position] = True
+            # The effect applies from here on: a later NotContingent condition reads it (C# applied_effects). An automatic
+            # target that enumerates nothing leaves the effect unapplied, as the native path does; a list target (stored,
+            # drawn, buried) instead counts as applied when its condition holds.
+            scope.applied[position] = _applies_to(root, index, scope)
+            if scope.applied[position]:
+                _record_revealed_chosen(root, index, scope)
             if _short(effect_type) == "ActivateAbilityEffectTemplate":
                 _invoke(guid, position, effect_raw, scope, _target_owners(root, index, scope))
                 continue
@@ -1292,6 +1300,32 @@ def _run_effects(guid: str, root: MechanicsObject, scope: Scope, start: int) -> 
             _run_clause(root, clause, scope)
     scope.gate = None
     return True
+
+
+EMPTY_LIST_TARGET_KINDS = {"SourceDrawnTargetTemplate", "SourceBuriedTargetTemplate", "SourceStoredTargetTemplate",
+                           "AbilityCreatedTargetTemplate", "VoidedTargetTemplate"}
+
+
+def _record_revealed_chosen(root: MechanicsObject, index: int, scope: Scope) -> None:
+    """A revealed target's cards are chosen from the reveal (native resolver: source_revealed_chosen). A card moved to
+    hand from there is shown publicly, so the move leaf reads this list."""
+    if index >= len(root.m_AbilityTargetTemplateIds or []):
+        return
+    template = _load("AbilityTargetTemplate", _guid(root.m_AbilityTargetTemplateIds[index]))
+    if _short(template.type_name) != "SourceRevealedTargetTemplate":
+        return
+    chosen = scope.context.bstate.setdefault("source_revealed_chosen", [])
+    for uid in _targets(root, index, scope):
+        if int(uid) not in chosen:
+            chosen.append(int(uid))
+
+
+def _applies_to(root: MechanicsObject, index: int, scope: Scope) -> bool:
+    """Whether an effect counts as applied (C# m_WasApplied): unless its automatic target enumerates nothing."""
+    if index >= len(root.m_AbilityTargetTemplateIds or []):
+        return True
+    kind = _short(_load("AbilityTargetTemplate", _guid(root.m_AbilityTargetTemplateIds[index])).type_name)
+    return kind in EMPTY_LIST_TARGET_KINDS or bool(_targets(root, index, scope))
 
 
 def _contingency_holds(root: MechanicsObject, clause: Any, scope: Scope) -> bool:
@@ -1901,14 +1935,4 @@ def coverage(guid: str) -> list[str]:
                 or (effect.get("m_Modifier") or {}).get("m_RemoveAllCounters")):
             missing.append(f"counter operation {(effect.get('m_Modifier') or {}).get('m_Operation')}")
     missing.extend(ir_exec_resources.coverage_invocation_cost(raw))
-    # TODO(gap area B, follow-up): a reveal whose picked card the StoreTargets effect stores resolves to a different
-    # card on the engine than on the native path (Create four, Put into your hand), so the pair is refused until the
-    # engine's reveal pick matches the native one.
-    # TODO(gap area B, follow-up): a revert after StoreTargets emits a revert the native path skips (Valorous), so
-    # the pair is refused until the revert matches the native path.
-    effect_kinds = {_short(_stored("AbilityEffectTemplate", _guid(clause.get("m_EffectTemplateId")))[0])
-                    for clause in raw.get("m_AbilityEffectList") or []}
-    if "StoreTargetsAbilityEffectTemplate" in effect_kinds and \
-            effect_kinds & {"RevealCardsAbilityEffectTemplate", "RevertPermanentModificationsAbilityEffectTemplate"}:
-        missing.append("reveal or revert with store targets")
     return sorted(set(missing))

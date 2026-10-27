@@ -197,9 +197,11 @@ def create_matching_target(context, target, count, collection,
     if (location == "deck" and made and
             str(deck_location or "").lower() in ("", "unknown", "random")):
         from pvp_db import db_randomly_insert_deck_cards
+        # The session RNG draws the slots, so a run replays the same deck order (the stdlib RNG made it differ).
         db_randomly_insert_deck_cards(
             context.session.session_id, owner_id,
-            [uid for uid, _guid, _card_type in made], connection=context.db)
+            [uid for uid, _guid, _card_type in made], connection=context.db,
+            rng=context.bstate.get("_rules_rng"))
     context.db.commit()
     for uid, template_guid, card_type_name in made:
         scid = game_engine.SessionCardId(game_engine.UID(uid))
@@ -891,7 +893,8 @@ def summon_token(context, payload=None, *, target=None, owner=None):
         from pvp_db import db_randomly_insert_deck_cards
         db_randomly_insert_deck_cards(
             context.session.session_id, owner,
-            [uid for uid, _create_guid, _card_type in made], connection=context.db)
+            [uid for uid, _create_guid, _card_type in made], connection=context.db,
+            rng=context.bstate.get("_rules_rng"))
     for uid, created_guid, created_card_type in made:
         _publish_created_card(context, uid, owner, created_card_type)
         if location == "none":

@@ -629,6 +629,16 @@ def test_a_choice_from_the_choice_zone_keeps_its_ability_on_the_native_path():
                                                 set())
 
 
+REVEAL_THEN_STORE_ABILITY_GUID = "3532ed8c-2e0f-7a65-d972-4ea301f7e757"
+
+
+def test_a_reveal_that_feeds_a_store_is_covered():
+    """A reveal whose picked card the store step names runs in the interpreter, as the live resolver runs it."""
+    from rules_port.ir_exec import coverage
+
+    assert coverage(REVEAL_THEN_STORE_ABILITY_GUID) == []
+
+
 if __name__ == "__main__":
     import db as dbmod
     for run in (test_burning_ability_runs_from_its_ir, test_dazed_and_vulnerable_removals_match_the_live_engine,
