@@ -52,8 +52,6 @@ test.
 
 from __future__ import annotations
 
-import logging
-
 from typing import Any, cast
 
 import game_engine
@@ -641,12 +639,7 @@ def resolve_ability_item(host, session, db, game, state, item, player_uid,
         # the player's answers from the item. A refusal before any client event falls back to the native path.
         from . import ir_exec
         answers = _answers_from_target_map(target_map)
-        # TEMPORARY (diagnosing a fight that does nothing on the server): which route resolved this spell or activated
-        # ability, and the answers the route saw.
-        _runs = ir_exec.engine_runs(ability_guid, source_uid, owner_id, answers=answers)
-        logging.warning("IR spell route: guid=%s engine=%s runs=%s answers=%s coverage=%s",
-                        ability_guid, ir_exec.ENGINE_ON, _runs, answers, ir_exec.coverage(ability_guid))
-        if _runs:
+        if ir_exec.engine_runs(ability_guid, source_uid, owner_id, answers=answers):
             from .context import EffectContext
             started = len(game.events)
             try:

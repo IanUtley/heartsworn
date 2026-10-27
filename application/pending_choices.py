@@ -1315,7 +1315,7 @@ class PendingChoicesMixin:
                              for uid in uids]
             # The event that raised the trigger: the interpreter's trigger conditions (TriggerCardEnteredZone, say) read
             # it when the chain item resolves, so the descriptor must carry it as the dispatch's chain item does.
-            trigger_event = pend.get("trigger_event") or {}
+            from rules_port.resolution import trigger_event_fields
             descriptor = {
                 "kind": "trigger",
                 "ability_guid": ag,
@@ -1324,11 +1324,7 @@ class PendingChoicesMixin:
                 "target_uid": (None if chosen_uid is None
                                else int(chosen_uid)),
                 "trigger_target_uid": pend.get("trigger_target_uid"),
-                "trigger_event_type": trigger_event.get("event_type"),
-                "trigger_event_data": dict(trigger_event.get("data") or {}),
-                "trigger_source_uid": trigger_event.get("source_card_id"),
-                "trigger_source_player_uid": trigger_event.get("source_player_id"),
-                "trigger_target_player_uid": trigger_event.get("target_player_id"),
+                **trigger_event_fields(pend),
                 "activation_data": activation_data,
                 "instance_id": inst_id,
             }
@@ -1368,10 +1364,12 @@ class PendingChoicesMixin:
             _hc.log_req(f"    RulesPort trigger target chosen: {ag[:8]} "
                     f"target={hex(chosen_uid) if chosen_uid else 'none'}")
             return True
+        from rules_port.resolution import trigger_event_fields
         _be.stack_push(bstate, {
             "kind": "trigger", "ability_guid": ag,
             "source_uid": src, "target_uid": chosen_uid,
             "instance_id": inst_id,
+            **trigger_event_fields(pend),
         })
         _be.save_state(session, bstate)
         g = self._fresh_game(session, pl_t, ai_t, bstate)

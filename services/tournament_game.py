@@ -7288,12 +7288,13 @@ def _pvp_resolve_trigger_target(handler, session, inner_bytes, my_pid,
     g = _ge.Game(int(session.session_id), pl_t, ai_t)
     _pvp_populate_game_state(g, state, owner_id, opp_pid)
     try:
-        from rules_port.resolution import resolve_port_trigger
+        from rules_port.resolution import resolve_port_trigger, trigger_event_fields
         resolve_port_trigger(handler, g, session, _db, pl_t, ai_t, view, {
             "kind": "trigger", "ability_guid": ag, "source_uid": src,
             "source_owner_uid": owner_id,
             "target_uid": chosen_uid,
             "trigger_target_uid": pend.get("trigger_target_uid"),
+            **trigger_event_fields(pend),
             "activation_data": activation_data,
             "instance_id": int(pend.get("instance_id", 1)),
         })

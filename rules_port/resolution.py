@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import logging
-
 import json
 
 from .actions import AbilityResolutionState
@@ -2076,6 +2074,20 @@ def prompt_interpreted_reveal(handler, game, session, db, player_uid, ai_uid, ba
     return "waiting"
 
 
+def trigger_event_fields(pending):
+    """The event fields a chain descriptor for a chosen trigger carries, from the pending trigger that kept the event
+    the dispatch raised. The interpreter reads them when it resolves the ability, so every descriptor for a chosen
+    trigger must include them; an empty set means the pending trigger kept no event."""
+    event = (pending or {}).get("trigger_event") or {}
+    return {
+        "trigger_event_type": event.get("event_type"),
+        "trigger_event_data": dict(event.get("data") or {}),
+        "trigger_source_uid": event.get("source_card_id"),
+        "trigger_source_player_uid": event.get("source_player_id"),
+        "trigger_target_player_uid": event.get("target_player_id"),
+    }
+
+
 def run_interpreted_trigger(handler, game, session, db, player_uid, ai_uid, battle_state, guid,
                             source_uid, owner_uid, event_name, trigger_source_uid, event_data, answers=None,
                             target_player_uid=None, source_player_uid=None, instance_id=None,
@@ -2105,11 +2117,7 @@ def run_interpreted_trigger(handler, game, session, db, player_uid, ai_uid, batt
                                      target_player_uid, source_player_uid, target_card_uid=target_card_uid),
             answers=answers,
             instance_id=None if instance_id is None else int(instance_id))
-    except NotImplementedError as exc:
-        # TEMPORARY (diagnosing a fight that does nothing on the server): the interpreter refused the trigger before it
-        # sent any event, so the native resolver runs it.
-        logging.warning("IR fallback to native: guid=%s reason=%s events_sent=%s", guid, exc,
-                        len(game.events) != started)
+    except NotImplementedError:
         if len(game.events) != started:
             raise
         return None
@@ -2214,12 +2222,7 @@ def resolve_port_trigger(handler, game, session, db, player_uid, ai_uid,
         from . import ir_exec
         event_name = str(item.get("trigger_event_type") or "").rsplit(".", 1)[-1]
         interpreted = None
-        # TEMPORARY (diagnosing a fight that does nothing on the server): which route resolved this trigger, and the
-        # answers the route saw.
-        _runs = ir_exec.engine_runs(guid, source_uid, owner_id, answers=answers)
-        logging.warning("IR trigger route: guid=%s engine=%s runs=%s answers=%s coverage=%s",
-                        guid, ir_exec.ENGINE_ON, _runs, answers, ir_exec.coverage(guid))
-        if _runs:
+        if ir_exec.engine_runs(guid, source_uid, owner_id, answers=answers):
             interpreted = run_interpreted_trigger(
                 handler, game, session, db, player_uid, ai_uid, battle_state,
                 guid, source_uid, owner_id, event_name,

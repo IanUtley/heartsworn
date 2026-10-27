@@ -8,7 +8,6 @@ controller, so no effect logic is forked here.
 
 from __future__ import annotations
 
-import logging
 from contextlib import contextmanager
 from typing import Any, Iterator
 
@@ -102,10 +101,6 @@ def _fight(root: Any, clause: Any, scope: ir_exec.Scope, defenders: list[int]) -
     instance's first card deals its damage once to each of this clause's targets)."""
     from rules_port.battle_effects import fight_cards
     attackers = _second_targets(root, clause, scope)
-    # TEMPORARY (debugging a fight that does nothing on the server): log every fight the interpreter runs, and the
-    # early return that leaves a fight with no card on either side.
-    logging.warning("IR fight: source=%s attackers=%s defenders=%s instance=%s",
-                    scope.source_uid, attackers, defenders, scope.instance_id)
     if not attackers or not defenders:
         # The native fight needs two cards, so a side with none does nothing.
         return
