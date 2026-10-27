@@ -511,7 +511,7 @@ def _counter_variable(variable: Any, counter: str | None, scope: Scope) -> int:
 # Variables the native variable evaluator computes (C# IntAttrAbilityVariable, CountListAttrAbilityVariable). The
 # interpreter binds them through that same evaluator, from the ability's authored metadata.
 NATIVE_VARIABLE_KINDS = {"IntAttrAbilityVariable", "CountListAttrAbilityVariable",
-                         "SumVariableInListAttrCardsAbilityVariable"}
+                         "SumVariableInListAttrCardsAbilityVariable", "CardIntegerVariable"}
 SUPPORTED_VARIABLES = {"AbilityConstant", "AbilityVariable", "CounterVariable", "CardCountAbilityVariable"} \
     | ir_variables.VARIABLE_KINDS | NATIVE_VARIABLE_KINDS
 
@@ -1707,6 +1707,7 @@ def coverage(guid: str) -> list[str]:
             operation = str(effect.get("m_Operation") or "Set").rsplit(".", 1)[-1]
             if operation not in ("Add", "Remove", "Set"):
                 missing.append(f"card integer operation {operation}")
+            continue
         if kind == "StoreTargetsAbilityEffectTemplate":
             if effect.get("m_SetTargets"):
                 missing.append("store targets replacing the list")
