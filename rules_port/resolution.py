@@ -2105,7 +2105,11 @@ def run_interpreted_trigger(handler, game, session, db, player_uid, ai_uid, batt
                                      target_player_uid, source_player_uid, target_card_uid=target_card_uid),
             answers=answers,
             instance_id=None if instance_id is None else int(instance_id))
-    except NotImplementedError:
+    except NotImplementedError as exc:
+        # TEMPORARY (diagnosing a fight that does nothing on the server): the interpreter refused the trigger before it
+        # sent any event, so the native resolver runs it.
+        logging.warning("IR fallback to native: guid=%s reason=%s events_sent=%s", guid, exc,
+                        len(game.events) != started)
         if len(game.events) != started:
             raise
         return None
