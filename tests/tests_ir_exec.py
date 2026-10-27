@@ -617,6 +617,18 @@ def test_a_trigger_target_selector_is_covered():
     assert coverage(TRIGGER_TARGET_ABILITY_GUID) == []
 
 
+DILIGENCE_CHOOSE_ONE_ABILITY_GUID = "8a93c185-744b-2d28-a6ce-0b104910577f"
+
+
+def test_a_choice_from_the_choice_zone_keeps_its_ability_on_the_native_path():
+    """An invoked pick from the choice zone has no wired picker, so the engine gate sends the ability to the native
+    path. Only a pick restricted to the deck runs in the interpreter."""
+    from rules_port import ir_exec
+
+    assert ir_exec._invoked_non_revealed_choice(ir_exec._load("AbilityTemplate", DILIGENCE_CHOOSE_ONE_ABILITY_GUID),
+                                                set())
+
+
 if __name__ == "__main__":
     import db as dbmod
     for run in (test_burning_ability_runs_from_its_ir, test_dazed_and_vulnerable_removals_match_the_live_engine,

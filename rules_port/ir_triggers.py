@@ -13,7 +13,7 @@ from typing import Any, Callable
 TRIGGER_EVENTS = {
     "CardDealtDamageEvent", "CardAttackedEvent", "CardCastEvent", "CardDrawnEvent",
     "CardDiscardedEvent", "CardCreatedEvent", "AsEntersPlayEvent", "CardGainedIntAttrEvent",
-    "GameStartedEvent", "PreGameEvent",
+    "GameStartedEvent", "PreGameEvent", "CardReadiedEvent",
 }
 
 # Trigger condition classes this module evaluates.
