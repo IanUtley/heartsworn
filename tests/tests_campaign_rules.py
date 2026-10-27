@@ -531,3 +531,33 @@ def test_editor_refuses_rewards_on_dialog_scenes():
         assert "DIALOG" in str(exc)
     else:
         raise AssertionError("DIALOG scene accepted rewards")
+
+
+def test_az1_node062_visible_when_node061_completed_with_gnomes():
+    """Node062 in AZ1 must be visible when carrying gnomes and Node061 is completed."""
+    path = os.path.join(CAMPAIGN_ROOT, "campaign_rules", "AZ1.json")
+    rules = cr.load_rules(path)
+    state = {
+        "nodes": {
+            "Node057": {"completed": True, "visits": 1},
+            "Node061": {"completed": True, "visits": 1},
+        },
+        "current": "Node061",
+        "counters": {"gnomes_carried": 10},
+    }
+    layout = cr.layout(rules, state)
+    n62 = layout["nodes"].get("Node062")
+    assert n62 is not None
+    assert n62["visible"] is True, f"Node062 should be visible but got {n62}"
+    assert n62["blocked"] is False
+    assert n62["hidden"] is False
+
+
+def test_quest_public_vars_for_gnomes_come_home():
+    """Quest public vars for q_gnomes_come_home mirror gnomes_carried and gnomes_safe."""
+    from campaign_runtime.quests import quest_public_vars
+    vars_dict = quest_public_vars("q_gnomes_come_home", {"gnomes_carried": 10, "gnomes_safe": 5})
+    assert vars_dict == {"carry": 10, "count": 5}
+    assert quest_public_vars("other_quest", {"gnomes_carried": 10}) == {}
+
+

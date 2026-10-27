@@ -727,60 +727,48 @@
    ]
   },
   "Node058": {
-   "impassable": [
-    "counter(gnomes_carried,1)"
-   ],
    "completed": [
     "!counter(gnomes_carried,1)"
+   ],
+   "hidden": [
+    "!visited(Node057)"
    ]
   },
   "Node059": {
-   "impassable": [
-    "counter(gnomes_carried,1)"
-   ],
    "completed": [
     "!counter(gnomes_carried,1)"
    ],
-   "visible": [
-    "visited(Node057)"
+   "hidden": [
+    "!visited(Node057)"
    ]
   },
   "Node060": {
-   "impassable": [
-    "counter(gnomes_carried,1)"
-   ],
    "completed": [
     "!counter(gnomes_carried,1)"
    ],
-   "visible": [
-    "visited(Node057)"
+   "hidden": [
+    "!visited(Node057)"
    ]
   },
   "Node061": {
-   "completed": [
-    "!counter(gnomes_carried,1)"
+   "hidden": [
+    "!visited(Node057)"
    ]
   },
   "Node062": {
-   "blocked": [
-    "counter(gnomes_carried,1)"
-   ],
    "completed": [
     "!counter(gnomes_carried,1)"
    ],
-   "visible": [
-    "visited(Node057)"
+   "hidden": [
+    "!visited(Node057)"
    ]
   },
   "Node063": {
-   "blocked": [
-    "counter(gnomes_carried,1)"
-   ],
    "completed": [
     "!counter(gnomes_carried,1)"
    ],
-   "visible": [
-    "visited(Node057)"
+   "hidden": [
+    "!visited(Node057)"
    ]
   },
   "Node066": {
@@ -999,29 +987,35 @@
   ],
   "Node063": [
    "completed",
-   "visible"
+   "visible",
+   "hidden"
   ],
   "Node060": [
    "impassable",
    "completed",
-   "visible"
+   "visible",
+   "hidden"
   ],
   "Node059": [
    "impassable",
    "completed",
-   "visible"
+   "visible",
+   "hidden"
   ],
   "Node058": [
    "impassable",
    "completed",
-   "visible"
+   "visible",
+   "hidden"
   ],
   "Node062": [
    "completed",
-   "visible"
+   "visible",
+   "hidden"
   ],
   "Node061": [
-   "completed"
+   "completed",
+   "hidden"
   ],
   "Node044": [
    "completed",

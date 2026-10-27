@@ -201,9 +201,14 @@ def apply_attribute_grant(context, target, param):
     from pvp_db import (db_card_attribute_value, db_set_card_attribute_value,
                         db_card_owner_id, db_card_source_info,
                         db_card_mutation_field, db_set_card_mutation_field)
+    from .effect_lifetimes import WHILE_IN_PLAY_ATTRIBUTES as _WHILE_IN_PLAY_ATTRIBUTES
     uid = int(target)
-    temporary = str(param.get("duration") or "") in {
-        "EndOfTurn", "BeginningOfOwnersTurn", "AfterCardsReadyOnPlayersTurn"}
+    duration = str(param.get("duration") or "")
+    # A while-in-play grant is reversible too, but its boundary is its source's state rather than a turn step, so it
+    # goes in the temporary column (nothing else writes there for it) and its rule names the source and ability.
+    temporary = duration in {
+        "EndOfTurn", "BeginningOfOwnersTurn", "AfterCardsReadyOnPlayersTurn",
+        "WhileCardInPlay"}
     column = "temporary_attributes" if temporary else "card_attributes"
     current = int(db_card_attribute_value(
         context.session.session_id, uid, column, conn=context.db) or 0)
@@ -227,9 +232,8 @@ def apply_attribute_grant(context, target, param):
     if temporary:
         boundary = {"EndOfTurn": "end_turn",
                     "BeginningOfOwnersTurn": "start_turn",
-                    "AfterCardsReadyOnPlayersTurn": "prep"}.get(
-                        str(param.get("duration") or ""))
-        if boundary:
+                    "AfterCardsReadyOnPlayersTurn": "prep"}.get(duration)
+        if boundary or duration == "WhileCardInPlay":
             try:
                 buffs = json.loads(db_card_mutation_field(
                     context.session.session_id, uid, "temporary_buffs",
@@ -242,14 +246,23 @@ def apply_attribute_grant(context, target, param):
             if owner is None:
                 owner = context.bstate.get("resolving_owner_id", 0)
             metadata = buffs.setdefault("__attribute_expirations", {})
+            rule = ({"owner": int(owner or 0), "boundary": boundary} if boundary else
+                    {"owner": int(owner or 0), "boundary": "while_in_play",
+                     "source": context.bstate.get("resolving_source_uid"),
+                     "ability": str(context.bstate.get("resolving_root_ability")
+                                    or context.bstate.get("resolving_ability") or "").lower() or None})
             for bit in (1 << n for n in range(granted_bits.bit_length())
                         if granted_bits & (1 << n)):
-                metadata[str(bit)] = {"owner": int(owner or 0),
-                                      "boundary": boundary}
+                metadata[str(bit)] = dict(rule)
             db_set_card_mutation_field(
                 context.session.session_id, uid, "temporary_buffs",
                 json.dumps(buffs, separators=(",", ":"), sort_keys=True),
                 conn=context.db)
+            if not boundary:
+                # The sweep only looks at the cards this game has granted a while-in-play keyword on.
+                marked = context.bstate.setdefault(_WHILE_IN_PLAY_ATTRIBUTES, [])
+                if uid not in marked:
+                    marked.append(uid)
     context.db.commit()
     row = db_card_source_info(context.session.session_id, uid, conn=context.db)
     if row and row[0]:

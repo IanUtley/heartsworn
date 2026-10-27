@@ -12,6 +12,7 @@ from contextlib import contextmanager
 from typing import Any, Iterator
 
 from rules_port import ir_exec
+from rules_port import ir_exec_targets
 
 # The effect templates this module runs. ir_exec.coverage() accepts these through coverage_missing(), and
 # ir_exec._run_clause hands them to run_clause().
@@ -24,14 +25,27 @@ COMBAT_EFFECTS = {
 
 def _second_clause(clauses: Any, clause: Any) -> Any:
     """The clause whose effect instance a fight's second card is read from (m_SecondaryTargetIndex is an effect
-    instance id, not a target slot)."""
-    wanted = int(ir_exec._field(clause, "m_SecondaryTargetIndex") or -1)
+    instance id, not a target slot). An instance id of 0 is a real clause: only -1 means "none"."""
+    wanted = ir_exec_targets.instance_ref(ir_exec._field(clause, "m_SecondaryTargetIndex"))
     if wanted < 0:
         return None
     for other in clauses:
-        if int(ir_exec._field(other, "m_EffectInstanceId") or -1) == wanted:
+        if ir_exec_targets.instance_ref(ir_exec._field(other, "m_EffectInstanceId")) == wanted:
             return other
     return None
+
+
+def _second_targets(root: Any, clause: Any, scope: ir_exec.Scope) -> list[int]:
+    """The cards the clause's referenced effect instance resolved: the native battle_effects leaves read them from
+    the activation's target map, which the interpreter keeps as ``scope.resolved_by_instance``. A forward reference
+    (an instance that has not run yet) resolves through its target, as the native target map already holds it."""
+    second = _second_clause(root.m_AbilityEffectList, clause)
+    if second is None:
+        raise NotImplementedError("second card without a referenced clause")
+    instance = ir_exec_targets.instance_ref(ir_exec._field(second, "m_EffectInstanceId"))
+    if instance in scope.resolved_by_instance:
+        return [int(uid) for uid in scope.resolved_by_instance[instance]]
+    return ir_exec._targets(root, int(ir_exec._field(second, "m_TargetTemplateIndex") or 0), scope)
 
 
 def coverage_missing(effect_type: str, clause: Any, clauses: Any) -> list[str]:
@@ -82,37 +96,31 @@ def run_clause(effect_type: str, root: Any, clause: Any, effect_raw: dict[str, A
 
 
 def _fight(root: Any, clause: Any, scope: ir_exec.Scope, defenders: list[int]) -> None:
-    """The clause's target is the card that is fought; the referenced effect's target is the card that fights it,
-    as the native resolver reads them (battle_effects.battle_cards)."""
+    """The clause's target is the card (or cards) fought; the first card the referenced effect instance resolved is
+    the one that fights back, as the native resolver reads them (battle_effects.battle_cards: the referenced
+    instance's first card deals its damage once to each of this clause's targets)."""
     from rules_port.battle_effects import fight_cards
-    second = _second_clause(root.m_AbilityEffectList, clause)
-    if second is None:
-        raise NotImplementedError("fight without a second card")
-    second_index = int(ir_exec._field(second, "m_TargetTemplateIndex") or 0)
-    attackers = ir_exec._targets(root, second_index, scope)
+    attackers = _second_targets(root, clause, scope)
     if not attackers or not defenders:
         # The native fight needs two cards, so a side with none does nothing.
         return
-    if len(attackers) != 1 or len(defenders) != 1:
-        raise NotImplementedError("fight with more than one card on a side")
-    fight_cards(scope.context, int(attackers[0]), int(defenders[0]))
+    attacker = int(attackers[0])
+    for defender in defenders:
+        fight_cards(scope.context, attacker, int(defender))
 
 
 def _block(root: Any, clause: Any, scope: ir_exec.Scope, attackers: list[int]) -> None:
-    """The clause's target is the attacking troop, and the referenced effect's target is the blocker, as the native
-    resolver reads them (combat_effects.block)."""
-    second = _second_clause(root.m_AbilityEffectList, clause)
-    if second is None:
-        raise NotImplementedError("block without a second card")
-    blockers = ir_exec._targets(root, int(ir_exec._field(second, "m_TargetTemplateIndex") or 0), scope)
+    """The clause's target is the attacking troop (or troops), and the first card the referenced effect instance
+    resolved is the blocker, as the native resolver reads them (combat_effects.block: one assignment per target)."""
+    blockers = _second_targets(root, clause, scope)
     if not attackers or not blockers:
         return
-    if len(attackers) != 1 or len(blockers) != 1:
-        raise NotImplementedError("block with more than one card on a side")
+    blocker = int(blockers[0])
     from rules_port.combat_effects import block
-    with _target_set(scope.context.bstate, player_spell_target=int(attackers[0]),
-                     resolving_target_uid=int(attackers[0]), resolving_secondary_target_uid=int(blockers[0])):
-        block(scope.context)
+    for attacker in attackers:
+        with _target_set(scope.context.bstate, player_spell_target=int(attacker),
+                         resolving_target_uid=int(attacker), resolving_secondary_target_uid=blocker):
+            block(scope.context)
 
 
 @contextmanager

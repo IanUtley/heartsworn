@@ -24,7 +24,12 @@ GROUP_G_MODIFIERS = KEYWORD_MODIFIERS | PROTECTION_MODIFIERS | SHIELD_AND_SUBTYP
 DURATIONS = {"Permanent", "EndOfTurn"}
 # Keyword and int attribute grants also run the turn-boundary durations their native leaves already expire.
 _TURN_BOUNDARY_DURATIONS = {"Permanent", "EndOfTurn", "BeginningOfOwnersTurn", "AfterCardsReadyOnPlayersTurn"}
+# A linked clause (triggered, player-activated, or an invoked child's) also takes the while-in-play lifetime: the
+# grant is applied to its targets at resolution and recorded in the linked ledger, which expires it with its source.
+_LINKED_KEYWORD_DURATIONS = _TURN_BOUNDARY_DURATIONS | {"WhileCardInPlay"}
 DURATIONS_BY_KIND = {"AttributeModifier": _TURN_BOUNDARY_DURATIONS, "IntAttrModifier": _TURN_BOUNDARY_DURATIONS}
+LINKED_DURATIONS_BY_KIND = {"AttributeModifier": _LINKED_KEYWORD_DURATIONS,
+                            "IntAttrModifier": _LINKED_KEYWORD_DURATIONS}
 # A keyword is granted with Add; Remove is not ported yet. An int attribute is set or added.
 ATTRIBUTE_OPERATIONS = {"Add"}
 INT_ATTR_OPERATIONS = {"Set", "Add"}
@@ -53,18 +58,21 @@ def _kind(obj: Any) -> str:
     return _short(getattr(obj, "type_name", ""))
 
 
-def modifier_gaps(modifier: Any, duration: str) -> list[str]:
+def modifier_gaps(modifier: Any, duration: str, *, linked: bool = False) -> list[str]:
     """Why a group G modifier cannot run in the interpreter, or [] when it can.
 
     ``modifier`` is a raw Records dict (static coverage) or a typed object (runtime); both answer
-    the same field reads, so coverage and the runner agree on what runs.
+    the same field reads, so coverage and the runner agree on what runs. ``linked`` says the clause
+    belongs to a triggered, player-activated or invoked ability, which applies its grant to targets at
+    resolution and records it in the linked ledger instead of being projected by the static scan.
     """
     kind = _kind(modifier)
     if kind == "DamageShieldModifier":
         return _damage_shield_gaps(modifier, duration)
     if kind == "SubTypeModifier":
         return _subtype_gaps(modifier, duration)
-    if duration not in DURATIONS_BY_KIND.get(kind, DURATIONS):
+    durations = (LINKED_DURATIONS_BY_KIND if linked else DURATIONS_BY_KIND).get(kind, DURATIONS)
+    if duration not in durations:
         return [f"{kind} duration {duration}"]
     operation = _short(_get(modifier, "m_Operation"))
     if kind == "AttributeModifier":

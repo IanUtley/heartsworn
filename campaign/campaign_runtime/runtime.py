@@ -224,7 +224,8 @@ class Zone:
         self.store()
         synced = quests.sync(handler, self.db, self.camp_id, self.champ_id,
                              self.state, self.quests_before,
-                             self.campaign.get("quests") or {})
+                             self.campaign.get("quests") or {},
+                             counters=self.campaign.get("counters") or {})
         self.quests_before = json.loads(json.dumps(self.campaign.get("quests") or {}))
         _campaign()._merge_applied(self.applied, synced["applied"])
         for qid, script, qstate in synced["spawned"]:

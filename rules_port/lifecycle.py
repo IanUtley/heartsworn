@@ -596,16 +596,22 @@ def clear_expired_temporary_attributes(db, session_id, owner_id, boundary,
     if isinstance(battle_state, dict):
         from .effect_lifetimes import (expire_grants,
                                        expire_temporary_intattrs,
-                                       expire_temporary_stats)
+                                       expire_temporary_stats,
+                                       expire_while_in_play)
         expire_temporary_intattrs(
             db, session_id, battle_state, boundary=boundary,
-            boundary_owner=owner_id)
+            boundary_owner=owner_id, handler=handler)
         expire_grants(
             db, session_id, battle_state, boundary=boundary,
             boundary_owner=owner_id, handler=handler)
         stat_changes = list(expire_temporary_stats(
             db, session_id, battle_state, boundary=boundary,
-            boundary_owner=owner_id))
+            boundary_owner=owner_id, handler=handler))
+        # A while-in-play grant ends with its source, not at a turn step, so the boundary pass reconciles it too (the
+        # event sweep only sees events; a source that left play during a step that emits none would linger).
+        stat_changes = list(dict.fromkeys(
+            stat_changes + expire_while_in_play(
+                db, session_id, battle_state, handler=handler)))
     changed = list(stat_changes)
     for card_uid, target_owner, attrs, raw_buffs in db_temporary_attribute_rows(
             session_id, conn=db):

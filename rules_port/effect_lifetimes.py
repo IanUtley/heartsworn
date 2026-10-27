@@ -19,6 +19,22 @@ _ZONE_DURATIONS = frozenset({
     "UntilItLeavesYourHand", "WhileCardOnTopOfDeck",
 })
 _LIFETIME_LOCK = threading.RLock()
+# The cards carrying a keyword granted while a source is in play.  The bits and their rules live in the card's
+# ``temporary_buffs`` payload (``__attribute_expirations``); this list only remembers which cards to look at, so the
+# per-event sweep reads no rows when the game has granted no such keyword.
+WHILE_IN_PLAY_ATTRIBUTES = "while_in_play_attribute_cards"
+
+
+def _resolving_ability(state) -> str | None:
+    """The ability a resolving effect belongs to.
+
+    C# owns an effect instance on the ability instance that created it, and removes it when the source card's whole
+    ability list is rebuilt.  A child ability invoked by another is not on the card's list, so the ledger records the
+    ability that led to it (the run's root); ``resolving_ability`` is the current frame, used when no root is set.
+    """
+    value = (state.get("resolving_root_ability") or state.get("resolving_ability")
+             or "")
+    return str(value).lower() or None
 
 
 def mapping_duration(context) -> str:
@@ -53,6 +69,9 @@ def record_grant(state, *, source_uid, target_uid, ability_guid,
         return
     entry = {
         "source_uid": int(source_uid) if source_uid is not None else None,
+        # The ability that created the grant: a while-in-play grant dies with it, as C# disables the effect instance
+        # when the source's ability list is rebuilt (a transform, revert or champion talent change).
+        "source_ability": _resolving_ability(state),
         "target_uid": int(target_uid),
         "ability_guid": str(ability_guid).lower(),
         "duration": duration,
@@ -113,6 +132,47 @@ def _card_location(db, session_id, uid, state=None, handler=None):
     return str(row[1] or "").lower()
 
 
+def _source_ability_gone(db, session_id, entry):
+    """Whether the effect's source no longer carries the ability that created it.
+
+    C# keys a while-in-play effect instance on its source card and removes those instances whenever the card's ability
+    list is rebuilt -- ``AbilityManager.RemoveAbilities(card, WhileCardInPlay)`` runs before
+    ``Session.TransformCard``/``Session.RevertCard`` swap the template, and before ``SetChampionTalents`` rebuilds a
+    champion's abilities.  The server has no effect-instance list, so the same boundary is read from the source's
+    current authored abilities.  A source with no card row (a champion, whose abilities live on the handler) keeps its
+    effects: nothing here changes its list.
+    """
+    ability = str(entry.get("source_ability") or "").lower()
+    source = entry.get("source_uid")
+    if not ability or source is None:
+        return False
+    from pvp_db import (db_card_ability_list, db_card_gem_ability_guids,
+                        db_card_source_info)
+    if not db_card_source_info(session_id, int(source), conn=db):
+        return False
+    abilities = {str(value).lower() for value in
+                 db_card_ability_list(session_id, int(source), conn=db)}
+    # A socketed gem grants its ability without listing it on the card, so it keeps the effect alive too.
+    abilities.update(str(value).lower() for value in
+                     db_card_gem_ability_guids(session_id, int(source), conn=db))
+    return ability not in abilities
+
+
+def _while_in_play_source_gone(db, session_id, entry, state, *, handler=None):
+    """Whether a while-in-play effect's source left play or lost the ability that created it.
+
+    ``AbilityEffectInstance.Apply`` gates the effect on the source being in ``Champions|Warzone|Simulacrum``, so a card
+    that leaves play drops it; a card that stays in play but whose ability list was rebuilt (transform, revert, talent
+    change) drops it too (``AbilityManager.RemoveAbilities``).  Both are read from the source's current state.
+    """
+    source = entry.get("source_uid")
+    if source is None:
+        return False
+    if _card_location(db, session_id, source, state, handler) not in ("warzone", "champions"):
+        return True
+    return _source_ability_gone(db, session_id, entry)
+
+
 def _expired(entry, db, session_id, state, *, boundary=None,
              boundary_owner=None, damaged_uid=None, event_type=None,
              event_source_uid=None, handler=None):
@@ -152,8 +212,7 @@ def _expired(entry, db, session_id, state, *, boundary=None,
             return int(expected) == \
                 int(boundary_owner or 0)
     if duration == "WhileCardInPlay" and source is not None:
-        return _card_location(db, session_id, source, state, handler) != "warzone" and \
-            _card_location(db, session_id, source, state, handler) != "champions"
+        return _while_in_play_source_gone(db, session_id, entry, state, handler=handler)
     if duration == "WhileTargetInPlay" and target is not None:
         return _card_location(db, session_id, target, state, handler) != "warzone" and \
             _card_location(db, session_id, target, state, handler) != "champions"
@@ -276,7 +335,8 @@ def record_temporary_intattr(state, uid, attribute, previous, value,
             "expiration_owner_id": (int(expiration_owner_id)
                                     if expiration_owner_id is not None else None),
             "source_uid": (int(source_uid)
-                           if source_uid is not None else None)}
+                           if source_uid is not None else None),
+            "source_ability": _resolving_ability(state)}
     key = ("temporary_champion_int_attrs" if champion else
            "temporary_card_int_attrs")
     with _LIFETIME_LOCK:
@@ -284,7 +344,8 @@ def record_temporary_intattr(state, uid, attribute, previous, value,
 
 
 def expire_temporary_intattrs(db, session_id, state, *, boundary=None,
-                              boundary_owner=None, damaged_uid=None):
+                              boundary_owner=None, damaged_uid=None,
+                              handler=None):
     """Restore authored IntAttrs after their effect-instance duration."""
     with _LIFETIME_LOCK:
         results = []
@@ -296,7 +357,8 @@ def expire_temporary_intattrs(db, session_id, state, *, boundary=None,
                         _intattr_expired(item, db, session_id, state,
                                          boundary=boundary,
                                          boundary_owner=boundary_owner,
-                                         damaged_uid=damaged_uid)]
+                                         damaged_uid=damaged_uid,
+                                         handler=handler)]
             if matching:
                 state[key] = [item for item in values if item not in matching]
                 results.extend((key, item) for item in reversed(matching))
@@ -357,12 +419,14 @@ def record_temporary_stat(state, uid, attack, defense, *, duration,
             "owner_id": int(owner_id or 0),
             "turn_number": int(state.get("turn_number", 1) or 1),
             "source_uid": (int(source_uid)
-                           if source_uid is not None else None)}
+                           if source_uid is not None else None),
+            "source_ability": _resolving_ability(state)}
     with _LIFETIME_LOCK:
         state.setdefault("temporary_card_stats", []).append(item)
 
 
-def _stat_expired(item, *, boundary=None, boundary_owner=None):
+def _stat_expired(item, db, session_id, state, *, boundary=None,
+                  boundary_owner=None, handler=None):
     duration = str(item.get("duration") or "")
     owner = int(item.get("owner_id", 0) or 0)
     boundary_owner = int(boundary_owner or 0)
@@ -375,18 +439,23 @@ def _stat_expired(item, *, boundary=None, boundary_owner=None):
         # when the caster's opponent is the player whose turn ends (C#
         # AbilityManager.RemoveEndOfTurnAbilities).
         return True
+    if duration == "WhileCardInPlay":
+        return _while_in_play_source_gone(db, session_id, item, state,
+                                          handler=handler)
     return False
 
 
 def expire_temporary_stats(db, session_id, state, *, boundary=None,
-                           boundary_owner=None):
+                           boundary_owner=None, handler=None):
     """Remove stat grants whose authored duration boundary has arrived."""
     with _LIFETIME_LOCK:
         values = list(state.get("temporary_card_stats") or ())
         expired = [item for item in values
                    if isinstance(item, dict) and
-                   _stat_expired(item, boundary=boundary,
-                                 boundary_owner=boundary_owner)]
+                   _stat_expired(item, db, session_id, state,
+                                 boundary=boundary,
+                                 boundary_owner=boundary_owner,
+                                 handler=handler)]
         if expired:
             state["temporary_card_stats"] = [
                 item for item in values if item not in expired]
@@ -438,8 +507,98 @@ def expire_temporary_stats(db, session_id, state, *, boundary=None,
     return changed
 
 
+def expire_while_in_play(db, session_id, state, *, handler=None):
+    """Drop every while-in-play effect whose source left play or lost the granting ability.
+
+    A ``WhileCardInPlay`` clause has no duration boundary to wait for: C# re-checks the source on every apply and
+    removes the effect instances when the source leaves play or its ability list is rebuilt (transform, revert, talent
+    change).  The port has no instance list, so this sweep runs where the board can change -- before each dispatched
+    event and at each turn boundary -- and reads the source's current state for each ledger entry.  Returns the card
+    uids whose projected state changed, so the caller can push them.
+    """
+    changed = set(expire_temporary_stats(db, session_id, state,
+                                        handler=handler))
+    remaining_intattrs = lambda: {
+        int(item.get("uid", -1))
+        for item in state.get("temporary_card_int_attrs") or ()
+        if isinstance(item, dict)}
+    before = remaining_intattrs()
+    expire_temporary_intattrs(db, session_id, state, handler=handler)
+    changed |= before - remaining_intattrs()
+    changed |= set(expire_while_in_play_attributes(db, session_id, state,
+                                                   handler=handler))
+    return sorted(uid for uid in changed if uid is not None and uid >= 0)
+
+
+def expire_while_in_play_attributes(db, session_id, state, *, handler=None):
+    """Clear keyword bits granted while a source is in play, once that source is gone.
+
+    The bits sit in the card's ``temporary_attributes`` column and their rules in the ``temporary_buffs`` payload
+    (``__attribute_expirations``, one entry per bit), so no new storage is needed; only the rule shape differs --
+    a while-in-play rule names its source and ability instead of a turn boundary.  ``while_in_play_attribute_cards``
+    lists the cards to look at, so a game that never grants one reads no rows here.
+    """
+    from pvp_db import (db_set_temporary_card_state,
+                        db_temporary_attribute_rows)
+    uids = [int(uid) for uid in state.get(WHILE_IN_PLAY_ATTRIBUTES) or ()]
+    if not uids:
+        return ()
+    rows = {int(row[0]): row for row in
+            db_temporary_attribute_rows(session_id, conn=db)}
+    changed = []
+    keep = set()
+    for uid in dict.fromkeys(uids):
+        row = rows.get(uid)
+        if row is None:
+            continue
+        attrs = int(row[2] or 0)
+        try:
+            buffs = json.loads(row[3] or "{}")
+        except (TypeError, ValueError, json.JSONDecodeError):
+            continue
+        metadata = buffs.get("__attribute_expirations") if isinstance(buffs, dict) else None
+        if not isinstance(metadata, dict):
+            continue
+        cleared = 0
+        remaining: dict[str, Any] = {}
+        for bit_text, rule in metadata.items():
+            if not (isinstance(rule, dict) and
+                    rule.get("boundary") == "while_in_play"):
+                remaining[bit_text] = rule
+                continue
+            entry = {"source_uid": rule.get("source"),
+                     "source_ability": rule.get("ability")}
+            if _while_in_play_source_gone(db, session_id, entry, state,
+                                          handler=handler):
+                try:
+                    cleared |= int(bit_text)
+                except (TypeError, ValueError):
+                    continue
+            else:
+                remaining[bit_text] = rule
+                keep.add(uid)
+        if not cleared:
+            continue
+        if remaining:
+            buffs["__attribute_expirations"] = remaining
+        else:
+            buffs.pop("__attribute_expirations", None)
+        db_set_temporary_card_state(
+            session_id, uid, attrs & ~cleared,
+            json.dumps(buffs, separators=(",", ":"), sort_keys=True),
+            conn=db)
+        changed.append(uid)
+    if changed:
+        db.commit()
+    if keep:
+        state[WHILE_IN_PLAY_ATTRIBUTES] = sorted(keep)
+    else:
+        state.pop(WHILE_IN_PLAY_ATTRIBUTES, None)
+    return changed
+
+
 def _intattr_expired(item, db, session_id, state, *, boundary=None,
-                     boundary_owner=None, damaged_uid=None):
+                     boundary_owner=None, damaged_uid=None, handler=None):
     duration = str(item.get("duration") or "")
     owner = int(item.get("owner_id", 0) or 0)
     target_owner = item.get("target_owner_id")
@@ -473,6 +632,9 @@ def _intattr_expired(item, db, session_id, state, *, boundary=None,
         if source is None:
             source = item.get("uid")
         return _card_location(db, session_id, source, state) != "hand"
+    if duration == "WhileCardInPlay":
+        return _while_in_play_source_gone(db, session_id, item, state,
+                                          handler=handler)
     return False
 
 

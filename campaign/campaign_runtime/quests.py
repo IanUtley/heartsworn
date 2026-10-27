@@ -23,11 +23,24 @@ def _journal_index(db, champion_id: int, script: str):
         return None, None
     qid, raw = rows[0]
     state = json.loads(raw or "{}")
+    state["CampID"] = qid
     return int((state.get("Flags") or {}).get("_quest_objective_idx", 0) or 0), state
 
 
+def quest_public_vars(script: str, counters: dict[str, Any] | None) -> dict[str, Any]:
+    """Top-level PublicState.Data variables that quest objectives read (PublicScriptVar)."""
+    counters = counters or {}
+    if script == "q_gnomes_come_home":
+        return {
+            "carry": int(counters.get("gnomes_carried", 0) or 0),
+            "count": int(counters.get("gnomes_safe", 0) or 0),
+        }
+    return {}
+
+
 def sync(handler, db, camp_id: int, champion_id: int, client_state: dict,
-         before: dict[str, Any], after: dict[str, Any]) -> dict[str, Any]:
+         before: dict[str, Any], after: dict[str, Any],
+         counters: dict[str, Any] | None = None) -> dict[str, Any]:
     """Bring the journal level with ``after`` (the engine's quests).
 
     Returns ``{"spawned": [(qid, script, state)], "progressed": [state],
@@ -41,8 +54,7 @@ def sync(handler, db, camp_id: int, champion_id: int, client_state: dict,
         if status not in ("active", "finished"):
             continue
         old = (before or {}).get(script) or {}
-        if old == quest:
-            continue
+        quest_changed = (old != quest)
         index, state = _journal_index(db, champion_id, script)
         if state is None:
             qid = campaign._ensure_quest_campaign(db, champion_id, None, script)
@@ -50,21 +62,36 @@ def sync(handler, db, camp_id: int, champion_id: int, client_state: dict,
                 continue           # no QuestTemplate: an engine-only quest
             index, state = _journal_index(db, champion_id, script)
             out["spawned"].append((qid, script, state))
-        target = int(quest.get("step", 0) or 0)
-        objectives = len((state.get("Flags") or {}).get("_quest_objectives") or ())
-        if status == "finished":
-            target = max(target, objectives)
-        progressed = None
-        while index is not None and index < target and not state.get("Finished"):
-            progressed = campaign._advance_quest_campaign(db, champion_id, script)
-            if progressed is None:
-                break
-            index, state = _journal_index(db, champion_id, script)
-        if progressed is not None:
-            out["progressed"].append(progressed)
-        if status == "finished" and old.get("status") != "finished":
-            campaign._merge_applied(out["applied"], campaign._apply_quest_rewards(
-                handler, db, camp_id, client_state, script))
+        if quest_changed:
+            target = int(quest.get("step", 0) or 0)
+            objectives = len((state.get("Flags") or {}).get("_quest_objectives") or ())
+            if status == "finished":
+                target = max(target, objectives)
+            progressed = None
+            while index is not None and index < target and not state.get("Finished"):
+                progressed = campaign._advance_quest_campaign(db, champion_id, script)
+                if progressed is None:
+                    break
+                index, state = _journal_index(db, champion_id, script)
+            if progressed is not None:
+                out["progressed"].append(progressed)
+            if status == "finished" and old.get("status") != "finished":
+                campaign._merge_applied(out["applied"], campaign._apply_quest_rewards(
+                    handler, db, camp_id, client_state, script))
+
+        expected_vars = quest_public_vars(script, counters)
+        if expected_vars and state is not None:
+            pdata = state.setdefault("PublicState", {}).setdefault("Data", {})
+            vars_changed = False
+            for k, v in expected_vars.items():
+                if pdata.get(k) != v:
+                    pdata[k] = v
+                    vars_changed = True
+            if vars_changed:
+                qid = state.get("CampID") or pve_db.db_quest_campaign_id(champion_id, script, db)
+                pve_db.db_campaign_update_state(qid, json.dumps(state), db)
+                if not any((st.get("CampID") or 0) == qid for st in out["progressed"]):
+                    out["progressed"].append(state)
     return out
 
 

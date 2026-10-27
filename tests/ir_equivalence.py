@@ -279,6 +279,12 @@ def _live(case):
     case["prepare"](db, bstate, player_champ, ai_champ)
     start_events = len(game.events)
     source = player_champ if case.get("champion") else SOURCE_UID
+    # An event sourced on a champion names the champion, not the ability's card, and belongs to the champion's
+    # owner: Session.AddChargePoints and Session.HealChampion set SourcePlayerId from the champion's controller.
+    event_card, event_owner = source, TROOP_OWNER
+    if case.get("event_source"):
+        own = case["event_source"] == "player"
+        event_card, event_owner = (player_champ if own else ai_champ), (TROOP_OWNER if own else OPPOSING_OWNER)
     if case["event"] in SETUP_ZONES and not case.get("champion"):
         # Encounter setup abilities live on a card in the hidden mod collection, which is the only place their trigger
         # collection (Mod) admits them, as the live setup finds them.
@@ -302,8 +308,8 @@ def _live(case):
         target_card = source if _uses_trigger_target(case["ability"]) else None
         dispatch_native_trigger(db=db, handler=handler, game=game, session=SessionStub(),
                                 player_uid=pl_t, ai_uid=ai_t, battle_state=bstate,
-                                event_type=case["event"], source_card_id=source,
-                                source_player_id=TROOP_OWNER, target_card_id=target_card,
+                                event_type=case["event"], source_card_id=event_card,
+                                source_player_id=event_owner, target_card_id=target_card,
                                 target_player_id=case.get("target_player"),
                                 data={"event_int_attribute": case.get("int_attribute"),
                                       "zones": SETUP_ZONES.get(case["event"])})
@@ -418,6 +424,9 @@ CHAMPION_CASES = [
 ]
 
 TURN_EVENTS = {"TurnStartedEvent", "TurnEndedEvent", "CardEnteredZoneEvent"}
+# Events whose own source card is a champion (Session.AddChargePoints, Session.HealChampion): the ability that
+# reacts is another card's, and the event belongs to the champion's owner.
+CHAMPION_SOURCE_EVENTS = {"GainChargeEvent", "ChampionHealedEvent"}
 # The zones each setup event is dispatched over, as the live setup calls dispatch them (services/tournament_game.py).
 SETUP_ZONES = {"GameStartedEvent": ("hand", "warzone"), "PreGameEvent": ("deck",)}
 # The live events the interpreter runs beyond the turn and zone events (rules_port/ir_triggers.py).
@@ -443,6 +452,19 @@ def _trigger_condition_parts(raw):
     return out
 
 
+def _one_zone(flags, fallback, source=None):
+    """One collection from a flags string. A condition may name a mask ("anywhere") because it accepts any of those
+    zones, but a move lands in exactly one collection, so pick the one a real move of that kind uses."""
+    zones = [zone.strip().lower() for zone in str(flags or "").split("|")
+             if zone.strip() and zone.strip().lower() != "none"]
+    if not zones:
+        return fallback
+    for preferred in ("discard", "void", "deck", "hand", "warzone"):
+        if preferred in zones and preferred != source:
+            return preferred
+    return zones[0]
+
+
 def _zone_move(db, raw):
     """The card move a zone trigger needs, read from its own condition: the ability's source moves when the
     condition names it (a "dies" or "enters play" ability), else another card moves. The zones are the
@@ -451,10 +473,8 @@ def _zone_move(db, raw):
     parts = _trigger_condition_parts(raw)
     names = {part["_t"].rsplit(".", 1)[-1] for part in parts}
     zone = next((part for part in parts if part["_t"].endswith("TriggerCardEnteredZone")), {})
-    source = str(zone.get("m_SourceCollection") or "None").lower()
-    destination = str(zone.get("m_DestinationCollection") or "None").lower()
-    source = "hand" if source in ("none", "") else source
-    destination = "warzone" if destination in ("none", "") else destination
+    source = _one_zone(zone.get("m_SourceCollection"), "hand")
+    destination = _one_zone(zone.get("m_DestinationCollection"), "warzone", source=source)
     opposing = bool(zone.get("m_Opposing")) and not zone.get("m_Your")
     owner = OPPOSING_OWNER if opposing else TROOP_OWNER
     mover = 900 if "TriggerCardIsAbilitySource" in names else MOVED_UID
@@ -525,6 +545,33 @@ def _case_cache_path(limit):
     return os.path.join(tempfile.gettempdir(), f"hex-ir-equivalence-cases-{digest.hexdigest()[:16]}.json")
 
 
+# The case fields a run reads, all of them plain data (``prepare`` is stored as the spec it is rebuilt from).
+_CASE_FIELDS = ("name", "ability", "event", "champion", "any_template", "target_player",
+                "int_attribute", "event_source")
+
+
+def _case_spec(case):
+    """A case as JSON: every field it carries, so the cache cannot lose one (it dropped the event's target player
+    and the attribute a CardGainedIntAttrEvent names before, which silently changed the battle a case ran on)."""
+    spec = {field: case[field] for field in _CASE_FIELDS if field in case}
+    spec["opposing"] = [list(entry) for entry in case["opposing"]]
+    if case.get("extra"):
+        spec["extra"] = [list(entry) for entry in case["extra"]]
+    spec["prepare"] = _prepare_spec(case["prepare"])
+    spec["moved"] = list(case["moved"]) if case.get("moved") else None
+    return spec
+
+
+def _case_from_spec(spec):
+    case = {field: spec[field] for field in _CASE_FIELDS if field in spec}
+    case["opposing"] = [tuple(entry) for entry in spec["opposing"]]
+    if spec.get("extra"):
+        case["extra"] = tuple(tuple(entry) for entry in spec["extra"])
+    case["prepare"] = _prepare_from_spec(spec["prepare"])
+    case["moved"] = tuple(spec["moved"]) if spec.get("moved") else None
+    return case
+
+
 def cached_auto_cases(limit):
     """auto_cases, from a cache keyed by the harness and the coverage code. Listing the cases reads and indexes the
     whole Records, which is most of a run's startup; each chunk of a run loads the cached list instead."""
@@ -534,17 +581,10 @@ def cached_auto_cases(limit):
         with open(path) as stream:
             stored = json.load(stream)
         SKIPPED_BY_COVERAGE[:] = [tuple(item) for item in stored["skipped"]]
-        return [{"name": item["name"], "ability": item["ability"], "event": item["event"],
-                 "opposing": [tuple(entry) for entry in item["opposing"]],
-                 "prepare": _prepare_from_spec(item["prepare"]),
-                 "moved": tuple(item["moved"]) if item["moved"] else None}
-                for item in stored["cases"]]
+        return [_case_from_spec(item) for item in stored["cases"]]
     cases = auto_cases(limit)
     stored = {"skipped": [list(item) for item in SKIPPED_BY_COVERAGE],
-              "cases": [{"name": case["name"], "ability": case["ability"], "event": case["event"],
-                         "opposing": [list(entry) for entry in case["opposing"]],
-                         "prepare": _prepare_spec(case["prepare"]),
-                         "moved": list(case["moved"]) if case["moved"] else None} for case in cases]}
+              "cases": [_case_spec(case) for case in cases]}
     with open(path, "w") as stream:
         json.dump(stored, stream)
     return cases
@@ -570,20 +610,33 @@ def auto_cases(limit):
         if missing:
             SKIPPED_BY_COVERAGE.append((f"{event}: {raw.get('m_GameText', '')[:70]}", missing))
             continue
-        moved = None
-        if event == "CardEnteredZoneEvent":
-            moved = _zone_move(db, raw)
+        moves = [None]
+        if event in ("CardEnteredZoneEvent", "CardExitedZoneEvent"):
+            move = _zone_move(db, raw)
+            moves = [move]
+            if event == "CardExitedZoneEvent" and move[0] != 900:
+                # Another card leaves. Run the move both ways: only the ability's own condition says which
+                # controller makes it fire ("when an opposing troop leaves play" against "when a troop leaves your
+                # crypt"), and the condition is exactly what the two sides must agree on.
+                moves.append((move[0], OPPOSING_OWNER if move[1] == TROOP_OWNER else TROOP_OWNER) + tuple(move[2:]))
+        # An event sourced on a champion (a charge gained, a champion healed) belongs to that champion's owner, so
+        # it runs for the player's champion and then for the opponent's.
+        variants = ([{"event_source": "player"}, {"event_source": "opposing"}]
+                    if event in CHAMPION_SOURCE_EVENTS else [{}])
         # A damage event names the damaged card's controller: the player's own troop's owner and the opposing one,
         # so a "when you are dealt damage" ability runs on one and not the other.
-        targets = [TROOP_OWNER, OPPOSING_OWNER] if event in TRIGGER_EVENTS else [None]
+        targets = ([TROOP_OWNER, OPPOSING_OWNER]
+                   if event in TRIGGER_EVENTS and event not in CHAMPION_SOURCE_EVENTS else [None])
         # An attribute gain names the attribute its ability's TriggerEventIntAttribute tests.
         attribute = next((part.get("m_Attribute") for part in _trigger_condition_parts(raw)
                           if part.get("_t", "").endswith("TriggerEventIntAttribute")), None)
-        for target in targets:
-            cases.append({"name": f"{event}: {raw.get('m_GameText', '')[:70]}",
-                          "ability": record.guid.lower(), "event": event,
-                          "opposing": [], "prepare": _threshold_prepare(raw), "moved": moved,
-                          "target_player": target, "int_attribute": attribute})
+        for moved in moves:
+            for variant in variants:
+                for target in targets:
+                    cases.append({"name": f"{event}: {raw.get('m_GameText', '')[:70]}",
+                                  "ability": record.guid.lower(), "event": event,
+                                  "opposing": [], "prepare": _threshold_prepare(raw), "moved": moved,
+                                  "target_player": target, "int_attribute": attribute, **variant})
         if len(cases) >= limit:
             break
     return cases
@@ -866,10 +919,16 @@ def main():
     expanded = []
     for case in turn_cases:
         expanded.extend(random_cases(case, random_count, seed) if random_count else [case])
+    # IR_EQ_EVENTS="CardExitedZoneEvent,GainChargeEvent" runs only those events (one cluster at a time).
+    events = {name for name in os.environ.get("IR_EQ_EVENTS", "").split(",") if name}
+    if events:
+        expanded = [case for case in expanded if case["event"] in events]
     # IR_EQ_CHUNK="start:end" runs a slice of the cases in this process (the port keeps memory across cases, so
     # a long run is split into several processes).
     start, end = (int(part) for part in os.environ.get("IR_EQ_CHUNK", f"0:{len(expanded) + 9}").split(":"))
     everything = CHAMPION_CASES + CASES + expanded
+    if events:
+        everything = [case for case in everything if case["event"] in events]
     print("CASES", len(everything), flush=True)
     cases = everything[start:end]
     for case in cases:

@@ -73,7 +73,13 @@ def kill_troop(context, target, *, cause="effect"):
         scid, recipient, card_collection_for_location("discard"),
         card_type, template_id=tpl,
         attack=attack, defense=defense, cost=cost, gems=gems)
-    context._emit_trigger("CardExitedZoneEvent", target, owner)
+    # C# MoveCardWithDispatch enqueues the exit with both collections (CardExitedZoneEvent is an IZoneChange), so the
+    # "when this leaves play" conditions can test warzone->discard.  The exit carried neither before, which made the
+    # move invisible to any trigger that names a zone.
+    context._emit_trigger(
+        "CardExitedZoneEvent", target, owner,
+        event_source_collection="warzone",
+        event_destination_collection="discard")
     context._emit_trigger(
         "CardEnteredZoneEvent", target, owner,
         event_source_collection="warzone",

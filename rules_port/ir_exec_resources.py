@@ -33,6 +33,9 @@ EFFECTS = {"ReplenishResourcesAbilityEffectTemplate", "LoseThresholdAbilityEffec
 RESOURCE_DURATIONS = {"Instant", "Permanent"}
 # A card cost change runs through the live cost leaf, which handles these two durations.
 COST_DURATIONS = {"Instant", "Permanent"}
+# A linked clause (triggered, player-activated, or an invoked child's) also takes the while-in-play lifetime: the cost
+# delta is applied at resolution and recorded in the linked ledger, which reverses it when its source is gone.
+LINKED_COST_DURATIONS = COST_DURATIONS | {"WhileCardInPlay"}
 
 
 def _target_template(raw: dict[str, Any], index: int) -> tuple[str, dict[str, Any]]:
@@ -49,14 +52,19 @@ def _player_filter(raw: dict[str, Any], index: int) -> str | None:
     return str(template.get("m_PlayerFilter") or "")
 
 
-def coverage_modifier(kind: str, effect: dict[str, Any], clause: dict[str, Any], raw: dict[str, Any]) -> list[str]:
-    """The constructs of one CardModifier clause this module cannot run (empty when it runs it)."""
+def coverage_modifier(kind: str, effect: dict[str, Any], clause: dict[str, Any], raw: dict[str, Any],
+                      *, linked: bool = False) -> list[str]:
+    """The constructs of one CardModifier clause this module cannot run (empty when it runs it).
+
+    ``linked`` says the clause belongs to a triggered, player-activated or invoked ability, whose cost change applies
+    at resolution and is recorded in the linked ledger rather than projected by the static scan.
+    """
     modifier = effect.get("m_Modifier") or {}
     duration = str(clause.get("m_EffectDuration") or "")
     index = int(clause.get("m_TargetTemplateIndex") or 0)
     missing: list[str] = []
     if kind == CARD_COST_MODIFIER:
-        if duration not in COST_DURATIONS:
+        if duration not in (LINKED_COST_DURATIONS if linked else COST_DURATIONS):
             missing.append(f"cost duration {duration}")
         return missing
     if duration not in RESOURCE_DURATIONS:

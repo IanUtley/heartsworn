@@ -298,6 +298,23 @@ def _quest_template(db, quest_script=None, campaign_group=None):
     return _quest_template_from_row(row)
 
 
+def _quest_initial_public_data(db, champ_id, campaign_group, q):
+    pdata = {"CampaignGroup": campaign_group or q.get("campaign_group")}
+    script_name = q.get("script_name")
+    if script_name:
+        try:
+            from campaign_runtime.quests import quest_public_vars
+            counters = {}
+            rows = pve_db.db_campaign_state_rows(champ_id, "AREA", db)
+            if rows:
+                cst = json.loads(rows[0][1] or "{}")
+                counters = (cst.get("PublicState") or {}).get("Data", {}).get("counters") or {}
+            pdata.update(quest_public_vars(script_name, counters))
+        except Exception:
+            pass
+    return pdata
+
+
 def _ensure_quest_campaign(db, champ_id, campaign_group, quest_script=None):
     """Create the QUEST campaign row that drives the zone's quest journal.
 
@@ -376,7 +393,7 @@ def _ensure_quest_campaign(db, champ_id, campaign_group, quest_script=None):
         "LastNode": q["objectives"][0]["id"] if q["objectives"] else "",
         # The client's quest tracker draws only quests whose group matches the
         # zone, so a start from the engine (no group given) takes the template's.
-        "PublicState": {"Data": {"CampaignGroup": campaign_group or q["campaign_group"]}},
+        "PublicState": {"Data": _quest_initial_public_data(db, champ_id, campaign_group, q)},
         "Started": None, "Finished": None, "FinishReason": None,
         "Wins": 0, "Losses": 0, "Score": 0, "HealthAdj": 0, "DungeonLifeAdj": 0,
         "Flags": {"_quest_objective_idx": 0, "_quest_objectives": q["objectives"]},

@@ -199,11 +199,14 @@ def grant_ability(context):
     from gamedata import DEFAULT_RECORD_STORE, ability_graph
     from pvp_db import (db_ability_metadata_exists, db_card_grant_info,
                         db_set_card_abilities)
+    from .granted_abilities import is_zero_guid
     try:
         granted = str(context.param or "").lower()
     except Exception:
         granted = ""
-    if not granted or granted == "0" * 36:
+    if is_zero_guid(granted):
+        # No typed template: the abilities come from what the resolving ability remembered, or from one of the
+        # effect's power-source flags below (sockets, payments, remembered powers, a random pick).
         remembered = (context.bstate.get("remembered_powers") or {})
         values = remembered.get(context.bstate.get("resolving_ability"), [])
         granted_values = [str(value).lower() for value in values]
@@ -212,7 +215,7 @@ def grant_ability(context):
     if not granted_values:
         typed = str(context.template_value(
             "m_GrantedAbilityTemplateId", "") or "").lower()
-        if typed and typed != "0" * 36:
+        if not is_zero_guid(typed):
             granted_values = [typed]
     target = context.bstate.get("grant_target")
     if target is None:
@@ -901,9 +904,10 @@ def _card_cost(context, target, param):
         db_add_card_cost_modifier(
             context.session.session_id, int(target), amount, conn=context.db)
         if duration in ("BeginningOfOwnersTurn",
-                        "AfterCardsReadyOnPlayersTurn"):
+                        "AfterCardsReadyOnPlayersTurn", "WhileCardInPlay"):
             # "Cost [(1)] until the start of your next turn" (Thk'tatcha) is
-            # reversed at the owner's boundary instead of staying forever.
+            # reversed at the owner's boundary instead of staying forever; a
+            # while-in-play change is reversed when its source is gone.
             from .effect_lifetimes import record_temporary_stat
             resolving_owner = int(
                 context.bstate.get("resolving_owner_id", 0) or 0)
@@ -960,6 +964,9 @@ def _int_attribute(context, target, param):
         "EndOfTurn", "EndOfNextTurn", "BeginningOfOwnersTurn",
         "BeginningOfOpponentsTurn", "AfterCardsReadyOnPlayersTurn",
         "UntilDamaged", "UntilItLeavesYourHand",
+        # A while-in-play write is a recorded grant: it lives in the temporary payload and the linked ledger
+        # expires it with the source (the sweep at each event and turn boundary).
+        "WhileCardInPlay",
     }
     resolving_owner = int(context.bstate.get("resolving_owner_id", 0) or 0)
     if duration == "BeginningOfOwnersTurn":
@@ -1012,7 +1019,7 @@ def _int_attribute(context, target, param):
         "EndOfTurn", "EndOfNextTurn", "BeginningOfOwnersTurn",
         "BeginningOfOpponentsTurn",
         "AfterCardsReadyOnPlayersTurn", "UntilDamaged",
-        "UntilItLeavesYourHand"}
+        "UntilItLeavesYourHand", "WhileCardInPlay"}
     column = "temporary_buffs" if temporary else "permanent_buffs"
     raw = db_card_mutation_field(
         context.session.session_id, int(target), column, conn=context.db)

@@ -199,6 +199,103 @@ def _literal_leaf(param, *, extra_properties=()):
     return prop, value
 
 
+# The leaf properties the static scan actually spells out, split by the shape it gives them: a combat/cost delta, a
+# typed card property, or a rule modifier the combat and damage paths read.  A continuous clause whose property is in
+# none of these is not projected at all (a damage shield's lifetime is its own flags, and a resource modifier is the
+# resource lifecycle's), so the interpreter must not claim the static path owns it.
+_DELTA_PROPERTIES = frozenset({"attack", "defense", "cardcost", "attribute",
+                               "intattr", "damagemultiplier"})
+_RULE_PROPERTIES = frozenset({"damageimmunity", "attackimmunity",
+                              "targetingimmunity", "blockimmunity",
+                              "blockimmunityexception", "blockrestriction"})
+_PROJECTED_PROPERTIES = (_DELTA_PROPERTIES | _RULE_PROPERTIES |
+                         _CARD_PROPERTY_LEAVES)
+# The variable kinds ``_expression_value`` binds, so a leaf whose operand is one of them resolves on read.
+PROJECTED_VARIABLE_KINDS = frozenset({
+    "AbilityConstant", "CardCountAbilityVariable", "CardSumAbilityVariable",
+    "CounterVariable", "HighestCardAbilityVariable",
+    "SourcePlayerChargeVariable", "TriggerEventDamageProperty",
+    "SourcePlayerHealthVariable", "SourcePlayerThresholdAbilityVariable",
+    "IntAttrAbilityVariable", "AbilityVariable", "CardIntegerVariable",
+    "SourcePlayerResourceAbilityVariable", "SourcePlayerShardAbilityVariable",
+    "CountListAttrAbilityVariable", "AbilityPropertyVariable",
+    "CardPropertyVariable", "TriggerTargetPropertyVariable",
+    "TriggerSourcePropertyVariable", "SourcePlayerBriarLegionVariable",
+    "SumVariableInListAttrCardsAbilityVariable", "ExpressionAbilityVariable",
+})
+
+
+def variable_kind(raw, variable_name):
+    """Return the authored kind of one named variable, or ``""`` when the ability does not declare it."""
+    record = raw if isinstance(raw, dict) else None
+    if record is None:
+        try:
+            record = json.loads(raw or "{}")
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return ""
+    for variable in record.get("m_Variables") or []:
+        if not isinstance(variable, dict):
+            continue
+        if str(variable.get("m_Name") or "") != str(variable_name or ""):
+            continue
+        return str(variable.get("_t") or "").rsplit(".", 1)[-1]
+    return ""
+
+
+def projects_continuous_modifier(modifier, raw=""):
+    """Whether the static scan applies this continuous CardModifier clause on read.
+
+    The scan resolves a leaf through :func:`_native_leaf_value`, so it owns a clause only when the modifier maps to a
+    property it spells out, and the operand is either authored literally or bound by a variable kind the native
+    evaluator reads.  Anything else would be dropped silently, which is why the answer is a refusal rather than a
+    blank cheque: coverage asks this before it lets a ``WhileCardInPlay`` clause through as projected.
+    """
+    from .bom_fields import modifier_leaf_fields
+    leaf = modifier_leaf_fields(modifier)
+    prop = str(leaf.get("property") or "").lower()
+    if prop not in _PROJECTED_PROPERTIES:
+        return False
+    variable = str(leaf.get("input_variable") or "")
+    if variable:
+        return variable_kind(raw, variable) in PROJECTED_VARIABLE_KINDS
+    if prop in _RULE_PROPERTIES or prop in _CARD_PROPERTY_LEAVES:
+        return True
+    if _literal_leaf(leaf) is not None:
+        return True
+    # Attribute grants commonly put the keyword in typed ``attribute_flags`` and leave the amount at zero.
+    return prop == "attribute" and bool(
+        leaf.get("attributeflags") or leaf.get("attribute_flags") or
+        leaf.get("value"))
+
+
+def projects_clause(ability_guid, effect_guid, duration):
+    """Whether the scan has this clause to project: the ability is a continuous source in the snapshot, and its
+    materialized effect row for this clause carries ``duration``.
+
+    ``projects_continuous_modifier`` answers from the authored record; this asks the scan's own inputs, so an ability
+    the snapshot does not carry (a stale seed, or a template no card references) is a refusal rather than a clause
+    that projects nothing.
+    """
+    from pvp_db import db_ability_effect_rows, db_ability_static_metadata
+    ability_guid = str(ability_guid or "").lower()
+    effect_guid = str(effect_guid or "").lower()
+    if not ability_guid or not effect_guid:
+        return False
+    if not _is_continuous_source_ability(db_ability_static_metadata(ability_guid)):
+        return False
+    for row_effect, row_type, raw_param in db_ability_effect_rows(ability_guid):
+        if str(row_effect or "").lower() != effect_guid:
+            continue
+        if row_type != "CardModifierAbilityEffectTemplate":
+            return False
+        try:
+            param = json.loads(raw_param or "{}")
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return False
+        return str(param.get("duration") or "") == str(duration or "")
+    return False
+
+
 def _variable_card_candidates(db, session_id, battle_state, source_uid,
                                owner, variable, *, self_owner="responsible"):
     """Apply a Records variable's player, zone and card filters like C#.

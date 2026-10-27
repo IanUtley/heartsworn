@@ -43,11 +43,25 @@ def _guid(value: Any) -> str:
     return str(value or "").lower()
 
 
+def instance_ref(value: Any) -> int:
+    """An effect-instance id (``m_SecondaryTargetIndex``, ``m_ContingentEffectInstanceId``), or -1 for none.
+
+    Instance ids are authored from 0 upward, so 0 is a real instance: only a missing value means "none". Records
+    spell the missing one -1, but a plain value can be None or "", so test for those instead of truthiness.
+    """
+    if value is None or value == "":
+        return -1
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return -1
+
+
 def referenced_instances(root: Any) -> set[int]:
     """The effect instance ids a clause of the ability names as its secondary target (m_SecondaryTargetIndex)."""
     found = set()
     for clause in root.m_AbilityEffectList:
-        wanted = int(_get(clause, "m_SecondaryTargetIndex", -1) or -1)
+        wanted = instance_ref(_get(clause, "m_SecondaryTargetIndex"))
         if wanted >= 0:
             found.add(wanted)
     return found
@@ -132,7 +146,7 @@ def follow_up_targets(template: Any, template_guid: str, root_guid: str, scope: 
         return [int(uid) for uid in resolution._list_target_values(
             bstate, ability, kind, scope.source_uid, target_spec, db, session_id)]
     # The contingent effect's targets are the ones the interpreter resolved for that effect instance.
-    effect = {"secondary_target_index": int(_get(scope.clause, "m_SecondaryTargetIndex", -1) or -1)}
+    effect = {"secondary_target_index": instance_ref(_get(scope.clause, "m_SecondaryTargetIndex"))}
     if kind == "SecondaryTargetTemplate":
         from rules_port.targeting import filter_resolved_targets
         raw = (resolution._resolved_effect_target_values(

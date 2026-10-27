@@ -17,6 +17,7 @@ import functools
 import json
 import os
 import re
+import threading
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from types import SimpleNamespace
@@ -46,6 +47,10 @@ from rules_port import continuous_statics, granted_abilities
 
 # A CounterModifier's operation, as the live counter primitive names it.
 COUNTER_OPERATIONS = {"Add": "add", "Remove": "remove", "Set": "set"}
+# Trigger conditions that judge the event rather than the board: which card moved, between which collections, and
+# which player the event belongs to. They are evaluated by the native shared evaluator, so both paths agree.
+SHARED_TRIGGER_CONDITIONS = frozenset({"TriggerCardIsAbilitySource", "TriggerPlayerControlsAbilitySource",
+                                       "TriggerCardEnteredZone"})
 
 # C# EComparisons. An operator outside this table is refused by coverage.
 _COMPARISONS = {
@@ -207,6 +212,17 @@ class Scope:
     variables: dict[str, int] = field(default_factory=dict)
     table: list[dict[str, int]] | None = None
     event: dict[str, Any] = field(default_factory=dict)   # player, card, from, to
+    # The ability this run started from: for an invoked child, the ability that invoked it (at any depth). A linked
+    # effect's lifetime is recorded against it, because a child is not on its source card's ability list (C# keys the
+    # effect instance on the card's whole list, not on the individual child).
+    root_ability: str = ""
+    # Whether this scope belongs to an invoked child: the native static path projects only the abilities authored on
+    # a card, so an invoked child's clause is a resolved effect with a linked lifetime, not an aura.
+    invoked: bool = False
+    # The activation this run belongs to (C# ``AbilityInstance`` id), when the caller knows it. The shared leaves key
+    # per-activation state on it: a granted "random champion charge power" is picked once per activation and cached
+    # in ``ability_runtime_state[<instance>]``, so two activations must not share one entry.
+    instance_id: int | None = None
     chosen: dict[int, int | None] = field(default_factory=dict)   # target index -> the card the player chose
     # The clause the interpreter is running, and the targets each effect instance resolved to (for a later
     # clause's secondary target).
@@ -405,20 +421,13 @@ def _condition_holds(condition: Any, scope: Scope) -> bool:
         return all(_condition_holds(part, scope) for part in condition.m_Conditions)
     if cls in ("TriggerCondition", "TriggerSource"):
         return True
-    if cls == "TriggerCardIsAbilitySource":
-        # The card that moved is the ability's own source.
-        return scope.event.get("card") is not None and int(scope.event["card"]) == scope.source_uid
-    if cls == "TriggerPlayerControlsAbilitySource":
-        # The event's player controls the ability's source.
-        return int(scope.event.get("player", -1)) == int(scope.owner_uid)
-    if cls == "TriggerCardEnteredZone":
-        # A collection of "None" places no restriction on that side of the move.
-        for wanted, actual in ((condition.m_SourceCollection, scope.event.get("from")),
-                               (condition.m_DestinationCollection, scope.event.get("to"))):
-            if str(wanted).lower() not in ("none", "") and str(wanted).lower() != str(actual or "").lower():
-                return False
-        mine = int(scope.event.get("player", -1)) == int(scope.owner_uid)
-        return (not condition.m_Your or mine) and (not condition.m_Opposing or not mine)
+    if cls in SHARED_TRIGGER_CONDITIONS:
+        # These three read the event's own source player, the moved card's controller and the two collections it moved
+        # between. The native discovery path evaluates them through the shared condition evaluator
+        # (``rules_port.conditions``), so the interpreter calls it too: one implementation, and the event's player is
+        # the event's SourcePlayerId rather than the ability's owner (which made every "when an opposing ..." trigger
+        # false and every "when you ..." one true, whoever the event belonged to).
+        return bridge.condition_holds(condition, scope)
     if cls == "TriggerCardIsStoredTargetOfAbilitySource":
         return ir_exec_targets.trigger_card_is_stored(scope)
     if cls == "TriggerCardMatchesFilter":
@@ -857,8 +866,11 @@ def _run_clause(root: MechanicsObject, clause: Any, scope: Scope) -> None:
         return
     if _short(effect_type) != "CardModifierAbilityEffectTemplate":
         raise NotImplementedError(f"effect {_short(effect_type)}")
-    if continuous_statics.is_static_owned(str(_field(clause, "m_EffectDuration") or "")):
-        # The native static path projects this clause from its source while it is in play, so it is not applied here.
+    if continuous_statics.is_static_owned(str(_field(clause, "m_EffectDuration") or "")) and not \
+            _short(_field(_field(root, "m_TriggerEventType"), "m_InternalType")) and not scope.invoked:
+        # The clause of an authored static (no trigger) is projected from its source by the native static path, so it
+        # is not applied here. A triggered, player-activated or invoked clause with the same duration is a linked
+        # effect and does apply.
         return
     modifier = _typed(effect_raw["m_Modifier"], "Modifier", effect_raw.get("_v"))
     if not isinstance(modifier, MechanicsObject):
@@ -1004,12 +1016,20 @@ def _pauses_for_choice(guid: str, seen: set[str]) -> bool:
 
 
 def live_event(event_type: str, owner_uid: int, data: dict[str, Any], trigger_source_uid: Any,
-               target_player_uid: Any = None) -> dict[str, Any]:
+               target_player_uid: Any = None, source_player_id: Any = None) -> dict[str, Any]:
     """The interpreter's event for a live trigger: its player, its card and target player, and for a zone move the
-    card and zones the live dispatch recorded (``event_source_collection`` and ``event_destination_collection``)."""
-    event: dict[str, Any] = {"player": owner_uid, **ir_triggers.event_fields(
-        event_type, trigger_source_uid, target_player_uid, data)}
-    if event_type == "CardEnteredZoneEvent":
+    card and zones the live dispatch recorded (``event_source_collection`` and ``event_destination_collection``).
+
+    ``player`` is the event's own ``SourcePlayerId``, which C# takes from whoever the event is about -- the moved
+    card's *previous* controller for a zone exit, the champion's controller for a charge or heal, the active player for
+    a turn step. It is not the resolving ability's owner: "when an opposing champion gains health" has to see the
+    opponent. Only a caller that has no source player (a synthetic event) falls back to the ability's owner."""
+    event: dict[str, Any] = {"player": owner_uid if source_player_id is None else source_player_id,
+                             **ir_triggers.event_fields(
+                                 event_type, trigger_source_uid, target_player_uid, data)}
+    if event_type in ("CardEnteredZoneEvent", "CardExitedZoneEvent"):
+        # C# CardExitedZoneEvent implements IZoneChange exactly as the entry event does, so both the "leaves play" and
+        # the "enters play" trigger conditions test the two collections.
         event["card"] = trigger_source_uid
         event["from"] = data.get("event_source_collection")
         event["to"] = data.get("event_destination_collection")
@@ -1108,13 +1128,31 @@ def static_cost_increase(context: Any, card_uid: int, owner: int) -> int:
     return total
 
 
+def _finish_activation(scope: Scope) -> None:
+    """Drop the per-activation runtime state the shared leaves kept for this instance.
+
+    C# keeps such state on the ability instance: it survives a pause/continuation of one activation and is dropped
+    when the activation finishes (the native resolver pops it on the way out). A finished interpreted run left its
+    entry in the battle state, where it would outlive the activation."""
+    if scope.instance_id is None:
+        return
+    bstate = scope.context.bstate
+    runtime = bstate.get("ability_runtime_state") or {}
+    if runtime.pop(str(int(scope.instance_id)), None) is not None and not runtime:
+        bstate.pop("ability_runtime_state", None)
+
+
 def run_ability(guid: str, event_type: str, *, context: Any, source_uid: int,
                 owner_uid: int, event: dict[str, Any] | None = None,
-                answers: dict[int, int | None] | None = None) -> bool:
+                answers: dict[int, int | None] | None = None,
+                instance_id: int | None = None) -> bool:
     """Run one ability for an event. Returns whether its trigger fired.
 
     ``event`` names what happened: ``player`` (whose turn or whose card), and for a zone move the
-    ``card`` and its ``from`` and ``to`` zones. A turn event needs only the ``player``."""
+    ``card`` and its ``from`` and ``to`` zones. A turn event needs only the ``player``.
+
+    ``instance_id`` is the activation's C# ability-instance id, when the caller has one; the shared leaves key
+    per-activation state on it (a random power a grant picks once)."""
     # Refuse an ability with any construct the interpreter lacks before anything runs, so no ability
     # is ever half-run.
     missing = coverage(guid)
@@ -1128,7 +1166,8 @@ def run_ability(guid: str, event_type: str, *, context: Any, source_uid: int,
         return False
     event = {"player": owner_uid, **(event or {})}
     scope = Scope(context=context, source_uid=int(source_uid), owner_uid=int(owner_uid),
-                  table=root.version_table, event=event)
+                  table=root.version_table, event=event, root_ability=guid,
+                  instance_id=instance_id)
     # The trigger fires only while its source is in one of the zones its collection flags name (C#
     # AbilityTemplate.TriggerCollectionFlags).
     zones = _zones_of(_field(root, "m_TriggerCollectionFlags"))
@@ -1148,14 +1187,26 @@ def run_ability(guid: str, event_type: str, *, context: Any, source_uid: int,
     if not _condition_holds(root.m_TriggerCondition, scope):
         return False
     scope.chosen = {int(k): (None if v is None else int(v)) for k, v in (answers or {}).items()}
-    return _run_effects(guid, root, scope, start=0)
+    try:
+        fired = _run_effects(guid, root, scope, start=0)
+    except NeedsChoice:
+        # A pause leaves the activation open, so its runtime state stays until the continuation resumes it.
+        raise
+    except Exception:
+        # A refused run is not an activation that continues: its partial state goes with it, and the caller may
+        # resolve the ability on the native path instead.
+        _finish_activation(scope)
+        raise
+    _finish_activation(scope)
+    return fired
 
 
 def _run_effects(guid: str, root: MechanicsObject, scope: Scope, start: int) -> bool:
     """Run the ability's effects from clause ``start``. A clause whose target the player picks either takes its
     one forced candidate, takes nothing, or pauses with NeedsChoice before it runs."""
     bstate = scope.context.bstate
-    with _bridge_caster(bstate, owner=scope.owner_uid, source=scope.source_uid, ability=guid):
+    with _bridge_caster(bstate, owner=scope.owner_uid, source=scope.source_uid, ability=guid,
+                        root_ability=scope.root_ability or guid, instance_id=scope.instance_id):
         for position in range(start, len(root.m_AbilityEffectList)):
             clause = root.m_AbilityEffectList[position]
             scope.clause = clause
@@ -1184,6 +1235,8 @@ def _run_effects(guid: str, root: MechanicsObject, scope: Scope, start: int) -> 
                 else:
                     continuation = {"ability_guid": guid, "event": dict(scope.event),
                                     "source_uid": int(scope.source_uid), "owner_uid": int(scope.owner_uid),
+                                    "root_ability": scope.root_ability, "invoked": bool(scope.invoked),
+                                    "instance_id": scope.instance_id,
                                     "position": position, "target_index": index,
                                     "candidates": candidates, "optional": optional,
                                     "chosen": {str(k): v for k, v in scope.chosen.items()},
@@ -1244,11 +1297,11 @@ def _run_effects(guid: str, root: MechanicsObject, scope: Scope, start: int) -> 
 def _contingency_holds(root: MechanicsObject, clause: Any, scope: Scope) -> bool:
     """Whether the effect the clause is contingent on applied. A clause with no contingency, or one naming an
     effect the ability does not have, is not held back."""
-    wanted = _field(clause, "m_ContingentEffectInstanceId")
-    if wanted is None or int(wanted) == -1:
+    wanted = ir_exec_targets.instance_ref(_field(clause, "m_ContingentEffectInstanceId"))
+    if wanted < 0:
         return True
     for position, other in enumerate(root.m_AbilityEffectList):
-        if int(_field(other, "m_EffectInstanceId") or -1) == int(wanted):
+        if ir_exec_targets.instance_ref(_field(other, "m_EffectInstanceId")) == wanted:
             return bool(scope.applied.get(position, False))
     return True
 
@@ -1288,13 +1341,26 @@ def _reveal_cards(root: MechanicsObject, clause: Any, effect_raw: dict[str, Any]
 
 @contextmanager
 def _bridge_caster(bstate: dict[str, Any], *, owner: Any = None, source: Any = None,
-                   variables: dict[str, Any] | None = None, ability: str | None = None) -> Iterator[None]:
+                   variables: dict[str, Any] | None = None, ability: str | None = None,
+                   root_ability: str | None = None,
+                   instance_id: int | None = None) -> Iterator[None]:
     """The one place the interpreter writes the caster, source and variables into the battle state. The shared
     resolver leaves read those from the battle state, so they are set here for the duration of one interpreted call
-    and restored after it. Every target the interpreter acts on is passed explicitly, not read from this state."""
+    and restored after it. Every target the interpreter acts on is passed explicitly, not read from this state.
+
+    ``root_ability`` is the ability the run started from (the parent, for an invoked child). A linked effect's ledger
+    entry records it, because C# expires such an effect with the source card's whole ability list, and the child is
+    not on that list.
+
+    ``instance_id`` is the activation's C# ability-instance id. A shared leaf keys per-activation state on it (the
+    ``RandomPowerTemplate`` a "grant a random champion charge power" effect picks once and reuses), so a run that
+    knows its instance publishes it and every nested child inherits it."""
     saved = {key: bstate.get(key) for key in ("resolving_owner_id", "resolving_source_uid", "ability_variables",
-                                              "resolving_ability")}
+                                              "resolving_ability", "resolving_root_ability",
+                                              "resolving_ability_instance_id")}
     try:
+        if root_ability is not None:
+            bstate["resolving_root_ability"] = str(root_ability).lower()
         if ability is not None:
             # The lists an effect records (a created, moved or voided card) are kept for the resolving ability.
             bstate["resolving_ability"] = str(ability).lower()
@@ -1302,6 +1368,8 @@ def _bridge_caster(bstate: dict[str, Any], *, owner: Any = None, source: Any = N
             bstate["resolving_owner_id"] = int(owner)
         if source is not None:
             bstate["resolving_source_uid"] = int(source)
+        if instance_id is not None:
+            bstate["resolving_ability_instance_id"] = int(instance_id)
         if variables is not None:
             bstate["ability_variables"] = dict(variables)
         if ability is not None:
@@ -1381,7 +1449,9 @@ def _invoke(parent_guid: str, position: int, effect_raw: dict[str, Any], scope: 
     child_root = _load("AbilityTemplate", child_guid)
     for owner in owners:
         child_scope = Scope(context=scope.context, source_uid=int(scope.source_uid), owner_uid=int(owner),
-                            table=child_root.version_table, event=dict(scope.event))
+                            table=child_root.version_table, event=dict(scope.event),
+                            root_ability=scope.root_ability or parent_guid, invoked=True,
+                            instance_id=scope.instance_id)
         # The child starts from the lists the parent recorded so far (C# Session.CreateAbility appends the parent), so
         # a stored-targets read in the child finds the parent's stored cards.
         with _bridge_caster(scope.context.bstate, ability=parent_guid):
@@ -1391,6 +1461,8 @@ def _invoke(parent_guid: str, position: int, effect_raw: dict[str, Any], scope: 
         except NeedsChoice as pause:
             frame = {"ability_guid": parent_guid, "event": dict(scope.event), "source_uid": int(scope.source_uid),
                      "owner_uid": int(scope.owner_uid), "position": position,
+                     "root_ability": scope.root_ability, "invoked": bool(scope.invoked),
+                     "instance_id": scope.instance_id,
                      "chosen": {str(k): v for k, v in scope.chosen.items()},
                      "picked": {str(k): list(v) for k, v in scope.picked.items()},
                      "variables": dict(scope.variables), "resolved": _resolved_json(scope),
@@ -1411,7 +1483,11 @@ def _frame_scope(frame: dict[str, Any], context: Any) -> tuple[MechanicsObject, 
     """The root and scope of one frame of a paused ability, as it was when the frame paused."""
     root = _load("AbilityTemplate", frame["ability_guid"])
     scope = Scope(context=context, source_uid=int(frame["source_uid"]), owner_uid=int(frame["owner_uid"]),
-                  table=root.version_table, event=dict(frame["event"]))
+                  table=root.version_table, event=dict(frame["event"]),
+                  root_ability=str(frame.get("root_ability") or frame["ability_guid"]),
+                  invoked=bool(frame.get("invoked")),
+                  instance_id=(None if frame.get("instance_id") is None
+                               else int(frame["instance_id"])))
     scope.chosen = {int(k): (None if v is None else int(v)) for k, v in frame["chosen"].items()}
     scope.picked = {int(k): [int(uid) for uid in v] for k, v in (frame.get("picked") or {}).items()}
     # The variables the frame had bound (a random branch's number, say) are part of its state, so the resumed effects
@@ -1456,6 +1532,7 @@ def resume_ability(continuation: dict[str, Any], answer: int | None, *, context:
             _append_chain(pause.continuation, nxt)
             raise
         frame = nxt
+    _finish_activation(scope)
     return True
 
 
@@ -1478,6 +1555,10 @@ SUPPORTED_MODIFIERS = {"DamageModifier", "CounterModifier", "HealHeroModifier", 
 # The clause durations a stat modifier runs with: Permanent (the card's permanent buffs) and EndOfTurn (its
 # temporary buffs), as the live stat path applies them. Other durations are refused.
 STAT_DURATIONS = {"Permanent", "EndOfTurn"}
+# A linked clause -- triggered, player-activated, or an invoked child's -- applies its stat to its targets when it
+# resolves and is recorded in the linked ledger, so it also takes the while-in-play lifetime (it expires with its
+# source rather than at a boundary).
+LINKED_STAT_DURATIONS = STAT_DURATIONS | {"WhileCardInPlay"}
 # The effect text the live stat path derives its operand from (equal to this troop's DEF, a voided troop's stat).
 # An effect with such text is refused, not computed differently.
 DERIVED_STAT_TEXT = ("troop's [def]", "voided troop's")
@@ -1537,8 +1618,17 @@ def _comparison_ops(value: Any, out: list[str]) -> list[str]:
     return out
 
 
-# The abilities whose coverage is being checked, so an invocation cycle is refused rather than followed.
-_COVERAGE_STACK: set[str] = set()
+# The abilities whose coverage is being checked, so an invocation cycle is refused rather than followed. Per thread:
+# two games can check coverage at once, and a shared set would make one game's child look like the other's cycle.
+_COVERAGE_LOCAL = threading.local()
+
+
+def _coverage_stack() -> set[str]:
+    """The invocation chain this thread is currently checking (an invoked child is on it)."""
+    stack = getattr(_COVERAGE_LOCAL, "stack", None)
+    if stack is None:
+        stack = _COVERAGE_LOCAL.stack = set()
+    return stack
 
 
 def _amount_refusals(effect: dict[str, Any], raw: dict[str, Any], field_name: str = "m_InputValue") -> list[str]:
@@ -1745,14 +1835,15 @@ def coverage(guid: str) -> list[str]:
             if effect.get("m_RandomlyLuckyOrUnlucky"):
                 missing.append("random invocation")
             child = _guid(effect.get("m_AbilityToInvoke"))
-            if child in _COVERAGE_STACK:
+            stack = _coverage_stack()
+            if child in stack:
                 missing.append("recursive invocation")
             else:
-                _COVERAGE_STACK.add(child)
+                stack.add(child)
                 try:
                     missing.extend(f"invoked: {item}" for item in coverage(child))
                 finally:
-                    _COVERAGE_STACK.discard(child)
+                    stack.discard(child)
             continue
         if kind in TRANSFORM_EFFECTS:
             target_ids = raw.get("m_AbilityTargetTemplateIds") or []
@@ -1773,13 +1864,23 @@ def coverage(guid: str) -> list[str]:
             missing.append(f"effect {kind}")
             continue
         modifier = _short((effect.get("m_Modifier") or {}).get("_t"))
+        clause_duration = str(clause.get("m_EffectDuration") or "")
+        # A triggered or player-activated clause, and an invoked child's, apply to their targets at resolution and
+        # live on through the linked ledger; an authored static (none of those) is the scan's to project on read.
+        linked = bool(trigger) or bool(raw.get("m_Manual")) or bool(_coverage_stack())
+        if continuous_statics.covered_as_static(clause_duration, trigger, effect.get("m_Modifier"), raw,
+                                                ability_guid=guid,
+                                                effect_guid=_guid(clause.get("m_EffectTemplateId")),
+                                                invoked=bool(_coverage_stack())):
+            # A triggerless clause the native static path projects from its source on read. Nothing runs here, so the
+            # leaf has no execution gaps to check: the scan resolves it (that is what covered_as_static asked).
+            continue
         if modifier in ir_exec_resources.MODIFIERS:
-            missing.extend(ir_exec_resources.coverage_modifier(modifier, effect, clause, raw))
+            missing.extend(ir_exec_resources.coverage_modifier(modifier, effect, clause, raw, linked=linked))
             continue
         if modifier in ("AttackModifier", "DefenseModifier"):
             stat = effect.get("m_Modifier") or {}
-            clause_duration = str(clause.get("m_EffectDuration") or "")
-            if clause_duration not in STAT_DURATIONS and not continuous_statics.covered_as_static(clause_duration, trigger):
+            if clause_duration not in (LINKED_STAT_DURATIONS if linked else STAT_DURATIONS):
                 missing.append(f"stat duration {clause_duration}")
             if stat.get("m_ReplaceExistingValue"):
                 missing.append("stat replaces the existing value")
@@ -1792,7 +1893,7 @@ def coverage(guid: str) -> list[str]:
                 missing.append("stat derived from another card")
         if modifier in GROUP_G_MODIFIERS:
             missing.extend(modifier_gaps(effect.get("m_Modifier") or {},
-                                         str(clause.get("m_EffectDuration") or "")))
+                                         str(clause.get("m_EffectDuration") or ""), linked=linked))
         elif modifier not in SUPPORTED_MODIFIERS:
             missing.append(f"modifier {modifier or '(untagged)'}")
         elif modifier == "CounterModifier" and (

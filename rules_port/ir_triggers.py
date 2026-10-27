@@ -14,6 +14,9 @@ TRIGGER_EVENTS = {
     "CardDealtDamageEvent", "CardAttackedEvent", "CardCastEvent", "CardDrawnEvent",
     "CardDiscardedEvent", "CardCreatedEvent", "AsEntersPlayEvent", "CardGainedIntAttrEvent",
     "GameStartedEvent", "PreGameEvent", "CardReadiedEvent", "CardBlockedEvent",
+    # The three events that carry nothing but a source card and its player, so the interpreter needs no more than the
+    # dispatch already gives it. CardExitedZoneEvent also carries the two collections (its own ``from``/``to``).
+    "CardExitedZoneEvent", "GainChargeEvent", "ChampionHealedEvent",
 }
 
 # Trigger condition classes this module evaluates.
@@ -27,7 +30,8 @@ def event_fields(event_type: str, trigger_source_uid: Any, target_player_uid: An
 
     ``card`` is the trigger source (the native ``ConditionContext.trigger_uid``), ``target_player`` is the event's
     TargetPlayerId (the damaged card's controller for a damage event), ``event_type`` is the event's class name, and
-    ``int_attribute`` is the attribute a CardGainedIntAttrEvent reports."""
+    ``int_attribute`` is the attribute a CardGainedIntAttrEvent reports. ``player`` is set by ``ir_exec.live_event``
+    from the event's own SourcePlayerId, not from here: this function also serves coverage and the synthetic events."""
     return {"event_type": event_type, "card": trigger_source_uid, "target_player": target_player_uid,
             "int_attribute": data.get("event_int_attribute")}
 

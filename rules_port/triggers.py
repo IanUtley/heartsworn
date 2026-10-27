@@ -170,6 +170,30 @@ class NativeTriggerBackend:
                 event_name, event.source_card_id, event.source_player_id,
                 event.target_card_id, event.target_player_id,
                 dict(event.data or {}))
+        # A while-in-play effect has no duration boundary: it ends when its source leaves play or its ability list is
+        # rebuilt (C# AbilityManager.RemoveAbilities). Reconcile those before anything reads the board for this event,
+        # so no trigger fires off a source that is already gone, and push the cards whose projected state changed.
+        from .effect_lifetimes import expire_while_in_play
+        for uid in expire_while_in_play(db, session.session_id, battle_state,
+                                        handler=handler):
+            from pvp_db import db_card_source_info
+            from .runtime_helpers import card_collection_for_location, owner_uid
+            row = db_card_source_info(session.session_id, int(uid), conn=db)
+            if not row:
+                continue
+            template_guid, card_type, location, owner = row
+            scid = game_engine.SessionCardId(game_engine.UID(int(uid)))
+            try:
+                tpl, card_type, _name, cost, attack, defense, gems = \
+                    handler._card_full_data(game, scid, template_guid)
+            except Exception:
+                continue
+            game.push_card_updated(
+                scid, owner_uid(owner or 0, player_uid, ai_uid, battle_state),
+                card_collection_for_location(location), card_type,
+                template_id=tpl, cost=cost, attack=attack, defense=defense,
+                gems=gems, nulling=str(location or "").lower() == "deck")
+
         # AbilityTriggerCardTargetTemplate selects SourceCardId or
         # TargetCardId exactly as carried by the C# TriggerEvent. Do not
         # synthesize a target from the source for event classes that have no
@@ -660,7 +684,9 @@ class NativeTriggerBackend:
                                 handler, game, session, db, player_uid, ai_uid,
                                 battle_state, key[1], source_uid, source_card_owner,
                                 event_name, event.source_card_id, dict(event.data or {}),
-                                target_player_uid=event.target_player_id)
+                                target_player_uid=event.target_player_id,
+                                source_player_uid=event.source_player_id,
+                                instance_id=instance_id)
                         if interpreted is not None:
                             result = interpreted
                         else:
@@ -729,6 +755,7 @@ class NativeTriggerBackend:
                         "trigger_event_type": event_name,
                         "trigger_event_data": dict(event.data or {}),
                         "trigger_target_player_uid": event.target_player_id,
+                        "trigger_source_player_uid": event.source_player_id,
                         "source_owner_uid": source_card_owner,
                         "instance_id": instance_id,
                         **activation_payload})
@@ -773,6 +800,7 @@ class NativeTriggerBackend:
                             "trigger_event_type": event_name,
                             "trigger_event_data": dict(event.data or {}),
                             "trigger_target_player_uid": event.target_player_id,
+                            "trigger_source_player_uid": event.source_player_id,
                             "source_owner_uid": source_card_owner,
                             "instance_id": instance_id,
                             **activation_payload,

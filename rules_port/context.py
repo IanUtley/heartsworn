@@ -1011,8 +1011,9 @@ class EffectContext:
         event.old_damage_value = old_value
         event.new_damage_value = new_value
         self.game._push(event)
-        if new_value > old_value:
-            self.emit_champion_healed(owner, old_value, new_value)
+        # C# Session.SetChampionHealth only publishes ChampionHealthChanged; ChampionHealedEvent is enqueued by
+        # Session.HealChampion alone (after CantGainHealth and the life-gain modifiers).  A SetHeroHealthModifier that
+        # raises a champion's health is therefore not a "gain health" event, so no trigger fires from here.
         return f"set health {old_value}->{new_value}"
 
     def champion_card_uid(self, owner: int) -> int | None:
@@ -1482,7 +1483,8 @@ class EffectContext:
             "event_previous_state": int(row[4] or 0),
         }
         self._emit_trigger("CardExitedZoneEvent", int(target), owner_id,
-                           event_source_collection=row[3])
+                           event_source_collection=row[3],
+                           event_destination_collection="discard")
         self._emit_trigger("CardEnteredZoneEvent", int(target), owner_id,
                            **event_data)
         # Session.DiscardCard enqueues CardDiscardedEvent with the discarding
