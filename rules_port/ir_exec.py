@@ -510,7 +510,8 @@ def _counter_variable(variable: Any, counter: str | None, scope: Scope) -> int:
 # The ability variables the interpreter binds (coverage refuses an ability with any other kind).
 # Variables the native variable evaluator computes (C# IntAttrAbilityVariable, CountListAttrAbilityVariable). The
 # interpreter binds them through that same evaluator, from the ability's authored metadata.
-NATIVE_VARIABLE_KINDS = {"IntAttrAbilityVariable", "CountListAttrAbilityVariable"}
+NATIVE_VARIABLE_KINDS = {"IntAttrAbilityVariable", "CountListAttrAbilityVariable",
+                         "SumVariableInListAttrCardsAbilityVariable"}
 SUPPORTED_VARIABLES = {"AbilityConstant", "AbilityVariable", "CounterVariable", "CardCountAbilityVariable"} \
     | ir_variables.VARIABLE_KINDS | NATIVE_VARIABLE_KINDS
 
@@ -533,9 +534,13 @@ def _native_variable_value(root: MechanicsObject, scope: Scope, name: str) -> in
     from pvp_db import db_ability_raw_json
     from rules_port.static_rules import _expression_value
     context = scope.context
-    raw = db_ability_raw_json(_guid(root.m_AbilityTemplateId), conn=context.db) or "{}"
-    value = _expression_value(context.db, context.session.session_id, context.bstate, scope.source_uid,
-                              scope.owner_uid, raw, name)
+    ability = _guid(root.m_AbilityTemplateId)
+    raw = db_ability_raw_json(ability, conn=context.db) or "{}"
+    # The native list lookups read the resolving ability and its caster from the battle state, as they do while the
+    # live resolver runs the ability; the bridge sets them for this one read.
+    with _bridge_caster(context.bstate, owner=scope.owner_uid, source=scope.source_uid, ability=ability):
+        value = _expression_value(context.db, context.session.session_id, context.bstate, scope.source_uid,
+                                  scope.owner_uid, raw, name)
     return int(value or 0)
 
 

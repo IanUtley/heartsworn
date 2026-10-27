@@ -9,8 +9,8 @@ interpreter never half-runs an ability.
 
 Measured with `AssetExtraction/ir_gap_report.py` over all 8,996 `AbilityTemplate` records:
 
-- Covered by the interpreter: 6,914
-- Refused: 2,081
+- Covered by the interpreter: 6,965
+- Refused: 2,030
 - Coverage check raises on bad Records data: 1 (see Data below)
 
 Regenerate the numbers and the full reason list from the current code and Records:
@@ -22,8 +22,8 @@ python3 AssetExtraction/ir_gap_report.py --top 80 --json /tmp/ir_gaps.json
 The counts below are one ability's refusal reasons each. An ability with several reasons is counted under each.
 
 Closed so far: chosen `SinglePlayer` targets, random targets with a card filter, `PlayedResources` moves,
-turn-boundary durations on attribute and int-attribute modifiers, and the `IntAttrAbilityVariable` and
-`CountListAttrAbilityVariable` variables.
+turn-boundary durations on attribute and int-attribute modifiers, and the `IntAttrAbilityVariable`,
+`CountListAttrAbilityVariable` and `SumVariableInListAttrCardsAbilityVariable` variables.
 
 ## Triggers
 
@@ -70,9 +70,6 @@ entered-zone events in `ir_exec.py`. Other trigger types are refused as `trigger
 
 ## Variables
 
-- `SumVariableInListAttrCardsAbilityVariable` (68, plus 6 invoked). The native evaluator computes it
-  (`_sum_variable` and `_list_sum_variable` in `rules_port/static_rules.py`), so binding it the way
-  `IntAttrAbilityVariable` is bound (`_native_variable_value` in `ir_exec.py`) is the next step.
 - `variable CardIntegerVariable` (19), `card count of different races` (18), `CardSumAbilityVariable` (5),
   `SourcePlayerHealthVariable` (5), `SourcePlayerShardAbilityVariable` (2).
 - `variable TriggerEventDamageProperty` (11), `TriggerSourcePropertyVariable` (6), `TriggerTargetPropertyVariable` (3):
