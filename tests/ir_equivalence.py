@@ -457,9 +457,9 @@ CHAMPION_CASES = [
 ]
 
 TURN_EVENTS = {"TurnStartedEvent", "TurnEndedEvent", "CardEnteredZoneEvent"}
-# Events whose own source card is a champion (Session.AddChargePoints, Session.HealChampion): the ability that
-# reacts is another card's, and the event belongs to the champion's owner.
-CHAMPION_SOURCE_EVENTS = {"GainChargeEvent", "ChampionHealedEvent"}
+# Events whose own source card is a champion (Session.AddChargePoints, Session.HealChampion, and a Fateweave cast by
+# the champion): the ability that reacts is another card's, and the event belongs to the champion's owner.
+CHAMPION_SOURCE_EVENTS = {"GainChargeEvent", "ChampionHealedEvent", "FateweavedEvent"}
 # The zones each setup event is dispatched over, as the live setup calls dispatch them (services/tournament_game.py).
 SETUP_ZONES = {"GameStartedEvent": ("hand", "warzone"), "PreGameEvent": ("deck",)}
 # The live events the interpreter runs beyond the turn and zone events (rules_port/ir_triggers.py).

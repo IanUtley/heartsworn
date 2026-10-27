@@ -17,7 +17,7 @@ TRIGGER_EVENTS = {
     # The three events that carry nothing but a source card and its player, so the interpreter needs no more than the
     # dispatch already gives it. CardExitedZoneEvent also carries the two collections (its own ``from``/``to``).
     "CardExitedZoneEvent", "GainChargeEvent", "ChampionHealedEvent", "CardTransformsEvent",
-    "CardActivatedEvent", "CardBattledEvent",
+    "CardActivatedEvent", "CardBattledEvent", "FateweavedEvent",
 }
 
 # Trigger condition classes this module evaluates.
