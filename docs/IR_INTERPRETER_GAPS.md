@@ -39,7 +39,11 @@ entered-zone events in `ir_exec.py`. Other trigger types are refused as `trigger
   scenario for most setup abilities, because they share their card with other setup abilities and so never fire
   alone. Two covered setup cases did not reach the interpreter in the harness, so their discovery is unverified.
 - `trigger selector TriggerTarget` (135): the trigger's target is chosen by the trigger, not the event.
-- `CardReadiedEvent` (76), `CardExitedZoneEvent` (37), `GainThresholdEvent` (37), `GainChargeEvent` (31),
+- `GainThresholdEvent` (37) and `GainChargeEvent` (31): harness-blocked. The equivalence harness builds scenarios
+  for them, but the native trigger never fires there (50 cases), because the harness does not pass the event data
+  a gain carries (the threshold colour or charge). The events stay refused until the harness fires them, and then
+  they pass against the live result.
+- `CardReadiedEvent` (76), `CardExitedZoneEvent` (37),
   `CardBlockedEvent` (28), `ChampionHealedEvent` (25), and about 40 more event types with fewer than 20 abilities each.
 - Trigger conditions: `TACTriggerCondition` (38), `TriggerAbilityIsChargePower` (14), `trigger condition IntAttrFilter` (12).
 
