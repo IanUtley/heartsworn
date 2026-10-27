@@ -22,9 +22,10 @@ EFFECTS = {
     "ConscriptAbilityEffectTemplate",
 }
 
-# The effects whose target is the player (their champion stands for them). Only Conscript takes a player target as
-# its own meaning. For every other effect here a player target has no card to act on, so it is refused.
-PLAYER_TARGET_EFFECTS = {"ConscriptAbilityEffectTemplate"}
+# The effects whose target is the player (their champion stands for them). Conscript and a transform ("You transform
+# into X") take a player target as their own meaning: the champion is the card transformed, as C# applies the effect to
+# the player's champion card. For every other effect here a player target has no card to act on, so it is refused.
+PLAYER_TARGET_EFFECTS = {"ConscriptAbilityEffectTemplate", "TransformCardAbilityEffectTemplate"}
 
 # The typed amount field an effect reads, when it is not m_InputValue.
 AMOUNT_FIELDS = {"ConscriptAbilityEffectTemplate": "m_Amount"}

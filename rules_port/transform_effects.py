@@ -159,6 +159,13 @@ def _refresh_champion_portrait(context, card_uid, template_guid,
         if champion is None or int(champion.uid.uid64) != int(card_uid):
             continue
         setattr(handler, guid_attr, template_guid)
+        # champ_guid_map is read by controller (the statics, and the interpreter's champion subtype). The champion that
+        # transformed carries its new template there, even when no champ_map names it.
+        if isinstance(guid_map, dict):
+            from .runtime_helpers import champion_owner_id
+            owner = 0 if is_ai else champion_owner_id(handler, context.bstate, card_uid)
+            if owner is not None:
+                guid_map[str(owner)] = template_guid
         # The champion CardDef's abilities come from these lists, and the client
         # shows the charge-power button only when one of them is a charge
         # power (GoHUDPlayer.SetupAbilityButtons). Refresh them so Inferno
