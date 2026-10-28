@@ -3013,8 +3013,9 @@ def db_talent_has_ability_guid(ability_guid, conn=None):
     """Whether a talent authors this ability."""
     connection = conn or _db_layer._db
     return connection.execute(
-        "SELECT 1 FROM talent_data WHERE ability_guid=? AND has_ability=1 LIMIT 1",
-        (str(ability_guid).lower(),)).fetchone() is not None
+        "SELECT 1 FROM talent_data WHERE ability_guid=? AND has_ability=1 "
+        "UNION SELECT 1 FROM talent_abilities WHERE ability_guid=? LIMIT 1",
+        (str(ability_guid).lower(), str(ability_guid).lower())).fetchone() is not None
 
 
 def db_champion_ability_guid_exists(ability_guid, conn=None):
@@ -3030,10 +3031,16 @@ def db_talent_ability_guids(talent_guids, conn=None):
     connection = conn or _db_layer._db
     guids = []
     for talent in talent_guids or ():
+        talent_guid = str(talent).lower()
         for row in connection.execute(
                 "SELECT ability_guid FROM talent_data WHERE talent_guid=? AND has_ability=1 "
-                "ORDER BY rowid", (str(talent).lower(),)).fetchall():
-            if row[0]:
+                "ORDER BY rowid", (talent_guid,)).fetchall():
+            if row[0] and str(row[0]).lower() not in guids:
+                guids.append(str(row[0]).lower())
+        for row in connection.execute(
+                "SELECT ability_guid FROM talent_abilities WHERE talent_guid=? ORDER BY rowid",
+                (talent_guid,)).fetchall():
+            if row[0] and str(row[0]).lower() not in guids:
                 guids.append(str(row[0]).lower())
     return guids
 
