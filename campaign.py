@@ -3128,17 +3128,38 @@ def consume_fortune(db, camp_id, fortune_guid):
     return True
 
 
-def _dungeon_extra_cards(db, camp_id):
-    """The temporary card picks of this campaign's current dungeon run."""
+def _rules_zone_state(db, camp_id):
+    """The rules zone state of this campaign's current location ({} when none)."""
     from campaign_runtime import progress
     row = pve_db.db_campaign_protocol_row(camp_id, conn=db)
     if not row:
-        return []
+        return {}
     zone_id = (json.loads(row[1] or "{}") or {}).get("RulesZone")
     loaded = progress.load(db, row[0]) if zone_id else None
     if not loaded:
+        return {}
+    return loaded[1].get(zone_id) or {}
+
+
+def _dungeon_extra_cards(db, camp_id):
+    """The temporary card picks of this campaign's current dungeon run."""
+    return list(_rules_zone_state(db, camp_id).get("extra_cards") or ())
+
+
+# Gnomes Come Home: the gnomes carried into a fight join its deck as Lost
+# Gnome cards, and every three of them add a Primal Shard (the template GUIDs
+# are Records CardTemplate rows "Lost Gnome" and "Primal Shard").
+LOST_GNOME_CARD_GUID = "4ccb7e5f-bc32-4e9a-b1fe-abf944b27b74"
+PRIMAL_SHARD_CARD_GUID = "4b0e888e-ea2b-4674-acc8-a0292ad3b9ed"
+
+
+def _gnome_carry_cards(db, camp_id):
+    """The gnome cards the player's deck gains before this battle (none if no gnome is carried)."""
+    counters = _rules_zone_state(db, camp_id).get("counters") or {}
+    carried = int(counters.get("gnomes_carried", 0) or 0)
+    if carried < 1:
         return []
-    return list((loaded[1].get(zone_id) or {}).get("extra_cards") or ())
+    return [LOST_GNOME_CARD_GUID] * carried + [PRIMAL_SHARD_CARD_GUID] * (carried // 3)
 
 
 def resolve_battle_config(handler, db, camp_id, session_name):
@@ -3300,7 +3321,7 @@ def resolve_battle_config(handler, db, camp_id, session_name):
         "gnd_name": gnd_name,
         "player_champ_guid": player_champ_override or player_champ_guid,
         "player_deck_cards_json": player_deck_cards_json,
-        "extra_deck_cards": _dungeon_extra_cards(db, camp_id),
+        "extra_deck_cards": _dungeon_extra_cards(db, camp_id) + _gnome_carry_cards(db, camp_id),
         "player_talents_json": player_talents_json,
         "player_starting_health": player_starting_health,
         "is_tutorial": is_tutorial,
