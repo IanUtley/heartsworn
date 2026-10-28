@@ -508,6 +508,18 @@ COUNTER_CASES = [
      "event": "IlluminatedEvent", "opposing": [], "prepare": _nothing, "event_source": "player", "any_template": True},
     {"name": "When you Illuminate: this gets cost -1 in all zones", "ability": "6f201580", "event": "IlluminatedEvent",
      "opposing": [], "prepare": _nothing, "event_source": "player", "any_template": True},
+    # Verdict abilities: the keyword's event is sourced on the player's side, with the ability on a troop.
+    {"name": "When you Verdict: this deals damage equal to its ATK to each opposing champion", "ability": "a10ac1af",
+     "event": "VerdictEvent", "opposing": [], "prepare": _nothing, "event_source": "player", "any_template": True},
+    {"name": "When you Verdict: this deals damage equal to its ATK to each opposing champion (second)",
+     "ability": "5dc14d49", "event": "VerdictEvent", "opposing": [], "prepare": _nothing, "event_source": "player",
+     "any_template": True},
+    {"name": "When you Verdict: this gets +1/+1 and Lifedrain this turn", "ability": "91181914",
+     "event": "VerdictEvent", "opposing": [], "prepare": _nothing, "event_source": "player", "any_template": True},
+    {"name": "Once per turn: When you Verdict, summon a token", "ability": "2be48369", "event": "VerdictEvent",
+     "opposing": [], "prepare": _nothing, "event_source": "player", "any_template": True},
+    {"name": "When you Verdict: this gets +1 ATK", "ability": "7fa5c876", "event": "VerdictEvent",
+     "opposing": [], "prepare": _nothing, "event_source": "player", "any_template": True},
 ]
 CHAMPION_CASES = [
     {"name": "Champion built-in Burning: end of your turn", "ability": "82598d69",
