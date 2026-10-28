@@ -539,7 +539,8 @@ def _counter_variable(variable: Any, counter: str | None, scope: Scope) -> int:
 # Variables the native variable evaluator computes (C# IntAttrAbilityVariable, CountListAttrAbilityVariable). The
 # interpreter binds them through that same evaluator, from the ability's authored metadata.
 NATIVE_VARIABLE_KINDS = {"IntAttrAbilityVariable", "CountListAttrAbilityVariable",
-                         "SumVariableInListAttrCardsAbilityVariable", "CardIntegerVariable"}
+                         "SumVariableInListAttrCardsAbilityVariable", "CardIntegerVariable",
+                         "SourcePlayerHealthVariable"}
 DAMAGE_PROPERTY_VARIABLE = "TriggerEventDamageProperty"
 SUPPORTED_VARIABLES = {"AbilityConstant", "AbilityVariable", "CounterVariable", "CardCountAbilityVariable",
                        DAMAGE_PROPERTY_VARIABLE} | ir_variables.VARIABLE_KINDS | NATIVE_VARIABLE_KINDS
