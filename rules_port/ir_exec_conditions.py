@@ -30,6 +30,10 @@ BRIDGED_CONDITIONS = frozenset({
     "RequiresSourcePassesFilterCondition", "RequiresTotalResources", "SourceCardHasCounters",
     "SourceCardHasKeywords", "TACTriggerCondition", "TurnPhaseCondition", "NotEffectCondition",
     "TriggerPlayerControlsCard",
+    # Trigger tests the native evaluator reads from the event and the ability (conditions.evaluate_condition).
+    "TriggerCardIsNthCardDrawnThisTurnByThisPlayer", "TriggerAbilityHasSpellPointCostModifier",
+    "TriggerAbilityIsSpellPower", "TriggerAbilityHasUsesPerGameValue", "RequiresEncounterGameboard",
+    "TriggerCardSameNameInZone",
 })
 
 # Filter classes the live predicate set has, but whose result depends on state the interpreter does not set: the
