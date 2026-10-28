@@ -1553,14 +1553,47 @@ def _effect_amount(effect_raw: dict[str, Any], scope: Scope) -> int | None:
 
 def _randomize_variable(effect_raw: dict[str, Any], scope: Scope) -> None:
     """C# RandomizeVariableEffectTemplate: a number from the minimum to the maximum, inclusive, drawn from the
-    session RNG (rules_port.context.randomize_variable), kept in the ability's variables under the name."""
+    session RNG, kept in the ability's variables under the name. A maximum field (a constant or a variable) replaces
+    the stored maximum. ``m_SecondValue`` rolls a second number, distinct when the range holds two values, into
+    "<name>2" (C# Apply; the native randomize_variable caps the re-rolls at 100 the same way)."""
     from rules_port.runtime_helpers import rng_below
     minimum, maximum = int(effect_raw.get("m_MinValue") or 0), int(effect_raw.get("m_MaxValue") or 0)
+    field = effect_raw.get("m_MaxValueField")
+    if field:
+        maximum = _effect_field_value(field, scope)
     if minimum > maximum:
         minimum, maximum = maximum, minimum
     span = max(0, maximum - minimum) + 1
-    scope.variables[str(effect_raw.get("m_VariableName") or "RandomNumber")] = \
-        minimum + int(rng_below(scope.context.bstate, span)) % span
+    bstate = scope.context.bstate
+
+    def roll() -> int:
+        return minimum + int(rng_below(bstate, span)) % span
+
+    name = str(effect_raw.get("m_VariableName") or "RandomNumber")
+    value = roll()
+    scope.variables[name] = value
+    if effect_raw.get("m_SecondValue"):
+        second = value
+        if maximum - minimum >= 2:
+            attempts = 0
+            while second == value and attempts < 100:
+                second = roll()
+                attempts += 1
+        if second != value:
+            scope.variables[name + "2"] = second
+
+
+def _effect_field_value(field: dict[str, Any], scope: Scope) -> int:
+    """A typed effect field's value: a constant, or the bound value of the variable it names."""
+    kind = _short(field.get("_t"))
+    if kind == "EffectConstant":
+        return int(field.get("m_Value") or 0)
+    if kind != "EffectInputVariable":
+        raise NotImplementedError(f"effect field {kind}")
+    name = str(field.get("m_InputVariableName") or "")
+    if name not in scope.variables:
+        raise KeyError(f"variable {name} is not bound")
+    return int(scope.variables[name])
 
 
 def _revealed_target_empty(root: MechanicsObject, index: int, scope: Scope) -> bool:
@@ -2069,8 +2102,9 @@ def coverage(guid: str) -> list[str]:
                 missing.append(f"reveal to {effect.get('m_PlayerRevealTargets')}")
             continue
         if kind == "RandomizeVariableEffectTemplate":
-            if effect.get("m_SecondValue") or effect.get("m_MaxValueField"):
-                missing.append("random variable with a second value or a dynamic bound")
+            field = effect.get("m_MaxValueField")
+            if field and _short(field.get("_t")) not in ("EffectInputVariable", "EffectConstant"):
+                missing.append(f"random variable bound {_short(field.get('_t'))}")
             continue
         if kind == "RepeatingAbilityEffectTemplate":
             missing.extend(_repeat_gaps(effect))
