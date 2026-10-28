@@ -931,8 +931,17 @@ def _run_clause(root: MechanicsObject, clause: Any, scope: Scope) -> None:
         from rules_port.stat_effects import apply_stat_mod
         amount = _input_value(modifier, scope)
         duration = str(_field(clause, "m_EffectDuration") or "")
+        replace = bool(getattr(modifier, "m_ReplaceExistingValue", False))
         for target in _targets(root, index, scope):
-            attack, defense = (amount, 0) if kind == "AttackModifier" else (0, amount)
+            value = amount
+            if replace:
+                # C# sets the card's value to the amount (ContextAttackValue = num). The buff that reaches it is the
+                # difference from its value now.
+                from rules_port.static_rules import effective_stats
+                current = effective_stats(scope.context.db, scope.context.session.session_id, scope.context.bstate,
+                                          int(target))
+                value = amount - int(current[0] if kind == "AttackModifier" else current[1])
+            attack, defense = (value, 0) if kind == "AttackModifier" else (0, value)
             apply_stat_mod(scope.context, target, attack, defense, this_turn=duration == "EndOfTurn",
                            duration=duration if duration in LINKED_STAT_DURATIONS else None)
         return
@@ -2168,8 +2177,6 @@ def coverage(guid: str) -> list[str]:
             stat = effect.get("m_Modifier") or {}
             if clause_duration not in (LINKED_STAT_DURATIONS if linked else STAT_DURATIONS):
                 missing.append(f"stat duration {clause_duration}")
-            if stat.get("m_ReplaceExistingValue"):
-                missing.append("stat replaces the existing value")
             if str(stat.get("m_Property") or "Unknown") != "Unknown":
                 missing.append(f"stat property {stat.get('m_Property')}")
             if _short((stat.get("m_InputValue") or {}).get("_t")) not in ("EffectInputVariable", "EffectConstant"):
