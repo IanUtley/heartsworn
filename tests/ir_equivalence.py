@@ -844,7 +844,7 @@ def choice_parity(case, index):
     that answer and the native resolver run with the same target map must leave the same battle and client events.
     Returns (passed, detail)."""
     from rules_port.context import EffectContext
-    from rules_port.ir_exec import NeedsChoice, resume_ability, run_ability
+    from rules_port.ir_exec import NeedsChoice, _guid, _load, resume_ability, run_ability, target_count
     from rules_port.resolution import resolve_port_ability
 
     event = case.get("event_data") or {"player": TROOP_OWNER}
@@ -863,9 +863,19 @@ def choice_parity(case, index):
         return None, "the ability did not pause for a choice"
     except NeedsChoice as pause:
         candidates = list(pause.candidates)
+        index = int(pause.continuation["target_index"])
+        root = _load("AbilityTemplate", pause.continuation["ability_guid"])
+        template = _load("AbilityTargetTemplate", _guid(root.m_AbilityTargetTemplateIds[index]))
+        most = target_count(template.m_MaxTargetCount, {})
     if not candidates:
         return None, "no candidate for the choice"
-    for answer in candidates:
+    # A chosen target of one card is answered with each candidate; a target of several is answered with the picks it
+    # takes (the first ``most`` candidates, or all of them when it has no limit), as one list.
+    if most == 1:
+        answers = candidates
+    else:
+        answers = [candidates[:most or len(candidates)]]
+    for answer in answers:
         db, pl_t, ai_t, game, handler, bstate, player_champ, ai_champ, start, context = fresh()
         try:
             run_ability(case["ability"], case["event"], context=context, source_uid=SOURCE_UID,
@@ -899,9 +909,15 @@ def choice_cases(limit):
         indices = _chosen_targets(record.guid.lower())
         if not indices or coverage(record.guid.lower()) or _any_template(db, record.guid.lower()) is None:
             continue
+        # A crypt's troops are the candidates of an ability that names one with its only chosen target (the harness answers
+        # that target alone; an ability with a second chosen target is answered by its forced pick on one side only).
+        crypt = [(610, TROOP_OWNER, "discard", "{}"), (611, TROOP_OWNER, "discard", "{}"),
+                 (612, TROOP_OWNER, "discard", "{}")] \
+            if "crypt" in str(raw.get("m_GameText", "")).lower() and len(indices) == 1 else []
         cases.append((
             {"name": f"choice {event}: {raw.get('m_GameText', '')[:70]}", "ability": record.guid.lower(),
-             "event": event, "opposing": [(502, 0), (503, 0)], "extra": [(600, TROOP_OWNER, "warzone", "{}"), (601, TROOP_OWNER, "warzone", "{}")],
+             "event": event, "opposing": [(502, 0), (503, 0)],
+             "extra": [(600, TROOP_OWNER, "warzone", "{}"), (601, TROOP_OWNER, "warzone", "{}")] + crypt,
              "event_data": ({"player": TROOP_OWNER, "card": SOURCE_UID, "from": "hand", "to": "warzone"}
                             if event == "CardEnteredZoneEvent" else None),
              "prepare": _nothing, "moved": None},

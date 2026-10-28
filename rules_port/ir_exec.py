@@ -642,7 +642,9 @@ def _resolved_targets(root: MechanicsObject, index: int, scope: Scope) -> list[i
             and index in scope.chosen:
         # A chosen target the player has answered: the card, or nothing when the player chose none.
         chosen = scope.chosen[index]
-        return [] if chosen is None else [int(chosen)]
+        if chosen is None:
+            return []
+        return [int(uid) for uid in chosen] if isinstance(chosen, list) else [int(chosen)]
     if kind == "PlayerTargetTemplate":
         # An automatic player target: the controller ("You") or the one opponent. Its champion stands for
         # the player, as the live resolver's player target does for damage and the summoned tokens' owner.
@@ -722,8 +724,8 @@ def _revealed_candidates(template: MechanicsObject, index: int, scope: Scope) ->
     "remaining cards" of an effect are the revealed cards the first target did not take)."""
     revealed = [int(uid) for uid in (scope.context.bstate.get("revealed_cards") or [])]
     zones = _zones_of(template.m_CollectionFlags)
-    taken = {int(value) for position, value in scope.chosen.items()
-             if position != index and value is not None}
+    taken = {int(uid) for position, value in scope.chosen.items() if position != index and value is not None
+             for uid in (value if isinstance(value, list) else [value])}
     cards = {card.uid: card for card in _battle_cards(scope)}
     return [uid for uid in revealed
             if uid in cards and uid not in taken
@@ -1197,7 +1199,7 @@ def run_ability(guid: str, event_type: str, *, context: Any, source_uid: int,
         return False
     if not _condition_holds(root.m_TriggerCondition, scope):
         return False
-    scope.chosen = {int(k): (None if v is None else int(v)) for k, v in (answers or {}).items()}
+    scope.chosen = {int(k): _chosen_value(v) for k, v in (answers or {}).items()}
     try:
         fired = _run_effects(guid, root, scope, start=0)
     except NeedsChoice:
@@ -1520,6 +1522,25 @@ def _append_chain(continuation: dict[str, Any], outer: dict[str, Any] | None) ->
     node["parent"] = outer
 
 
+def _chosen_value(value: Any) -> int | list[int] | None:
+    """A chosen target's answer as a scope keeps it: None (no card), a card, or the list of cards a target that takes
+    several cards was given."""
+    if value is None:
+        return None
+    if isinstance(value, (list, tuple, set)):
+        return [int(uid) for uid in value]
+    return int(value)
+
+
+def _check_pick_count(root: MechanicsObject, index: int, picked: int) -> None:
+    """A chosen target's pick count must lie between its minimum and its maximum (a maximum of 0 is no limit)."""
+    template = _load("AbilityTargetTemplate", _guid(root.m_AbilityTargetTemplateIds[index]))
+    most = target_count(template.m_MaxTargetCount, {})
+    least = target_count(template.m_MinTargetCount, {})
+    if (most and picked > most) or picked < least:
+        raise ValueError(f"{picked} cards picked for a target of {least} to {most}")
+
+
 def _frame_scope(frame: dict[str, Any], context: Any) -> tuple[MechanicsObject, Scope]:
     """The root and scope of one frame of a paused ability, as it was when the frame paused."""
     root = _load("AbilityTemplate", frame["ability_guid"])
@@ -1529,7 +1550,7 @@ def _frame_scope(frame: dict[str, Any], context: Any) -> tuple[MechanicsObject, 
                   invoked=bool(frame.get("invoked")),
                   instance_id=(None if frame.get("instance_id") is None
                                else int(frame["instance_id"])))
-    scope.chosen = {int(k): (None if v is None else int(v)) for k, v in frame["chosen"].items()}
+    scope.chosen = {int(k): _chosen_value(v) for k, v in frame["chosen"].items()}
     scope.picked = {int(k): [int(uid) for uid in v] for k, v in (frame.get("picked") or {}).items()}
     # The variables the frame had bound (a random branch's number, say) are part of its state, so the resumed effects
     # see the same values the paused run did.
@@ -1550,13 +1571,24 @@ def resume_ability(continuation: dict[str, Any], answer: int | None, *, context:
     then resume after their invoke clauses, outermost last."""
     index = int(continuation["target_index"])
     candidates = [int(uid) for uid in continuation["candidates"]]
+    picks = None
     if answer is None:
         if not continuation["optional"]:
             raise ValueError("this choice is not optional")
-    elif int(answer) not in candidates:
-        raise ValueError(f"{answer} is not a candidate of this choice")
+    else:
+        picks = [int(uid) for uid in answer] if isinstance(answer, (list, tuple, set)) else [int(answer)]
+        if len(set(picks)) != len(picks):
+            raise ValueError("a card is picked twice")
+        for uid in picks:
+            if uid not in candidates:
+                raise ValueError(f"{uid} is not a candidate of this choice")
     root, scope = _frame_scope(continuation, context)
-    scope.chosen[index] = None if answer is None else int(answer)
+    if picks is not None:
+        _check_pick_count(root, index, len(picks))
+    if picks is None:
+        scope.chosen[index] = None
+    else:
+        scope.chosen[index] = picks if isinstance(answer, (list, tuple, set)) else picks[0]
     outer = continuation.get("parent")
     try:
         _run_effects(continuation["ability_guid"], root, scope, start=int(continuation["position"]))
@@ -1739,10 +1771,6 @@ def coverage(guid: str) -> list[str]:
         if kind == "AbilityTargetTemplate" and player_filter not in TARGET_PLAYER_FILTERS and not chain_card \
                 and not chosen_single_player:
             missing.append(f"target player filter {template.get('m_PlayerFilter')}")
-        if kind == "AbilityTargetTemplate" and not template.get("m_IsAutoTarget") and \
-                target_count(_load("AbilityTargetTemplate", template_guid).m_MaxTargetCount, {}) != 1:
-            # The player picks one card; a chosen target of several cards (or no limit) is not modelled.
-            missing.append("chosen target of more than one card")
         if kind in FOLLOW_UP_KINDS:
             missing.extend(follow_up_gaps(template, kind))
         if template.get("m_IsRandomTarget") and template.get("m_CardFilter") is None \
@@ -1753,14 +1781,14 @@ def coverage(guid: str) -> list[str]:
         for name in _tagged_classes(template.get("m_CardFilter"), []):
             if name not in SUPPORTED_FILTERS and not bridge.filter_accepted(name):
                 missing.append(f"filter {name}")
-        # The interpreter picks cards for a target index: one for a chosen target, and the automatic target's cards (the
-        # first ``count`` candidates, or a random pick of them) for an automatic one, as the native resolver takes them. A
-        # chosen target of several cards, or a count that varies, is refused.
+        # The interpreter picks cards for a target index: the player's picks for a chosen target (one, or several within a
+        # constant count), and the automatic target's cards (the first ``count`` candidates, or a random pick of them), as
+        # the native resolver takes them. A count that varies is refused, and so is several cards for any other kind.
         for bound in ("m_MinTargetCount", "m_MaxTargetCount"):
             count = template.get(bound)
             if isinstance(count, dict) and count.get("m_Value") is not None and int(count["m_Value"]) != 1 \
                     and not (bound == "m_MinTargetCount" and int(count["m_Value"]) == 0) \
-                    and not (template.get("m_IsAutoTarget") and kind == "AbilityTargetTemplate"):
+                    and kind != "AbilityTargetTemplate":
                 missing.append(f"multi-card target ({bound} {count['m_Value']})")
             elif isinstance(count, dict) and count.get("m_Value") is None:
                 missing.append(f"variable target count ({bound})")

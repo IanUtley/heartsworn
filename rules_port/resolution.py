@@ -2032,13 +2032,14 @@ def resolve_port_played_permanent(game, session, db, handler, player_uid,
     return result
 
 
-def _answers_from_target_map(target_map: dict[Any, Any]) -> dict[int, int | None]:
-    """A chain item's target map as the interpreter's answers: each target index to the card chosen, or None."""
-    answers: dict[int, int | None] = {}
+def _answers_from_target_map(target_map: dict[Any, Any]) -> dict[int, int | list[int] | None]:
+    """A chain item's target map as the interpreter's answers: each target index to the card chosen, the list of cards
+    when several were chosen, or None."""
+    answers: dict[int, int | list[int] | None] = {}
     for index, value in (target_map or {}).items():
         values = value if isinstance(value, (list, tuple, set)) else (value,)
         chosen = [int(item) for item in values if item is not None and str(item).lstrip("-").isdigit()]
-        answers[int(index)] = chosen[0] if chosen else None
+        answers[int(index)] = chosen if len(chosen) > 1 else (chosen[0] if chosen else None)
     return answers
 
 
