@@ -523,12 +523,18 @@ def _project_card(row, battle_state=None, db=None, session_id=None):
             "original_template_guid": original_guid or ""}
     if (db is not None and session_id is not None and
             not (battle_state or {}).get("_rules_port_suppress_card_properties")):
-        from .static_rules import effective_card_properties
+        from .static_rules import effective_card_properties, effective_stats
         thresholds, current_subtype = effective_card_properties(
             db, session_id, battle_state or {}, int(uid))
         card["shards"] = thresholds
         card["subtype"] = current_subtype
         card["thresholds"] = thresholds
+        # C# filters read a card's current attack and defense (buffs and statics included), not the printed column.
+        try:
+            card["attack"], card["defense"] = (int(value) for value in
+                                               effective_stats(db, session_id, battle_state or {}, int(uid))[:2])
+        except RuntimeError:
+            pass
     return card
 
 
@@ -914,10 +920,18 @@ def _legal_targets(db, session_id, controller_uid, template_id, source_uid,
                     int(controller_uid or 0), is_auto)):
                 continue
             filter_source = card if player_target else source
+            # The champion's own filter reads the board too (a players-who-control count, say), so its context carries
+            # the same card pool the card scan above does.
+            context = _FilterContext(battle_state or {})
+            known = {int(candidate["card_uid"]) for candidate in global_cards}
+            context["cards"] = global_cards
+            context["all_cards"] = list(global_cards) + [
+                candidate for candidate in champion_cards
+                if int(candidate["card_uid"]) not in known]
             try:
                 predicate = records_filter_evaluator(
                     filter_json, source=filter_source,
-                    context=_FilterContext(battle_state or {}),
+                    context=context,
                     player=int(controller_uid or 0))
                 is_match = predicate(card)
             except (TypeError, ValueError, KeyError):

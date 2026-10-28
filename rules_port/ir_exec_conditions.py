@@ -40,7 +40,7 @@ BRIDGED_CONDITIONS = frozenset({
 # stored targets, the chain stack, the movement history, or the other players' cards. They are refused.
 DENIED_FILTERS = frozenset({
     "IsStoredCardFilter", "MatchesTargetFilter", "HasASharedShardWithTopOfChainFilter",
-    "MovedBySource", "PlayersWhoControlMatchingFilter",
+    "MovedBySource",
 })
 
 _COMBINATORS = frozenset({"AndCardFilter", "OrCardFilter", "NotCardFilter"})
