@@ -867,11 +867,16 @@ def choice_parity(case, index):
         root = _load("AbilityTemplate", pause.continuation["ability_guid"])
         template = _load("AbilityTargetTemplate", _guid(root.m_AbilityTargetTemplateIds[index]))
         most = target_count(template.m_MaxTargetCount, {})
+        chooser = pause.continuation.get("owner_uid")
     if not candidates:
         return None, "no candidate for the choice"
     # A chosen target of one card is answered with each candidate; a target of several is answered with the picks it
     # takes (the first ``most`` candidates, or all of them when it has no limit), as one list.
-    if most == 1:
+    if most == 1 and chooser == OPPOSING_OWNER:
+        # The AI chooses one of its own troops (the sacrifice of "may sacrifice a troop"): any of them is legal, and the
+        # native resolver takes the first, so the interpreter is answered with that one.
+        answers = candidates[:1]
+    elif most == 1:
         answers = candidates
     else:
         answers = [candidates[:most or len(candidates)]]
