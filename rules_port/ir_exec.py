@@ -1002,7 +1002,9 @@ def _repeat_gaps(effect: dict[str, Any]) -> list[str]:
         gaps.append("random invocation")
     child = _guid(inner.get("m_AbilityToInvoke"))
     stack = _coverage_stack()
-    if child in stack:
+    if child == "00000000-0000-0000-0000-000000000000":
+        gaps.append("repeat of an invoke with no ability")
+    elif child in stack:
         gaps.append("recursive invocation")
     else:
         stack.add(child)
@@ -1972,7 +1974,9 @@ def coverage(guid: str) -> list[str]:
                 missing.append("random invocation")
             child = _guid(effect.get("m_AbilityToInvoke"))
             stack = _coverage_stack()
-            if child in stack:
+            if child == "00000000-0000-0000-0000-000000000000":
+                missing.append("invoke with no ability")
+            elif child in stack:
                 missing.append("recursive invocation")
             else:
                 stack.add(child)

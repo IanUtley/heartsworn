@@ -18,6 +18,8 @@ TRIGGER_EVENTS = {
     # dispatch already gives it. CardExitedZoneEvent also carries the two collections (its own ``from``/``to``).
     "CardExitedZoneEvent", "GainChargeEvent", "ChampionHealedEvent", "CardTransformsEvent",
     "CardActivatedEvent", "CardBattledEvent", "FateweavedEvent", "GainThresholdEvent",
+    # Its source is the conscripted card (as native publishes it), so the card's own filters read it.
+    "ConscriptEvent",
 }
 
 # Trigger condition classes this module evaluates.
