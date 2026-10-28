@@ -20,7 +20,12 @@ EFFECTS = {
     "CreateTokenCopyAbilityEffectTemplate",
     "TransformSelfAbilityEffectTemplate",
     "ConscriptAbilityEffectTemplate",
+    "CreateTokenMatchingTargetAbilityEffectTemplate",
 }
+
+# The TAC flags a matching token takes: SameName narrows the pool to the target's own template, SameOwner creates the
+# copies under the target's controller.
+MATCHING_FLAGS = ("SameName", "SameOwner")
 
 # The effects whose target is the player (their champion stands for them). Conscript and a transform ("You transform
 # into X") take a player target as their own meaning: the champion is the card transformed, as C# applies the effect to
@@ -67,8 +72,10 @@ def refusals(kind: str, effect: dict[str, Any], target_kind: str) -> list[str]:
     missing: list[str] = []
     data = tac_data(effect.get("m_SerializedTAC"))
     copy_form = stored_copy(kind, effect)
-    if kind != "TransformCardAbilityEffectTemplate":
-        allowed: tuple[str, ...] = ()
+    if kind == "CreateTokenMatchingTargetAbilityEffectTemplate":
+        allowed: tuple[str, ...] = MATCHING_FLAGS
+    elif kind != "TransformCardAbilityEffectTemplate":
+        allowed = ()
     else:
         allowed = STORED_COPY_FLAGS if copy_form else TRANSFORM_FLAGS
     if data and not (allowed and _only_flags(data, allowed)):
@@ -161,6 +168,15 @@ def _copy_token(context: Any, target: int, count: int | None) -> None:
     create_token_copy(context, count=count)
 
 
+def _create_matching(context: Any, target: int, count: int | None) -> None:
+    # C# CreateTokenMatchingTargetAbilityEffectTemplate: copies of the target's pool, as many as the effect's count, at
+    # the authored collection and location (the native leaf the resolver runs).
+    from rules_port.token_effects import create_matching_target
+    collection = str(context.template_value("m_CardCollection", "Warzone") or "Warzone")
+    deck_location = str(context.template_value("m_CardLocation", "") or "").rsplit(".", 1)[-1].lower()
+    create_matching_target(context, int(target), 1 if count is None else int(count), collection, deck_location)
+
+
 _RUNNERS: dict[str, Callable[[Any, int, int | None], None]] = {
     "TunnelAbilityEffectTemplate": _tunnel,
     "TransformCardAbilityEffectTemplate": _transform,
@@ -168,4 +184,5 @@ _RUNNERS: dict[str, Callable[[Any, int, int | None], None]] = {
     "CreateTokenCopyAbilityEffectTemplate": _copy_token,
     "TransformSelfAbilityEffectTemplate": _transform_self,
     "ConscriptAbilityEffectTemplate": _conscript,
+    "CreateTokenMatchingTargetAbilityEffectTemplate": _create_matching,
 }
