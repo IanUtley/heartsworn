@@ -34,7 +34,6 @@ def _is_set(value: Any) -> bool:
 
 def unsupported_costs(raw: dict[str, Any]) -> list[str]:
     """The cost constructs of an AbilityTemplate that the interpreter cannot resolve (empty when it can)."""
-    missing: list[str] = []
-    if _is_set(raw.get("m_VariableActivationCost")):
-        missing.append("cost or optional (m_VariableActivationCost)")
-    return missing
+    # A variable activation cost is paid before the chain (its X is the activation's), and the chain puts that X in the
+    # battle state (bstate["x_cost"]), which the X variable reads.
+    return []

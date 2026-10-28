@@ -703,11 +703,11 @@ def test_a_cost_that_selects_cards_runs_once_the_cards_are_paid():
     assert coverage(COLDHEART_REAVER_ABILITY_GUID) == []
 
 
-def test_a_variable_activation_cost_stays_on_the_native_path():
-    """The X value of a variable activation cost is not passed to the interpreter."""
+def test_a_variable_activation_cost_is_paid_before_the_interpreter_runs():
+    """The X of a variable activation cost is paid before the chain, and the chain's X reaches the interpreter."""
     from rules_port.ir_exec import coverage
 
-    assert "cost or optional (m_VariableActivationCost)" in coverage(X_COST_ABILITY_GUID)
+    assert "cost or optional (m_VariableActivationCost)" not in coverage(X_COST_ABILITY_GUID)
 
 
 def test_a_zero_resource_id_is_not_a_set_cost():
@@ -716,7 +716,6 @@ def test_a_zero_resource_id_is_not_a_set_cost():
     assert unsupported_costs({"m_ExhaustTarget": {"m_Guid": "00000000-0000-0000-0000-000000000000"},
                               "m_DiscardTargets": []}) == []
     assert unsupported_costs({"m_DiscardTargets": [{"m_Guid": "84e4acf1-1f2e-abac-069d-8c6eb18b2b12"}]}) == []
-    assert unsupported_costs({"m_VariableActivationCost": True}) == [
-        "cost or optional (m_VariableActivationCost)"]
+    assert unsupported_costs({"m_VariableActivationCost": True}) == []
     assert unsupported_costs({"m_ActivationCost": 2, "m_LifeCost": 1, "m_CounterCosts": []}) == []
 
