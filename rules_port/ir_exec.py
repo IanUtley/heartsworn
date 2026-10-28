@@ -554,7 +554,9 @@ def _counter_variable(variable: Any, counter: str | None, scope: Scope) -> int:
 NATIVE_VARIABLE_KINDS = {"IntAttrAbilityVariable", "CountListAttrAbilityVariable",
                          "SumVariableInListAttrCardsAbilityVariable", "CardIntegerVariable",
                          "SourcePlayerHealthVariable", "CardSumAbilityVariable", "TriggerSourcePropertyVariable",
-                         "TriggerTargetPropertyVariable"}
+                         "TriggerTargetPropertyVariable", "SourcePlayerChargeVariable",
+                         "SourcePlayerResourceAbilityVariable", "SourcePlayerShardAbilityVariable",
+                         "SourcePlayerBriarLegionVariable"}
 DAMAGE_PROPERTY_VARIABLE = "TriggerEventDamageProperty"
 SUPPORTED_VARIABLES = {"AbilityConstant", "AbilityVariable", "CounterVariable", "CardCountAbilityVariable",
                        DAMAGE_PROPERTY_VARIABLE} | ir_variables.VARIABLE_KINDS | NATIVE_VARIABLE_KINDS
