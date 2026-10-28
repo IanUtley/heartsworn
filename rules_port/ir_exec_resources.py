@@ -73,15 +73,15 @@ def coverage_modifier(kind: str, effect: dict[str, Any], clause: dict[str, Any],
     if kind == CARD_THRESHOLD_MODIFIER:
         # Its thresholds are set on each card it names, with no amount to read.
         return missing
-    if ix._short((modifier.get("m_InputValue") or {}).get("_t")) not in ("EffectInputVariable", "EffectConstant"):
+    # A half-health loss has no amount to read: the champion's health is halved when it runs (C# LoseHalfHealth).
+    if ix._short((modifier.get("m_InputValue") or {}).get("_t")) not in ("EffectInputVariable", "EffectConstant") \
+            and not (kind == "LoseLifeModifier" and modifier.get("m_LoseHalfHealth")):
         missing.append(f"{kind} without a typed amount")
     player = _player_filter(raw, index)
     if player is not None and player not in ix.SUPPORTED_PLAYER_TARGETS:
         missing.append(f"{kind} for player {player}")
     if kind == "ChargePointsModifier" and modifier.get("m_RemoveAllCharges"):
         missing.append("remove all charges")
-    if kind == "LoseLifeModifier" and modifier.get("m_LoseHalfHealth"):
-        missing.append("lose half health")
     return missing
 
 
@@ -139,6 +139,11 @@ def run_modifier(kind: str, modifier: MechanicsObject, root: MechanicsObject, cl
                 "setthresholds": bool(modifier.m_SetThresholds),
                 "copysourcecard": bool(modifier.m_CopySourceCard),
             })
+        return
+    if kind == "LoseLifeModifier" and getattr(modifier, "m_LoseHalfHealth", False):
+        # C# LoseHalfHealth: the champion loses half its current health, rounded down (context.lose_life halves it).
+        for target in ix._targets(root, index, scope):
+            context.lose_life(int(target), 0, {"lose_half_health": True})
         return
     amount = ix._input_value(modifier, scope)
     for target in ix._targets(root, index, scope):
