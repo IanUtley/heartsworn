@@ -24,7 +24,7 @@ TRIGGER_EVENTS = {
     "TurnPhaseEvent",
     # The "would" events carry the damage (and whether it is combat damage) in their event TAC.
     "CardWouldDealDamageEvent", "CardWouldBeDamagedEvent",
-    "ChampionWouldLoseEvent",
+    "ChampionWouldLoseEvent", "CardWouldEnterZoneEvent",
 }
 
 # Trigger condition classes this module evaluates.
