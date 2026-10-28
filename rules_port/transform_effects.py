@@ -244,8 +244,10 @@ def _transform_champion_without_row(context, card_uid, owner_id,
 
 def transform_instance(context, card_uid, new_template_guid, *, keep_zone=True,
                        reverted=False, copy_from_uid=None, is_replica=False,
-                       event_gems=None, trigger_already_dispatched=False):
-    """Transform one live card while preserving its SessionCardId/state."""
+                       event_gems=None, trigger_already_dispatched=False,
+                       original_template_guid=None):
+    """Transform one live card while preserving its SessionCardId/state. ``original_template_guid`` is set for an
+    irreversible transform (C# m_OriginalCardTemplateId), and is recorded on the card's row."""
     from pvp_db import (db_card_owner_location_position,
                         db_card_owner_zone_state, db_copy_template_payload,
                         db_transform_card_instance, db_card_attribute_value,
@@ -357,6 +359,11 @@ def transform_instance(context, card_uid, new_template_guid, *, keep_zone=True,
         old_state, conn=context.db,
         preserve_instance_state=copy_from_uid is not None,
         gems=original_gems if reverted else None)
+    if original_template_guid is not None:
+        # C# TransformCardAbilityEffectTemplate.Apply: an irreversible transform records its original template on the card.
+        context.db.execute(
+            "UPDATE game_cards SET original_template_guid=? WHERE session_id=? AND card_uid=?",
+            (str(original_template_guid).lower(), context.session.session_id, int(card_uid)))
     if copy_from_uid is None:
         db_reset_card_uses(
             context.session.session_id, int(card_uid),
@@ -419,6 +426,15 @@ def revert_instance(context, card_uid):
     if isinstance(result, str):
         return result
     return f"reverted {hex(int(card_uid))}"
+
+
+def irreversible_original(serialized, template):
+    """The original template an irreversible transform records (C# TransformCardAbilityEffectTemplate.Apply sets
+    m_OriginalCardTemplateId to the effect's own template), or None when the transform is not irreversible."""
+    from rules_port.tac import tac_int
+    if not tac_int(serialized, "Irreversible", 0):
+        return None
+    return str(template or "").lower()
 
 
 def transform_into_stored_copy(context, serialized):

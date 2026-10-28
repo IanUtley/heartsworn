@@ -1720,7 +1720,7 @@ class EffectContext:
 
             if self.bstate.get("_skip_transform"):
                 return "transform skipped (gate not met)"
-            from rules_port.transform_effects import transform_instance
+            from rules_port.transform_effects import irreversible_original, transform_instance
             portal = bool(self.template_value("m_Portal", False))
             template = self.template_value("m_CardTemplateId", "")
             serialized = self.template_value("m_SerializedTAC", None)
@@ -1756,7 +1756,9 @@ class EffectContext:
                     if not new_template:
                         continue
                     transform_instance(self, int(target), new_template,
-                                       keep_zone=True, event_gems=event_gems)
+                                       keep_zone=True, event_gems=event_gems,
+                                       original_template_guid=irreversible_original(
+                                           serialized, template))
                 return f"transform {len(pending)} card(s)"
             # The effect's own resolved target (e.g. a TriggerSource card) comes
             # before the ability source, which is only the fallback.
@@ -1774,7 +1776,9 @@ class EffectContext:
             else:
                 new_template = str(template)
             result = transform_instance(self, int(target), new_template,
-                                        keep_zone=True, event_gems=event_gems)
+                                        keep_zone=True, event_gems=event_gems,
+                                        original_template_guid=irreversible_original(
+                                            serialized, template))
             if isinstance(result, str):
                 return result
             return f"transformed {hex(int(target))} -> {new_template[:8]}"

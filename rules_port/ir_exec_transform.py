@@ -46,25 +46,32 @@ def stored_copy(kind: str, effect: dict[str, Any]) -> bool:
 
 
 # The TAC flags a stored-copy transform may carry: the copy's source is stored, and CopyGems copies the source's gem.
+# The TAC flags each form of transform may carry. A stored copy (UseStoredTarget) copies the stored card's gem with
+# CopyGems. An ordinary transform may be irreversible: it records its original template on the card.
 STORED_COPY_FLAGS = ("UseStoredTarget", "CopyGems")
+TRANSFORM_FLAGS = ("Irreversible",)
 
 
-def _only_stored_copy_flags(data: str) -> bool:
-    """Whether a serialized TAC carries nothing but the flags the stored-copy transform runs."""
+def _only_flags(data: str, names: tuple[str, ...]) -> bool:
+    """Whether a serialized TAC carries nothing but the named flags."""
     from rules_port.tac import _tac_attr_hash, decode_tac_tree
-    allowed = {_tac_attr_hash(name) for name in STORED_COPY_FLAGS}
+    allowed = {_tac_attr_hash(name) for name in names}
     return set(decode_tac_tree(data)) <= allowed
 
 
 def refusals(kind: str, effect: dict[str, Any], target_kind: str) -> list[str]:
     """The reasons an effect of this area cannot run in the interpreter (empty when it can). A serialized TAC is
-    refused unless it is the stored-copy transform (UseStoredTarget, with CopyGems at most): that form runs the native
-    stored-copy leaf. An effect whose target is a player (not a card) is refused unless it is one that takes the
-    champion as its card (PLAYER_TARGET_EFFECTS)."""
+    refused unless it carries only the flags this form runs: a stored copy (UseStoredTarget, CopyGems at most), or an
+    ordinary transform that is irreversible. An effect whose target is a player (not a card) is refused unless it is
+    one that takes the champion as its card (PLAYER_TARGET_EFFECTS)."""
     missing: list[str] = []
     data = tac_data(effect.get("m_SerializedTAC"))
     copy_form = stored_copy(kind, effect)
-    if data and not (copy_form and _only_stored_copy_flags(data)):
+    if kind != "TransformCardAbilityEffectTemplate":
+        allowed: tuple[str, ...] = ()
+    else:
+        allowed = STORED_COPY_FLAGS if copy_form else TRANSFORM_FLAGS
+    if data and not (allowed and _only_flags(data, allowed)):
         missing.append(f"{kind} with a serialized TAC")
     if target_kind == "PlayerTargetTemplate" and kind not in PLAYER_TARGET_EFFECTS:
         missing.append(f"{kind} of a player")
@@ -112,7 +119,8 @@ def _transform(context: Any, target: int, count: int | None) -> None:
     # copy (UseStoredTarget) makes the stored card a copy of the target, through the leaf the native resolver runs.
     import game_engine
     from rules_port.tac import tac_int
-    from rules_port.transform_effects import transform_instance, transform_into_stored_copy
+    from rules_port.transform_effects import (irreversible_original, transform_instance,
+                                              transform_into_stored_copy)
     serialized = tac_data(context.template_value("m_SerializedTAC", None))
     if tac_int(serialized, "UseStoredTarget", 0):
         transform_into_stored_copy(context, serialized)
@@ -124,7 +132,9 @@ def _transform(context: Any, target: int, count: int | None) -> None:
     else:
         new_template = str(context.template_value("m_CardTemplateId", "")).lower()
     transform_instance(context, target, new_template, keep_zone=True,
-                       event_gems=game_engine.EGemTypesNew.Unknown)
+                       event_gems=game_engine.EGemTypesNew.Unknown,
+                       original_template_guid=irreversible_original(
+                           serialized, context.template_value("m_CardTemplateId", "")))
 
 
 def _transform_at_random(context: Any, target: int, count: int | None) -> None:
