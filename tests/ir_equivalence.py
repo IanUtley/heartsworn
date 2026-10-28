@@ -868,11 +868,16 @@ def choice_parity(case, index):
         template = _load("AbilityTargetTemplate", _guid(root.m_AbilityTargetTemplateIds[index]))
         most = target_count(template.m_MaxTargetCount, {})
         chooser = pause.continuation.get("owner_uid")
+        nested = pause.continuation.get("ability_guid") != case["ability"]
     if not candidates:
         return None, "no candidate for the choice"
     # A chosen target of one card is answered with each candidate; a target of several is answered with the picks it
     # takes (the first ``most`` candidates, or all of them when it has no limit), as one list.
-    if most == 1 and chooser == OPPOSING_OWNER:
+    if nested and chooser != OPPOSING_OWNER:
+        # A choice another player makes in an invoked ability: native has no target-map entry for it, so the answer
+        # cannot be given to the native resolver here. Compared once the PvP path is wired through this harness.
+        return None, "another player chooses in an invoked ability"
+    if nested:
         # The AI chooses one of its own troops (the sacrifice of "may sacrifice a troop"): any of them is legal, and the
         # native resolver takes the first, so the interpreter is answered with that one.
         answers = candidates[:1]
