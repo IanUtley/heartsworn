@@ -18,6 +18,8 @@ TRIGGER_EVENTS = {
     # dispatch already gives it. CardExitedZoneEvent also carries the two collections (its own ``from``/``to``).
     "CardExitedZoneEvent", "GainChargeEvent", "ChampionHealedEvent", "CardTransformsEvent",
     "CardActivatedEvent", "CardBattledEvent", "FateweavedEvent", "GainThresholdEvent", "CardTappedEvent",
+    # Published with the destroyed or scrounging card as its source (C# FireEvent(typeof(...), card, card)).
+    "CardDestroyedEvent", "CardScroungedEvent",
     # Its source is the conscripted card (as native publishes it), so the card's own filters read it.
     "ConscriptEvent",
     # The phase the turn entered (native publishes it with the phase in its data); the phase condition reads the battle.
