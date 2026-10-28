@@ -25,7 +25,7 @@ TRIGGER_EVENTS = {
     # The "would" events carry the damage (and whether it is combat damage) in their event TAC.
     "CardWouldDealDamageEvent", "CardWouldBeDamagedEvent",
     "ChampionWouldLoseEvent", "CardWouldEnterZoneEvent", "CardWouldBeDrawnEvent",
-    "CardInspiredEvent",
+    "CardInspiredEvent", "PowerShiftedEvent",
 }
 
 # Trigger condition classes this module evaluates.
