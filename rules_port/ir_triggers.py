@@ -20,6 +20,8 @@ TRIGGER_EVENTS = {
     "CardActivatedEvent", "CardBattledEvent", "FateweavedEvent", "GainThresholdEvent",
     # Its source is the conscripted card (as native publishes it), so the card's own filters read it.
     "ConscriptEvent",
+    # The phase the turn entered (native publishes it with the phase in its data); the phase condition reads the battle.
+    "TurnPhaseEvent",
 }
 
 # Trigger condition classes this module evaluates.
