@@ -2032,7 +2032,10 @@ def coverage(guid: str) -> list[str]:
             elif kind == "RequiresTargetPassesFilterCondition":
                 # Tested against each target (scope.gate), so only its filter has to run.
                 missing.extend(bridge.unsupported(stored.get("m_Filter"), "effect condition"))
-            elif kind not in ("RequiresCardsControlled", "NotContingentAbilityCondition"):
+            elif kind == "RequiresCardsControlled":
+                # The cards it counts are picked by its card filter, which must run as the live check does.
+                missing.extend(bridge.unsupported(stored.get("m_CardFilter"), "effect condition"))
+            elif kind != "NotContingentAbilityCondition":
                 missing.extend(bridge.unsupported(stored, "effect condition"))
                 missing.extend(f"comparison {op}" for op in _comparison_ops(stored, []) if op not in _COMPARISONS)
     declared = {str(v.get("m_Name") or "") for v in raw.get("m_Variables") or [] if isinstance(v, dict)}
