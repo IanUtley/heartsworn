@@ -931,6 +931,14 @@ def _run_clause(root: MechanicsObject, clause: Any, scope: Scope) -> None:
         for owner in _target_owners(root, index, scope):
             scope.context.gain_health(int(owner), amount)
         return
+    if kind == "SetHeroHealthModifier":
+        # C# SetHeroHealthModifier: each player it lands on has health equal to the amount, through the typed leaf.
+        amount = _input_value(modifier, scope)
+        for owner in _target_owners(root, index, scope):
+            champion = scope.context.champion_card_uid(int(owner))
+            if champion is not None:
+                scope.context.set_hero_health(champion, amount)
+        return
     # Damage is dealt to the cards in last-in-first-out order: the client pushes the matching cards on a stack and
     # pops them (a Deathcry's troops are hit before the champion that is listed first).
     targets = _targets(root, index, scope)
@@ -1708,7 +1716,7 @@ SUPPORTED_FILTERS = {
 }
 SUPPORTED_MODIFIERS = {"DamageModifier", "CounterModifier", "HealHeroModifier", "AttackModifier", "DefenseModifier",
                        "CurrentResourceModifier", "TotalResourceModifier", "ChargePointsModifier", "ThresholdModifier",
-                       "LoseLifeModifier", "SpellPointsModifier", "CardCostModifier"}
+                       "LoseLifeModifier", "SpellPointsModifier", "CardCostModifier", "SetHeroHealthModifier"}
 # The clause durations a stat modifier runs with: Permanent (the card's permanent buffs) and EndOfTurn (its
 # temporary buffs), as the live stat path applies them. Other durations are refused.
 STAT_DURATIONS = {"Permanent", "EndOfTurn"}
