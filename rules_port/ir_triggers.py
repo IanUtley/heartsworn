@@ -26,6 +26,7 @@ TRIGGER_EVENTS = {
     "CounterAddedToCardEvent",
     # Published with the transformed card as its source and controller as its player (C# Session.cs).
     "CardTransformedEvent",
+    "IlluminatedEvent",
     # Its source is the conscripted card (as native publishes it), so the card's own filters read it.
     "ConscriptEvent",
     # The phase the turn entered (native publishes it with the phase in its data); the phase condition reads the battle.

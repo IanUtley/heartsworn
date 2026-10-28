@@ -500,6 +500,14 @@ COUNTER_CASES = [
     {"name": "Transformed into an artifact: ready it and gain a charge", "ability": "6919e6cd",
      "event": "CardTransformedEvent", "opposing": [], "prepare": _nothing, "card_type": "Artifact",
      "any_template": True},
+    # Illuminate abilities: the player's champion performs the keyword (the trigger tests that the event's card is a
+    # hero), so the event is sourced on the player's champion.
+    {"name": "When you Illuminate: trigger this troop's Momentum", "ability": "a12971ff", "event": "IlluminatedEvent",
+     "opposing": [], "prepare": _nothing, "event_source": "player", "any_template": True},
+    {"name": "When you Illuminate: trigger this troop's Momentum (second)", "ability": "ba83fe34",
+     "event": "IlluminatedEvent", "opposing": [], "prepare": _nothing, "event_source": "player", "any_template": True},
+    {"name": "When you Illuminate: this gets cost -1 in all zones", "ability": "6f201580", "event": "IlluminatedEvent",
+     "opposing": [], "prepare": _nothing, "event_source": "player", "any_template": True},
 ]
 CHAMPION_CASES = [
     {"name": "Champion built-in Burning: end of your turn", "ability": "82598d69",
