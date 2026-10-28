@@ -496,6 +496,12 @@ def _count_holds(condition: Any, scope: Scope) -> bool:
 COUNTER_VARIABLE_PLAYERS = ("Self", "MultipleOpponents", "MultiplePlayers")
 
 
+def _faction_races(card: Card, faction: str) -> tuple[str, ...]:
+    """The races of one faction the card's subtype line names (C# ERace on the card, as native reads it)."""
+    from rules_port.conditions import _different_races
+    return _different_races({"subtype": card.subtype or ""}, faction)
+
+
 def _counter_variable(variable: Any, counter: str | None, scope: Scope) -> int:
     """C# CounterVariable.GetValue (``counter`` given) and CardCountAbilityVariable.GetValue (``counter``
     None): over the cards that pass the player filter (the ability's controller, its opponents, or
@@ -507,6 +513,9 @@ def _counter_variable(variable: Any, counter: str | None, scope: Scope) -> int:
     zones = _zones_of(_field(variable, "m_CollectionFlags"))
     if not zones:
         raise NotImplementedError("counter variable without collection flags")
+    # Counting different races of a faction: each race of the faction that the matching cards carry counts once.
+    faction = str(_field(variable, "m_OnlyIncludeDifferentRacesForFaction") or "Unknown")
+    races: set[str] = set()
     values = []
     for card in _battle_cards(scope):
         if player_filter == "Self" and card.owner != int(scope.owner_uid):
@@ -515,7 +524,12 @@ def _counter_variable(variable: Any, counter: str | None, scope: Scope) -> int:
             continue
         if card.zone not in zones or not _filter_holds(_field(variable, "m_CardFilter"), card, scope):
             continue
+        if faction != "Unknown":
+            races.update(_faction_races(card, faction))
+            continue
         values.append(card.counters.get(counter, 0) if counter else 1)
+    if faction != "Unknown":
+        return len(races)
     if _field(variable, "m_UseHighestValue"):
         return max(values, default=0)
     return sum(values)
@@ -1906,9 +1920,6 @@ def coverage(guid: str) -> list[str]:
             missing.append(f"{kind} for {player}")
         if not _zones_of(variable.get("m_CollectionFlags")):
             missing.append(f"{kind} without collection flags")
-        if kind == "CardCountAbilityVariable" and str(variable.get("m_OnlyIncludeDifferentRacesForFaction") or
-                                                      "Unknown") != "Unknown":
-            missing.append("card count of different races")
         for name in _tagged_classes(variable.get("m_CardFilter"), []):
             if name not in SUPPORTED_FILTERS and not bridge.filter_accepted(name):
                 missing.append(f"filter {name}")
