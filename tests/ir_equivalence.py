@@ -361,7 +361,8 @@ def _live(case):
                                 target_player_id=case.get("target_player"),
                                 data={"event_int_attribute": case.get("int_attribute"),
                                       "gain_threshold_color": _threshold_color(case),
-                                      "zones": SETUP_ZONES.get(case["event"])})
+                                      "zones": SETUP_ZONES.get(case["event"]),
+                                      "event_tac": case.get("event_tac") or {}})
     # The live trigger goes on the battle stack; the chain resolves it (and anything it queues).
     for _ in range(8):
         if not bstate.get("stack"):

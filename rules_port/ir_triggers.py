@@ -20,6 +20,8 @@ TRIGGER_EVENTS = {
     "CardActivatedEvent", "CardBattledEvent", "FateweavedEvent", "GainThresholdEvent", "CardTappedEvent",
     # Published with the destroyed or scrounging card as its source (C# FireEvent(typeof(...), card, card)).
     "CardDestroyedEvent", "CardScroungedEvent",
+    # The champion attacks with several troops; the event TAC carries how many (NumAttackers).
+    "CardsAttackedEvent",
     # Its source is the conscripted card (as native publishes it), so the card's own filters read it.
     "ConscriptEvent",
     # The phase the turn entered (native publishes it with the phase in its data); the phase condition reads the battle.

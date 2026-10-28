@@ -1103,6 +1103,8 @@ def live_event(event_type: str, owner_uid: int, data: dict[str, Any], trigger_so
                              "target_card": None if target_card_uid is None else int(target_card_uid),
                              **ir_triggers.event_fields(
                                  event_type, trigger_source_uid, target_player_uid, data)}
+    # The event TAC the live dispatch publishes (the native path reads it as the condition context's event_tac).
+    event["event_tac"] = dict(data.get("event_tac") or {})
     if event_type in ("CardWouldDealDamageEvent", "CardWouldBeDamagedEvent"):
         # The damage the event would deal, and whether it is combat damage (the event TAC the live dispatch publishes).
         event_tac = data.get("event_tac") or {}

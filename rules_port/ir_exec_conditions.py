@@ -112,7 +112,8 @@ def condition_context(scope: Any, *, target: int | None = None, event_type: str 
         trigger_uid=target if target is not None else event.get("card"), extra_target=target,
         pl_t=getattr(context, "player_uid", None), ai_t=getattr(context, "ai_uid", None), champions=champions,
         trigger_owner_id=event.get("player"),
-        event_source_collection=event.get("from"), event_destination_collection=event.get("to"))
+        event_source_collection=event.get("from"), event_destination_collection=event.get("to"),
+        event_tac=event.get("event_tac"))
 
 
 def filter_holds(card_filter: Any, uid: int, scope: Any) -> bool:
