@@ -53,7 +53,9 @@ def zone_effect_gaps(kind: str, raw: dict[str, Any], clause: dict[str, Any], eff
         amount_kind = _short(amount.get("_t")) if isinstance(amount, dict) else ""
         # A bury may leave its count out when it counts the top half of the deck or a filter instead.
         optional = kind == "BuryCardAbilityEffectTemplate" and not amount
-        if not optional and amount_kind not in TYPED_VALUES:
+        # A draw's count may be the player's chosen amount, an ability variable the activation sets (C# DrawAmount).
+        typed = set(TYPED_VALUES) | ({"EffectAbilityVariable"} if kind == "DrawNCardsAbilityEffectTemplate" else set())
+        if not optional and amount_kind not in typed:
             gaps.append(f"{short} amount {amount_kind or 'untyped'}")
     if kind in CARD_ONLY_EFFECTS and _target_kind(raw, clause) == "PlayerTargetTemplate":
         gaps.append(f"{short} for a player target")
