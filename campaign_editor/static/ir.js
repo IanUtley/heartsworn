@@ -1,5 +1,5 @@
-// The IR editor: the IR as code (ability_ir_text.py). Names and completions come from
-// /api/ability-ir-code-names; the code is loaded, checked and compiled by the /api/ability-ir-code routes.
+// The IR editor: an ability as surface text (gamedata/ir_surface_write.py). Names and completions come from
+// /api/ability-surface-names; the text is loaded, checked and compiled by the /api/ability-surface routes.
 // Text from the server is written with textContent, never as HTML.
 (function () {
   const text = document.getElementById("text");
