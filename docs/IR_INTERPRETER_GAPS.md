@@ -7,11 +7,11 @@ interpreter never half-runs an ability.
 
 ## Current state
 
-Measured with `AssetExtraction/ir_gap_report.py` over all 8,996 `AbilityTemplate` records:
+Measured with `AssetExtraction/ir_gap_report.py` over all 8,996 `AbilityTemplate` records, at the latest run:
 
-- Covered by the interpreter: 8,122
-- Refused: 873
-- Coverage check raises on bad Records data: 1 (see Data below)
+- Covered by the interpreter: 8,896
+- Refused: 100 (the reasons are under "Outstanding after the latest run" below)
+- Coverage errors (the coverage check raising on bad Records data): 0 at this run
 
 Regenerate the numbers and the full reason list from the current code and Records:
 
@@ -34,6 +34,87 @@ in the linked ledger (see that section), and the `CardExitedZoneEvent`, `GainCha
 triggers (88 abilities; 112 harness cases pass, and the event's own player is now the trigger's (see Triggers)), the
 fight/block "second card" family (80 abilities, 72 of which now run; see the section below), and the granted powers
 from sockets, payments, remembered powers and random picks (62 of the 66 grants now run; see the section below).
+
+## Outstanding after the latest run
+
+The 100 refused abilities, by refusal reason. An ability with several reasons is counted under each, so the
+column sums to more than 100. Regenerate with `python3 AssetExtraction/ir_gap_report.py --top 200`.
+
+| Reason | Abilities |
+| --- | ---: |
+| `chosen follow-up target` (`ir_exec_targets.follow_up_gaps`) | 14 |
+| `target MaxTargetCount` / `target MinTargetCount` (a list target's count) | 7 / 7 |
+| `DestroyCard for a player target` (the game-over path) | 5 |
+| `effect StoreListAttrAbilityEffectTemplate` (shard picks, run as invoked children) | 5 |
+| `cost duration EndOfTurn` | 5 |
+| `stat duration WhileCardInPlay` / `AttributeModifier duration WhileCardInPlay` / `IntAttrModifier duration WhileCardInPlay` / `cost duration WhileCardInPlay` | 4 / 3 / 1 / 1 |
+| `move to none` (a zone move with no destination) | 4 |
+| `IntAttrModifier duration WhileCardOnTopOfDeck` | 4 |
+| `invoked: chosen follow-up target` | 4 |
+| `effect LoadPlayerDeckAbilityEffectTemplate` | 4 |
+| `effect condition AbilityVariableCondition` (a "began the game with N cards" test) | 2 |
+| `reveal to Opponents` | 2 |
+| `multi-card target` (count 2 min / max, count 3, count 2147483647, and invoked forms) | 2 / 2 / 1 / 1 / 1 / 1 |
+| `target TargetsAPlayerOrHisStuff` (interrupts) | 2 |
+| `random target without a card filter` (C# takes every card; the live pool drops them) | 2 |
+| `trigger CombatEndedEvent` (no card template in the harness) | 2 |
+| `grant duration BeginningOfOpponentsTurn` | 2 |
+| `stat duration UntilEndOfDungeon` | 2 |
+| `effect FinishResolvingCardAbilityEffectTemplate`, `BuiltInPlayCardAbilityEffectTemplate`, `TransformCardIntoReplicaAbilityEffectTemplate`, `DiscardOrSacrificeCardAbilityEffectTemplate`, `CopyAbilityEffectTemplate`, `DoubleChoiceAbilityEffectTemplate` | 1 each |
+| `target player filter Unknown`, `target DuplicateCardTargetTemplate` | 1 each |
+| `effect condition RequiresDateTime`, `NotAbilityCondition`, `NotContingentAbilityCondition` | 1 each |
+| `counter operation Set` (remove all counters from a target; C# clears the counter collection) | 1 |
+| `move of every card in a zone` | 1 |
+| `damage shield without a lifetime` | 1 |
+| `expression name INS` | 1 |
+| `int attribute doubled`, `int attribute operation Unknown` | 1 each |
+| `TransformSelfAbilityEffectTemplate of a player` | 1 |
+| `random invocation`, `invoke with no ability` | 1 each |
+| `cost duration UntilItLeavesYourHand`, `cost duration BeginningOfOwnersTurn` | 1 each |
+| `IntAttrModifier duration UntilDamaged`, `DamageMultiplierModifier duration BeginningOfOwnersTurn` | 1 each |
+| `remove all charges`, `ChargePointsModifier without a typed amount` | 1 each |
+
+Notes on the largest entries:
+
+- **Chosen follow-up pickers and multi-card targets (about 26 with the invoked forms).** These need the native pick
+  prompts mirrored in the interpreter, with a parity check per ability. The deck-search picker is already wired for a
+  deck-only pick; a pick from a wider set has no interpreter picker yet.
+- **Static and "until" durations (about 15).** `WhileCardInPlay` on an authored static is projected by the native
+  static path rather than run, so it is refused here by design where the interpreter would have to apply it. The
+  `WhileCardOnTopOfDeck`, `UntilEndOfDungeon` and `BeginningOfOpponentsTurn` durations need their own lifetimes.
+- **Data-driven gaps.** `cost duration EndOfTurn` on played actions needs the linked-cost ledger checked against C#.
+
+## Closed in the latest stretch
+
+Checked against the C# implementation, with the live engine agreeing on each case the harness can run:
+
+- Trigger events now run in the interpreter: `CardAttackedOrBlockedEvent`, `CardTappedEvent`, `CardDestroyedEvent`,
+  `CardScroungedEvent`, `CardsAttackedEvent` (with the attacker count in the event TAC), `CounterAddedToCardEvent`,
+  `CardTransformedEvent`, `IlluminatedEvent`, `VerdictEvent`, `HiddenCardEnteredZoneEvent`.
+- Conversations: an encounter conversation pauses the ability at the native leaf, and the client's answer resumes the
+  interpreter at the next effect (`ir_exec.resume_conversation`).
+- Card filters: `TACFilter` (quick, basic and threshold checks); `PlayersWhoControlMatchingFilter`, after the target
+  scan's cards carry effective attack and defense and the champion branch reads the board.
+- Trigger conditions the native evaluator already reads: six of them, and the serialized TAC as data in coverage.
+- Variables: `TriggerTargetPropertyVariable`, the source-player charge, resource, shard and briar-legion variables,
+  `DrawAmount` (the draw count a player chooses), and `RandomizeVariable` with a second value and a variable maximum.
+- Stats: `ReplaceExistingValue` and a named `CurrentAttackValue` or `CurrentDefenseValue` property now apply the C#
+  rule on both paths (the native stat leaf previously ignored both).
+- `CreateAndCastSpell`, the talent animation effect and "lose half your health" run through their native leaves.
+- Activation gates: an `IntAttrFilter` gate on an ability with no trigger (C# tests the trigger condition on
+  activation) runs and matches the native gate.
+- Chosen numbers in a card filter: the client already sends the player-chosen value with the activation, so the
+  interpreter reads it from the ability's variables.
+
+Harness: a case may set `quick` (the source card is a quick card), `counters` (seeded source counters), `card_type`
+(the source's type), `event_source` (the event is sourced on the player's or opponent's champion) and `event_tac`
+(the event's TAC). `any_template` lets a case run an ability no card template fires alone.
+
+## Historical sections
+
+The sections from "Ruling queue" to "Data" record the refusal counts of earlier runs (952, then 873, then the counts
+recorded under each area). They are kept for the reasoning behind each ruling. The counts in them are superseded by
+"Outstanding after the latest run" above.
 
 ## Ruling: `WhileCardInPlay` (implemented)
 
@@ -372,9 +453,8 @@ grant reaching the clause's own targets, and the per-activation pick.
 
 ## Data
 
-- One Records ability (`9b36aabc-dffc-edf3-eaf9-cd514adf3d6a`) has a clause that points at a null template GUID.
-  Its coverage check raises `KeyError`, so the report counts it as a coverage error, not a refusal. It stays on the
-  native path. Fixing it needs the Records data corrected.
+- The latest run reports 0 coverage errors. An earlier note recorded one Records ability with a null template GUID;
+  it is not reported now, but its cause was not re-checked.
 
 ## Remaining work outside the interpreter
 
