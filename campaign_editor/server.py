@@ -38,6 +38,7 @@ import cards
 import catalog
 import editing
 import effect_reference
+import gamedata.ir_surface_write as ir_surface_write
 import incdata
 import set_icons
 import store_listing
@@ -393,6 +394,12 @@ class EditorHandler(BaseHTTPRequestHandler):
                     self._json({"text": ability_ir_text.code_for(query.get("guid", [""])[0])})
                 except ability_ir_text.TextError as error:
                     self._json({"error": str(error)}, 404)
+            elif path == "/api/ability-surface-code":
+                # An ability as surface text (gamedata/ir_surface_write.py), read by GUID.
+                try:
+                    self._json({"text": ir_surface_write.ability_text(query.get("guid", [""])[0])})
+                except KeyError as error:
+                    self._json({"error": str(error)}, 404)
             elif path == "/api/ability-ir-code-names":
                 self._json({"names": ability_ir_text.names()})
             elif path == "/api/ability-ir-kinds":
@@ -570,6 +577,13 @@ class EditorHandler(BaseHTTPRequestHandler):
             if url.path == "/api/ability-ir-from-text":
                 # The semantic form for sentence text.
                 self._json(ability_ir_semantic.from_text(body.get("text") or ""))
+                return
+            if url.path == "/api/ability-surface-parse":
+                # The Records ability that surface text binds, or why the text is not valid.
+                try:
+                    self._json({"records": [ir_surface_write.record_for(body.get("text") or "")]})
+                except (ValueError, KeyError, SyntaxError, TypeError) as error:
+                    self._json({"error": f"{type(error).__name__}: {error}"}, 400)
                 return
             if url.path == "/api/ability-ir-code-parse":
                 # The Records an ability's code declares (root first), or why the code is not valid.

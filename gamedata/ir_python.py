@@ -63,7 +63,13 @@ def _named(name: str) -> dict[str, Any]:
     return ir_registry.ref_of(name)
 
 
-HELPERS: dict[str, Any] = {"Ref": _ref, "Resource": _resource, "Clause": _clause, "Named": _named}
+def _no_ref() -> dict[str, Any]:
+    """An empty reference: the Records' all-zero GUID, written with no GUID."""
+    return _ref(_ZERO_GUID)
+
+
+HELPERS: dict[str, Any] = {"Ref": _ref, "NoRef": _no_ref, "Resource": _resource, "Clause": _clause,
+                           "Named": _named}
 # The surface's factories (counter, count, effect, ability, ...) are helpers too.
 HELPERS.update(ir_surface.FACTORIES)
 

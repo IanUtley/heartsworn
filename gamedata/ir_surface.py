@@ -35,10 +35,14 @@ from typing import Any
 
 from gamedata import DEFAULT_RECORD_STORE as STORE
 from gamedata import mechanics_types as T
-from gamedata.mechanics_base import Typed, _typed_value
+from gamedata.mechanics_base import Typed, _record_names, _typed_value
 from gamedata.mechanics_fields import ir_name
 
 ZERO_GUID = "00000000-0000-0000-0000-000000000000"
+# The ability's target slots that are empty unless the ability uses one. A written ability leaves them out.
+EMPTY_REF_FIELDS = ("m_DiscardTarget", "m_ExhaustTarget", "m_PutIntoDeckTarget", "m_PutIntoDeckTarget2",
+                    "m_PutIntoHandTarget", "m_RevealTarget", "m_SacrificeTarget",
+                    "m_ShuffleIntoDeckTarget", "m_VoidTarget")
 _NAMESPACE = uuid.UUID("6f0a9d2e-3c1b-4f7a-9d5e-2b8c4e1f0a73")
 _TAGS = re.compile(r"<[^>]+>")
 
@@ -247,10 +251,18 @@ def sacrifice(target: Target) -> Typed:
     return obj
 
 
-def ability(text: str, *, on: dict[str, str], when: Typed, does: list[Typed], id: str | None = None,
-            zones: str = "Champions|Warzone") -> Typed:
+def ability(text: str, *, on: dict[str, str] | None = None, when: Typed | None = None,
+            does: list[Typed] | None = None, id: str | None = None, zones: str = "Champions|Warzone",
+            **fields: Any) -> Typed:
     """The ability named by its rule text: its trigger, its condition, and the effects it runs in order.
-    Each effect's clause picks that effect's target."""
+    Each effect's clause picks that effect's target.
+
+    Without ``does``, the ability is written field by field: each keyword is one of its Records fields by its
+    IR name (``ability_effect_list=[Clause(...)]``), and nothing is derived from the effects."""
+    if does is None:
+        return _explicit_ability(text, id, fields)
+    if on is None or when is None:
+        raise ValueError("an ability with effects needs on= and when=")
     from gamedata.ir_python import _clause
     record = _single_record("AbilityTemplate", text, id)
     guid = (id or (record.guid.lower() if record else _stable_guid("ability", text))).lower()
@@ -276,14 +288,27 @@ def ability(text: str, *, on: dict[str, str], when: Typed, does: list[Typed], id
         # A new ability: the boilerplate the Records give an ability with no special rules.
         obj.ignores_chain = 1
         obj.serialized_tac = {"data": "AgAAAAAA"}
-        for field in ("m_DiscardTarget", "m_ExhaustTarget", "m_PutIntoDeckTarget", "m_PutIntoDeckTarget2",
-                      "m_PutIntoHandTarget", "m_RevealTarget", "m_SacrificeTarget",
-                      "m_ShuffleIntoDeckTarget", "m_VoidTarget"):
+        for field in EMPTY_REF_FIELDS:
             setattr(obj, field, _ref(ZERO_GUID))
         obj.m_AICustomAbilityEvaluator = []
         obj._record_order = [*T.AbilityTemplate.fields, "m_AICustomAbilityEvaluator"]
         return obj
     return _fill(obj, record, values)
+
+
+def _explicit_ability(text: str, id_: str | None, fields: dict[str, Any]) -> Typed:
+    """An ability from its own fields. Nothing is filled in but the name and ID, so every stored
+    value is the one written; fields the constructor does not name are kept as ``_deprecated``."""
+    deprecated = dict(fields.pop("_deprecated", {}))
+    for field in EMPTY_REF_FIELDS:
+        fields.setdefault(ir_name(field), _ref(ZERO_GUID))
+    guid = (id_ or _stable_guid("ability", text)).lower()
+    obj = T.AbilityTemplate(ability_template_id=_ref(guid), game_text=text, **fields)
+    for name, value in deprecated.items():
+        setattr(obj, name, value)
+    if deprecated:
+        obj._record_order = [*_record_names(T.AbilityTemplate), *deprecated]
+    return obj
 
 
 def card_enters(*, from_zone: Zone, to_zone: Zone) -> Typed:

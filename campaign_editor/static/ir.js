@@ -104,7 +104,7 @@
       compiled.textContent = "Empty.";
       return setStatus("Empty.");
     }
-    const { ok, data } = await getJson("/api/ability-ir-code-parse", { text: text.value });
+    const { ok, data } = await getJson("/api/ability-surface-parse", { text: text.value });
     if (ok) {
       compiled.textContent = JSON.stringify(data.records, null, 2);
       setStatus("Compiles to a Records ability.", "ok");
@@ -117,7 +117,7 @@
   async function load() {
     const id = guid.value.trim();
     if (!id) return setStatus("Enter an ability GUID.", "bad");
-    const { ok, data } = await getJson(`/api/ability-ir-code?guid=${encodeURIComponent(id)}`);
+    const { ok, data } = await getJson(`/api/ability-surface-code?guid=${encodeURIComponent(id)}`);
     if (!ok) return setStatus(data.error || "Could not load the ability.", "bad");
     text.value = data.text;
     setStatus(`Loaded ${id}.`, "ok");
