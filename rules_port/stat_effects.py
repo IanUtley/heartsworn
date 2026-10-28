@@ -8,7 +8,7 @@ import game_engine
 # The durations whose grant must be undone later.  EndOfTurn lives in the card's ``temporary_buffs`` column, which the
 # end-turn wipe clears; a while-in-play grant has no boundary to wait for, so it is applied as a permanent buff and
 # recorded in the linked ledger (``rules_port.effect_lifetimes``), which expires it with its source.
-LEDGER_DURATIONS = frozenset({"WhileCardInPlay"})
+LEDGER_DURATIONS = frozenset({"WhileCardInPlay", "BeginningOfOwnersTurn"})
 
 
 def apply_stat_mod(context, target, attack=0, defense=0, *, this_turn=False,

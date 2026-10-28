@@ -895,10 +895,11 @@ def _run_clause(root: MechanicsObject, clause: Any, scope: Scope) -> None:
         # The shared stat primitive, with the live path's choice of buffs (EndOfTurn is this turn only).
         from rules_port.stat_effects import apply_stat_mod
         amount = _input_value(modifier, scope)
-        this_turn = str(_field(clause, "m_EffectDuration") or "") == "EndOfTurn"
+        duration = str(_field(clause, "m_EffectDuration") or "")
         for target in _targets(root, index, scope):
             attack, defense = (amount, 0) if kind == "AttackModifier" else (0, amount)
-            apply_stat_mod(scope.context, target, attack, defense, this_turn=this_turn)
+            apply_stat_mod(scope.context, target, attack, defense, this_turn=duration == "EndOfTurn",
+                           duration=duration if duration in LINKED_STAT_DURATIONS else None)
         return
     if kind in GROUP_G_MODIFIERS:
         from rules_port.ir_modifiers import run_modifier
@@ -1631,9 +1632,9 @@ SUPPORTED_MODIFIERS = {"DamageModifier", "CounterModifier", "HealHeroModifier", 
 # temporary buffs), as the live stat path applies them. Other durations are refused.
 STAT_DURATIONS = {"Permanent", "EndOfTurn"}
 # A linked clause -- triggered, player-activated, or an invoked child's -- applies its stat to its targets when it
-# resolves and is recorded in the linked ledger, so it also takes the while-in-play lifetime (it expires with its
-# source rather than at a boundary).
-LINKED_STAT_DURATIONS = STAT_DURATIONS | {"WhileCardInPlay"}
+# resolves and is recorded in the linked ledger: it expires with its source (while in play), or at the start of the
+# responsible player's next turn, as native records it.
+LINKED_STAT_DURATIONS = STAT_DURATIONS | {"WhileCardInPlay", "BeginningOfOwnersTurn"}
 # The effect text the live stat path derives its operand from (equal to this troop's DEF, a voided troop's stat).
 # An effect with such text is refused, not computed differently.
 DERIVED_STAT_TEXT = ("troop's [def]", "voided troop's")
