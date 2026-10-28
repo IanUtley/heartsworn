@@ -587,7 +587,8 @@ def _case_cache_path(limit):
     import tempfile
     root = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
     digest = hashlib.sha256()
-    for path in (os.path.abspath(__file__), os.path.join(root, "rules_port", "ir_exec.py")):
+    for path in (os.path.abspath(__file__), os.path.join(root, "rules_port", "ir_exec.py"),
+                 os.path.join(root, "rules_port", "ir_triggers.py")):
         with open(path, "rb") as stream:
             digest.update(stream.read())
     digest.update(str(limit).encode())
