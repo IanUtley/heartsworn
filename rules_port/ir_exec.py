@@ -1753,12 +1753,14 @@ def coverage(guid: str) -> list[str]:
         for name in _tagged_classes(template.get("m_CardFilter"), []):
             if name not in SUPPORTED_FILTERS and not bridge.filter_accepted(name):
                 missing.append(f"filter {name}")
-        # The interpreter picks one card for a target index. A target that takes several (or a count that varies)
-        # is refused, as the native resolver takes them all ("two target" and "up to two target" cards).
+        # The interpreter picks cards for a target index: one for a chosen target, and the automatic target's cards (the
+        # first ``count`` candidates, or a random pick of them) for an automatic one, as the native resolver takes them. A
+        # chosen target of several cards, or a count that varies, is refused.
         for bound in ("m_MinTargetCount", "m_MaxTargetCount"):
             count = template.get(bound)
             if isinstance(count, dict) and count.get("m_Value") is not None and int(count["m_Value"]) != 1 \
-                    and not (bound == "m_MinTargetCount" and int(count["m_Value"]) == 0):
+                    and not (bound == "m_MinTargetCount" and int(count["m_Value"]) == 0) \
+                    and not (template.get("m_IsAutoTarget") and kind == "AbilityTargetTemplate"):
                 missing.append(f"multi-card target ({bound} {count['m_Value']})")
             elif isinstance(count, dict) and count.get("m_Value") is None:
                 missing.append(f"variable target count ({bound})")
