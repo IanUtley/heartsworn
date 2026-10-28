@@ -884,10 +884,14 @@ def choice_parity(case, index):
             continuation = again.continuation
         resume_ability(continuation, answer, context=context)
         interpreted = _snapshot(db, bstate, player_champ, ai_champ, game, start)
+        # The native resolver gets every chosen target's pick: the answered one, and the ones the interpreter made itself
+        # (a single candidate is not a question), so both sides run the same choices.
+        picks = {k: v for k, v in (getattr(context, "interpreted_picks", None) or {}).items() if v is not None}
+        target_map = {**picks, index: answer}
 
         db, pl_t, ai_t, game, handler, bstate, player_champ, ai_champ, start, context = fresh()
         resolve_port_ability(handler, game, SessionStub(), db, pl_t, ai_t, bstate, case["ability"],
-                             SOURCE_UID, TROOP_OWNER, target_map={index: answer}, instance_id=1)
+                             SOURCE_UID, TROOP_OWNER, target_map=target_map, instance_id=1)
         native = _snapshot(db, bstate, player_champ, ai_champ, game, start)
         if interpreted != native:
             return False, f"answer {answer}: interpreter {interpreted['cards']} native {native['cards']}"
@@ -909,11 +913,9 @@ def choice_cases(limit):
         indices = _chosen_targets(record.guid.lower())
         if not indices or coverage(record.guid.lower()) or _any_template(db, record.guid.lower()) is None:
             continue
-        # A crypt's troops are the candidates of an ability that names one with its only chosen target (the harness answers
-        # that target alone; an ability with a second chosen target is answered by its forced pick on one side only).
+        # A crypt's troops are the candidates of an ability that names one.
         crypt = [(610, TROOP_OWNER, "discard", "{}"), (611, TROOP_OWNER, "discard", "{}"),
-                 (612, TROOP_OWNER, "discard", "{}")] \
-            if "crypt" in str(raw.get("m_GameText", "")).lower() and len(indices) == 1 else []
+                 (612, TROOP_OWNER, "discard", "{}")] if "crypt" in str(raw.get("m_GameText", "")).lower() else []
         cases.append((
             {"name": f"choice {event}: {raw.get('m_GameText', '')[:70]}", "ability": record.guid.lower(),
              "event": event, "opposing": [(502, 0), (503, 0)],

@@ -54,6 +54,34 @@ def _live_list_variable(ctx, name):
         return None
 
 
+def _ability_variable_value(ctx, name, variables, state):
+    """The current value of a named ability variable, or None when it has none.
+
+    List-producing child abilities (for example, burying or sacrificing a card) record their results on the invoking
+    ability instance, so a CountList variable counts that list as it stands, on either side of the comparison. Any other
+    variable reads its value.
+    """
+    resolving_ability = str(state.get("resolving_ability") or "").lower()
+    scoped_lists = ((state.get("list_attrs") or {}).get(resolving_ability) or {})
+    if name in scoped_lists:
+        values = scoped_lists[name]
+        if isinstance(values, (list, tuple, set)):
+            return len(values)
+        try:
+            return int(values)
+        except (TypeError, ValueError):
+            return None
+    live = _live_list_variable(ctx, name)
+    if live is not None:
+        return int(live)
+    if name not in variables:
+        return None
+    try:
+        return int(variables[name])
+    except (TypeError, ValueError):
+        return None
+
+
 def _record_filter_zones(node):
     """Return explicit zone predicates from a Records card-filter tree."""
     if isinstance(node, dict):
@@ -738,43 +766,14 @@ def _native_condition(node, ctx):
         variables = getattr(ctx, "ability_variables", {}) or {}
         lhs, rhs = str(node.get("m_Lhs") or ""), str(node.get("m_Rhs") or "")
         state = getattr(ctx, "bstate", {}) or {}
-        # List-producing child abilities (for example, burying a card) record
-        # their results on the invoking ability instance.  A parent
-        # AbilityVariableCondition can name that list directly, but its
-        # authored variable default is still zero.  Resolve a matching
-        # instance list as its current count before falling back to the
-        # scalar variable value.
-        resolving_ability = str(state.get("resolving_ability") or "").lower()
-        scoped_lists = ((state.get("list_attrs") or {}).get(
-            resolving_ability) or {})
-        live_left = (None if lhs in scoped_lists
-                     else _live_list_variable(ctx, lhs))
-        if lhs in scoped_lists:
-            values = scoped_lists[lhs]
-            if isinstance(values, (list, tuple, set)):
-                left_value = len(values)
-            else:
-                try:
-                    left_value = int(values)
-                except (TypeError, ValueError):
-                    return False
-        elif live_left is not None:
-            left_value = int(live_left)
-        else:
-            if lhs not in variables:
-                return False
-            try:
-                left_value = int(variables[lhs])
-            except (TypeError, ValueError):
-                return False
+        left_value = _ability_variable_value(ctx, lhs, variables, state)
+        if left_value is None:
+            return False
         try:
             right_value = int(rhs)
         except (TypeError, ValueError):
-            if rhs not in variables:
-                return False
-            try:
-                right_value = int(variables[rhs])
-            except (TypeError, ValueError):
+            right_value = _ability_variable_value(ctx, rhs, variables, state)
+            if right_value is None:
                 return False
         return _compare(left_value, node.get("m_ComparisonOp"), right_value)
     if kind in ("NotContingentAbilityCondition", "NotContingentEffectCondition"):

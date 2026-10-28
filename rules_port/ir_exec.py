@@ -1147,6 +1147,8 @@ def _finish_activation(scope: Scope) -> None:
     C# keeps such state on the ability instance: it survives a pause/continuation of one activation and is dropped
     when the activation finishes (the native resolver pops it on the way out). A finished interpreted run left its
     entry in the battle state, where it would outlive the activation."""
+    # The picks the activation made, the forced ones included, for a caller that must answer the same targets elsewhere.
+    scope.context.interpreted_picks = dict(scope.chosen)
     if scope.instance_id is None:
         return
     bstate = scope.context.bstate
