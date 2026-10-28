@@ -33,9 +33,10 @@ EFFECTS = {"ReplenishResourcesAbilityEffectTemplate", "LoseThresholdAbilityEffec
 RESOURCE_DURATIONS = {"Instant", "Permanent"}
 # A card cost change runs through the live cost leaf, which handles these two durations.
 COST_DURATIONS = {"Instant", "Permanent"}
-# A linked clause (triggered, player-activated, or an invoked child's) also takes the while-in-play lifetime: the cost
-# delta is applied at resolution and recorded in the linked ledger, which reverses it when its source is gone.
-LINKED_COST_DURATIONS = COST_DURATIONS | {"WhileCardInPlay"}
+# A linked clause (triggered, player-activated, or an invoked child's) also takes the while-in-play and this-turn
+# lifetimes: the cost delta is applied at resolution and recorded in the linked ledger, which reverses it when its
+# source is gone or at the end of the turn.
+LINKED_COST_DURATIONS = COST_DURATIONS | {"WhileCardInPlay", "EndOfTurn"}
 
 
 def _target_template(raw: dict[str, Any], index: int) -> tuple[str, dict[str, Any]]:

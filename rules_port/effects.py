@@ -903,11 +903,13 @@ def _card_cost(context, target, param):
     else:
         db_add_card_cost_modifier(
             context.session.session_id, int(target), amount, conn=context.db)
-        if duration in ("BeginningOfOwnersTurn",
-                        "AfterCardsReadyOnPlayersTurn", "WhileCardInPlay"):
+        if duration in ("BeginningOfOwnersTurn", "AfterCardsReadyOnPlayersTurn",
+                        "WhileCardInPlay", "EndOfTurn"):
             # "Cost [(1)] until the start of your next turn" (Thk'tatcha) is
             # reversed at the owner's boundary instead of staying forever; a
-            # while-in-play change is reversed when its source is gone.
+            # while-in-play change is reversed when its source is gone; "this
+            # turn" is reversed at the end of the turn (C# disables the
+            # effect instance in RemoveEndOfTurnAbilities).
             from .effect_lifetimes import record_temporary_stat
             resolving_owner = int(
                 context.bstate.get("resolving_owner_id", 0) or 0)
