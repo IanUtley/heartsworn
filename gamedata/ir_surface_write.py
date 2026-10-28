@@ -104,6 +104,11 @@ def _guid_of(value: Any) -> str | None:
     return str(value["m_Guid"]).lower() if isinstance(value, dict) and "m_Guid" in value else None
 
 
+def _input_of(value: Any) -> str | None:
+    """The name of an effect input read from a variable, or None."""
+    return str(value["m_InputVariableName"]) if isinstance(value, dict) and "m_InputVariableName" in value else None
+
+
 def _kind(record: dict[str, Any]) -> str:
     return str(record.get("_t") or "").rsplit(".", 1)[-1]
 
@@ -115,7 +120,8 @@ def _modifier_kind(record: dict[str, Any]) -> str:
 # Each surface helper with the keywords it takes from a stored record (None when the record is not its kind).
 SURFACE_HELPERS: tuple[tuple[str, Any], ...] = (
     ("summon", lambda r: {"card": _guid_of(r.get("m_CardTemplateId")), "zone": r.get("m_CardCollection"),
-                          "amount": r.get("m_Amount")} if _kind(r) == "SummonTokenTroopAbilityEffectTemplate" else None),
+                          "amount": r.get("m_Amount"), "amount_input": _input_of(r.get("m_AmountField"))}
+     if _kind(r) == "SummonTokenTroopAbilityEffectTemplate" else None),
     ("activate", lambda r: {"ability": _guid_of(r.get("m_AbilityToInvoke"))}
      if _kind(r) == "ActivateAbilityEffectTemplate" else None),
     ("grant", lambda r: {"ability": _guid_of(r.get("m_GrantedAbilityTemplateId"))}
@@ -124,6 +130,10 @@ SURFACE_HELPERS: tuple[tuple[str, Any], ...] = (
      if _kind(r) == "MoveCardToZoneEffectTemplate" else None),
     ("transform", lambda r: {"card": _guid_of(r.get("m_CardTemplateId"))}
      if _kind(r) == "TransformCardAbilityEffectTemplate" else None),
+    ("add_counter", lambda r: {"counter": _guid_of(r.get("m_Modifier", {}).get("m_CardCounterTemplateId")),
+                               "amount": _input_of(r.get("m_Modifier", {}).get("m_InputValue"))}
+     if _kind(r) == "CardModifierAbilityEffectTemplate" and _modifier_kind(r) == "CounterModifier"
+     else None),
     ("deal_damage", lambda r: {"amount": ((r.get("m_Modifier") or {}).get("m_InputValue") or {}).get(
         "m_InputVariableName")} if _kind(r) == "CardModifierAbilityEffectTemplate"
      and _modifier_kind(r) == "DamageModifier" else None),

@@ -242,11 +242,13 @@ def _effect(cls: type, text: str, id_: str, name: str | None, **fields: Any) -> 
 
 
 def summon(text: str, *, id: str, card: str, zone: str = "Warzone", amount: int = 1,
-           name: str | None = None) -> Typed:
-    """Summon ``amount`` copies of a card (by GUID) into ``zone``: "summon a Captain's Parrot"."""
+           amount_input: str | None = None, name: str | None = None) -> Typed:
+    """Summon ``amount`` copies of a card (by GUID) into ``zone``: "summon a Captain's Parrot". With
+    ``amount_input``, the number is read from that input instead ("for each seed counter on this")."""
+    fields: dict[str, Any] = {"amount_field": T.EffectInputVariable(input_variable_name=amount_input)} \
+        if amount_input else {}
     return _effect(T.SummonTokenTroopAbilityEffectTemplate, text, id, name, card_template_id=_ref(card),
-                   card_collection=zone, card_location="Unknown", amount=amount,
-                   amount_field=T.EffectInputVariable(input_variable_name="A"))
+                   card_collection=zone, card_location="Unknown", amount=amount, **fields)
 
 
 def activate(text: str, *, id: str, ability: str, name: str | None = None) -> Typed:
@@ -268,6 +270,12 @@ def move_card(text: str, *, id: str, zone: str, name: str | None = None) -> Type
 def transform(text: str, *, id: str, card: str, name: str | None = None) -> Typed:
     """Transform the target into a card (by GUID)."""
     return _effect(T.TransformCardAbilityEffectTemplate, text, id, name, card_template_id=_ref(card))
+
+
+def add_counter(text: str, *, id: str, counter: str, amount: str = "A", name: str | None = None) -> Typed:
+    """Add counters (by counter GUID) to this card, the number read from the input named ``amount``."""
+    return _effect(T.CardModifierAbilityEffectTemplate, text, id, name, modifier=T.CounterModifier(
+        input_value=T.EffectInputVariable(input_variable_name=amount), card_counter_template_id=_ref(counter)))
 
 
 def deal_damage(text: str, *, id: str, amount: str, name: str | None = None) -> Typed:
@@ -400,6 +408,7 @@ FACTORIES: dict[str, Any] = {
     "move_card": move_card,
     "transform": transform,
     "deal_damage": deal_damage,
+    "add_counter": add_counter,
     "ability": ability,
     "card_enters": card_enters,
     "card_matches": card_matches,
