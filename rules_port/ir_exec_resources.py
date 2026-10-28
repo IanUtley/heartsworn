@@ -78,8 +78,6 @@ def coverage_modifier(kind: str, effect: dict[str, Any], clause: dict[str, Any],
     player = _player_filter(raw, index)
     if player is not None and player not in ix.SUPPORTED_PLAYER_TARGETS:
         missing.append(f"{kind} for player {player}")
-    if kind in ("CurrentResourceModifier", "TotalResourceModifier") and modifier.get("m_Set"):
-        missing.append("resource set (not add)")
     if kind == "ChargePointsModifier" and modifier.get("m_RemoveAllCharges"):
         missing.append("remove all charges")
     if kind == "LoseLifeModifier" and modifier.get("m_LoseHalfHealth"):
@@ -151,7 +149,8 @@ def _apply_to_target(kind: str, modifier: MechanicsObject, target: int, amount: 
     """One resource or life change on one target, through the live leaf for its kind."""
     if kind in RESOURCE_PROPERTIES:
         from rules_port.effects import _resource_modifier
-        param: dict[str, Any] = {"property": RESOURCE_PROPERTIES[kind], "amount": amount}
+        param: dict[str, Any] = {"property": RESOURCE_PROPERTIES[kind], "amount": amount,
+                                 "set": bool(getattr(modifier, "m_Set", False))}
         if kind == "ThresholdModifier":
             param.update({
                 "shard": str(modifier.m_ThresholdColor),

@@ -592,7 +592,9 @@ def _resource_modifier(context, effect):
                              "chargepoints", "threshold"}:
         return None
     amount = int(param.get("amount") or 0)
-    if amount == 0:
+    # A set (CurrentResourceModifier/TotalResourceModifier with Set) makes the pool the value, not a change of it.
+    is_set = bool(param.get("set")) and property_name in {"currentresource", "totalresource"}
+    if amount == 0 and not is_set:
         amount = context.modifier_value(param, {}, property_name)
     target = context.resolved_target()
     owner = context.target_owner(target, default=None)
@@ -662,6 +664,9 @@ def _resource_modifier(context, effect):
             color = int(game_engine.SHARD_TO_FLAG.get(shard, 0))
         if not color:
             return None
+    if is_set:
+        pool_key = f"{side}_resources" if property_name == "currentresource" else f"{side}_total_resources"
+        amount = int(amount) - int(context.bstate.get(pool_key, 0) or 0)
     from .resources import project_resource_change
     change = project_resource_change(
         context.game, context.session, context.bstate,
