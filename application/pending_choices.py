@@ -397,6 +397,9 @@ class PendingChoicesMixin:
         pending.update({"kind": "conversation",
                         "conversation_id": str(conversation_id).lower(),
                         "ability_owner_id": owner_id})
+        if bstate.get("_interpreter_continuation"):
+            # The interpreter paused here (rules_port/ir_exec.py): its continuation resumes it, not the native walker.
+            pending["interpreter"] = bstate["_interpreter_continuation"]
         event_player = pl_t
         if bstate.get("pvp"):
             from services.tournament_game import pvp_load_state, pvp_save_state
@@ -425,6 +428,49 @@ class PendingChoicesMixin:
         _hc.log_req(f"    Conversation queued: {str(conversation_id)[:8]} "
                 f"ability={ability_guid[:8]} owner={answer_owner_id}")
         return f"conversation: awaiting {str(conversation_id).lower()}"
+
+    def _resume_interpreted_conversation(self, session, pl_t, ai_t,
+                                         pending_state, continuation):
+        """Resume an interpreter pause once the client has closed its conversation (rules_port/ir_exec.py): the effects
+        after the conversation run, then the chain finishes as an interpreted deck-search pick does."""
+        import hconnect_server as _hc
+        from rules_port import ir_exec
+        from rules_port.context import EffectContext
+        from rules_port.resolution import prompt_interpreted_reveal
+        _be = self._checkpoint_engine(session)
+        _hc.log_req("    Conversation answered: resuming the interpreter "
+                    f"{continuation['ability_guid'][:8]}")
+        pending_state.pop("pending_conversation", None)
+        pending_state.pop("resolution_paused", None)
+        g = self._fresh_game(session, pl_t, ai_t, pending_state)
+        try:
+            ir_exec.resume_conversation(
+                continuation,
+                context=EffectContext.from_rules_port(
+                    g, session, _hc._db, self, pl_t, ai_t, pending_state, ""))
+        except ir_exec.NeedsChoice as pause:
+            prompt_interpreted_reveal(self, g, session, _hc._db, pl_t, ai_t,
+                                      pending_state, pause)
+            _be.save_state(session, pending_state)
+            self._send_battle_events(session, g, pl_t)
+            self._push_transaction_ack(session)
+            return True
+        except ir_exec.NeedsConversation:
+            # A further conversation: the leaf queued it and saved the pause, so the next answer resumes it.
+            _be.save_state(session, pending_state)
+            self._send_battle_events(session, g, pl_t)
+            self._push_transaction_ack(session)
+            return True
+        self._mark_interpreted_chain_item_done(pending_state)
+        _be.save_state(session, pending_state)
+        self._send_battle_events(session, g, pl_t)
+        if self._resume_completed_rules_port_chain(session, pending_state):
+            if not self._advance_rules_port_to_priority(
+                    session, pl_t, ai_t, pending_state):
+                self._push_transaction_ack(session)
+        else:
+            self._push_transaction_ack(session)
+        return True
 
     def _resolve_pending_conversation(self, session, transaction):
         """Resume a BOM after the client closes class-55 conversation UI."""
@@ -465,6 +511,10 @@ class PendingChoicesMixin:
 
         pl_t = _hc.game_engine.UID.make(244, int(self.client_reck_id))
         ai_t = _hc.game_engine.UID.make(_hc.game_engine.SERVICE_AI_UID_TYPE, 1000)
+        interpreted = pending.get("interpreter")
+        if isinstance(interpreted, dict):
+            return self._resume_interpreted_conversation(
+                session, pl_t, ai_t, pending_state, interpreted)
         pending_state.pop("pending_conversation", None)
         pending_state.pop("resolution_paused", None)
         game = self._fresh_game(session, pl_t, ai_t, pending_state)

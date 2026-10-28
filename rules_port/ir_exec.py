@@ -234,6 +234,15 @@ class Scope:
     applied: dict[int, bool] = field(default_factory=dict)   # effect position -> whether it applied (C# applied_effects)
 
 
+class NeedsConversation(Exception):
+    """The ability reached an encounter conversation, which the client plays before the ability's effects resume.
+    The native leaf has queued the conversation; ``continuation`` resumes the ability with ``resume_conversation``."""
+
+    def __init__(self, continuation: dict[str, Any]):
+        super().__init__(f"conversation for {continuation['ability_guid']}")
+        self.continuation = continuation
+
+
 class NeedsChoice(Exception):
     """The ability reached a target the player chooses. Its continuation (JSON-serialisable) resumes it with
     ``resume_ability`` once the player answers; ``candidates`` are the cards the answer may name."""
@@ -1275,7 +1284,7 @@ def run_ability(guid: str, event_type: str, *, context: Any, source_uid: int,
     scope.chosen = {int(k): _chosen_value(v) for k, v in (answers or {}).items()}
     try:
         fired = _run_effects(guid, root, scope, start=0)
-    except NeedsChoice:
+    except (NeedsChoice, NeedsConversation):
         # A pause leaves the activation open, so its runtime state stays until the continuation resumes it.
         raise
     except Exception:
@@ -1359,6 +1368,8 @@ def _run_effects(guid: str, root: MechanicsObject, scope: Scope, start: int) -> 
             scope.applied[position] = _applies_to(root, index, scope)
             if scope.applied[position]:
                 _record_revealed_chosen(root, index, scope)
+            if _short(effect_type) == "ConversationAbilityEffectTemplate":
+                _pause_for_conversation(guid, position, effect_raw, scope)
             if _short(effect_type) == "ActivateAbilityEffectTemplate":
                 _invoke(guid, position, effect_raw, scope, _target_owners(root, index, scope))
                 continue
@@ -1600,7 +1611,7 @@ def _invoke(parent_guid: str, position: int, effect_raw: dict[str, Any], scope: 
             scope.context.inherit_child_lists(child_guid)
         try:
             _run_effects(child_guid, child_root, child_scope, start=0)
-        except NeedsChoice as pause:
+        except (NeedsChoice, NeedsConversation) as pause:
             frame = {"ability_guid": parent_guid, "event": dict(scope.event), "source_uid": int(scope.source_uid),
                      "owner_uid": int(scope.owner_uid), "position": position,
                      "root_ability": scope.root_ability, "invoked": bool(scope.invoked),
@@ -1692,19 +1703,71 @@ def resume_ability(continuation: dict[str, Any], answer: int | None, *, context:
     outer = continuation.get("parent")
     try:
         _run_effects(continuation["ability_guid"], root, scope, start=int(continuation["position"]))
-    except NeedsChoice as pause:
+    except (NeedsChoice, NeedsConversation) as pause:
         _append_chain(pause.continuation, outer)
         raise
-    frame = outer
+    _resume_frames(outer, context)
+    _finish_activation(scope)
+    return True
+
+
+def _conversation_gaps(effect: dict[str, Any]) -> list[str]:
+    """A conversation effect the interpreter cannot run: one that names no conversation (the native leaf refuses it)."""
+    value = effect.get("m_ConversationId")
+    guid = str((value.get("m_Guid") if isinstance(value, dict) else value) or "").lower()
+    return [] if guid and guid != "00000000-0000-0000-0000-000000000000" else ["conversation without an id"]
+
+
+def _conversation_continuation(guid: str, position: int, scope: Scope) -> dict[str, Any]:
+    """The frame a conversation pause leaves: the effects after it resume from here once the client closes the UI."""
+    return {"ability_guid": guid, "event": dict(scope.event), "source_uid": int(scope.source_uid),
+            "owner_uid": int(scope.owner_uid), "position": position, "root_ability": scope.root_ability,
+            "invoked": bool(scope.invoked), "instance_id": scope.instance_id,
+            "chosen": {str(k): v for k, v in scope.chosen.items()},
+            "picked": {str(k): list(v) for k, v in scope.picked.items()},
+            "variables": dict(scope.variables), "resolved": _resolved_json(scope),
+            "applied": {str(k): v for k, v in scope.applied.items()}}
+
+
+def _pause_for_conversation(guid: str, position: int, effect_raw: dict[str, Any], scope: Scope) -> None:
+    """C# ConversationAbilityEffectTemplate: the native leaf opens the client's conversation and queues the BOM
+    continuation; the interpreter's own continuation rides along in that pending state, so the client's answer
+    resumes the interpreter (resume_conversation) rather than the native walker. Always raises NeedsConversation."""
+    bstate = scope.context.bstate
+    scope.applied[position] = True
+    continuation = _conversation_continuation(guid, position, scope)
+    bstate["_interpreter_continuation"] = continuation
+    try:
+        run_native_leaf(scope.context, "ConversationAbilityEffectTemplate", effect_raw, [])
+    finally:
+        bstate.pop("_interpreter_continuation", None)
+    raise NeedsConversation(continuation)
+
+
+def _resume_frames(frame: dict[str, Any] | None, context: Any) -> None:
+    """Run each invoking frame after its invoke clause, outermost last (the frames a pause left open)."""
     while frame is not None:
         frame_root, frame_scope = _frame_scope(frame, context)
         nxt = frame.get("parent")
         try:
             _run_effects(frame["ability_guid"], frame_root, frame_scope, start=int(frame["position"]) + 1)
-        except NeedsChoice as pause:
+        except (NeedsChoice, NeedsConversation) as pause:
             _append_chain(pause.continuation, nxt)
             raise
         frame = nxt
+
+
+def resume_conversation(continuation: dict[str, Any], *, context: Any) -> bool:
+    """Resume a paused ability once the client has closed its conversation: the effects after the conversation run,
+    then the invoking frames. Raises NeedsChoice or NeedsConversation if a later effect pauses again."""
+    root, scope = _frame_scope(continuation, context)
+    outer = continuation.get("parent")
+    try:
+        _run_effects(continuation["ability_guid"], root, scope, start=int(continuation["position"]) + 1)
+    except (NeedsChoice, NeedsConversation) as pause:
+        _append_chain(pause.continuation, outer)
+        raise
+    _resume_frames(outer, context)
     _finish_activation(scope)
     return True
 
@@ -2037,6 +2100,10 @@ def coverage(guid: str) -> list[str]:
         from rules_port.ir_exec_combat import COMBAT_EFFECTS, coverage_missing as combat_missing
         if kind in COMBAT_EFFECTS:
             missing.extend(combat_missing(kind, clause, raw.get("m_AbilityEffectList") or []))
+            continue
+        if kind == "ConversationAbilityEffectTemplate":
+            # The client's conversation pauses the ability (_pause_for_conversation), so it is covered when it names one.
+            missing.extend(_conversation_gaps(effect))
             continue
         if kind != "CardModifierAbilityEffectTemplate":
             missing.append(f"effect {kind}")

@@ -514,6 +514,8 @@ class EffectContext:
         # instead of silently succeeding.
         pending = self.continuation()
         pending.update({"kind": "conversation", "conversation_id": conversation_id})
+        if self.bstate.get("_interpreter_continuation"):
+            pending["interpreter"] = self.bstate["_interpreter_continuation"]
         self.bstate["pending_conversation"] = pending
         self.bstate["resolution_paused"] = True
         return f"conversation: awaiting {conversation_id}"

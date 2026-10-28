@@ -2124,6 +2124,9 @@ def run_interpreted_trigger(handler, game, session, db, player_uid, ai_uid, batt
         return None
     except ir_exec.NeedsChoice as pause:
         return prompt_interpreted_reveal(handler, game, session, db, player_uid, ai_uid, battle_state, pause)
+    except ir_exec.NeedsConversation:
+        # The leaf queued the conversation and saved the pause; the client's answer resumes the interpreter.
+        return "interpreter"
     return "interpreter"
 
 
