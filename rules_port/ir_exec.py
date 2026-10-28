@@ -987,6 +987,35 @@ def engine_runs(guid: str, source_uid: Any, owner_uid: Any, answers: dict[int, A
     return not _invoked_non_revealed_choice(root, set())
 
 
+def _repeat_gaps(effect: dict[str, Any]) -> list[str]:
+    """The constructs of one repeating effect the interpreter cannot run (empty when it can): a repeat of an invoke
+    whose count is a constant or a bound variable, and whose child is covered and picks no card of its own."""
+    inner = effect.get("m_RepeatingEffect") or {}
+    inner_kind = _short(inner.get("_t"))
+    if inner_kind != "ActivateAbilityEffectTemplate":
+        return [f"repeat of {inner_kind}"]
+    gaps: list[str] = []
+    count_kind = _short((effect.get("m_LoopCount") or {}).get("_t"))
+    if count_kind not in ("EffectInputVariable", "EffectConstant"):
+        gaps.append(f"repeat count {count_kind}")
+    if inner.get("m_RandomlyLuckyOrUnlucky"):
+        gaps.append("random invocation")
+    child = _guid(inner.get("m_AbilityToInvoke"))
+    stack = _coverage_stack()
+    if child in stack:
+        gaps.append("recursive invocation")
+    else:
+        stack.add(child)
+        try:
+            gaps.extend(f"invoked: {item}" for item in coverage(child))
+        finally:
+            stack.discard(child)
+    child_root = _load("AbilityTemplate", child)
+    if any(_needs_choice(child_root, i) for i in range(len(child_root.m_AbilityTargetTemplateIds or []))):
+        gaps.append("repeat of a chosen target")
+    return gaps
+
+
 def _invoked_non_revealed_choice(root: MechanicsObject, seen: set[str]) -> bool:
     """Whether an invoked ability (at any depth) picks a card other than from a reveal. A reveal's pick is shown
     through the revealed-card picker, which the engine wires; any other pick is not."""
@@ -1292,6 +1321,9 @@ def _run_effects(guid: str, root: MechanicsObject, scope: Scope, start: int) -> 
             if _short(effect_type) == "ActivateAbilityEffectTemplate":
                 _invoke(guid, position, effect_raw, scope, _target_owners(root, index, scope))
                 continue
+            if _short(effect_type) == "RepeatingAbilityEffectTemplate":
+                _repeat(guid, position, effect_raw, root, index, scope)
+                continue
             if _short(effect_type) in TRANSFORM_EFFECTS:
                 _transform_targets(guid, root, clause, _short(effect_type), effect_raw, scope)
                 continue
@@ -1484,6 +1516,29 @@ def _revealed_target_empty(root: MechanicsObject, index: int, scope: Scope) -> b
     template = _load("AbilityTargetTemplate", _guid(root.m_AbilityTargetTemplateIds[index]))
     return _short(template.type_name) == "SourceRevealedTargetTemplate" and not template.m_IsAutoTarget \
         and not _revealed_candidates(template, index, scope)
+
+
+def _loop_count(field: dict[str, Any], scope: Scope) -> int:
+    """A repeating effect's loop count: a constant, or the bound value of its input variable."""
+    kind = _short(field.get("_t"))
+    if kind == "EffectConstant":
+        return int(field.get("m_Value") or 0)
+    if kind != "EffectInputVariable":
+        raise NotImplementedError(f"loop count {kind}")
+    name = str(field.get("m_InputVariableName") or "")
+    if name not in scope.variables:
+        raise KeyError(f"variable {name} is not bound")
+    return int(scope.variables[name])
+
+
+def _repeat(parent_guid: str, position: int, effect_raw: dict[str, Any], root: MechanicsObject, index: int,
+            scope: Scope) -> None:
+    """C# RepeatingAbilityEffectTemplate: the wrapped invoke runs once per loop, for the owners the clause's target
+    names. The wrapped effect is an invoke of a child that picks no card (see coverage)."""
+    loop = _loop_count(effect_raw.get("m_LoopCount") or {}, scope)
+    owners = _target_owners(root, index, scope)
+    for _ in range(max(0, loop)):
+        _invoke(parent_guid, position, effect_raw["m_RepeatingEffect"], scope, owners)
 
 
 def _invoke(parent_guid: str, position: int, effect_raw: dict[str, Any], scope: Scope, owners: list[int]) -> None:
@@ -1908,6 +1963,9 @@ def coverage(guid: str) -> list[str]:
         if kind == "RandomizeVariableEffectTemplate":
             if effect.get("m_SecondValue") or effect.get("m_MaxValueField"):
                 missing.append("random variable with a second value or a dynamic bound")
+            continue
+        if kind == "RepeatingAbilityEffectTemplate":
+            missing.extend(_repeat_gaps(effect))
             continue
         if kind == "ActivateAbilityEffectTemplate":
             if effect.get("m_RandomlyLuckyOrUnlucky"):
