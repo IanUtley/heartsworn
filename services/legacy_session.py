@@ -32,7 +32,7 @@ def handle_servicegamesession_replayfetch_160000(handler, target, instance, data
     except (TypeError, ValueError, UnicodeDecodeError):
         env_json = {}
     if isinstance(env_json, dict) and env_json.get("action") == "replayfetch":
-        from replay import replay_fetch
+        from services.replay import replay_fetch
         resp_envelope = replay_fetch(env_json)
         _hc.log_req(
             f">>> ReplayFetch session={env_json.get('Session', '')} "

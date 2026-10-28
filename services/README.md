@@ -13,4 +13,4 @@ include a focused protocol test where practical.
 Auction remains registered as an intentionally unimplemented API surface.
 Practice does not have a separate service module: it is a single client action
 handled by the main session path. Replay packaging lives in the root
-`replay.py`; `replay_server.py` is only its polling worker.
+`services/replay.py`; `replay_server.py` (root) is only its polling worker.

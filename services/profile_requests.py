@@ -31,7 +31,7 @@ def handle_serviceprofile_80000(handler, target, instance, data_type, reqid, com
         template_envelope = handle_profile_action(
             _hc._db, handler.user_profile["id"], env_json)
     if isinstance(env_json, dict) and env_json.get("action") == "qreplaylst":
-        from replay import replay_list
+        from services.replay import replay_list
         resp_envelope = json.dumps(
             replay_list(env_json), separators=(",", ":")
         ).encode("utf-8")

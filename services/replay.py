@@ -11,7 +11,7 @@ import os
 import struct
 from datetime import datetime, timedelta, timezone
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DB_PATH = os.environ.get("HEX_DB_PATH", os.path.join(BASE_DIR, "hconnect.db"))
 REPLAY_DIR = os.environ.get(
     "HEX_REPLAY_DIR", os.path.join(os.path.dirname(DB_PATH), "replays"))

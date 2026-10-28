@@ -184,8 +184,8 @@ or display text.
 | `chat_db.py` | chat-history persistence API |
 | `tournament_db.py` | tournament, bracket, signup, and tournament-match persistence API |
 | `replay_db.py` | replay event/index persistence API |
-| `replay.py` | replay packaging plus list/fetch compatibility helpers |
-| `replay_server.py` | polling worker only; no replay business logic |
+| `services/replay.py` | replay packaging plus list/fetch compatibility helpers |
+| `replay_server.py` | root entry point for the polling worker only; no replay business logic |
 | `encoder.py` | ObjFmt response and binary event encoding |
 | `proxy.py` | HTTP authentication, payment-link compatibility, news, and static proxy endpoints |
 
@@ -198,7 +198,7 @@ counters in that dungeon's rules state so values do not leak between zones.
 `practice.py` is not a service: Practice is one client action and follows the
 normal session path. The old `services/practice.py` and replay browser module
 were removed. `auction.py` stays because Auction is a substantial unimplemented
-API surface. Replay packaging stays in the root `replay.py` even if playback
+API surface. Replay packaging stays in `services/replay.py` even if playback
 endpoints remain incomplete.
 
 The `rules_port/` package is the semantic migration boundary for battle rules;
