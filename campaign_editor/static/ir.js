@@ -187,6 +187,12 @@
       names = data.names;
       renderNames();
       setStatus(`${names.length} names loaded. Load an ability by GUID, or write code.`, "ok");
+      // Opened from the ability editor: load the ability it names (?guid=).
+      const params = new URLSearchParams(location.search);
+      if (params.get("guid")) {
+        guid.value = params.get("guid");
+        load();
+      }
     } catch (error) {
       setStatus(`Could not load the names: ${error.message}`, "bad");
     }

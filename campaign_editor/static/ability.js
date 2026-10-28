@@ -404,6 +404,7 @@ async function openAbility() {
   quiet = false;
   showProblems([]);
   setStatus("Opened.", "ok");
+  syncIrLink();
 }
 
 function newAbility() {
@@ -418,6 +419,7 @@ function newAbility() {
   quiet = false;
   showProblems([]);
   setStatus("New ability: pick a trigger or add a clause, then save.");
+  syncIrLink();
 }
 
 async function save() {
@@ -432,6 +434,13 @@ async function save() {
   $("guid").value = guid;
   showProblems([]);
   setStatus("Saved.", "ok");
+  syncIrLink();
+}
+
+// The IR editor opens the ability being edited (its ?guid= parameter), so the link follows the GUID.
+function syncIrLink() {
+  const link = $("ir-link");
+  link.href = guid ? `/ir?guid=${encodeURIComponent(guid)}` : "/ir";
 }
 
 // ---- wiring -------------------------------------------------------------------------
@@ -492,6 +501,7 @@ async function loadSuggestions() {
 
 (async function start() {
   loadSuggestions();
+  syncIrLink();
   const { ok, data } = await api("/api/ability-ir-vocab");
   if (!ok) return setStatus(data.error || "could not load the editor's vocabulary", "bad");
   vocab = { triggers: [], shapes: [], durations: [], ...data };

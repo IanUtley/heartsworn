@@ -28,6 +28,8 @@
   button:hover:not(:disabled) { border-color: var(--accent); }
   button.primary { border-color: var(--accent); color: var(--accent); }
   button:disabled { opacity: .45; cursor: default; }
+  a.button { display: inline-block; padding: 3px 9px; border: 1px solid var(--line); border-radius: 5px; background-color: var(--panel-2); color: var(--text); text-decoration: none; }
+  a.button:hover { border-color: var(--accent); }
 
   .bar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 8px 12px; border-bottom: 1px solid var(--line); background: var(--panel); }
   .bar h1 { font-size: 15px; margin: 0 6px 0 0; }
@@ -86,6 +88,7 @@
   <button id="open" type="button">Open</button>
   <button id="new" type="button">New</button>
   <button id="save" type="button" class="primary" disabled>Save</button>
+  <a id="ir-link" class="button" href="/ir" target="_blank" rel="noopener" title="Open this ability in the IR editor">IR editor</a>
   <span id="status" class="status">Enter an ability GUID, or start a new one.</span>
 </header>
 
