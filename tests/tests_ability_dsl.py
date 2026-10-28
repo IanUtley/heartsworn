@@ -41,6 +41,15 @@ def test_records_abilities_round_trip():
     assert root["m_Variables"][0]["m_DefaultValue"] == 2 and not compiled["new"]
 
 
+PLAY_FOR_FREE = "1068f0c2-b21d-e7d8-747b-6a213600a543"   # its clause plays a card for free
+
+
+def test_play_for_free_has_a_sentence_and_reads_back_exactly():
+    read = dsl.decompile(PLAY_FOR_FREE)
+    assert read["exact"] and read["reasons"] == [], read["reasons"]
+    assert read["text"].endswith("Then play this for free (new target).")
+
+
 def test_compiled_ability_saves_to_the_overlay():
     records_file = card_abilities.RECORDS / "AbilityTemplate.jsonl"
     stamp = records_file.stat().st_mtime_ns

@@ -66,6 +66,15 @@ class IrTextTest(unittest.TestCase):
         with self.assertRaises(tx.TextError):
             tx.loads_ability(with_binding("NoSuchInput"))
 
+    def test_default_fields_are_left_out_of_the_code(self):
+        code = tx.ability_code("1068f0c2-b21d-e7d8-747b-6a213600a543")
+        for default_only in ("output_variables=", "is_optional=", "vfx_", "effect_instance_id=0",
+                             "target_template_index=0", "min=", "explicit=", "random="):
+            self.assertNotIn(default_only, code)
+        written = tx.loads_ability(code)["records"]
+        self.assertEqual(sorted(map(_canon, written)), sorted(map(_canon, _expected(
+            card_abilities.lookup("AbilityTemplate", "1068f0c2-b21d-e7d8-747b-6a213600a543")[0]))))
+
     def test_bad_code_raises(self):
         with self.assertRaises(tx.TextError):
             tx.loads_ability("root.ability_template(name=)")

@@ -34,6 +34,7 @@ Records it stands for. ``dumps`` and ``loads`` are the same pair for one IR obje
 
 from __future__ import annotations
 
+import copy
 import functools
 import json
 import re
@@ -176,6 +177,60 @@ def _written_fields(node: Node) -> dict[str, Any]:
     return {key: value for key, value in node.fields.items() if not mf.is_default(cls, key, value)}
 
 
+CLAUSE_CLASS = "AbilityEffectTargetMapping"
+
+
+def _written_clause_fields(clause: irc.Clause) -> dict[str, Any]:
+    """A clause's fields without the ones that hold their client default (its output variables,
+    its VFX and the other fields Records never vary): the loader puts them back."""
+    return {key: value for key, value in clause.fields.items() if not mf.is_default(CLAUSE_CLASS, key, value)}
+
+
+def _target_keys(kind: str) -> dict[str, str]:
+    """The stored key of each IR field of a target kind."""
+    keys = {ir: key for key, ir in ability_ir.TARGET_BASE.items()}
+    keys.update(ability_ir.TARGET_KINDS[kind][1])
+    return keys
+
+
+def _written_target_fields(target: ability_ir.Target) -> dict[str, Any]:
+    """A target's fields without the ones that hold their client default: the loader puts them back."""
+    cls = ability_ir.TARGET_KINDS[target.kind][0]
+    keys = _target_keys(target.kind)
+    out = {}
+    for ir, value in target.fields.items():
+        stored = keys.get(ir)
+        stored_value = ability_ir._count_to_record(value) if ir in ("min", "max") else value
+        if stored and mf.is_default(cls, mf.ir_name(stored), stored_value):
+            continue
+        out[ir] = value
+    return out
+
+
+def _with_defaults(cls: str, fields: dict[str, Any]) -> dict[str, Any]:
+    """The fields with each missing field of the class set to its client default (copied, so the
+    shared defaults are never changed)."""
+    filled = dict(fields)
+    for name, default in mf.current_fields(cls).items():
+        if name not in filled:
+            filled[name] = copy.deepcopy(default)
+    return filled
+
+
+def _with_target_defaults(kind: str, fields: dict[str, Any]) -> dict[str, Any]:
+    """A target's fields with each missing field of its kind set to its client default."""
+    cls = ability_ir.TARGET_KINDS[kind][0]
+    current = mf.current_fields(cls)
+    filled = dict(fields)
+    for ir, stored in _target_keys(kind).items():
+        name = mf.ir_name(stored)
+        if ir in filled or name not in current:
+            continue
+        default = copy.deepcopy(current[name])
+        filled[ir] = ability_ir._count_from_record(default) if ir in ("min", "max") else default
+    return filled
+
+
 def _written_meta(node: Node) -> dict[str, Any] | None:
     """The node's meta, without a ``_v`` the loader can generate exactly (None when there is
     nothing to write)."""
@@ -236,9 +291,9 @@ def dumps(value: Any, names: dict[str, str] | None = None) -> str:
     if isinstance(value, Raw):
         return f"raw({dumps(value.value)})"
     if isinstance(value, irc.Clause):
-        return _call("clause", _fields_args(value.fields, names))
+        return _call("clause", _fields_args(_written_clause_fields(value), names))
     if isinstance(value, ClauseLink):
-        args = _fields_args(value.clause.fields, names)
+        args = _fields_args(_written_clause_fields(value.clause), names)
         if value.bindings:
             pairs = [f"{_name_text(b.child)} = ${_name_text(b.parent)}" for b in value.bindings]
             args.append(("bindings", "[" + ", ".join(pairs) + "]"))
@@ -249,7 +304,7 @@ def dumps(value: Any, names: dict[str, str] | None = None) -> str:
     if isinstance(value, irf.Filter):
         return _call(f"filter.{value.kind}", _fields_args(value.fields, names))
     if isinstance(value, ability_ir.Target):
-        return _call(f"target.{value.kind}", _fields_args(value.fields, names, value.meta or None))
+        return _call(f"target.{value.kind}", _fields_args(_written_target_fields(value), names, value.meta or None))
     if isinstance(value, ability_ir.Var):
         return _var_text(value, names)
     raise TextError(f"cannot print {type(value).__name__}")
@@ -296,14 +351,15 @@ def _build(name: str, positional: list[Any], keywords: dict[str, Any]) -> Any:
     if name == "raw":
         return Raw(positional[0])
     if name == "clause":
-        return irc.Clause(fields=dict(keywords))
+        return irc.Clause(fields=_with_defaults(CLAUSE_CLASS, dict(keywords)))
     if name == "effect_constant":
         return ability_ir.Var(kind="effect_constant", base={}, fields=dict(keywords))
     if name == "tuple":
         return tuple(positional[0])
     if name == "link":
         bindings = keywords.pop("bindings", None) or []
-        return ClauseLink(clause=irc.Clause(fields=dict(keywords)), bindings=tuple(bindings))
+        return ClauseLink(clause=irc.Clause(fields=_with_defaults(CLAUSE_CLASS, dict(keywords))),
+                          bindings=tuple(bindings))
     if "." not in name:
         raise TextError(f"unknown call {name!r}")
     layer, kind = name.split(".", 1)
@@ -314,7 +370,7 @@ def _build(name: str, positional: list[Any], keywords: dict[str, Any]) -> Any:
     if layer == "filter":
         return irf.Filter(kind=kind, fields=fields)
     if layer == "target":
-        return ability_ir.Target(kind=kind, fields=fields, meta=meta)
+        return ability_ir.Target(kind=kind, fields=_with_target_defaults(kind, fields), meta=meta)
     if layer == "variable":
         return ability_ir.Var(kind=kind, base=base, fields=fields)
     to_class = _tables()

@@ -448,6 +448,10 @@ SHAPES: tuple[dict[str, Any], ...] = (
     {"id": "fire_event", "label": "Fire an event", "phrase": "fire the {event} event for {target}",
      "you": "fire the {event} event",
      "record": {"_t": _ABL + "FireEventEffectTemplate", "m_TriggerType": "$event"}},
+    # Play a card for free (the card the target names). m_JustActivate is the one field the
+    # sentence does not say, so a template that sets it does not match.
+    {"id": "play", "label": "Play for free", "phrase": "play {target} for free",
+     "record": {"_t": _ABL + "PlayCardAbilityEffectTemplate", "m_JustActivate": 0}},
 )
 SHAPE_BY_ID = {shape["id"]: shape for shape in SHAPES}
 
