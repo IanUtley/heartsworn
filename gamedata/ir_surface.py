@@ -236,6 +236,46 @@ def effect(text: str, body: Body, *, id: str | None = None) -> Typed:
     return obj
 
 
+def _effect(cls: type, text: str, id_: str, name: str | None, **fields: Any) -> Typed:
+    """An effect template built from its rule text, template ID and the fields its kind names."""
+    return cls(name=name or _derived_name(text), template_id=_ref(str(id_).lower()), game_text=text, **fields)
+
+
+def summon(text: str, *, id: str, card: str, zone: str = "Warzone", amount: int = 1,
+           name: str | None = None) -> Typed:
+    """Summon ``amount`` copies of a card (by GUID) into ``zone``: "summon a Captain's Parrot"."""
+    return _effect(T.SummonTokenTroopAbilityEffectTemplate, text, id, name, card_template_id=_ref(card),
+                   card_collection=zone, card_location="Unknown", amount=amount,
+                   amount_field=T.EffectInputVariable(input_variable_name="A"))
+
+
+def activate(text: str, *, id: str, ability: str, name: str | None = None) -> Typed:
+    """Use another ability (by GUID): "you invoke Discard a card"."""
+    return _effect(T.ActivateAbilityEffectTemplate, text, id, name, ability_to_invoke=_ref(ability))
+
+
+def grant(text: str, *, id: str, ability: str, name: str | None = None) -> Typed:
+    """Give a card an ability (by GUID): 'drawn resource cards get "Draw a card"'."""
+    return _effect(T.GrantAbilityEffectTemplate, text, id, name, granted_ability_template_id=_ref(ability))
+
+
+def move_card(text: str, *, id: str, zone: str, name: str | None = None) -> Typed:
+    """Move the target cards into ``zone``."""
+    return _effect(T.MoveCardToZoneEffectTemplate, text, id, name, destination_collection=zone,
+                   destination_location="Unknown")
+
+
+def transform(text: str, *, id: str, card: str, name: str | None = None) -> Typed:
+    """Transform the target into a card (by GUID)."""
+    return _effect(T.TransformCardAbilityEffectTemplate, text, id, name, card_template_id=_ref(card))
+
+
+def deal_damage(text: str, *, id: str, amount: str, name: str | None = None) -> Typed:
+    """Deal damage equal to an input named ``amount`` ("2" for a fixed amount)."""
+    return _effect(T.CardModifierAbilityEffectTemplate, text, id, name, modifier=T.DamageModifier(
+        input_value=T.EffectInputVariable(input_variable_name=str(amount))))
+
+
 def sacrifice(target: Target) -> Typed:
     """Sacrifice each card ``target`` picks. The stored "sacrifice a troop." effect is reused."""
     text = "sacrifice a troop."
@@ -354,6 +394,12 @@ FACTORIES: dict[str, Any] = {
     "library_target": library_target,
     "effect": effect,
     "sacrifice": sacrifice,
+    "summon": summon,
+    "activate": activate,
+    "grant": grant,
+    "move_card": move_card,
+    "transform": transform,
+    "deal_damage": deal_damage,
     "ability": ability,
     "card_enters": card_enters,
     "card_matches": card_matches,

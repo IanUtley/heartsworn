@@ -92,13 +92,69 @@ def _effect_fragments(clauses: list[dict[str, Any]]) -> tuple[dict[str, str], li
         if guid in names or guid == ZERO_GUID:
             continue
         record = effect_record(guid)
-        cls = getattr(T, str(record.get("_t") or "").rsplit(".", 1)[-1], None)
-        if cls is None:
+        if getattr(T, _kind(record), None) is None:
             continue
         name = _fragment_name(record, used)
         names[guid] = name
-        lines.append(f"{name} = {P.dumps(cls.from_record(record))}")
+        lines.append(f"{name} = {_fragment_value(record)}")
     return names, lines
+
+
+def _guid_of(value: Any) -> str | None:
+    return str(value["m_Guid"]).lower() if isinstance(value, dict) and "m_Guid" in value else None
+
+
+def _kind(record: dict[str, Any]) -> str:
+    return str(record.get("_t") or "").rsplit(".", 1)[-1]
+
+
+def _modifier_kind(record: dict[str, Any]) -> str:
+    return str((record.get("m_Modifier") or {}).get("_t") or "").rsplit(".", 1)[-1]
+
+
+# Each surface helper with the keywords it takes from a stored record (None when the record is not its kind).
+SURFACE_HELPERS: tuple[tuple[str, Any], ...] = (
+    ("summon", lambda r: {"card": _guid_of(r.get("m_CardTemplateId")), "zone": r.get("m_CardCollection"),
+                          "amount": r.get("m_Amount")} if _kind(r) == "SummonTokenTroopAbilityEffectTemplate" else None),
+    ("activate", lambda r: {"ability": _guid_of(r.get("m_AbilityToInvoke"))}
+     if _kind(r) == "ActivateAbilityEffectTemplate" else None),
+    ("grant", lambda r: {"ability": _guid_of(r.get("m_GrantedAbilityTemplateId"))}
+     if _kind(r) == "GrantAbilityEffectTemplate" else None),
+    ("move_card", lambda r: {"zone": r.get("m_DestinationCollection")}
+     if _kind(r) == "MoveCardToZoneEffectTemplate" else None),
+    ("transform", lambda r: {"card": _guid_of(r.get("m_CardTemplateId"))}
+     if _kind(r) == "TransformCardAbilityEffectTemplate" else None),
+    ("deal_damage", lambda r: {"amount": ((r.get("m_Modifier") or {}).get("m_InputValue") or {}).get(
+        "m_InputVariableName")} if _kind(r) == "CardModifierAbilityEffectTemplate"
+     and _modifier_kind(r) == "DamageModifier" else None),
+)
+
+
+def _same_record(built: dict[str, Any], stored: dict[str, Any]) -> bool:
+    return {k: v for k, v in _plain(built).items() if k != "_v"} == {k: v for k, v in stored.items() if k != "_v"}
+
+
+def _fragment_value(record: dict[str, Any]) -> str:
+    """An effect's fragment value: the surface helper that rebuilds it exactly, else its constructor form."""
+    import gamedata.ir_surface as surface
+    text = record.get("m_GameText") or ""
+    guid = _guid_of(record.get("m_TemplateId"))
+    for helper, keywords_of in SURFACE_HELPERS:
+        keywords = keywords_of(record)
+        if keywords is None or guid is None or any(value is None for value in keywords.values()):
+            continue
+        keywords["id"] = guid
+        if record.get("m_Name") != surface._derived_name(text):
+            keywords["name"] = record.get("m_Name")
+        try:
+            built = getattr(surface, helper)(text, **keywords)
+        except (ValueError, TypeError, KeyError):
+            continue
+        if _same_record(built.to_record(), record):
+            shown = [repr(text), *[f"{key}={value!r}" for key, value in keywords.items()]]
+            return f"{helper}({', '.join(shown)})"
+    cls = getattr(T, _kind(record), None)
+    return P.dumps(cls.from_record(record))
 
 
 def effect_record(guid: str) -> dict[str, Any]:
