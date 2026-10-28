@@ -7,7 +7,7 @@ interpreter never half-runs an ability.
 
 ## Current state
 
-Measured with `AssetExtraction/ir_gap_report.py` over all 8,996 `AbilityTemplate` records, at the latest run:
+Measured with `tools/ir_coverage/ir_gap_report.py` over all 8,996 `AbilityTemplate` records, at the latest run:
 
 - Covered by the interpreter: 8,896
 - Refused: 100 (the reasons are under "Outstanding after the latest run" below)
@@ -16,7 +16,7 @@ Measured with `AssetExtraction/ir_gap_report.py` over all 8,996 `AbilityTemplate
 Regenerate the numbers and the full reason list from the current code and Records:
 
 ```bash
-python3 AssetExtraction/ir_gap_report.py --top 80 --json /tmp/ir_gaps.json
+python3 tools/ir_coverage/ir_gap_report.py --top 80 --json /tmp/ir_gaps.json
 ```
 
 The counts below are one ability's refusal reasons each. An ability with several reasons is counted under each.
@@ -38,7 +38,7 @@ from sockets, payments, remembered powers and random picks (62 of the 66 grants 
 ## Outstanding after the latest run
 
 The 100 refused abilities, by refusal reason. An ability with several reasons is counted under each, so the
-column sums to more than 100. Regenerate with `python3 AssetExtraction/ir_gap_report.py --top 200`.
+column sums to more than 100. Regenerate with `python3 tools/ir_coverage/ir_gap_report.py --top 200`.
 
 | Reason | Abilities |
 | --- | ---: |
@@ -465,7 +465,7 @@ and zone events.
 
 ## How to close an entry
 
-1. Find the refusal in the report (`AssetExtraction/ir_gap_report.py`) and the code that raises it.
+1. Find the refusal in the report (`tools/ir_coverage/ir_gap_report.py`) and the code that raises it.
 2. Call the live leaf or evaluator the native path uses, with its inputs passed explicitly, as the existing
    `ir_exec_*` runners do. Prefer calling the native function over re-implementing it, so both paths agree by
    construction.

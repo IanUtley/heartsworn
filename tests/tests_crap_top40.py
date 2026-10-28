@@ -263,7 +263,7 @@ def test_auth_proxy_serves_the_news_feed():
 
 
 def test_set_one_inventory_builds_from_the_baseline_database():
-    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "AssetExtraction"))
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "tools", "ir_coverage"))
     import build_set1_coverage
     from tests.test_db import fresh_database as baseline
     inventory = build_set1_coverage.build_inventory(
@@ -1471,7 +1471,7 @@ def test_new_session_packet_assigns_a_session_and_answers_create():
 
 
 def test_ability_record_describes_a_manual_effect_with_its_signature():
-    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "AssetExtraction"))
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "tools", "ir_coverage"))
     import build_set1_coverage as coverage
     meta = (0, 1, 2, 0, 0, 0, 0, 0, "[]", "", "Gain 2", "{}")
     effects = [("row", "effect-1", 0, "CardModifierAbilityEffectTemplate", "{}", 0, "", -1,
@@ -2478,7 +2478,7 @@ def test_az1_node_details_come_from_its_encounter_scene_row(tmp_path):
 
 def test_set_one_coverage_sweep_reports_the_non_resource_cards(monkeypatch, capsys):
     from tests.test_db import fresh_database
-    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "AssetExtraction"))
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "tools", "ir_coverage"))
     import sweep_set1_coverage
     monkeypatch.setattr(sweep_set1_coverage, "DB", fresh_database())
     sweep_set1_coverage.main()
@@ -2747,7 +2747,7 @@ def test_panorama_importer_dry_run_reports_every_template_and_writes_nothing(tmp
 
 def test_effect_leaf_audit_writes_a_report_for_every_effect_class(tmp_path, monkeypatch, capsys):
     import json as _json
-    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "AssetExtraction"))
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "tools", "ir_coverage"))
     import audit_effect_leaves
     report = tmp_path / "effect_leaf_audit.json"
     monkeypatch.setattr(sys, "argv", ["audit_effect_leaves.py", "--json", str(report)])

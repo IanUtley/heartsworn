@@ -6,8 +6,8 @@ refusal stays on the native resolver path. The report lists the refusal reasons,
 gap document (docs/IR_INTERPRETER_GAPS.md) can be regenerated from the current code and Records.
 
 Usage (from the repo root, with the Records checked out at hex-private/Records):
-    python3 AssetExtraction/ir_gap_report.py
-    python3 AssetExtraction/ir_gap_report.py --top 80 --json /tmp/ir_gaps.json
+    python3 tools/ir_coverage/ir_gap_report.py
+    python3 tools/ir_coverage/ir_gap_report.py --top 80 --json /tmp/ir_gaps.json
 """
 
 import argparse

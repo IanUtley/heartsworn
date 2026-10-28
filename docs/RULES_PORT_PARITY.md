@@ -1595,7 +1595,7 @@ the uncertified rows above, the inspected damage path still needs:
 - Consistent state-based death timing across effect groups and simultaneous
   damage, with real trigger and zone-event acceptance scenarios.
 
-Effect-field audit follow-ups (`AssetExtraction/audit_effect_leaves.py`
+Effect-field audit follow-ups (`tools/ir_coverage/audit_effect_leaves.py`
 reports no meaningful unread effect-template fields for the current snapshot;
 these are the remaining projection limits):
 
@@ -1608,7 +1608,7 @@ these are the remaining projection limits):
   implementation does not branch on it. The server therefore has no distinct
   action to mirror for this flag in the inspected client build.
 
-`scripts/card_audit.py` reports zero unconsumed intattrs for the current Records
+`tools/ir_coverage/card_audit.py` reports zero unconsumed intattrs for the current Records
 snapshot: every C# `Game/**` runtime IntAttr read now has a Python consumer,
 including the champion permissions (`CantActivateAbilities`,
 `CantUseChargePowers`, `OpposingCryptPowersCantBeUsed`,

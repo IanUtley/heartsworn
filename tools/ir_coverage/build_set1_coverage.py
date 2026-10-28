@@ -12,8 +12,8 @@ cover several related behaviors at once.  Every card remains in the inventory;
 cards outside the representative set are "smoke-only", not ignored.
 
 Usage:
-    python3 AssetExtraction/build_set1_coverage.py
-    python3 AssetExtraction/build_set1_coverage.py --out-dir /tmp/set1-coverage
+    python3 tools/ir_coverage/build_set1_coverage.py
+    python3 tools/ir_coverage/build_set1_coverage.py --out-dir /tmp/set1-coverage
 """
 
 import argparse

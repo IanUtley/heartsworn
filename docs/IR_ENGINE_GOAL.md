@@ -15,7 +15,7 @@ Three measurable parts:
 
 ## Where we are
 
-Measured with `AssetExtraction/ir_gap_report.py` over the 8,996 `AbilityTemplate` records in the Records:
+Measured with `tools/ir_coverage/ir_gap_report.py` over the 8,996 `AbilityTemplate` records in the Records:
 
 | Measure | Value |
 | --- | --- |
@@ -113,7 +113,7 @@ Exit for each: its refusal reason is gone from the gap report, with a passing te
 
 ## How progress is tracked
 
-- The gap report (`AssetExtraction/ir_gap_report.py`) is the source of the counts. Re-run it after each change, and
+- The gap report (`tools/ir_coverage/ir_gap_report.py`) is the source of the counts. Re-run it after each change, and
   update the numbers in `docs/IR_INTERPRETER_GAPS.md`.
 - Each milestone's exit check is run and its result written into the change's commit message.
 - A refusal removed without a passing test does not count as closed.

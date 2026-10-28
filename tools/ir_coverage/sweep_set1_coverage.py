@@ -7,7 +7,7 @@ the gaps (missing leaves, stubbed leaves, unmodeled conditions, undispatched
 trigger events) so the port can be driven by real card coverage.
 
 Usage:
-    python3 AssetExtraction/sweep_set1_coverage.py
+    python3 tools/ir_coverage/sweep_set1_coverage.py
 """
 
 import json

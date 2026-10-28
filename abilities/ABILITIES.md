@@ -778,7 +778,7 @@ auto-target in the extracted record.
 
 #### Typed-field audit
 
-`AssetExtraction/audit_effect_leaves.py` is the field-level counterpart to the
+`tools/ir_coverage/audit_effect_leaves.py` is the field-level counterpart to the
 registration inventory above. It reads the C# `m_*` field declarations, the
 Records field unions, and the Python leaf call closures, then reports every
 meaningful Records field a leaf never reads, leaves with no typed reads, and

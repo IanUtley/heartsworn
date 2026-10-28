@@ -13,8 +13,8 @@ class carries with the fields the Python leaf actually reads.  It reports:
 * leaves that read no typed ``m_*`` field at all (text-inference risk).
 
 Usage:
-    python3 AssetExtraction/audit_effect_leaves.py
-    python3 AssetExtraction/audit_effect_leaves.py --json /tmp/leaf_audit.json
+    python3 tools/ir_coverage/audit_effect_leaves.py
+    python3 tools/ir_coverage/audit_effect_leaves.py --json /tmp/leaf_audit.json
 """
 
 import argparse
