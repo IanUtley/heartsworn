@@ -1707,9 +1707,6 @@ STAT_DURATIONS = {"Permanent", "EndOfTurn"}
 # resolves and is recorded in the linked ledger: it expires with its source (while in play), or at the start of the
 # responsible player's next turn, as native records it.
 LINKED_STAT_DURATIONS = STAT_DURATIONS | {"WhileCardInPlay", "BeginningOfOwnersTurn"}
-# The effect text the live stat path derives its operand from (equal to this troop's DEF, a voided troop's stat).
-# An effect with such text is refused, not computed differently.
-DERIVED_STAT_TEXT = ("troop's [def]", "voided troop's")
 SUPPORTED_TARGETS = {"AbilitySourceCardTargetTemplate", "AbilityTargetTemplate", "PlayerTargetTemplate",
                      "SourceRevealedTargetTemplate"} | FOLLOW_UP_KINDS
 # The player targets run without a choice: "You", and the one opponent (its random pick is that one player).
@@ -2044,9 +2041,6 @@ def coverage(guid: str) -> list[str]:
                 missing.append(f"stat property {stat.get('m_Property')}")
             if _short((stat.get("m_InputValue") or {}).get("_t")) not in ("EffectInputVariable", "EffectConstant"):
                 missing.append("stat without a typed amount")
-            game_text = str(effect.get("m_GameText") or "").lower()
-            if any(phrase in game_text for phrase in DERIVED_STAT_TEXT):
-                missing.append("stat derived from another card")
         if modifier in GROUP_G_MODIFIERS:
             missing.extend(modifier_gaps(effect.get("m_Modifier") or {},
                                          str(clause.get("m_EffectDuration") or ""), linked=linked))
