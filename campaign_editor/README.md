@@ -47,8 +47,10 @@ champions; admins can save anyone's.
 Campaign content is shared across accounts. Legacy `campaign_user_data` rows
 from older versions are ignored and retained; character progress remains in
 `campaign_progress`. Sessions live in memory (restarting the editor logs everyone out). The
-editor listens on 127.0.0.1 unless started with `--host`; put it behind
-HTTPS before exposing it.
+editor listens on 127.0.0.1 unless started with `--host`. Log-in passwords
+are only sent over HTTPS: start the editor with `--cert` and `--key` (PEM
+files) to serve HTTPS, which also marks the session cookie `Secure`. A
+`--host` other than loopback without `--cert`/`--key` refuses to start.
 
 ## Run
 

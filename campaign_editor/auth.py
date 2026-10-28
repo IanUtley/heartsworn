@@ -100,8 +100,11 @@ def logout(token: str) -> None:
         _SESSIONS.pop(token, None)
 
 
-def set_cookie(token: str, *, clear: bool = False) -> str:
-    """The Set-Cookie header value for a session (or its removal)."""
+def set_cookie(token: str, *, clear: bool = False, secure: bool = False) -> str:
+    """The Set-Cookie header value for a session (or its removal). ``secure``
+    keeps the cookie to HTTPS requests (the editor serves TLS)."""
     value = "" if clear else token
     extra = "; Max-Age=0" if clear else ""
+    if secure:
+        extra += "; Secure"
     return f"{COOKIE}={value}; Path=/; HttpOnly; SameSite=Strict{extra}"

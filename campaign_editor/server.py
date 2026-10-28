@@ -2,6 +2,7 @@
 """Campaign editor and character-state simulator.
 
     python3 campaign_editor/server.py [--port 8765] [--db hconnect.db]
+    python3 campaign_editor/server.py --host 0.0.0.0 --cert cert.pem --key key.pem
 
 Serves the editor page and JSON built from ``hex-private/Records/`` plus a view of the
 server database, behind a log-in with the game's accounts (``auth.py``).
@@ -19,6 +20,7 @@ import json
 import mimetypes
 import re
 import sqlite3
+import ssl
 import threading
 import traceback
 from contextlib import closing
@@ -48,11 +50,13 @@ STATIC = HERE / "static"
 SHARED_ROOT = catalog.REPO / "web_client" / "static"
 SHARED_FILE = re.compile(r"(hex_assets|cache|card_face)\.js|unity/[a-z_]+\.js")
 PUBLIC_API = {"/api/me", "/api/login", "/api/logout"}
+LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1"}
 
 
 class EditorHandler(BaseHTTPRequestHandler):
     db_path: Path = catalog.REPO / "hconnect.db"
     session: dict | None = None
+    secure_cookies: bool = False      # set when the editor serves HTTPS
 
     def log_message(self, fmt, *args):  # keep the terminal quiet
         pass
@@ -445,7 +449,8 @@ class EditorHandler(BaseHTTPRequestHandler):
                                       "admin": session["admin"]}).encode("utf-8")
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json; charset=utf-8")
-                self.send_header("Set-Cookie", auth.set_cookie(session["token"]))
+                self.send_header("Set-Cookie", auth.set_cookie(
+                    session["token"], secure=self.secure_cookies))
                 self.send_header("Content-Length", str(len(payload)))
                 self.end_headers()
                 self.wfile.write(payload)
@@ -454,7 +459,8 @@ class EditorHandler(BaseHTTPRequestHandler):
                 if self.session:
                     auth.logout(self.session["token"])
                 self.send_response(200)
-                self.send_header("Set-Cookie", auth.set_cookie("", clear=True))
+                self.send_header("Set-Cookie", auth.set_cookie(
+                    "", clear=True, secure=self.secure_cookies))
                 self.send_header("Content-Length", "2")
                 self.end_headers()
                 self.wfile.write(b"{}")
@@ -748,6 +754,17 @@ class EditorHandler(BaseHTTPRequestHandler):
             self._json({"error": f"{type(exc).__name__}: {exc}"}, 500)
 
 
+class TLSServer(ThreadingHTTPServer):
+    """Serves HTTPS. The handshake runs in each request's own thread, so a
+    slow or stalled client cannot hold up the accept loop."""
+    ssl_context: ssl.SSLContext
+
+    def get_request(self):
+        sock, addr = super().get_request()
+        return self.ssl_context.wrap_socket(sock, server_side=True,
+                                            do_handshake_on_connect=False), addr
+
+
 def _create_play(db, session, body):
     """Store an editor Play request of ``body["scene"]`` for the logged-in
     account and return the chat command that starts it in the game client
@@ -788,7 +805,16 @@ def main():
     parser.add_argument("--db", type=Path, default=catalog.REPO / "hconnect.db")
     parser.add_argument("--host", default="127.0.0.1",
                         help="address to listen on (default: this machine only)")
+    parser.add_argument("--cert", type=Path,
+                        help="TLS certificate (PEM); with --key, the editor serves HTTPS")
+    parser.add_argument("--key", type=Path, help="TLS private key (PEM) for --cert")
     args = parser.parse_args()
+    if bool(args.cert) != bool(args.key):
+        parser.error("--cert and --key must be given together")
+    if not args.cert and args.host not in LOOPBACK_HOSTS:
+        # Passwords go over the wire at log-in: never serve them in clear text
+        # to another machine.
+        parser.error(f"--host {args.host} needs --cert and --key (HTTPS) for log-in")
     EditorHandler.db_path = args.db.resolve()
     # Parse the conversation catalogue in the background; the first request
     # that needs it waits on the same lock instead of reparsing.
@@ -797,8 +823,18 @@ def main():
     # The ability form's facts (Records references, client field types) likewise,
     # then the sentence catalogue (it reads the same Records files).
     threading.Thread(target=lambda: (abilities.warm_caches(), ability_dsl.warm()), daemon=True).start()
-    server =ThreadingHTTPServer((args.host, args.port), EditorHandler)
-    print(f"Campaign editor: http://{args.host}:{args.port}/  (db: {args.db})")
+    if args.cert:
+        context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        context.minimum_version = ssl.TLSVersion.TLSv1_2
+        context.load_cert_chain(args.cert, args.key)
+        server = TLSServer((args.host, args.port), EditorHandler)
+        server.ssl_context = context
+        EditorHandler.secure_cookies = True
+        scheme = "https"
+    else:
+        server = ThreadingHTTPServer((args.host, args.port), EditorHandler)
+        scheme = "http"
+    print(f"Campaign editor: {scheme}://{args.host}:{args.port}/  (db: {args.db})")
     try:
         server.serve_forever()
     except KeyboardInterrupt:
