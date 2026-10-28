@@ -1606,11 +1606,12 @@ def _chosen_value(value: Any) -> int | list[int] | None:
     return int(value)
 
 
-def _check_pick_count(root: MechanicsObject, index: int, picked: int) -> None:
-    """A chosen target's pick count must lie between its minimum and its maximum (a maximum of 0 is no limit)."""
+def _check_pick_count(root: MechanicsObject, index: int, picked: int, variables: dict[str, int]) -> None:
+    """A chosen target's pick count must lie between its minimum and its maximum (a maximum of 0 is no limit). A count
+    named by an ability variable is read from the variables the ability has bound."""
     template = _load("AbilityTargetTemplate", _guid(root.m_AbilityTargetTemplateIds[index]))
-    most = target_count(template.m_MaxTargetCount, {})
-    least = target_count(template.m_MinTargetCount, {})
+    most = target_count(template.m_MaxTargetCount, variables)
+    least = target_count(template.m_MinTargetCount, variables)
     if (most and picked > most) or picked < least:
         raise ValueError(f"{picked} cards picked for a target of {least} to {most}")
 
@@ -1658,7 +1659,7 @@ def resume_ability(continuation: dict[str, Any], answer: int | None, *, context:
                 raise ValueError(f"{uid} is not a candidate of this choice")
     root, scope = _frame_scope(continuation, context)
     if picks is not None:
-        _check_pick_count(root, index, len(picks))
+        _check_pick_count(root, index, len(picks), scope.variables)
     if picks is None:
         scope.chosen[index] = None
     else:
@@ -1864,7 +1865,11 @@ def coverage(guid: str) -> list[str]:
                     and not (bound == "m_MinTargetCount" and int(count["m_Value"]) == 0) \
                     and kind != "AbilityTargetTemplate":
                 missing.append(f"multi-card target ({bound} {count['m_Value']})")
-            elif isinstance(count, dict) and count.get("m_Value") is None:
+            elif isinstance(count, dict) and count.get("m_Value") is None and not (
+                    _short(count.get("_t")) == "TargetVariable" and
+                    str(count.get("m_AbilityVariableName") or "") in {str(v.get("m_Name") or "") for v in
+                                                                      raw.get("m_Variables") or [] if isinstance(v, dict)}):
+                # A count named by a variable the ability declares is bound when it runs (its kind is covered above).
                 missing.append(f"variable target count ({bound})")
     # Paid costs and optional abilities are settled before the ability reaches the interpreter (ir_exec_costs).
     missing.extend(unsupported_costs(raw))
