@@ -37,9 +37,9 @@ BRIDGED_CONDITIONS = frozenset({
 })
 
 # Filter classes the live predicate set has, but whose result depends on state the interpreter does not set: the
-# TAC event, the stored targets, the chain stack, the movement history, or the other players' cards. They are refused.
+# stored targets, the chain stack, the movement history, or the other players' cards. They are refused.
 DENIED_FILTERS = frozenset({
-    "TACFilter", "IsStoredCardFilter", "MatchesTargetFilter", "HasASharedShardWithTopOfChainFilter",
+    "IsStoredCardFilter", "MatchesTargetFilter", "HasASharedShardWithTopOfChainFilter",
     "MovedBySource", "PlayersWhoControlMatchingFilter",
 })
 
