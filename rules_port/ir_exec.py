@@ -1950,7 +1950,8 @@ def coverage(guid: str) -> list[str]:
     for name in trigger_names:
         # A ResourceId is a value (a counter's identity), not a construct. The serialized TAC inside a TAC trigger
         # condition is that condition's data, which the live evaluator decodes.
-        if name == "SerializableTAC" and "TACTriggerCondition" in trigger_names:
+        if name == "SerializableTAC":
+            # A serialized TAC is the data a TAC condition or TAC filter reads (its template name), not a construct.
             continue
         if name not in SUPPORTED_CONDITIONS and name not in SUPPORTED_FILTERS and name != "ResourceId" \
                 and name not in bridge.BRIDGED_CONDITIONS and not bridge.filter_accepted(name):

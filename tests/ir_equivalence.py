@@ -520,6 +520,11 @@ COUNTER_CASES = [
      "opposing": [], "prepare": _nothing, "event_source": "player", "any_template": True},
     {"name": "When you Verdict: this gets +1 ATK", "ability": "7fa5c876", "event": "VerdictEvent",
      "opposing": [], "prepare": _nothing, "event_source": "player", "any_template": True},
+    # Serialized-TAC conditions: a quick troop played (the source is quick), and the end-of-turn troop-cost check.
+    {"name": "When you play a quick troop, this gets +1/+1", "ability": "99b487a2", "event": "CardCastEvent",
+     "opposing": [], "prepare": _nothing, "quick": True, "any_template": True},
+    {"name": "At end of your turn, if two troops share a cost, sacrifice this", "ability": "52ee4dbe",
+     "event": "TurnEndedEvent", "opposing": [], "prepare": _nothing, "any_template": True},
 ]
 CHAMPION_CASES = [
     {"name": "Champion built-in Burning: end of your turn", "ability": "82598d69",
