@@ -11,7 +11,7 @@ from typing import Any, Callable
 
 # Trigger types the interpreter runs. CardEnteredZoneEvent, TurnStartedEvent and TurnEndedEvent are in ir_exec.
 TRIGGER_EVENTS = {
-    "CardDealtDamageEvent", "CardAttackedEvent", "CardCastEvent", "CardDrawnEvent",
+    "CardDealtDamageEvent", "CardAttackedEvent", "CardAttackedOrBlockedEvent", "CardCastEvent", "CardDrawnEvent",
     "CardDiscardedEvent", "CardCreatedEvent", "AsEntersPlayEvent", "CardGainedIntAttrEvent",
     "GameStartedEvent", "PreGameEvent", "CardReadiedEvent", "CardBlockedEvent", "CardSacrificedEvent",
     # The three events that carry nothing but a source card and its player, so the interpreter needs no more than the
