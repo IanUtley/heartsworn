@@ -540,8 +540,9 @@ def _counter_variable(variable: Any, counter: str | None, scope: Scope) -> int:
 # interpreter binds them through that same evaluator, from the ability's authored metadata.
 NATIVE_VARIABLE_KINDS = {"IntAttrAbilityVariable", "CountListAttrAbilityVariable",
                          "SumVariableInListAttrCardsAbilityVariable", "CardIntegerVariable"}
-SUPPORTED_VARIABLES = {"AbilityConstant", "AbilityVariable", "CounterVariable", "CardCountAbilityVariable"} \
-    | ir_variables.VARIABLE_KINDS | NATIVE_VARIABLE_KINDS
+DAMAGE_PROPERTY_VARIABLE = "TriggerEventDamageProperty"
+SUPPORTED_VARIABLES = {"AbilityConstant", "AbilityVariable", "CounterVariable", "CardCountAbilityVariable",
+                       DAMAGE_PROPERTY_VARIABLE} | ir_variables.VARIABLE_KINDS | NATIVE_VARIABLE_KINDS
 
 
 def _clause_names(clause: Any) -> set[str]:
@@ -593,6 +594,9 @@ def _bind_variables(root: MechanicsObject, scope: Scope, wanted: set[str] | None
             scope.variables[variable.m_Name] = ir_variables.card_property_value(scope, variable)
         elif kind == ir_variables.ABILITY_PROPERTY_VARIABLE:
             scope.variables[variable.m_Name] = ir_variables.ability_property_value(scope)
+        elif kind == DAMAGE_PROPERTY_VARIABLE:
+            # The damage a would-damage event carries (C# TriggerEventDamageProperty); the default outside one.
+            scope.variables[variable.m_Name] = int(scope.event.get("damage", variable.m_DefaultValue or 0) or 0)
         elif kind == ir_variables.HIGHEST_CARD_VARIABLE:
             scope.variables[variable.m_Name] = ir_variables.highest_card_value(scope, variable)
         elif kind in NATIVE_VARIABLE_KINDS:
@@ -1086,6 +1090,11 @@ def live_event(event_type: str, owner_uid: int, data: dict[str, Any], trigger_so
                              "target_card": None if target_card_uid is None else int(target_card_uid),
                              **ir_triggers.event_fields(
                                  event_type, trigger_source_uid, target_player_uid, data)}
+    if event_type in ("CardWouldDealDamageEvent", "CardWouldBeDamagedEvent"):
+        # The damage the event would deal, and whether it is combat damage (the event TAC the live dispatch publishes).
+        event_tac = data.get("event_tac") or {}
+        event["damage"] = int(event_tac.get("damage", 0) or 0)
+        event["is_combat_damage"] = bool(event_tac.get("is_combat_damage"))
     if event_type in ("CardEnteredZoneEvent", "CardExitedZoneEvent"):
         # C# CardExitedZoneEvent implements IZoneChange exactly as the entry event does, so both the "leaves play" and
         # the "enters play" trigger conditions test the two collections.
@@ -1900,7 +1909,7 @@ def coverage(guid: str) -> list[str]:
         if kind not in SUPPORTED_VARIABLES:
             missing.append(f"variable {kind or 'untyped'}")
             continue
-        if kind in ("AbilityConstant", "AbilityVariable") or kind in NATIVE_VARIABLE_KINDS:
+        if kind in ("AbilityConstant", "AbilityVariable", DAMAGE_PROPERTY_VARIABLE) or kind in NATIVE_VARIABLE_KINDS:
             continue
         if kind == ir_variables.CARD_PROPERTY_VARIABLE:
             missing.extend(ir_variables.card_property_gaps(variable))

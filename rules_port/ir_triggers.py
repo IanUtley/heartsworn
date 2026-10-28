@@ -22,6 +22,8 @@ TRIGGER_EVENTS = {
     "ConscriptEvent",
     # The phase the turn entered (native publishes it with the phase in its data); the phase condition reads the battle.
     "TurnPhaseEvent",
+    # The "would" events carry the damage (and whether it is combat damage) in their event TAC.
+    "CardWouldDealDamageEvent", "CardWouldBeDamagedEvent",
 }
 
 # Trigger condition classes this module evaluates.
@@ -67,5 +69,7 @@ def condition_holds(cls: str, condition: Any, scope: Any, holds: Callable[[Any, 
                 str(getattr(condition, "m_Attribute", "") or "") == str(scope.event.get("int_attribute") or ""))
     if cls == "TriggerEventIsCombatDamage":
         # A damage event is combat damage when it is CardDealtDamageEvent (the native check, for the events here).
-        return scope.event.get("event_type") == "CardDealtDamageEvent"
+        event_type = scope.event.get("event_type")
+        return event_type == "CardDealtDamageEvent" or (
+            event_type == "CardWouldDealDamageEvent" and bool(scope.event.get("is_combat_damage")))
     raise NotImplementedError(f"trigger condition {cls}")
