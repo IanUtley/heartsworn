@@ -2068,5 +2068,4 @@ def coverage(guid: str) -> list[str]:
                 (effect.get("m_Modifier") or {}).get("m_Operation") not in COUNTER_OPERATIONS
                 or (effect.get("m_Modifier") or {}).get("m_RemoveAllCounters")):
             missing.append(f"counter operation {(effect.get('m_Modifier') or {}).get('m_Operation')}")
-    missing.extend(ir_exec_resources.coverage_invocation_cost(raw))
     return sorted(set(missing))

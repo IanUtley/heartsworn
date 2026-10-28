@@ -198,14 +198,3 @@ def run_effect(kind: str, effect_raw: dict[str, Any], root: MechanicsObject, cla
         raise NotImplementedError(f"effect {kind}")
 
 
-def coverage_invocation_cost(raw: dict[str, Any]) -> list[str]:
-    """An ability that both invokes another ability and changes a card's cost is refused. The invoked ability draws
-    its random picks in a different order from the native resolver, so the cost change can land on a different card
-    than the native path (Mawstorm). Every other cost change runs as the native resolver runs it."""
-    kinds = []
-    for clause in raw.get("m_AbilityEffectList") or []:
-        effect_type, effect = ix._stored("AbilityEffectTemplate", ix._guid(clause.get("m_EffectTemplateId")))
-        kinds.append((ix._short(effect_type), ix._short((effect.get("m_Modifier") or {}).get("_t"))))
-    invokes = any(kind == "ActivateAbilityEffectTemplate" for kind, _ in kinds)
-    changes_cost = any(modifier == CARD_COST_MODIFIER for _, modifier in kinds)
-    return ["cost change in an ability that invokes another"] if invokes and changes_cost else []
