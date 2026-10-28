@@ -440,6 +440,10 @@ def _condition_holds(condition: Any, scope: Scope) -> bool:
         return card is not None and _filter_holds(condition.m_CardFilter, card, scope)
     if cls in bridge.BRIDGED_CONDITIONS:
         return bridge.condition_holds(condition, scope)
+    if cls == "IntAttrFilter":
+        # "You>CardStatsThisTurn>..." is judged for the player's champion, as the native live check does, so it goes
+        # through the shared evaluator rather than the event's or the source's card.
+        return bridge.condition_holds(condition, scope)
     if bridge.filter_accepted(cls):
         return bridge.trigger_card_holds(condition, scope)
     if cls in ir_triggers.CONDITIONS:
@@ -1819,9 +1823,9 @@ def coverage(guid: str) -> list[str]:
     if trigger and trigger not in SUPPORTED_TRIGGERS:
         missing.append(f"trigger {trigger}")
     top_condition = _short((raw.get("m_TriggerCondition") or {}).get("_t"))
-    if top_condition in SUPPORTED_FILTERS:
+    if top_condition in SUPPORTED_FILTERS and top_condition != "IntAttrFilter":
         # A card filter on its own as the trigger condition: there is no card of the event to test it against, and
-        # the runtime does not evaluate it (Feralroot Archdruid's health-gained check).
+        # the runtime does not evaluate it. An IntAttrFilter is judged by the shared evaluator (see _condition_holds).
         missing.append(f"trigger condition {top_condition}")
     if raw.get("m_Threshold"):
         missing.append("ability threshold")
