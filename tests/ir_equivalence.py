@@ -908,6 +908,84 @@ def choice_parity(case, index):
     return True, f"{len(candidates)} answers agree"
 
 
+# The owner of the opposing side in a PvP check: a human player, not the AI.
+PVP_OWNER = 777
+
+
+def pvp_parity(case):
+    """A choice another player makes in an invoked ability, with the opposing side a human (PVP_OWNER). The interpreter
+    pauses for that player; native prompts the same player with the same candidates; and each answer sacrifices the
+    same card on both sides. The source's buffs are left out: the -2/-2 that follows a sacrifice runs in the application's
+    resume, not in this single-ability resolve. Returns (passed, detail), or (None, why) when no such choice exists."""
+    from rules_port.context import EffectContext
+    from rules_port.ir_exec import NeedsChoice, resume_ability, run_ability
+    from rules_port.resolution import resolve_port_ability
+    import game_engine
+
+    event = case.get("event_data") or {"player": TROOP_OWNER}
+    opposing = game_engine.UID.make(3, 2000)
+
+    def fresh():
+        db, pl_t, ai_t, game, handler, bstate, player_champ, ai_champ = _scenario(
+            case["ability"], case["opposing"], None, case.get("extra", ()), any_template=True)
+        # The opposing side is the human: its troops and champion are its own, and the participant id is not the champion's.
+        db.execute("UPDATE game_cards SET user_id=? WHERE user_id=?", (PVP_OWNER, OPPOSING_OWNER))
+        db.execute("UPDATE game_cards SET user_id=? WHERE card_uid=?", (PVP_OWNER, ai_champ))
+        db.commit()
+        bstate["champ_map"] = {str(PVP_OWNER): ai_champ, str(TROOP_OWNER): player_champ}
+        prompts = []
+
+        def record(game_, pl, ai, session, state, source_uid, ability_guid, templates, candidates, owner_id=None, **kw):
+            prompts.append({"owner": owner_id, "candidates": sorted(int(c) for c in candidates)})
+            return "prompted"
+
+        handler._prompt_trigger_targets = record
+        start = len(game.events)
+        context = EffectContext.from_rules_port(game, SessionStub(), db, handler, pl_t, opposing, bstate, "")
+        return db, pl_t, game, handler, bstate, player_champ, ai_champ, start, context, prompts
+
+    db, pl_t, game, handler, bstate, player_champ, ai_champ, start, context, prompts = fresh()
+    try:
+        run_ability(case["ability"], case["event"], context=context, source_uid=SOURCE_UID,
+                    owner_uid=TROOP_OWNER, event=event)
+        return None, "the ability did not pause"
+    except NeedsChoice as pause:
+        if pause.continuation["ability_guid"] == case["ability"] or pause.continuation["owner_uid"] != PVP_OWNER:
+            return None, "no choice for another player in an invoked ability"
+        candidates = sorted(int(c) for c in pause.candidates)
+        child = pause.continuation["ability_guid"]
+    if not candidates:
+        return None, "no candidate for the choice"
+    parent_index = 0  # the forced parent target (the opposing champion)
+
+    def without_source(cards):
+        return [row for row in cards if row[0] != SOURCE_UID]
+
+    db, pl_t, game, handler, bstate, player_champ, ai_champ, start, context, prompts = fresh()
+    resolve_port_ability(handler, game, SessionStub(), db, pl_t, opposing, bstate, case["ability"],
+                         SOURCE_UID, TROOP_OWNER, target_map={parent_index: ai_champ}, instance_id=1)
+    if not prompts:
+        return False, "native did not prompt the other player"
+    if prompts[0]["owner"] != PVP_OWNER or prompts[0]["candidates"] != candidates:
+        return False, f"native prompted {prompts[0]} but the interpreter paused for {candidates}"
+    for answer in candidates:
+        db, pl_t, game, handler, bstate, player_champ, ai_champ, start, context, prompts = fresh()
+        try:
+            run_ability(case["ability"], case["event"], context=context, source_uid=SOURCE_UID,
+                        owner_uid=TROOP_OWNER, event=event)
+        except NeedsChoice as again:
+            continuation = again.continuation
+        resume_ability(continuation, answer, context=context)
+        interpreted = without_source(_snapshot(db, bstate, player_champ, ai_champ, game, start)["cards"])
+        db, pl_t, game, handler, bstate, player_champ, ai_champ, start, context, prompts = fresh()
+        resolve_port_ability(handler, game, SessionStub(), db, pl_t, opposing, bstate, child,
+                             SOURCE_UID, PVP_OWNER, target_map={0: [answer]}, instance_id=2)
+        native = without_source(_snapshot(db, bstate, player_champ, ai_champ, game, start)["cards"])
+        if interpreted != native:
+            return False, f"answer {answer}: interpreter {interpreted} native {native}"
+    return True, f"prompt and {len(candidates)} answers agree"
+
+
 def choice_cases(limit):
     """Covered turn-event abilities with a chosen target, as cases (the first chosen target's index is used)."""
     from gamedata import DEFAULT_RECORD_STORE as STORE
@@ -1045,6 +1123,9 @@ def main():
     for case, index in choice_cases(int(os.environ.get("IR_EQ_CHOICES", "40"))):
         try:
             choice_results.append((case["name"], *choice_parity(case, index)))
+            pvp = pvp_parity(case)
+            if pvp[1] != "no choice for another player in an invoked ability":
+                choice_results.append(("PVP " + case["name"], *pvp))
         except Exception as exc:  # reported with its cause
             choice_results.append((case["name"], False, f"{type(exc).__name__}: {exc}"))
     for name, ok, detail in choice_results:

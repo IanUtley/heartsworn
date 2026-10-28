@@ -4307,9 +4307,9 @@ class EffectContext:
                         choice_target = (
                             index, [int(uid) for uid in candidates], from_deck)
                     break
-            # A player's child that picks a card from its hand ("target an action in
-            # your hand") is the player's choice, not an automatic pick: prompt them
-            # with the same target prompt a triggered ability uses.
+            # A human player's child that picks a card ("target an action in your hand", "sacrifice a troop") is the
+            # player's choice, not an automatic pick: prompt them with the same target prompt a triggered ability uses.
+            # A choice zone or deck pick has its own picker below. A single candidate is not a question.
             hand_pick = None
             prompt_targets = getattr(self.handler, "_prompt_trigger_targets", None)
             if child is not None and int(owner_id or 0) != 0 and callable(prompt_targets):
@@ -4318,9 +4318,10 @@ class EffectContext:
                     to_dict = getattr(card_filter, "to_dict", None)
                     if callable(to_dict):
                         card_filter = to_dict()
-                    if (target.requires_input and target.explicit and
+                    if (target.requires_input and
                             str(target.target_kind or "").endswith("AbilityTargetTemplate") and
-                            filter_restricts_to_zone(card_filter, "Hand")):
+                            not filter_restricts_to_zone(card_filter, "Choosing") and
+                            not filter_restricts_to_zone(card_filter, "Deck")):
                         hand_candidates = legal_targets(
                             self.db, self.session.session_id, int(owner_id or 0),
                             target.guid, source_uid,
@@ -4330,7 +4331,9 @@ class EffectContext:
                                 self.handler, "_champion_targets", lambda: [])()
                                        or []),
                             battle_state=self.bstate)
-                        if hand_candidates:
+                        forced = (len(hand_candidates) == 1 and not target.optional and
+                                  not filter_restricts_to_zone(card_filter, "Hand"))
+                        if hand_candidates and not forced:
                             hand_pick = (target.guid, [int(uid) for uid in hand_candidates])
                         break
             if hand_pick is not None:
