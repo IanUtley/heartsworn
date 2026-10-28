@@ -28,7 +28,7 @@ BRIDGED_CONDITIONS = frozenset({
     "ChampionCardsCastCondition", "OrAbilityCondition", "OrEffectCondition", "RequiresCardsControlled",
     "RequiresChampionCharges", "RequiresChampionHealth", "RequiresResourceThreshold",
     "RequiresSourcePassesFilterCondition", "RequiresTotalResources", "SourceCardHasCounters",
-    "SourceCardHasKeywords", "TACTriggerCondition", "TurnPhaseCondition",
+    "SourceCardHasKeywords", "TACTriggerCondition", "TurnPhaseCondition", "NotEffectCondition",
 })
 
 # Filter classes the live predicate set has, but whose result depends on state the interpreter does not set: the
