@@ -892,7 +892,9 @@ def _invoked_non_revealed_choice(root: MechanicsObject, seen: set[str]) -> bool:
     through the revealed-card picker, which the engine wires; any other pick is not."""
     for clause in root.m_AbilityEffectList:
         effect_type, effect_raw = _stored("AbilityEffectTemplate", _guid(_field(clause, "m_EffectTemplateId")))
-        if _short(effect_type) != "ActivateAbilityEffectTemplate":
+        if _short(effect_type) == "RepeatingAbilityEffectTemplate":
+            effect_raw = effect_raw["m_RepeatingEffect"]
+        elif _short(effect_type) != "ActivateAbilityEffectTemplate":
             continue
         child = _guid(effect_raw.get("m_AbilityToInvoke"))
         if child in seen:
@@ -1132,6 +1134,9 @@ def _run_effects(guid: str, root: MechanicsObject, scope: Scope, start: int) -> 
             if _short(effect_type) == "ActivateAbilityEffectTemplate":
                 _invoke(guid, position, effect_raw, scope, _target_owners(root, index, scope))
                 continue
+            if _short(effect_type) == "RepeatingAbilityEffectTemplate":
+                _repeat(guid, position, root, clause, effect_raw, scope)
+                continue
             if _short(effect_type) in TRANSFORM_EFFECTS:
                 _transform_targets(guid, root, clause, _short(effect_type), effect_raw, scope)
                 continue
@@ -1303,6 +1308,38 @@ def _invoke(parent_guid: str, position: int, effect_raw: dict[str, Any], scope: 
                      "applied": {str(k): v for k, v in scope.applied.items()}}
             _append_chain(pause.continuation, frame)
             raise
+
+
+def _repeat_count(effect: dict[str, Any]) -> int:
+    """C# RepeatingAbilityEffectTemplate: the loop count, a constant (or the deprecated count, which defaults to one)."""
+    count = effect.get("m_LoopCount")
+    loops = 0 if count is None else int(count.get("m_Value") or 0)
+    return loops or int(effect.get("m_LoopCount_DEPRECATED") or 1)
+
+
+def _repeat(parent_guid: str, position: int, root: MechanicsObject, clause: Any, effect_raw: dict[str, Any],
+            scope: Scope) -> None:
+    """C# RepeatingAbilityEffectTemplate: its invoke child runs once per loop, for each owner the clause's target names
+    (the same owners a single invoke runs for). A child that pauses is refused by coverage, so no loop is cut short."""
+    owners = _target_owners(root, int(_field(clause, "m_TargetTemplateIndex") or 0), scope) or [int(scope.owner_uid)]
+    for _ in range(_repeat_count(effect_raw)):
+        _invoke(parent_guid, position, effect_raw["m_RepeatingEffect"], scope, owners)
+
+
+def _may_pause(root: MechanicsObject, seen: set[str]) -> bool:
+    """Whether an ability, or any ability it invokes at any depth, picks a card the player chooses."""
+    if any(_needs_choice(root, index) for index in range(len(root.m_AbilityTargetTemplateIds or []))):
+        return True
+    for clause in root.m_AbilityEffectList:
+        effect_type, effect_raw = _stored("AbilityEffectTemplate", _guid(_field(clause, "m_EffectTemplateId")))
+        if _short(effect_type) == "RepeatingAbilityEffectTemplate":
+            effect_raw = effect_raw["m_RepeatingEffect"]
+        elif _short(effect_type) != "ActivateAbilityEffectTemplate":
+            continue
+        child = _guid(effect_raw.get("m_AbilityToInvoke"))
+        if child not in seen and _may_pause(_load("AbilityTemplate", child), seen | {child}):
+            return True
+    return False
 
 
 def _append_chain(continuation: dict[str, Any], outer: dict[str, Any] | None) -> None:
@@ -1616,7 +1653,20 @@ def coverage(guid: str) -> list[str]:
             if effect.get("m_SecondValue") or effect.get("m_MaxValueField"):
                 missing.append("random variable with a second value or a dynamic bound")
             continue
-        if kind == "ActivateAbilityEffectTemplate":
+        if kind == "RepeatingAbilityEffectTemplate":
+            count = effect.get("m_LoopCount")
+            child = effect.get("m_RepeatingEffect") or {}
+            if count is not None and _short(count.get("_t")) != "EffectConstant":
+                missing.append("repeat count from a variable")
+            if _short(child.get("_t")) != "ActivateAbilityEffectTemplate":
+                missing.append(f"repeat {_short(child.get('_t')) or 'untyped'}")
+                continue
+            child_guid = _guid(child.get("m_AbilityToInvoke"))
+            if child_guid not in _COVERAGE_STACK and _may_pause(_load("AbilityTemplate", child_guid), {child_guid}):
+                missing.append("repeat of a child that pauses for a choice")
+            # The invoked ability's own constructs are reported below, as for a plain invoke.
+            effect = child
+        if kind in ("ActivateAbilityEffectTemplate", "RepeatingAbilityEffectTemplate"):
             if effect.get("m_RandomlyLuckyOrUnlucky"):
                 missing.append("random invocation")
             child = _guid(effect.get("m_AbilityToInvoke"))
