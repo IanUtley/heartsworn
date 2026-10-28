@@ -320,6 +320,10 @@ def _live(case):
         db.execute("UPDATE game_cards SET permanent_buffs = ? WHERE card_uid = ?",
                    (_json.dumps({"counters": counters}, sort_keys=True), SOURCE_UID))
         db.commit()
+    if case.get("card_type"):
+        # The source card's type (Troop, Artifact, ...), for abilities that test the card that changed.
+        db.execute("UPDATE game_cards SET card_type = ? WHERE card_uid = ?", (case["card_type"], SOURCE_UID))
+        db.commit()
     if case.get("quick"):
         # The source card is a quick card (its QuickSpeed attribute), for abilities that test a card's quickness.
         db.execute("UPDATE game_cards SET card_attributes = COALESCE(card_attributes, 0) | ? WHERE card_uid = ?",
@@ -489,6 +493,13 @@ COUNTER_CASES = [
      "event": "CounterAddedToCardEvent", "opposing": [], "prepare": _nothing, "counters": {"seed": 3},
      "any_template": True,
      "event_tac": {str(_tac_attr_hash("GainedCounterType")): "seed"}},
+    # Transformed-card abilities: the card that transformed is the source, and it is an artifact (the trigger tests
+    # the card's type).
+    {"name": "Transformed into an artifact: +1/+1 to itself", "ability": "08de4720", "event": "CardTransformedEvent",
+     "opposing": [], "prepare": _nothing, "card_type": "Artifact", "any_template": True},
+    {"name": "Transformed into an artifact: ready it and gain a charge", "ability": "6919e6cd",
+     "event": "CardTransformedEvent", "opposing": [], "prepare": _nothing, "card_type": "Artifact",
+     "any_template": True},
 ]
 CHAMPION_CASES = [
     {"name": "Champion built-in Burning: end of your turn", "ability": "82598d69",
@@ -628,7 +639,7 @@ def _case_cache_path(limit):
 
 # The case fields a run reads, all of them plain data (``prepare`` is stored as the spec it is rebuilt from).
 _CASE_FIELDS = ("name", "ability", "event", "champion", "any_template", "target_player",
-                "int_attribute", "event_source", "quick", "counters", "event_tac")
+                "int_attribute", "event_source", "quick", "counters", "event_tac", "card_type")
 # The ECardAttributes bit a quick card carries (the native quick check reads it).
 QUICK_SPEED_ATTRIBUTE = 268435456
 
