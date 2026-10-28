@@ -74,6 +74,7 @@
   .empty-note { padding: 2px 4px 2px 22px; }
 
   details.text-pane { margin-top: 12px; }
+  iframe.ir-frame { width: 100%; height: 60vh; min-height: 320px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); }
   details.text-pane > summary { cursor: pointer; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin-bottom: 6px; }
   textarea { width: 100%; min-height: 130px; resize: vertical; padding: 6px 8px; font-family: ui-monospace, monospace; font-size: 12px; }
 
@@ -110,6 +111,11 @@
   <details class="text-pane" id="text-pane" open>
     <summary>Sentences (DSL text)</summary>
     <textarea id="sentences" spellcheck="false" placeholder="When this enters play, draw a card." aria-label="Sentences"></textarea>
+  </details>
+
+  <details class="text-pane" id="ir-pane">
+    <summary>IR surface code (saved ability)</summary>
+    <iframe id="ir-frame" class="ir-frame" title="IR surface code" src="about:blank"></iframe>
   </details>
 </main>
 

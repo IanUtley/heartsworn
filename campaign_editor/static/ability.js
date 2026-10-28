@@ -437,10 +437,14 @@ async function save() {
   syncIrLink();
 }
 
-// The IR editor opens the ability being edited (its ?guid= parameter), so the link follows the GUID.
+// The IR editor opens the ability being edited (its ?guid= parameter), so the link and the embedded editor follow the
+// GUID. The embedded editor shows the saved ability; unsaved changes in this form are not in it.
 function syncIrLink() {
   const link = $("ir-link");
   link.href = guid ? `/ir?guid=${encodeURIComponent(guid)}` : "/ir";
+  const frame = $("ir-frame");
+  const src = guid ? link.href : "about:blank";
+  if (frame.getAttribute("src") !== src) frame.setAttribute("src", src);
 }
 
 // ---- wiring -------------------------------------------------------------------------

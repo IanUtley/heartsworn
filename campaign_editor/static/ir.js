@@ -2,6 +2,8 @@
 // /api/ability-surface-names; the text is loaded, checked and compiled by the /api/ability-surface routes.
 // Text from the server is written with textContent, never as HTML.
 (function () {
+  // Inside the ability editor: hide the page title, as the ability editor does when it is embedded.
+  if (window.self !== window.top) document.documentElement.classList.add("embedded");
   const text = document.getElementById("text");
   const guid = document.getElementById("guid");
   const menu = document.getElementById("menu");
