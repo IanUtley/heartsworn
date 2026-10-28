@@ -1785,6 +1785,8 @@ SUPPORTED_FILTERS = {
     "HasCountersValue", "IsTroop", "IsHero", "IsResource", "IsType", "IntAttrFilter", "InZone",
     "IsAbilitySource", "IsSubType", "NameContainsFilter", "TopNOfDeck", "IsStoredCardFilter",
 }
+# Values a card filter holds (a variable it adds to a cost, a constant): read as data, never a filter class.
+FILTER_VALUE_KINDS = {"EffectInputVariable", "EffectConstant", "EffectAbilityVariable", "ResourceId"}
 SUPPORTED_MODIFIERS = {"DamageModifier", "CounterModifier", "HealHeroModifier", "AttackModifier", "DefenseModifier",
                        "CurrentResourceModifier", "TotalResourceModifier", "ChargePointsModifier", "ThresholdModifier",
                        "LoseLifeModifier", "SpellPointsModifier", "CardCostModifier", "SetHeroHealthModifier"}
@@ -1939,6 +1941,9 @@ def coverage(guid: str) -> list[str]:
             # takes all of them. The interpreter follows C#, so such a random target stays with the native resolver.
             missing.append("random target without a card filter")
         for name in _tagged_classes(template.get("m_CardFilter"), []):
+            # A value inside a filter (a variable it adds, say) is read as data, not as a filter class.
+            if name in FILTER_VALUE_KINDS:
+                continue
             if name not in SUPPORTED_FILTERS and not bridge.filter_accepted(name):
                 missing.append(f"filter {name}")
         # The interpreter picks cards for a target index: the player's picks for a chosen target (one, or several within a

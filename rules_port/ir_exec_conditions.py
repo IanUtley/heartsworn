@@ -110,7 +110,7 @@ def condition_context(scope: Any, *, target: int | None = None, event_type: str 
     context = scope.context
     champions = _champions(context)
     event = scope.event or {}
-    return ConditionContext(
+    condition = ConditionContext(
         context.db, context.session, context.bstate, event_type=event_type or "AbilityEffectEvent",
         ability_source_uid=int(scope.source_uid), ability_source_owner_id=int(scope.owner_uid),
         trigger_uid=target if target is not None else event.get("card"), extra_target=target,
@@ -118,6 +118,10 @@ def condition_context(scope: Any, *, target: int | None = None, event_type: str 
         trigger_owner_id=event.get("player"),
         event_source_collection=event.get("from"), event_destination_collection=event.get("to"),
         event_tac=event.get("event_tac"))
+    # The ability's bound variables (a number the player chose, say) are what its filters read, as the native path reads
+    # them from the ability's activation.
+    condition.ability_variables = dict(scope.variables or {})
+    return condition
 
 
 def filter_holds(card_filter: Any, uid: int, scope: Any) -> bool:
