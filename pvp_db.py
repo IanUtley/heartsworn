@@ -2984,13 +2984,58 @@ def db_static_target_template(template_id, conn=None):
 
 
 def db_ability_static_metadata(ability_guid, conn=None):
-    """Return trigger/manual/raw metadata for static ability filtering."""
+    """Return trigger/manual/raw metadata for static ability filtering.
+
+    Card abilities carry it in ``card_abilities_meta``. A champion or talent ability has none there, so its trigger and
+    manual flag come from its Records template (the same fields the card rows are extracted from).
+    """
     connection = conn or _db_layer._db
-    return _cached_static_row(
+    row = _cached_static_row(
         connection, ("ability_static", str(ability_guid).lower()),
         "SELECT trigger_event_type, is_manual, raw_json "
         "FROM card_abilities_meta WHERE ability_guid=?",
         (str(ability_guid).lower(),))
+    if row is not None:
+        return row
+    if not (db_talent_has_ability_guid(ability_guid, conn=connection)
+            or db_champion_ability_guid_exists(ability_guid, conn=connection)):
+        return None
+    from gamedata import DEFAULT_RECORD_STORE
+    record = DEFAULT_RECORD_STORE.get("AbilityTemplate", str(ability_guid).lower())
+    if record is None:
+        return None
+    trigger = record.field("m_TriggerEventType", None) or {}
+    trigger_type = str(trigger.get("m_InternalType") or "").rsplit(".", 1)[-1] if isinstance(trigger, dict) else ""
+    return (trigger_type or None, 1 if record.field("m_Manual", 0) else 0, "")
+
+
+def db_talent_has_ability_guid(ability_guid, conn=None):
+    """Whether a talent authors this ability."""
+    connection = conn or _db_layer._db
+    return connection.execute(
+        "SELECT 1 FROM talent_data WHERE ability_guid=? AND has_ability=1 LIMIT 1",
+        (str(ability_guid).lower(),)).fetchone() is not None
+
+
+def db_champion_ability_guid_exists(ability_guid, conn=None):
+    """Whether any champion template authors this ability."""
+    connection = conn or _db_layer._db
+    return connection.execute(
+        "SELECT 1 FROM champion_abilities WHERE ability_guid=? LIMIT 1",
+        (str(ability_guid).lower(),)).fetchone() is not None
+
+
+def db_talent_ability_guids(talent_guids, conn=None):
+    """The abilities the given talents author, in talent order."""
+    connection = conn or _db_layer._db
+    guids = []
+    for talent in talent_guids or ():
+        for row in connection.execute(
+                "SELECT ability_guid FROM talent_data WHERE talent_guid=? AND has_ability=1 "
+                "ORDER BY rowid", (str(talent).lower(),)).fetchall():
+            if row[0]:
+                guids.append(str(row[0]).lower())
+    return guids
 
 
 def db_gem_abilities(gem_type, conn=None):

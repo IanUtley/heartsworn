@@ -1462,10 +1462,15 @@ def _all_static_sources(db, session_id, cache, battle_state=None):
                              champion_guids.get(str(owner)))
             if not champion_guid:
                 continue
+            # C# SetChampionTalents attaches each chosen talent's abilities to the champion card, so they are the
+            # champion's abilities as the scan sees them.
+            from pvp_db import db_talent_ability_guids
+            owner_talents = (state.get("talent_guids_by_owner") or {}).get(str(owner_id), ())
             abilities = tuple(
                 guid for guid in (str(value).lower() for value in
-                                  db_get_champion_ability_guids(
-                                      champion_guid, conn=db))
+                                  list(db_get_champion_ability_guids(
+                                      champion_guid, conn=db)) +
+                                  db_talent_ability_guids(owner_talents, conn=db))
                 if _is_continuous_source_ability(
                     db_ability_static_metadata(guid, conn=db)))
             if abilities:
