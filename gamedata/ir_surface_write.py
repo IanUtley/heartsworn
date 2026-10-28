@@ -242,3 +242,34 @@ def record_for(text: str) -> dict[str, Any]:
     if len(found) != 1:
         raise ValueError(f"the text must bind one ability, not {len(found)}")
     return found[0].to_record()
+
+
+def _first_line(value: Any) -> str:
+    return (getattr(value, "__doc__", None) or "").strip().split("\n")[0]
+
+
+def surface_names() -> list[dict[str, Any]]:
+    """Every name surface text can use, for completion: its layer, the keywords a call takes, and a meaning. A
+    helper takes the keywords of its signature, and a generated class the fields of its constructor."""
+    import inspect
+    names: list[dict[str, Any]] = []
+    for name, value in sorted(P.prelude().items()):
+        if name.startswith("_"):
+            continue
+        if isinstance(value, type) and issubclass(value, Typed):
+            layer, fields, meaning = "class", list(_argument_names(value)), _first_line(value)
+        elif callable(value):
+            layer, meaning = "helper", _first_line(value)
+            fields = [param.name for param in inspect.signature(value).parameters.values()
+                      if param.kind not in (param.VAR_POSITIONAL, param.VAR_KEYWORD)]
+            if name == "Clause":
+                fields = [ir_name(key) for key in P._clause(effect_template_id={"m_Guid": ZERO_GUID})
+                          if key != "m_EffectTemplateId"]
+            if name == "ability":
+                fields += [argument for argument in _argument_names(T.AbilityTemplate) if argument not in fields]
+        elif name.endswith("EventType"):
+            layer, fields, meaning = "event", [], "a trigger event"
+        else:
+            layer, fields, meaning = "constant", [], ""
+        names.append({"name": name, "layer": layer, "class": "", "fields": fields, "meaning": meaning})
+    return names

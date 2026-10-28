@@ -400,6 +400,9 @@ class EditorHandler(BaseHTTPRequestHandler):
                     self._json({"text": ir_surface_write.ability_text(query.get("guid", [""])[0])})
                 except KeyError as error:
                     self._json({"error": str(error)}, 404)
+            elif path == "/api/ability-surface-names":
+                # Every name surface text uses, for completion (gamedata/ir_surface_write.py).
+                self._json({"names": ir_surface_write.surface_names()})
             elif path == "/api/ability-ir-code-names":
                 self._json({"names": ability_ir_text.names()})
             elif path == "/api/ability-ir-kinds":
