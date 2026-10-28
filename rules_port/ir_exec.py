@@ -1957,7 +1957,9 @@ def coverage(guid: str) -> list[str]:
                 and name not in bridge.BRIDGED_CONDITIONS and not bridge.filter_accepted(name):
             missing.append(f"condition {name}")
     trigger_condition = _short((raw.get("m_TriggerCondition") or {}).get("_t"))
-    if not trigger and trigger_condition in SUPPORTED_FILTERS:
+    if not trigger and trigger_condition in SUPPORTED_FILTERS and trigger_condition != "IntAttrFilter":
+        # An IntAttrFilter activation gate ("If you gained health this turn") is judged by the same condition check as
+        # a trigger's (run_ability tests m_TriggerCondition for an activation too), which C# also applies.
         # A card filter standing as the whole condition of an ability with no trigger. The native activation does not
         # test it (the ability runs on the native path), so the interpreter refuses it rather than gate differently.
         missing.append(f"activation condition {trigger_condition}")
