@@ -1188,8 +1188,42 @@ def _targets(context):
     return None
 
 
+def _each_untap_targets(context):
+    """The cards an untap-each effect readies, read as the interpreter reads them: the automatic targets of the
+    resolving ability's untap clauses, which are every card the clause's filter passes (none when no card passes).
+    None when the resolving ability has no untap clause that targets automatically (a chosen or single card)."""
+    from rules_port import ir_exec
+    bstate = context.bstate or {}
+    guid = bstate.get("resolving_ability")
+    source = bstate.get("resolving_source_uid")
+    owner = bstate.get("resolving_owner_id")
+    if not guid or source is None or owner is None:
+        return None
+    try:
+        root = ir_exec._load("AbilityTemplate", str(guid).lower())
+    except KeyError:
+        return None
+    scope = ir_exec.Scope(context=context, source_uid=int(source), owner_uid=int(owner),
+                          table=root.version_table)
+    untap_targets: list[int] = []
+    found = False
+    for clause in root.m_AbilityEffectList:
+        effect_type, _raw = ir_exec._stored("AbilityEffectTemplate", ir_exec._guid(ir_exec._field(clause, "m_EffectTemplateId")))
+        if ir_exec._short(effect_type) != "UntapCardAbilityEffectTemplate":
+            continue
+        index = int(ir_exec._field(clause, "m_TargetTemplateIndex") or 0)
+        template = ir_exec._load("AbilityTargetTemplate", ir_exec._guid(root.m_AbilityTargetTemplateIds[index]))
+        if ir_exec._short(template.type_name) != "AbilityTargetTemplate" or not template.m_IsAutoTarget:
+            return None
+        found = True
+        untap_targets.extend(ir_exec._targets(root, index, scope))
+    return list(dict.fromkeys(untap_targets)) if found else None
+
+
 def _untap(context, targets=None):
     import game_engine
+    if targets is None:
+        targets = _each_untap_targets(context)
     targets = _targets(context) if targets is None else list(targets)
     if targets is None:
         return None
