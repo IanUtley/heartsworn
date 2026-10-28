@@ -1608,7 +1608,7 @@ these are the remaining projection limits):
   implementation does not branch on it. The server therefore has no distinct
   action to mirror for this flag in the inspected client build.
 
-`card_audit.py` reports zero unconsumed intattrs for the current Records
+`scripts/card_audit.py` reports zero unconsumed intattrs for the current Records
 snapshot: every C# `Game/**` runtime IntAttr read now has a Python consumer,
 including the champion permissions (`CantActivateAbilities`,
 `CantUseChargePowers`, `OpposingCryptPowersCantBeUsed`,

@@ -1,7 +1,7 @@
 """
 Generate golden-file snapshots for every encode_* function in hconnect_server.py.
 
-Usage:  python3 generate_goldens.py
+Usage:  python3 scripts/generate_goldens.py
 
 Outputs one .golden file per function under tests/goldens/.
 Re-run whenever an encode function intentionally changes.
@@ -9,9 +9,10 @@ Re-run whenever an encode function intentionally changes.
 import io, os, sys, struct, json
 from binascii import hexlify
 
-sys.path.insert(0, os.path.dirname(__file__))
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, ROOT)
 
-GOLDEN_DIR = os.path.join(os.path.dirname(__file__), "tests", "goldens")
+GOLDEN_DIR = os.path.join(ROOT, "tests", "goldens")
 os.makedirs(GOLDEN_DIR, exist_ok=True)
 
 # ── test data constants ──────────────────────────────────────────────

@@ -23,9 +23,9 @@ Read-only: it opens ``hconnect.db`` for the card list and reads Records via
 ``rules_port.bom_fields``.  It never mutates game state.
 
 Usage:
-    python3 card_audit.py                 # summary to stdout
-    python3 card_audit.py --json out.json # write the full report
-    python3 card_audit.py --card "Name"   # audit one card
+    python3 scripts/card_audit.py                 # summary to stdout
+    python3 scripts/card_audit.py --json out.json # write the full report
+    python3 scripts/card_audit.py --card "Name"   # audit one card
 """
 
 from __future__ import annotations
@@ -40,7 +40,7 @@ from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any, Mapping
 
-ROOT = Path(__file__).resolve().parent
+ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from gamedata import DEFAULT_RECORD_STORE
