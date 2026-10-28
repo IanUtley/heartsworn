@@ -22,6 +22,8 @@ TRIGGER_EVENTS = {
     "CardDestroyedEvent", "CardScroungedEvent",
     # The champion attacks with several troops; the event TAC carries how many (NumAttackers).
     "CardsAttackedEvent",
+    # A card hidden from the player entered a zone (published by the zone move that hides it).
+    "HiddenCardEnteredZoneEvent",
     # Published with the counter's type in the event TAC (GainedCounterType), as the counter leaf publishes it.
     "CounterAddedToCardEvent",
     # Published with the transformed card as its source and controller as its player (C# Session.cs).

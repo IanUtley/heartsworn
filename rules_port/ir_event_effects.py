@@ -18,6 +18,8 @@ NATIVE_LEAF_EFFECTS = frozenset({
     "RegisterTriggerAbilityEffectTemplate", "ActivateTriggeredAbilityEffectTemplate",
     # Copies the played spell and resolves the copy's authored abilities (rules_port.effects.create_and_cast_spell).
     "CreateAndCastSpellAbilityEffectTemplate",
+    # Presentation only: pushes the client animation for a talent or power (rules_port.effects._animation_trigger).
+    "AnimationTriggerEffectTemplate",
 })
 
 # The TAC operations the native leaf (EffectContext.tac) implements. A TAC operation outside this set is refused by

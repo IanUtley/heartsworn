@@ -525,6 +525,9 @@ COUNTER_CASES = [
      "opposing": [], "prepare": _nothing, "quick": True, "any_template": True},
     {"name": "At end of your turn, if two troops share a cost, sacrifice this", "ability": "52ee4dbe",
      "event": "TurnEndedEvent", "opposing": [], "prepare": _nothing, "any_template": True},
+    # A card hidden from the player enters a zone: the ability animates a talent (presentation only).
+    {"name": "Hidden card entered a zone: animate the talent", "ability": "d5902ce3", "event": "HiddenCardEnteredZoneEvent",
+     "opposing": [], "prepare": _nothing, "any_template": True},
 ]
 CHAMPION_CASES = [
     {"name": "Champion built-in Burning: end of your turn", "ability": "82598d69",
