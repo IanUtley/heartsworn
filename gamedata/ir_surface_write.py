@@ -29,9 +29,10 @@ from gamedata import ir_registry
 from gamedata import mechanics_types as T
 from gamedata.mechanics_base import Typed, _argument_names, _default_of, _record_value
 from gamedata.mechanics_fields import ir_name
-from gamedata.ir_surface import EMPTY_REF_FIELDS
+from gamedata.ir_surface import EMPTY_REF_FIELDS, THIS
 
 ZERO_GUID = "00000000-0000-0000-0000-000000000000"
+THIS_GUID = THIS.guid
 EVENT_PREFIX = "Game.Shared.Mechanics."
 # A field the header writes as the ability's text or ID, not as a keyword.
 HEADER = {"m_GameText", "m_AbilityTemplateId"}
@@ -192,9 +193,12 @@ def _clause_text(clause: dict[str, Any], names: dict[str, str]) -> str:
 
 
 def _field_value(key: str, value: Any, names: dict[str, str]) -> str:
-    """A list of clauses is written clause by clause; a trigger event by its event name where one exists."""
+    """A list of clauses is written clause by clause; a trigger event by its event name where one exists; a target
+    list names this card as ``this``."""
     if key == "m_AbilityEffectList":
         return "[" + ", ".join(_clause_text(item, names) for item in value) + "]"
+    if key == "m_AbilityTargetTemplateIds":
+        return "[" + ", ".join("this" if _guid_of(item) == THIS_GUID else _value(item) for item in value) + "]"
     if key == "m_TriggerEventType" and isinstance(value, dict) and set(value) == {"m_InternalType"}:
         name = str(value["m_InternalType"])
         if name.startswith(EVENT_PREFIX) and name[len(EVENT_PREFIX):] in P.EVENT_NAMES:

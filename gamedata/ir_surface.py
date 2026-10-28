@@ -350,6 +350,10 @@ def _explicit_ability(text: str, id_: str | None, fields: dict[str, Any]) -> Typ
     deprecated = dict(fields.pop("_deprecated", {}))
     for field in EMPTY_REF_FIELDS:
         fields.setdefault(ir_name(field), _ref(ZERO_GUID))
+    if "ability_target_template_ids" in fields:
+        # A target a name stands for (``this``) is its GUID in the Records.
+        fields["ability_target_template_ids"] = [
+            _ref(item.guid) if isinstance(item, Target) else item for item in fields["ability_target_template_ids"]]
     guid = (id_ or _stable_guid("ability", text)).lower()
     obj = T.AbilityTemplate(ability_template_id=_ref(guid), game_text=text, **fields)
     for name, value in deprecated.items():
