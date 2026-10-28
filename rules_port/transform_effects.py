@@ -421,6 +421,54 @@ def revert_instance(context, card_uid):
     return f"reverted {hex(int(card_uid))}"
 
 
+def transform_into_stored_copy(context, serialized):
+    """TransformCardAbilityEffectTemplate with UseStoredTarget: the stored target becomes a copy of the effect's resolved
+    target. The effect's template is zero; the destination is the resolved target, and the source card(s) come from the
+    StoreTargets effect earlier in this ability instance. Shared by the native resolver and the interpreter."""
+    from pvp_db import db_card_gem_type, db_card_source_info
+    from rules_port.tac import tac_int
+    copy_target = next((value for value in context.effect_targets
+                        if value is not None), None)
+    if copy_target is None:
+        copy_target = context.target(default=None)
+    if copy_target is None:
+        return "transform: no copy target"
+    target_info = db_card_source_info(
+        context.session.session_id, int(copy_target), conn=context.db)
+    new_template = (str(target_info[0]).lower()
+                    if target_info and target_info[0] else "")
+    if not new_template:
+        return "transform: copy target not found"
+    stored = context.bstate.get("stored_targets") or {}
+    stored_targets = (stored.get(context.ability_guid) or
+                      stored.get(str(context.bstate.get(
+                          "resolving_ability") or "")) or ())
+    targets = []
+    for value in stored_targets:
+        try:
+            value = int(value)
+        except (TypeError, ValueError):
+            continue
+        if value not in targets:
+            targets.append(value)
+    if not targets:
+        return "transform: no stored target"
+    if len(targets) != 1:
+        return "transform: expected one stored target"
+    source_uid = context.bstate.get("resolving_source_uid")
+    event_gems = game_engine.EGemTypesNew.Unknown
+    if tac_int(serialized, "CopyGems", 0) and source_uid is not None:
+        event_gems = db_card_gem_type(
+            context.session.session_id, int(source_uid),
+            conn=context.db) or game_engine.EGemTypesNew.Unknown
+    result = transform_instance(
+        context, targets[0], new_template, keep_zone=True,
+        copy_from_uid=int(copy_target), event_gems=event_gems)
+    if isinstance(result, str):
+        return result
+    return f"transformed 1 stored card(s) -> {new_template[:8]}"
+
+
 def transform_card_at_random(context):
     """Apply the authored Records filter to the transform candidate pool."""
     target = context.resolved_target()

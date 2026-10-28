@@ -1734,50 +1734,8 @@ class EffectContext:
                 # the effect's resolved target; the source card(s) come from
                 # the StoreTargets effect earlier in this ability instance.
                 # Do not infer either side from localized game text.
-                copy_target = next(
-                    (value for value in self.effect_targets
-                     if value is not None), None)
-                if copy_target is None:
-                    copy_target = self.target(default=None)
-                if copy_target is None:
-                    return "transform: no copy target"
-                from pvp_db import db_card_source_info
-                target_info = db_card_source_info(
-                    self.session.session_id, int(copy_target), conn=self.db)
-                new_template = (str(target_info[0]).lower()
-                                if target_info and target_info[0] else "")
-                if not new_template:
-                    return "transform: copy target not found"
-                stored = self.bstate.get("stored_targets") or {}
-                stored_targets = (stored.get(self.ability_guid) or
-                                  stored.get(str(self.bstate.get(
-                                      "resolving_ability") or "")) or ())
-                targets = []
-                for value in stored_targets:
-                    try:
-                        value = int(value)
-                    except (TypeError, ValueError):
-                        continue
-                    if value not in targets:
-                        targets.append(value)
-                if not targets:
-                    return "transform: no stored target"
-                if len(targets) != 1:
-                    return "transform: expected one stored target"
-                source_uid = self.bstate.get("resolving_source_uid")
-                event_gems = game_engine.EGemTypesNew.Unknown
-                if tac_int(serialized, "CopyGems", 0) and source_uid is not None:
-                    from pvp_db import db_card_gem_type
-                    event_gems = db_card_gem_type(
-                        self.session.session_id, int(source_uid),
-                        conn=self.db) or game_engine.EGemTypesNew.Unknown
-                result = transform_instance(
-                    self, targets[0], new_template, keep_zone=True,
-                    copy_from_uid=int(copy_target), event_gems=event_gems)
-                if isinstance(result, str):
-                    return result
-                return (f"transformed 1 stored card(s) -> "
-                        f"{new_template[:8]}")
+                from rules_port.transform_effects import transform_into_stored_copy
+                return transform_into_stored_copy(self, serialized)
             event_gems = game_engine.EGemTypesNew.Unknown
             source_uid = self.bstate.get("resolving_source_uid")
             if tac_int(serialized, "CopyGems", 0) and source_uid is not None:

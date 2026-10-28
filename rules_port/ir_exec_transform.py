@@ -31,17 +31,44 @@ PLAYER_TARGET_EFFECTS = {"ConscriptAbilityEffectTemplate", "TransformCardAbility
 AMOUNT_FIELDS = {"ConscriptAbilityEffectTemplate": "m_Amount"}
 
 
+def tac_data(serialized: Any) -> str:
+    """The base64 TAC of a serialized TAC (a dict with a ``data`` field, or the string itself)."""
+    if isinstance(serialized, dict):
+        return str(serialized.get("data") or "")
+    return str(serialized or "")
+
+
+def stored_copy(kind: str, effect: dict[str, Any]) -> bool:
+    """Whether a transform is the authored copy of a stored target (its TAC's UseStoredTarget flag)."""
+    from rules_port.tac import tac_int
+    return kind == "TransformCardAbilityEffectTemplate" and bool(tac_int(tac_data(effect.get("m_SerializedTAC")),
+                                                                         "UseStoredTarget", 0))
+
+
+# The TAC flags a stored-copy transform may carry: the copy's source is stored, and CopyGems copies the source's gem.
+STORED_COPY_FLAGS = ("UseStoredTarget", "CopyGems")
+
+
+def _only_stored_copy_flags(data: str) -> bool:
+    """Whether a serialized TAC carries nothing but the flags the stored-copy transform runs."""
+    from rules_port.tac import _tac_attr_hash, decode_tac_tree
+    allowed = {_tac_attr_hash(name) for name in STORED_COPY_FLAGS}
+    return set(decode_tac_tree(data)) <= allowed
+
+
 def refusals(kind: str, effect: dict[str, Any], target_kind: str) -> list[str]:
     """The reasons an effect of this area cannot run in the interpreter (empty when it can). A serialized TAC is
-    refused: its stored-target and copy-gem forms are not ported here, so they are not run differently. An effect
-    whose target is a player (not a card) is refused: the native resolver falls back to the source card for it, and
-    no card target is defined for the interpreter to pass."""
+    refused unless it is the stored-copy transform (UseStoredTarget, with CopyGems at most): that form runs the native
+    stored-copy leaf. An effect whose target is a player (not a card) is refused unless it is one that takes the
+    champion as its card (PLAYER_TARGET_EFFECTS)."""
     missing: list[str] = []
-    if effect.get("m_SerializedTAC"):
+    data = tac_data(effect.get("m_SerializedTAC"))
+    copy_form = stored_copy(kind, effect)
+    if data and not (copy_form and _only_stored_copy_flags(data)):
         missing.append(f"{kind} with a serialized TAC")
     if target_kind == "PlayerTargetTemplate" and kind not in PLAYER_TARGET_EFFECTS:
         missing.append(f"{kind} of a player")
-    if kind == "TransformCardAbilityEffectTemplate" and not effect.get("m_Portal"):
+    if kind == "TransformCardAbilityEffectTemplate" and not effect.get("m_Portal") and not copy_form:
         template = str((effect.get("m_CardTemplateId") or {}).get("m_Guid") or ZERO_GUID)
         if template.lower() == ZERO_GUID:
             missing.append("transform to no template")
@@ -81,9 +108,15 @@ def _tunnel(context: Any, target: int, count: int | None) -> None:
 
 
 def _transform(context: Any, target: int, count: int | None) -> None:
-    # C# TransformCardAbilityEffectTemplate: the target becomes the authored card (or a portal of its rarity).
+    # C# TransformCardAbilityEffectTemplate: the target becomes the authored card (or a portal of its rarity). A stored
+    # copy (UseStoredTarget) makes the stored card a copy of the target, through the leaf the native resolver runs.
     import game_engine
-    from rules_port.transform_effects import transform_instance
+    from rules_port.tac import tac_int
+    from rules_port.transform_effects import transform_instance, transform_into_stored_copy
+    serialized = tac_data(context.template_value("m_SerializedTAC", None))
+    if tac_int(serialized, "UseStoredTarget", 0):
+        transform_into_stored_copy(context, serialized)
+        return
     if context.template_value("m_Portal", False):
         new_template = context._portal_template_for(target)
         if not new_template:
