@@ -2069,6 +2069,11 @@ class EffectContext:
                 target = int(created[0])
                 self.bstate["player_mod_target"] = target
 
+        stat_property = str(metadata.get("stat_property") or param.get("stat_property") or "")
+        replace = bool(metadata.get("replaceexistingvalue") or param.get("replaceexistingvalue"))
+        if target is not None and (stat_property in ("CurrentAttackValue", "CurrentDefenseValue") or replace):
+            attack, defense = self._stat_modifier_per_target(
+                int(target), property_name, stat_property, replace, amount)
         if target is None:
             return f"stat mod: {property_name} {amount:+}"
         duration = str(param.get("duration") or "")
@@ -2098,6 +2103,19 @@ class EffectContext:
         return f"mod {hex(int(target))} {attack:+}/{defense:+}"
 
 
+
+    def _stat_modifier_per_target(self, target: int, property_name: str, stat_property: str,
+                                  replace: bool, amount: int) -> tuple[int, int]:
+        """The buff one attack or defense modifier gives one target (C# AttackModifier.Apply). A named property is the
+        target's own current value of it, in place of the amount. A replacing modifier sets the value, so its buff is
+        the difference from the value now."""
+        from rules_port.static_rules import effective_stats
+        now_attack, now_defense = effective_stats(self.db, self.session.session_id, self.bstate, int(target))[:2]
+        now = int(now_attack if property_name == "attack" else now_defense)
+        value = now if stat_property in ("CurrentAttackValue", "CurrentDefenseValue") else int(amount)
+        if replace:
+            value -= now
+        return (value, 0) if property_name == "attack" else (0, value)
 
     def stat_mod(self, target: int, attack: int = 0, defense: int = 0,
                  this_turn: bool = False):

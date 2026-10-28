@@ -929,18 +929,20 @@ def _run_clause(root: MechanicsObject, clause: Any, scope: Scope) -> None:
     if kind in ("AttackModifier", "DefenseModifier"):
         # The shared stat primitive, with the live path's choice of buffs (EndOfTurn is this turn only).
         from rules_port.stat_effects import apply_stat_mod
-        amount = _input_value(modifier, scope)
+        prop = str(getattr(modifier, "m_Property", "Unknown") or "Unknown")
+        amount = None if prop != "Unknown" else _input_value(modifier, scope)
         duration = str(_field(clause, "m_EffectDuration") or "")
         replace = bool(getattr(modifier, "m_ReplaceExistingValue", False))
+        from rules_port.static_rules import effective_stats
         for target in _targets(root, index, scope):
-            value = amount
+            current = effective_stats(scope.context.db, scope.context.session.session_id, scope.context.bstate,
+                                      int(target))
+            now = int(current[0] if kind == "AttackModifier" else current[1])
+            # C# AttackModifier.Apply: a named property (the card's own attack or defense) takes the place of the
+            # amount. A replacing modifier sets the value, so its buff is the difference from the value now.
+            value = now if prop != "Unknown" else amount
             if replace:
-                # C# sets the card's value to the amount (ContextAttackValue = num). The buff that reaches it is the
-                # difference from its value now.
-                from rules_port.static_rules import effective_stats
-                current = effective_stats(scope.context.db, scope.context.session.session_id, scope.context.bstate,
-                                          int(target))
-                value = amount - int(current[0] if kind == "AttackModifier" else current[1])
+                value = value - now
             attack, defense = (value, 0) if kind == "AttackModifier" else (0, value)
             apply_stat_mod(scope.context, target, attack, defense, this_turn=duration == "EndOfTurn",
                            duration=duration if duration in LINKED_STAT_DURATIONS else None)
@@ -2177,9 +2179,12 @@ def coverage(guid: str) -> list[str]:
             stat = effect.get("m_Modifier") or {}
             if clause_duration not in (LINKED_STAT_DURATIONS if linked else STAT_DURATIONS):
                 missing.append(f"stat duration {clause_duration}")
-            if str(stat.get("m_Property") or "Unknown") != "Unknown":
-                missing.append(f"stat property {stat.get('m_Property')}")
-            if _short((stat.get("m_InputValue") or {}).get("_t")) not in ("EffectInputVariable", "EffectConstant"):
+            prop = str(stat.get("m_Property") or "Unknown")
+            # A named property (the card's own attack or defense) takes the place of the amount, as C# reads it.
+            if prop not in ("Unknown", "CurrentAttackValue", "CurrentDefenseValue"):
+                missing.append(f"stat property {prop}")
+            elif prop == "Unknown" and _short((stat.get("m_InputValue") or {}).get("_t")) not in (
+                    "EffectInputVariable", "EffectConstant"):
                 missing.append("stat without a typed amount")
         if modifier in GROUP_G_MODIFIERS:
             missing.extend(modifier_gaps(effect.get("m_Modifier") or {},
