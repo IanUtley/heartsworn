@@ -11,11 +11,16 @@ A field that holds its client default is left out, and the constructor fills it 
 its own defaults the same way, and an empty reference is written as ``NoRef()``. ``ir_python.loads`` reads
 the text back to the same Records.
 
-Stage one: every effect is written inside its clause by its GUID. Named effect fragments come later.
+Each effect the ability uses is written once, before the ability, under a name taken from its game text, and
+each clause refers to it by that name:
+
+    DEAL_DAMAGE = CardModifierAbilityEffectTemplate(game_text='deal damage.', ...)
+    ABILITY = ability('…', ability_effect_list=[Clause(effect_template_id=DEAL_DAMAGE)])
 """
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from gamedata import DEFAULT_RECORD_STORE as STORE
@@ -55,24 +60,75 @@ def _value(value: Any) -> str:
     return P._literal(value)
 
 
-def _clause_text(clause: dict[str, Any]) -> str:
-    """One effect-list entry as ``Clause(...)``, leaving out the fields its own defaults already give."""
+# Words that carry no meaning in a fragment's name.
+_NAME_STOPWORDS = {
+    "a", "an", "the", "of", "to", "this", "that", "from", "on", "in", "at", "by", "for", "is", "are",
+    "and", "or", "if", "your", "you", "each", "equal", "number", "under", "control", "controlled", "with",
+}
+
+
+def _fragment_name(record: dict[str, Any], used: set[str]) -> str:
+    """A name from an effect's game text: its first words in capitals, without markup or filler words, unique
+    within the ability."""
+    plain = re.sub(r"<[^>]+>|\[[^\]]*\]|\([^)]*\)|#[A-Za-z0-9_]+#", " ", str(record.get("m_GameText") or ""))
+    words = [word.upper() for word in re.findall(r"[A-Za-z]+", plain) if word.lower() not in _NAME_STOPWORDS][:4]
+    name = "_".join(words) or "EFFECT"
+    unique, count = name, 2
+    while unique in used:
+        unique = f"{name}_{count}"
+        count += 1
+    used.add(unique)
+    return unique
+
+
+def _effect_fragments(clauses: list[dict[str, Any]]) -> tuple[dict[str, str], list[str]]:
+    """Each distinct effect the clauses use, as ``{guid: name}`` and the ``NAME = ...`` lines that bind them.
+    An effect whose class the IR does not know stays a GUID reference."""
+    names: dict[str, str] = {}
+    lines: list[str] = []
+    used: set[str] = set()
+    for clause in clauses:
+        guid = str(clause["m_EffectTemplateId"]["m_Guid"]).lower()
+        if guid in names or guid == ZERO_GUID:
+            continue
+        record = effect_record(guid)
+        cls = getattr(T, str(record.get("_t") or "").rsplit(".", 1)[-1], None)
+        if cls is None:
+            continue
+        name = _fragment_name(record, used)
+        names[guid] = name
+        lines.append(f"{name} = {P.dumps(cls.from_record(record))}")
+    return names, lines
+
+
+def effect_record(guid: str) -> dict[str, Any]:
+    """The stored effect template record with its type tags and fields, as plain JSON."""
+    for record in STORE.load("AbilityEffectTemplate"):
+        if record.guid.lower() == guid.lower():
+            return _plain(record.to_dict(include_metadata=True))
+    raise KeyError(f"no AbilityEffectTemplate {guid}")
+
+
+def _clause_text(clause: dict[str, Any], names: dict[str, str]) -> str:
+    """One effect-list entry as ``Clause(...)``, leaving out the fields its own defaults already give. The effect is
+    its fragment's name when it has one."""
     defaults = P._clause(effect_template_id=clause["m_EffectTemplateId"])
     arguments = []
     for key, value in clause.items():
         if key in defaults and defaults[key] == value and key != "m_EffectTemplateId":
             continue
         if key == "m_EffectTemplateId":
-            arguments.append(f"effect_template_id={_value(value)}")
+            guid = str(value["m_Guid"]).lower()
+            arguments.append(f"effect_template_id={names.get(guid) or _value(value)}")
         else:
             arguments.append(f"{ir_name(key)}={_value(value)}")
     return "Clause(" + ", ".join(arguments) + ")"
 
 
-def _field_value(key: str, value: Any) -> str:
+def _field_value(key: str, value: Any, names: dict[str, str]) -> str:
     """A list of clauses is written clause by clause; a trigger event by its event name where one exists."""
     if key == "m_AbilityEffectList":
-        return "[" + ", ".join(_clause_text(item) for item in value) + "]"
+        return "[" + ", ".join(_clause_text(item, names) for item in value) + "]"
     if key == "m_TriggerEventType" and isinstance(value, dict) and set(value) == {"m_InternalType"}:
         name = str(value["m_InternalType"])
         if name.startswith(EVENT_PREFIX) and name[len(EVENT_PREFIX):] in P.EVENT_NAMES:
@@ -87,6 +143,7 @@ def ability_text(guid: str, name: str = "ABILITY") -> str:
     known = _argument_names(T.AbilityTemplate)
     argument_of = {record_name: argument for argument, record_name in known.items()}
     header = [repr(root.m_GameText)]
+    names, fragments = _effect_fragments(record.get("m_AbilityEffectList") or [])
     arguments: list[str] = [f"id={root.m_AbilityTemplateId['m_Guid']!r}"]
     deprecated: dict[str, Any] = {}
     for key in record:
@@ -100,11 +157,11 @@ def ability_text(guid: str, name: str = "ABILITY") -> str:
             continue
         if key in EMPTY_REF_FIELDS and _value(value) == "NoRef()":
             continue
-        arguments.append(f"{argument_of[key]}={_field_value(key, value)}")
+        arguments.append(f"{argument_of[key]}={_field_value(key, value, names)}")
     if deprecated:
         arguments.append("_deprecated={" + ", ".join(
             f"{key!r}: {_value(value)}" for key, value in deprecated.items()) + "}")
-    lines = [f"{name} = ability(", *(f"    {item}," for item in header + arguments), ")"]
+    lines = [*fragments, f"{name} = ability(", *(f"    {item}," for item in header + arguments), ")"]
     return "\n".join(lines) + "\n"
 
 
