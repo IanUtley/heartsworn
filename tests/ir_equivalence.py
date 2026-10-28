@@ -307,10 +307,19 @@ def _live(case):
     from rules_port.triggers import dispatch_native_trigger
     import time
     setup = _scenario(case["ability"], case["opposing"], case.get("moved"),
-                      case.get("extra", ()), case.get("champion", False))
+                      case.get("extra", ()), case.get("champion", False),
+                      any_template=bool(case.get("any_template")))
     if setup is None:
         return None
     db, pl_t, ai_t, game, handler, bstate, player_champ, ai_champ = setup
+    if case.get("counters"):
+        # Counters the source card already carries (name -> count), stored as the card's permanent counters.
+        import json as _json
+        from rules_port.counter_effects import _counter_guid
+        counters = {str(_counter_guid(db, name)).lower(): int(count) for name, count in case["counters"].items()}
+        db.execute("UPDATE game_cards SET permanent_buffs = ? WHERE card_uid = ?",
+                   (_json.dumps({"counters": counters}, sort_keys=True), SOURCE_UID))
+        db.commit()
     if case.get("quick"):
         # The source card is a quick card (its QuickSpeed attribute), for abilities that test a card's quickness.
         db.execute("UPDATE game_cards SET card_attributes = COALESCE(card_attributes, 0) | ? WHERE card_uid = ?",
@@ -472,6 +481,15 @@ QUICK_CASES = [
 ]
 
 
+from rules_port.tac import _tac_attr_hash  # noqa: E402  (the event TAC's attribute key)
+
+# Counter-added abilities: the source card already holds the counters, and the event names the counter it gained.
+COUNTER_CASES = [
+    {"name": "Seed counters: three or more are removed when one is gained", "ability": "c5a722a7",
+     "event": "CounterAddedToCardEvent", "opposing": [], "prepare": _nothing, "counters": {"seed": 3},
+     "any_template": True,
+     "event_tac": {str(_tac_attr_hash("GainedCounterType")): "seed"}},
+]
 CHAMPION_CASES = [
     {"name": "Champion built-in Burning: end of your turn", "ability": "82598d69",
      "event": "TurnEndedEvent", "champion": True, "opposing": [], "prepare": _burning},
@@ -610,7 +628,7 @@ def _case_cache_path(limit):
 
 # The case fields a run reads, all of them plain data (``prepare`` is stored as the spec it is rebuilt from).
 _CASE_FIELDS = ("name", "ability", "event", "champion", "any_template", "target_player",
-                "int_attribute", "event_source", "quick")
+                "int_attribute", "event_source", "quick", "counters", "event_tac")
 # The ECardAttributes bit a quick card carries (the native quick check reads it).
 QUICK_SPEED_ATTRIBUTE = 268435456
 
@@ -1082,7 +1100,7 @@ def main():
     _count_generated_cards()
     from_cards = os.environ.get("IR_EQ_CARDS") == "1"
     card_roots = _card_roots() if from_cards else {}
-    resolved = _find_abilities([case["ability"][:8] for case in CASES + CHAMPION_CASES + QUICK_CASES])
+    resolved = _find_abilities([case["ability"][:8] for case in CASES + CHAMPION_CASES + QUICK_CASES + COUNTER_CASES])
     passed, failed, uncovered = [], [], []
     turn_cases = cached_auto_cases(int(os.environ.get("IR_EQ_LIMIT", "40")))
     random_count = int(os.environ.get("IR_EQ_RANDOM", "0"))
@@ -1097,7 +1115,7 @@ def main():
     # IR_EQ_CHUNK="start:end" runs a slice of the cases in this process (the port keeps memory across cases, so
     # a long run is split into several processes).
     start, end = (int(part) for part in os.environ.get("IR_EQ_CHUNK", f"0:{len(expanded) + 9}").split(":"))
-    everything = CHAMPION_CASES + QUICK_CASES + CASES + expanded
+    everything = CHAMPION_CASES + QUICK_CASES + COUNTER_CASES + CASES + expanded
     if events:
         everything = [case for case in everything if case["event"] in events]
     print("CASES", len(everything), flush=True)

@@ -22,6 +22,8 @@ TRIGGER_EVENTS = {
     "CardDestroyedEvent", "CardScroungedEvent",
     # The champion attacks with several troops; the event TAC carries how many (NumAttackers).
     "CardsAttackedEvent",
+    # Published with the counter's type in the event TAC (GainedCounterType), as the counter leaf publishes it.
+    "CounterAddedToCardEvent",
     # Its source is the conscripted card (as native publishes it), so the card's own filters read it.
     "ConscriptEvent",
     # The phase the turn entered (native publishes it with the phase in its data); the phase condition reads the battle.
