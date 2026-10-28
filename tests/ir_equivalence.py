@@ -311,6 +311,11 @@ def _live(case):
     if setup is None:
         return None
     db, pl_t, ai_t, game, handler, bstate, player_champ, ai_champ = setup
+    if case.get("quick"):
+        # The source card is a quick card (its QuickSpeed attribute), for abilities that test a card's quickness.
+        db.execute("UPDATE game_cards SET card_attributes = COALESCE(card_attributes, 0) | ? WHERE card_uid = ?",
+                   (QUICK_SPEED_ATTRIBUTE, SOURCE_UID))
+        db.commit()
     case["prepare"](db, bstate, player_champ, ai_champ)
     start_events = len(game.events)
     if case["event"] == "CardActivatedEvent" and _is_charge_power_trigger(case["ability"]):
@@ -460,6 +465,13 @@ def _cursed_death(db, bstate, player_champ, ai_champ):
     db.execute("UPDATE game_cards SET permanent_buffs=? WHERE card_uid=301", (CURSED,))
 
 
+# Quick-card abilities: their source card is a quick card (the "quick" field sets its QuickSpeed attribute).
+QUICK_CASES = [
+    {"name": "Quick source: Prophecy makes the next non-quick troop quick (player)", "ability": "348532b2",
+     "event": "CardEnteredZoneEvent", "opposing": [], "prepare": _nothing, "quick": True},
+]
+
+
 CHAMPION_CASES = [
     {"name": "Champion built-in Burning: end of your turn", "ability": "82598d69",
      "event": "TurnEndedEvent", "champion": True, "opposing": [], "prepare": _burning},
@@ -598,7 +610,9 @@ def _case_cache_path(limit):
 
 # The case fields a run reads, all of them plain data (``prepare`` is stored as the spec it is rebuilt from).
 _CASE_FIELDS = ("name", "ability", "event", "champion", "any_template", "target_player",
-                "int_attribute", "event_source")
+                "int_attribute", "event_source", "quick")
+# The ECardAttributes bit a quick card carries (the native quick check reads it).
+QUICK_SPEED_ATTRIBUTE = 268435456
 
 
 def _case_spec(case):
@@ -1068,7 +1082,7 @@ def main():
     _count_generated_cards()
     from_cards = os.environ.get("IR_EQ_CARDS") == "1"
     card_roots = _card_roots() if from_cards else {}
-    resolved = _find_abilities([case["ability"][:8] for case in CASES + CHAMPION_CASES])
+    resolved = _find_abilities([case["ability"][:8] for case in CASES + CHAMPION_CASES + QUICK_CASES])
     passed, failed, uncovered = [], [], []
     turn_cases = cached_auto_cases(int(os.environ.get("IR_EQ_LIMIT", "40")))
     random_count = int(os.environ.get("IR_EQ_RANDOM", "0"))
@@ -1083,7 +1097,7 @@ def main():
     # IR_EQ_CHUNK="start:end" runs a slice of the cases in this process (the port keeps memory across cases, so
     # a long run is split into several processes).
     start, end = (int(part) for part in os.environ.get("IR_EQ_CHUNK", f"0:{len(expanded) + 9}").split(":"))
-    everything = CHAMPION_CASES + CASES + expanded
+    everything = CHAMPION_CASES + QUICK_CASES + CASES + expanded
     if events:
         everything = [case for case in everything if case["event"] in events]
     print("CASES", len(everything), flush=True)
