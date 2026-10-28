@@ -22,6 +22,12 @@ WORKDIR /hex
 COPY requirements.txt /hex/requirements.txt
 RUN python3 -m pip install --no-cache-dir -r /hex/requirements.txt
 
+# The campaign editor's HTTPS listener makes its self-signed certificate with
+# the openssl CLI at first start (docker/campaign_editor_launcher.sh).
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends openssl \
+    && rm -rf /var/lib/apt/lists/*
+
 # Server sources and data.  The build context is the repository root even
 # though this Dockerfile lives under docker/.
 COPY *.py /hex/

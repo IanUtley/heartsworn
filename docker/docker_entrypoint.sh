@@ -28,6 +28,10 @@ mkdir -p /tmp
 # keeps the same program bound to loopback by default.
 export HEX_CAMPAIGN_EDITOR_HOST="${HEX_CAMPAIGN_EDITOR_HOST:-0.0.0.0}"
 export HEX_CAMPAIGN_EDITOR_PORT="${HEX_CAMPAIGN_EDITOR_PORT:-8765}"
+# The editor takes log-in passwords, so it serves HTTPS. The launcher makes a
+# self-signed certificate at first start unless HEX_CAMPAIGN_EDITOR_CERT and
+# HEX_CAMPAIGN_EDITOR_KEY name one.
+export HEX_CAMPAIGN_EDITOR_TLS="${HEX_CAMPAIGN_EDITOR_TLS:-1}"
 
 # Validate the gamedata mount and create a persistent database when this is a
 # first deployment. Services open SQLite only after this has completed.

@@ -246,8 +246,15 @@ zone loads; it doesn't need a restart for that.
 `hconnect_server.py` serves the TCP HConnect protocol on port 9933.
 `proxy.py` serves HTTP compatibility/auth and news endpoints on port 8081.
 `campaign_editor/server.py` serves the campaign
-editor over HTTP on port 8765; publish it with Docker mapping `8765:8765` to
-open `http://localhost:8765/`.
+editor over HTTPS on port 8765; publish it with Docker mapping `8765:8765` to
+open `https://localhost:8765/`. The container makes a self-signed certificate
+at first start and keeps it in the state directory (`<HEX_DB_PATH dir>/tls/`),
+so browsers keep trusting it across restarts. Your browser will warn about an
+untrusted certificate until you accept it. To use your own certificate, mount
+it and set `HEX_CAMPAIGN_EDITOR_CERT` and `HEX_CAMPAIGN_EDITOR_KEY` (PEM paths
+inside the container). To add a public IP or DNS name to the self-signed
+certificate, set `HEX_CAMPAIGN_EDITOR_TLS_NAMES` (comma-separated); delete the
+`tls/` folder to regenerate it after changing names.
 `db.py` owns the shared SQLite connection while `profile_db.py`, `pve_db.py`,
 `pvp_db.py`, `tournament_db.py`, and `replay_db.py` expose domain persistence
 APIs. `static.py` owns schema creation and server-owned seeds;
