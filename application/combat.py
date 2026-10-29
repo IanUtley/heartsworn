@@ -131,7 +131,11 @@ class CombatMixin:
         # A deck-search picker holds the turn the same way. The in-memory battle state is the one that knows the
         # picker is still open: the persisted copy still holds it while the answer's own packets are sent.
         deck_search_open = bool((getattr(self, "_current_bstate", None) or {}).get("pending_deck_search"))
-        carries_picker = any(type(ev).__name__ == "TriggeredAbilityActivationDataRequiredSessionEventArgs"
+        # A revealed-choice picker (class 23) is the same kind of packet: the client pairs its option list with the
+        # reveal, so holding the option list leaves the picker with no targets and no revealed cards.
+        carries_picker = any(type(ev).__name__ in (
+                                 "TriggeredAbilityActivationDataRequiredSessionEventArgs",
+                                 "AbilityActivationDataRequiredSessionEventArgs")
                              for ev in game.events)
         if deck_search_open and not picker_packet and not carries_picker:
             # The client leaves its picker on any priority window that follows it, so the window waits for the answer.

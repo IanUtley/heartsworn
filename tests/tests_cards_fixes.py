@@ -913,6 +913,8 @@ def test_oakhenge_single_revealed_troop_moves_without_a_picker(db):
 
     reveals = [event for event in game.events if isinstance(
         event, game_engine.CardsRevealedSessionEventArgs)]
+    # The five cards are shown once. In PvE the chosen troop needs no second
+    # coverflow: the owner already saw it, and its hand view is sent on the move.
     assert len(reveals) == 1, reveals
     assert [int(card.uid.uid64) for card in reveals[0].session_card_ids] == [
         362, 363, 364, 365, 366]
@@ -932,6 +934,150 @@ def test_oakhenge_single_revealed_troop_moves_without_a_picker(db):
     assert rows == [(362, "deck"), (363, "hand"), (364, "deck"),
                     (365, "deck"), (366, "deck")], rows
     assert not bstate.get("resolution_paused"), bstate
+
+
+def test_dream_eagle_one_of_them_offers_only_the_looked_at_cards(db):
+    """Dream Eagle's "one of them" picks from the top four cards its look shows.
+
+    The secondary target has no card filter of its own, so offering every card
+    in its zones showed the whole deck. It must follow the previous target, the
+    look's TopNOfDeck, back to the owner's first four deck cards.
+    """
+    import types
+
+    import hconnect_server as hcs
+    import db as dbmod
+    import battle_engine
+
+    EAGLE = "7f81a852-6f5e-4f37-b0a4-d9c13135daa7"
+    EAGLE_AG = "3179e9db-f8cd-fc06-3b0b-93c13ec82cde"
+    SECONDARY = "7a0df97e-c175-96ba-231f-7200f5fe53be"   # "one of them"
+    SHARD = "cd41bd00-7585-4762-a721-6163bdaee3c3"
+    _copy_card(db, EAGLE)
+    _copy_card(db, SHARD)
+    add_card(db, 900, 5, EAGLE, loc="CastSpells")
+    for index in range(8):
+        add_card(db, 910 + index, 5, SHARD, loc="deck")
+        db.execute("UPDATE game_cards SET position=? WHERE card_uid=?",
+                   (index, 910 + index))
+    db.commit()
+
+    old_db = dbmod._db
+    old_hcs_db = hcs._db
+    dbmod._db = db
+    hcs._db = db
+    try:
+        handler = HandlerStub(db)
+        handler._checkpoint_engine = lambda session: battle_engine
+        handler._send_battle_events = lambda *args, **kwargs: True
+        handler._push_transaction_ack = lambda *args, **kwargs: None
+        handler._champion_targets = lambda: []
+        for name in ("_prompt_trigger_targets", "_plan_target_bounds"):
+            setattr(handler, name, types.MethodType(
+                getattr(hcs.HCPHandler, name), handler))
+        pl_t = game_engine.UID.make(244, 5)
+        ai_t = game_engine.UID.make(3, 1000)
+        game = game_engine.Game(1, pl_t, ai_t)
+        bstate = {"player_health": 20, "ai_health": 20, "turn_number": 1,
+                  "resolving_owner_id": 5}
+        handler._prompt_trigger_targets(
+            game, pl_t, ai_t, SessionStub(), bstate, 900, EAGLE_AG,
+            [SECONDARY], None, owner_id=5)
+    finally:
+        dbmod._db = old_db
+        hcs._db = old_hcs_db
+
+    entries = bstate["pending_trigger"]["target_entries"]
+    assert len(entries) == 1, entries
+    assert entries[0]["uids"] == [910, 911, 912, 913], entries
+
+
+def test_dream_eagle_look_reveals_then_offers_one_of_them(db):
+    """Dream Eagle's "one of them" is chosen after its look reveals the cards.
+
+    The chain item carries no target for it, so the card that was played must not
+    be picked in its place (that moved Dream Eagle back to hand). The look reveals
+    the first four cards, and the choice is then offered from those four.
+    """
+    import types
+
+    import hconnect_server as hcs
+    import battle_engine
+    from rules_port.resolution import resolve_port_ability
+
+    EAGLE = "7f81a852-6f5e-4f37-b0a4-d9c13135daa7"
+    EAGLE_AG = "3179e9db-f8cd-fc06-3b0b-93c13ec82cde"
+    SHARD = "cd41bd00-7585-4762-a721-6163bdaee3c3"
+    _copy_card(db, EAGLE)
+    _copy_card(db, SHARD)
+    add_card(db, 900, 5, EAGLE, loc="warzone")
+    for index in range(8):
+        add_card(db, 910 + index, 5, SHARD, loc="deck")
+        db.execute("UPDATE game_cards SET position=? WHERE card_uid=?",
+                   (index, 910 + index))
+    # Cards outside the deck that the look's zones also list: they must not be offered.
+    add_card(db, 950, 5, SHARD, loc="hand")
+    add_card(db, 960, 0, SHARD, loc="deck")
+    db.execute("UPDATE game_cards SET position=0 WHERE card_uid=960")
+    db.commit()
+
+    handler = HandlerStub(db)
+    handler._checkpoint_engine = lambda session: battle_engine
+    handler._send_battle_events = lambda *args, **kwargs: True
+    handler._push_transaction_ack = lambda *args, **kwargs: None
+    handler._champion_targets = lambda: []
+    handler._prompt_revealed_choice = types.MethodType(
+        hcs.HCPHandler._prompt_revealed_choice, handler)
+    pl_t = game_engine.UID.make(244, 5)
+    ai_t = game_engine.UID.make(3, 1000)
+    game = game_engine.Game(1, pl_t, ai_t)
+    bstate = {"player_health": 20, "ai_health": 20, "turn_number": 1,
+              "resolving_owner_id": 5}
+    resolve_port_ability(handler, game, SessionStub(), db, pl_t, ai_t, bstate,
+                         EAGLE_AG, 900, 5, target_map={}, variables={},
+                         instance_id=1)
+
+    assert bstate.get("resolution_paused"), bstate
+    assert bstate["pending_deck_search"]["candidates"] == [910, 911, 912, 913], \
+        bstate.get("pending_deck_search")
+    assert db.execute("SELECT location FROM game_cards WHERE card_uid=900"
+                      ).fetchone()[0] == "warzone"
+
+
+def test_ai_revealed_troop_in_hand_is_shown_to_the_human(db):
+    """A troop the AI put into its hand from a public reveal stays visible to the human.
+
+    The human cannot see the AI's hand, so the human gets the card's hand view. It
+    must not get a second CardsRevealed: a second coverflow requests the same snapshot
+    again and leaves the hand copy without art.
+    """
+    from types import SimpleNamespace
+
+    from rules_port.reveal_effects import publish_revealed_card
+
+    SHARD = "cd41bd00-7585-4762-a721-6163bdaee3c3"
+    _copy_card(db, SHARD)
+    add_card(db, 980, 0, SHARD, loc="hand")
+    db.commit()
+
+    pl_t = game_engine.UID.make(244, 5)
+    ai_t = game_engine.UID.make(3, 1000)
+    game = game_engine.Game(1, pl_t, ai_t)
+    context = SimpleNamespace(
+        db=db, session=SessionStub(), handler=HandlerStub(db), game=game,
+        player_uid=pl_t, ai_uid=ai_t,
+        bstate={"resolving_owner_id": 0})
+    publish_revealed_card(context, 980)
+
+    updates = [event for event in game.events if isinstance(
+        event, game_engine.CardUpdatedSessionEventArgs)]
+    assert len(updates) == 1, game.events
+    assert int(updates[0].session_card_id.uid.uid64) == 980
+    assert int(updates[0].collection) == int(game_engine.ECardCollections.Hand)
+    assert not [event for event in game.events if isinstance(
+        event, game_engine.CardsRevealedSessionEventArgs)], game.events
+    assert int(updates[0]._hand_reveal_viewer_uid.uid64) == int(pl_t.uid64), \
+        updates[0]._hand_reveal_viewer_uid
 
 
 def test_revealed_cards_put_back_into_deck_are_hidden_again(db):

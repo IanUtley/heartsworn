@@ -122,6 +122,9 @@ def reveal_cards(context):
         except (TypeError, ValueError, json.JSONDecodeError):
             pass
     owner = int(context.bstate.get("resolving_owner_id", 0) or 0)
+    # The controller is who played the card. A self-only look is shown to them
+    # alone, even when the looked-at hand belongs to the opponent.
+    controller = owner
     owner = _reveal_owner(context, owner, target_kind)
     zone = _find_zone(filt) or "deck"
     revealed_zones = {}
@@ -204,6 +207,9 @@ def reveal_cards(context):
     # human). Only an everyone-reveal of an AI card is public.
     if owner == 0 and reveal_targets.lower() not in ("self", "you", "controller"):
         reveal_targets = "Everyone"
+    self_only = reveal_targets.lower() in ("self", "you", "controller")
+    controller_uid = owner_uid(controller, context.player_uid,
+                               context.ai_uid, context.bstate)
     private = False
     if (context.bstate.get("pvp") and reveal_targets.lower() in
             ("self", "you", "controller", "opponents")):
@@ -212,7 +218,8 @@ def reveal_cards(context):
             private = bool(sender(
                 context.session, context.bstate, owner, rows,
                 context.player_uid, context.ai_uid,
-                to_opponent=reveal_targets.lower() == "opponents"))
+                to_opponent=reveal_targets.lower() == "opponents",
+                viewer_id=controller if self_only else None))
     if not private:
         event = game_engine.CardsRevealedSessionEventArgs()
         event.player_id = owner_uid(owner, context.player_uid,
@@ -229,10 +236,10 @@ def reveal_cards(context):
         # the Coverflow shows the cards temporarily and does not keep them
         # revealed after a follow-up move puts them back into a hidden zone.
         event.inactive = True
-        if reveal_targets.lower() in ("self", "you", "controller"):
-            # Only the owner's packet carries a self-only reveal (the packet filter
-            # drops a private event for every other viewer).
-            event._private_player_uid = event.player_id
+        if self_only:
+            # Only the controller's packet carries a self-only look (the packet
+            # filter drops a private event for every other viewer).
+            event._private_player_uid = controller_uid
         # The client builds the coverflow from the revealed card views the
         # moment CardsRevealed arrives, and hidden deck cards have no view until
         # their CardUpdated lands. Send the card updates first.
@@ -253,8 +260,8 @@ def reveal_cards(context):
             # id, and the client's coverflow then has no card template to draw.
             # An AI reveal is shown to everyone (owner 0 above), so the human
             # player's packet gets the cards.
-            if reveal_targets.lower() in ("self", "you", "controller"):
-                context.game.events[-1]._hand_reveal_viewer_uid = card_owner
+            if self_only:
+                context.game.events[-1]._hand_reveal_viewer_uid = controller_uid
             elif (reveal_targets.lower() == "everyone" and
                   not context.bstate.get("pvp")):
                 context.game.events[-1]._hand_reveal_viewer_uid = \
@@ -281,22 +288,71 @@ def publish_revealed_card(context, uid):
     if not row:
         return
     template_guid, owner = row
+    # The owner already saw the card in the reveal, and the move into hand
+    # already sent its hand view. Only the opponent needs the public reveal.
+    if not context.bstate.get("pvp"):
+        if int(owner or 0) != 0:
+            # The human's own card: nothing more to send (a second coverflow for
+            # the owner requests the same snapshot again and leaves the hand copy
+            # without art).
+            return
+        # The AI's card: the human cannot see the AI's hand, so the revealed card
+        # stays public there. Send only its hand view to the human, with no second
+        # coverflow, for the same snapshot reason.
+        scid = game_engine.SessionCardId(game_engine.UID(int(uid)))
+        _tpl, card_type, _name, cost, attack, defense, gems = \
+            context.handler._card_full_data(context.game, scid, template_guid)
+        context.game.push_card_updated(
+            scid, owner_uid(0, context.player_uid, context.ai_uid,
+                            context.bstate),
+            game_engine.ECardCollections.Hand, card_type,
+            template_id=template_guid, cost=cost, attack=attack,
+            defense=defense, gems=gems, nulling=False)
+        context.game.events[-1]._hand_reveal_viewer_uid = context.player_uid
+        return
+    from pvp_db import db_game_session_pids
+    opponent = next((int(pid) for pid in db_game_session_pids(
+        context.session.session_id) if int(pid) != int(owner or 0)), 0)
+    if not opponent:
+        return
     scid = game_engine.SessionCardId(game_engine.UID(int(uid)))
     player = owner_uid(int(owner or 0), context.player_uid, context.ai_uid,
                        context.bstate)
-    _tpl, card_type, _name, cost, attack, defense, gems = \
-        context.handler._card_full_data(context.game, scid, template_guid)
-    context.game.push_card_updated(
-        scid, player, game_engine.ECardCollections.Hand, card_type,
-        template_id=template_guid, cost=cost, attack=attack, defense=defense,
-        gems=gems, nulling=False)
-    context.game.events[-1]._hand_reveal_viewer_uid = context.player_uid
-    context.game.events[-1]._temporary_reveal = True
+    opponent_uid = game_engine.UID.make(244, opponent)
+    send_revealed_cards(
+        context, [(scid, player, game_engine.ECardCollections.Hand,
+                   template_guid, 0)],
+        opponent_uid, player, private_to=opponent_uid)
+
+
+def send_revealed_cards(context, cards, viewer_uid, reveal_player,
+                        private_to=None):
+    """Send the revealed cards to ``viewer_uid``, then the CardsRevealed event.
+
+    The client builds its coverflow from each card's view as CardsRevealed
+    arrives, so every full definition goes first. ``cards`` holds
+    ``(session_card_id, owner_uid, collection, template_guid, state)`` tuples.
+    The updates are temporary and tagged for the viewer, so the packet filter
+    keeps the templates for that viewer only. ``private_to`` limits the
+    CardsRevealed event itself to one recipient.
+    """
+    import game_engine
+    for scid, owner, collection, template_guid, state in cards:
+        _tpl, card_type, _name, cost, attack, defense, gems = \
+            context.handler._card_full_data(context.game, scid, template_guid)
+        context.game.push_card_updated(
+            scid, owner, collection, card_type, state=int(state or 0),
+            template_id=template_guid, cost=cost, attack=attack,
+            defense=defense, gems=gems, nulling=False)
+        context.game.events[-1]._hand_reveal_viewer_uid = viewer_uid
+        context.game.events[-1]._temporary_reveal = True
     event = game_engine.CardsRevealedSessionEventArgs()
-    event.player_id = player
-    event.session_card_ids = [scid]
-    event.collections = [game_engine.ECardCollections.Hand]
-    event.owning_players = [player]
-    event.positions = [0]
+    event.player_id = reveal_player
+    event.session_card_ids = [card[0] for card in cards]
+    event.collections = [card[2] for card in cards]
+    event.owning_players = [card[1] for card in cards]
+    event.positions = [0] * len(cards)
     event.inactive = True
+    if private_to is not None:
+        event._private_player_uid = private_to
     context.game._push(event)

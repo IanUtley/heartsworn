@@ -1036,6 +1036,51 @@ class NativeEffectBackend:
                                 ability.responsible_player_id,
                                 target_spec.guid, ability.source_uid, raw,
                                 battle_state)
+                            if (target_spec.requires_input and
+                                    int(ability.responsible_player_id or 0) != 0):
+                                # "Put one of them": the player picks among the cards the
+                                # look produced, after that effect has run. A choice already
+                                # made for this target (the resumed continuation) is used as is.
+                                from .targeting import is_chosen_secondary_target
+                                prior = ability.activation.target_map.get(target_index)
+                                prior_values = (prior if isinstance(prior, (list, tuple))
+                                                else (prior,))
+                                allowed = {int(uid) for uid in target_values}
+                                chosen = tuple(int(uid) for uid in prior_values
+                                               if uid is not None and int(uid) in allowed)
+                                needs_choice = bool(target_values) and (
+                                    len(target_values) > 1 or target_spec.optional or
+                                    int(target_spec.minimum or 0) == 0)
+                                if chosen:
+                                    target_values = chosen
+                                elif needs_choice and is_chosen_secondary_target(target_spec):
+                                    prompt = getattr(handler, "_prompt_revealed_choice", None)
+                                    if callable(prompt):
+                                        continuation = {
+                                            "ability_instance_id": int(ability.instance_id),
+                                            "ability_guid": ability.ability_template_id,
+                                            "source_uid": int(ability.source_uid or 0),
+                                            "owner_id": int(ability.responsible_player_id or 0),
+                                            "target_map": {
+                                                str(key): value for key, value in
+                                                ability.activation.target_map.items()},
+                                            "variables": dict(ability.activation.variables or {}),
+                                            "resume_effect_order": int(position),
+                                            "target_index": int(target_index),
+                                        }
+                                        prompt(
+                                            game, session, player_uid, ai_uid,
+                                            battle_state, ability.ability_template_id,
+                                            int(ability.source_uid or 0),
+                                            int(ability.responsible_player_id),
+                                            list(target_values),
+                                            list(battle_state.get("revealed_cards") or []),
+                                            optional=bool(target_spec.optional or
+                                                          int(target_spec.minimum or 0) == 0),
+                                            continuation=continuation)
+                                        battle_state["resolution_paused"] = True
+                                        native_waiting = True
+                                        target_values = ()
                         elif kind == "MatchSecondaryTargetTemplate":
                             target_values = _match_secondary_values(
                                 db, session.session_id, ability, effect,
@@ -1196,14 +1241,25 @@ class NativeEffectBackend:
                             from .targeting import target_uses_both_players
                             both_players = target_uses_both_players(
                                 db, target_spec.guid)
-                            candidates = tuple(legal_targets(
+                            # A "top N of your deck" look takes the first N deck cards; legal_targets does not
+                            # apply that limit and would offer every card in the listed zones.
+                            from .targeting import authored_target_candidates
+                            authored = authored_target_candidates(
                                 db, session.session_id,
                                 int(ability.responsible_player_id or 0),
-                                target_spec.guid, ability.source_uid,
-                                both_players=both_players,
-                                champions=(getattr(handler, "_champion_targets",
-                                                   lambda: [])() or []),
-                                battle_state=battle_state))
+                                [spec.guid for spec in ability.metadata.targets],
+                                target_index)
+                            if authored is not None:
+                                candidates = tuple(authored)
+                            else:
+                                candidates = tuple(legal_targets(
+                                    db, session.session_id,
+                                    int(ability.responsible_player_id or 0),
+                                    target_spec.guid, ability.source_uid,
+                                    both_players=both_players,
+                                    champions=(getattr(handler, "_champion_targets",
+                                                       lambda: [])() or []),
+                                    battle_state=battle_state))
                             if not candidates:
                                 # C# GetAutoTargets yields an empty set when no
                                 # card matches the filter.  Falling through to
@@ -2182,8 +2238,10 @@ def resolve_port_trigger(handler, game, session, db, player_uid, ai_uid,
     target_map = (dict(activation_data.get("target_map") or {})
                   if isinstance(activation_data, dict) else {})
     if not target_map and selected_target is not None:
+        from .targeting import is_chosen_secondary_target
         for index, spec in enumerate(graph.targets):
-            if spec.requires_input:
+            # A "one of them" target is chosen at resolution; the item's own target is not its answer.
+            if spec.requires_input and not is_chosen_secondary_target(spec):
                 target_map[index] = int(selected_target)
                 break
     answers = _answers_from_target_map(target_map)

@@ -625,8 +625,10 @@ def resolve_ability_item(host, session, db, game, state, item, player_uid,
         if isinstance(activation_data, dict) else {}
     target_uid = item.get("target_uid")
     if graph is not None and not target_map and target_uid is not None:
+        from .targeting import is_chosen_secondary_target
         for index, target_spec in enumerate(graph.targets):
-            if getattr(target_spec, "requires_input", False):
+            # A "one of them" target is chosen at resolution; the item's own target is not its answer.
+            if getattr(target_spec, "requires_input", False) and not is_chosen_secondary_target(target_spec):
                 target_map[index] = int(target_uid)
                 break
     state["resolving_source_uid"] = source_uid

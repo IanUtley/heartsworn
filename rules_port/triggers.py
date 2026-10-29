@@ -566,8 +566,13 @@ class NativeTriggerBackend:
                 # marked explicit; otherwise the source card became its own target.
                 ask_player_input = (source_card_owner != 0 and
                                     event.target_card_id is None)
+                # A "one of them" target is chosen at resolution, after the
+                # effect that produces its cards (Dream Eagle's look), so it is
+                # not a trigger input.
+                from .targeting import is_chosen_secondary_target
                 explicit = [index for index, spec in enumerate(graph.targets)
                             if spec.requires_input and
+                            not is_chosen_secondary_target(spec) and
                             (spec.explicit or ask_player_input)]
                 # Only a player-input target consumes the trigger target.  An
                 # ability whose targets are all auto (Corinth's end-of-turn
@@ -575,7 +580,8 @@ class NativeTriggerBackend:
                 # as target 0, or the effect resolves against the champion.
                 requires_input_index = next(
                     (index for index, spec in enumerate(graph.targets)
-                     if spec.requires_input), None)
+                     if spec.requires_input and
+                     not is_chosen_secondary_target(spec)), None)
                 # The source card is only a default target when the input target
                 # template can select it.  Moldmass's Deploy (void a troop from
                 # your crypt) fired on its own entry with an empty crypt and
@@ -593,13 +599,17 @@ class NativeTriggerBackend:
                     if int(source_uid) not in {int(uid) for uid in legal}:
                         target = None
                 if explicit:
-                    from .targeting import legal_targets
+                    from .targeting import authored_target_candidates, legal_targets
                     template = graph.targets[explicit[0]].guid
-                    candidates = legal_targets(
-                        db, session.session_id, source_card_owner, template,
-                        source_uid, both_players=True,
-                        champions=(getattr(handler, "_champion_targets", lambda: [])() or []),
-                        battle_state=battle_state)
+                    candidates = authored_target_candidates(
+                        db, session.session_id, source_card_owner,
+                        [target.guid for target in graph.targets], explicit[0])
+                    if candidates is None:
+                        candidates = legal_targets(
+                            db, session.session_id, source_card_owner, template,
+                            source_uid, both_players=True,
+                            champions=(getattr(handler, "_champion_targets", lambda: [])() or []),
+                            battle_state=battle_state)
                     if source_card_owner != 0:
                         prompt = (getattr(handler, "_prompt_optional_trigger", None)
                                   if graph.optional else

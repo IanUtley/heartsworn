@@ -671,6 +671,12 @@ def _resolved_targets(root: MechanicsObject, index: int, scope: Scope) -> list[i
         return [scope.source_uid]
     if kind == "AbilityTargetTemplate" and template.m_IsAutoTarget:
         return _auto_card_targets(template, index, scope)
+    if kind == "SourceRevealedTargetTemplate" and not template.m_IsAutoTarget and index in scope.chosen:
+        # The card the player picked from the reveal (a free play of the revealed card), not every candidate.
+        chosen = scope.chosen[index]
+        if chosen is None:
+            return []
+        return [int(uid) for uid in chosen] if isinstance(chosen, list) else [int(chosen)]
     if kind == "SourceRevealedTargetTemplate":
         return _revealed_candidates(template, index, scope)
     if kind in ("AbilityTargetTemplate", "SourceRevealedTargetTemplate") and not template.m_IsAutoTarget \

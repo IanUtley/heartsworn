@@ -1831,12 +1831,14 @@ class CardPlayMixin:
                         continue
                 if graph.costs.exhausts_card_on_use:
                     # Exhaust-as-cost (e.g. Prairie Scout): the card must be
-                    # able to pay the tap — not already tapped, and not
-                    # summoning sick (entered this turn without Speed).
+                    # able to pay the tap — not already tapped. Only a troop is
+                    # summoning sick (entered this turn without Speed); an artifact
+                    # can use its [ACT] ability as soon as it is played.
                     cstate = card_state or 0
                     if cstate & _hc.game_engine.ECardStates.Tapped:
                         continue
-                    if (not (cstate & _hc.game_engine.ECardStates.StartedATurnOnYourSide)
+                    if ("Troop" in str(_card_type or "")
+                            and not (cstate & _hc.game_engine.ECardStates.StartedATurnOnYourSide)
                             and not ((attrs or 0) & _hc.game_engine.ECardAttributes.Speed)):
                         continue
                 casting = 64 if graph.casting_behavior == "QuickAction" else 8

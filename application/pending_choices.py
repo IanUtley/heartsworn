@@ -153,8 +153,14 @@ class PendingChoicesMixin:
             index = next(
                 (i for i, known in enumerate(all_target_ids)
                  if str(known).lower() == str(tid).lower()), position)
+            from rules_port.targeting import authored_target_candidates
+            authored = authored_target_candidates(
+                _hc._db, session.session_id, prompt_owner_id,
+                all_target_ids, index)
             if position < len(candidate_sets) and candidate_sets[position]:
                 uids = [int(u) for u in candidate_sets[position]]
+            elif authored is not None:
+                uids = authored
             else:
                 try:
                     from rules_port.targeting import legal_targets
@@ -1022,7 +1028,8 @@ class PendingChoicesMixin:
         return True
 
     def _push_private_revealed_cards(self, session, bstate, owner_id, rows,
-                                     pl_t, ai_t, to_opponent=False):
+                                     pl_t, ai_t, to_opponent=False,
+                                     viewer_id=None):
         """Send a recipient-only CardsRevealed packet for a PvP reveal.
 
         ``CardsRevealedSessionEventArgs`` is recipient-scoped by delivery, not
@@ -1032,6 +1039,8 @@ class PendingChoicesMixin:
         helper only handles the protocol delivery and card definitions.
         ``to_opponent`` sends the packet to the other PvP player (C#
         ``m_PlayerRevealTargets=Opponents``) instead of the owner.
+        ``viewer_id`` names the recipient directly, for a self-only look by the
+        controller of a card whose hand belongs to the other player.
         """
         import hconnect_server as _hc
         if not (bstate or {}).get("pvp"):
@@ -1043,10 +1052,13 @@ class PendingChoicesMixin:
         if chooser_pid not in pids:
             return False
         opponent_pid = next((p for p in pids if int(p) != chooser_pid), 0)
-        viewer_pid = opponent_pid if to_opponent else chooser_pid
-        if not viewer_pid:
+        if viewer_id is not None:
+            viewer_pid = int(viewer_id)
+        else:
+            viewer_pid = opponent_pid if to_opponent else chooser_pid
+        if not viewer_pid or viewer_pid not in pids:
             return False
-        other_pid = chooser_pid if to_opponent else opponent_pid
+        other_pid = opponent_pid if viewer_pid == chooser_pid else chooser_pid
         # ``chooser`` stays the card owner; ``viewer`` is the recipient.
         chooser = _hc.game_engine.UID.make(244, chooser_pid)
         viewer = _hc.game_engine.UID.make(244, viewer_pid)
@@ -1180,13 +1192,16 @@ class PendingChoicesMixin:
             inst.opt_id = _hc.game_engine.ResourceId.from_str(ability_guid)
             target_ids_json = _hc.db_ability_target_template_ids(
                 ability_guid, conn=_hc._db)
+            # The picked slot is the continuation's target (a "one of them" choice is not slot 0,
+            # which may be the look's automatic TopNOfDeck target).
+            target_index = int((continuation or {}).get("target_index") or 0)
             try:
-                target_id = json.loads(target_ids_json or "[]")[0]
+                target_id = json.loads(target_ids_json or "[]")[target_index]
             except (TypeError, ValueError, IndexError, json.JSONDecodeError):
                 target_id = "00000000-0000-0000-0000-000000000000"
             inst.target_ids.append(_hc.game_engine.ResourceId.from_str(target_id))
             tgt = g._make_event(_hc.game_engine.TargetInstanceSessionEventArgs)
-            tgt.target_index = 0
+            tgt.target_index = target_index
             tgt.target_id = _hc.game_engine.ResourceId.from_str(target_id)
             tgt.targets = [
                 _hc.game_engine.SessionCardId(_hc.game_engine.UID(int(u)))

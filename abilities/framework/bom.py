@@ -1713,6 +1713,14 @@ def _reveal_cards_legacy(game, session, db, handler, pl_t, ai_t, bstate,
                     scid, card_owner, reveal_collection, ct,
                     state=int(row[4] or 0), template_id=row[2], cost=cost,
                     attack=atk, defense=defense, nulling=False)
+                if not (bstate or {}).get("pvp"):
+                    # Deck cards are face down to their controller unless a
+                    # viewer-scoped reveal says otherwise. In PvE the human is
+                    # the only viewer, so tag the full update for them (as
+                    # reveal_effects does); otherwise the coverflow and picker
+                    # show card backs instead of the revealed cards.
+                    game.events[-1]._hand_reveal_viewer_uid = pl_t
+                    game.events[-1]._temporary_reveal = True
             ev = game_engine.CardsRevealedSessionEventArgs()
             ev.player_id = owner_uid(owner, pl_t, ai_t, bstate)
             ev.session_card_ids = [game_engine.SessionCardId(game_engine.UID(u))

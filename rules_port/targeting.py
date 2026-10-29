@@ -691,6 +691,47 @@ def evaluate_card_filter(card, spec, source_uid=None, *, ability_state=None,
         return False
 
 
+def is_chosen_secondary_target(spec):
+    """A "one of them" target: it picks among the cards an earlier target produced.
+
+    The choice is made when the ability resolves, after that target has run. It is not an input of the trigger, so
+    the trigger must not prompt for it when it is put on the chain.
+    """
+    return (str(getattr(spec, "target_kind", "") or "") == "SecondaryTargetTemplate"
+            and bool(getattr(spec, "requires_input", False)))
+
+
+def authored_target_candidates(db, session_id, owner_id, template_ids, index):
+    """The cards an authored target of an ability can name, or None when it has no such rule.
+
+    A SecondaryTargetTemplate ("one of them") picks from the previous target instance, so it follows that target
+    back. A TopNOfDeck target is the first N cards of the owner's deck in deck order. ``legal_targets`` does not apply
+    that limit, so a picker built from it offers the whole deck.
+    """
+    if index < 0 or index >= len(template_ids):
+        return None
+    row = db.execute(
+        "SELECT target_kind, filter_json FROM target_templates WHERE template_id=?",
+        (str(template_ids[index]).lower(),)).fetchone()
+    if row is None:
+        return None
+    if row[0] == "SecondaryTargetTemplate":
+        return authored_target_candidates(db, session_id, owner_id, template_ids, index - 1)
+    try:
+        filter_node = json.loads(row[1] or "{}")
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return None
+    top_n = _find_filter(filter_node, "TopNOfDeck")
+    if top_n is None:
+        return None
+    amount = max(0, int(top_n.get("m_Amount", 0) or 0))
+    deck_rows = db.execute(
+        "SELECT card_uid FROM game_cards WHERE session_id=? AND user_id=? "
+        "AND location='deck' ORDER BY position LIMIT ?",
+        (session_id, int(owner_id or 0), amount)).fetchall()
+    return [int(card_row[0]) for card_row in deck_rows]
+
+
 def legal_targets(db, session_id, controller_uid, template_id, source_uid,
                   both_players=False, champions=None, battle_state=None):
     """Return the SessionCardId-backed uids of one authored target template.
