@@ -396,6 +396,7 @@ SHARED_EFFECTS: dict[str, str] = {
     "PLUS_2_ATTACK": "8e0ffd26-c71b-0fb8-2e94-00c8751bc97d",
     "PLUS_2_DEFENSE": "5a7a65d9-527d-eaa8-bcac-8f86763c1ceb",
     "PLUS_3_ATTACK": "b30ae9c3-4cbc-e85c-ddc5-f4e89b6834af",
+    "PLUS_3_DEFENSE": "a1e6b617-5607-56f9-e823-a3185a4c8f7a",
     "MINUS_1_ATTACK": "ffb1bbc2-c8b9-c679-c12d-223674f19b21",
     "COST_MINUS_1": "4d5acf22-b1ea-adc9-9f92-6c7367185019",
     "VOID_ALL_ACTIONS": "c82ca6c8-7979-398e-53be-a39dd318f000",
