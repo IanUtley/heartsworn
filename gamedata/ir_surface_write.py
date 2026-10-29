@@ -59,7 +59,7 @@ def _value(value: Any) -> str:
     """A field value as text: an empty reference as ``NoRef()``, anything else as the IR text writes it."""
     if isinstance(value, dict) and set(value) == {"m_Guid"} and str(value["m_Guid"]).lower() == ZERO_GUID:
         return "NoRef()"
-    return P._literal(value)
+    return shorten(P._literal(value))
 
 
 # Words that carry no meaning in a fragment's name.
@@ -170,20 +170,224 @@ def _fragment_value(record: dict[str, Any]) -> str:
             shown = [repr(text), *[f"{key}={value!r}" for key, value in keywords.items()]]
             return f"{helper}({', '.join(shown)})"
     cls = getattr(T, _kind(record), None)
-    return _modifier_calls(P.dumps(cls.from_record(record)))
+    return shorten(P.dumps(cls.from_record(record)))
 
 
-# A change of a variable's value, written as its helper: ``def_mod("P3")`` for DefenseModifier(...).
-_MODIFIER_CALLS = {"DefenseModifier": "def_mod", "AttackModifier": "atk_mod", "CardCostModifier": "cost_mod"}
+def _split_top(text: str) -> list[str]:
+    """The comma-separated parts of a call's arguments or a list's items, leaving brackets and quotes whole."""
+    parts, depth, quote, start = [], 0, None, 0
+    for index, char in enumerate(text):
+        if quote:
+            if char == "\\":
+                continue
+            if char == quote:
+                quote = None
+        elif char in "'\"":
+            quote = char
+        elif char in "([{":
+            depth += 1
+        elif char in ")]}":
+            depth -= 1
+        elif char == "," and depth == 0:
+            parts.append(text[start:index].strip())
+            start = index + 1
+    tail = text[start:].strip()
+    return [part for part in [*parts, tail] if part]
 
 
-def _modifier_calls(text: str) -> str:
-    """Each change of a variable's value written as its helper call. The text rebuilds the same record, so a
-    round trip still checks it."""
-    for cls, helper in _MODIFIER_CALLS.items():
-        text = re.sub(rf"{cls}\(input_value=EffectInputVariable\(input_variable_name=('[^']*')\)\)",
-                      rf"{helper}(\1)", text)
-    return text
+def _close_of(text: str, open_index: int) -> int:
+    """The index of the bracket that closes the one at ``open_index``, skipping quoted text."""
+    depth, quote, index = 0, None, open_index
+    while index < len(text):
+        char = text[index]
+        if quote:
+            if char == "\\":
+                index += 1
+            elif char == quote:
+                quote = None
+        elif char in "'\"":
+            quote = char
+        elif char in "([{":
+            depth += 1
+        elif char in ")]}":
+            depth -= 1
+            if depth == 0:
+                return index
+        index += 1
+    raise ValueError("unbalanced brackets in " + text)
+
+
+def _keywords(args: list[str]) -> dict[str, str] | None:
+    """The arguments as ``{name: value text}``, or None when one is not a keyword."""
+    found = {}
+    for arg in args:
+        match = re.fullmatch(r"([a-z_]\w*)=(.*)", arg, re.DOTALL)
+        if match is None:
+            return None
+        found[match.group(1)] = match.group(2)
+    return found
+
+
+def _only(args: list[str], keys: set[str]) -> dict[str, str] | None:
+    """The keyword arguments when they are exactly ``keys`` (the rest of a call's fields are its defaults)."""
+    found = _keywords(args)
+    return found if found is not None and set(found) == keys else None
+
+
+def _kind_of(args: list[str], key: str, helper: str) -> str | None:
+    """``helper(value)`` for a call whose only field is ``key``."""
+    found = _only(args, {key})
+    return f"{helper}({found[key]})" if found else None
+
+
+def _class_of(text: str) -> type | None:
+    """The generated class a constructor call in ``text`` names, when it starts with one."""
+    match = re.match(r"([A-Z]\w*)\(", text)
+    cls = getattr(T, match.group(1), None) if match else None
+    return cls if isinstance(cls, type) else None
+
+
+def _is(text: str, base: type) -> bool:
+    cls = _class_of(text)
+    return cls is not None and issubclass(cls, base)
+
+
+def _not_of(args: list[str], key: str, base: type) -> str | None:
+    """``not_(x)`` when ``not_`` would pick the class the call names: x is a ``base`` condition, and not a trigger
+    or ability condition when ``base`` is the card filter's."""
+    found = _only(args, {key})
+    if not found or not _is(found[key], base):
+        return None
+    return f"not_({found[key]})"
+
+
+def _or_of(args: list[str], key: str, base: type) -> str | None:
+    """``or_(a, b)`` when ``or_`` would pick the class the call names: every item is a ``base`` condition."""
+    found = _only(args, {key})
+    if not found or not (found[key].startswith("[") and found[key].endswith("]")):
+        return None
+    items = _split_top(found[key][1:-1])
+    if not items or not all(_is(item, base) for item in items):
+        return None
+    return f"or_({', '.join(items)})"
+
+
+def _card_not_of(args: list[str]) -> str | None:
+    """``not_(x)`` for a card filter: x is neither a trigger nor an ability condition."""
+    found = _only(args, {"target_filter"})
+    if not found or _is(found["target_filter"], T.TriggerCondition) or _is(found["target_filter"], T.AbilityCondition):
+        return None
+    return f"not_({found['target_filter']})"
+
+
+def _card_or_of(args: list[str]) -> str | None:
+    """``or_(a, b)`` for card filters: the items are neither all trigger conditions nor all ability conditions."""
+    found = _only(args, {"target_filters"})
+    if not found or not (found["target_filters"].startswith("[") and found["target_filters"].endswith("]")):
+        return None
+    items = _split_top(found["target_filters"][1:-1])
+    if not items or all(_is(item, T.TriggerCondition) for item in items) \
+            or all(_is(item, T.AbilityCondition) for item in items):
+        return None
+    return f"or_({', '.join(items)})"
+
+
+def _variable_of(value: str) -> str | None:
+    """The name of a variable a modifier reads: ``'P3'`` for ``EffectInputVariable(input_variable_name='P3')``."""
+    match = re.fullmatch(r"EffectInputVariable\(input_variable_name=('[^']*')\)", value)
+    return match.group(1) if match else None
+
+
+def _modifier_of(args: list[str], helper: str) -> str | None:
+    found = _only(args, {"input_value"})
+    name = _variable_of(found["input_value"]) if found else None
+    return f"{helper}({name})" if name else None
+
+
+def _cost_of(args: list[str]) -> str | None:
+    found = _keywords(args)
+    if not found or "casting_cost" not in found or not set(found) <= {"casting_cost", "comparison_op"}:
+        return None
+    return _with_comparison(f"cost_is({found['casting_cost']}", found.get("comparison_op"))
+
+
+def _attribute_of(args: list[str]) -> str | None:
+    found = _keywords(args)
+    if not found or not {"attribute", "value"} <= set(found) or not set(found) <= {"attribute", "value", "comparison_op"}:
+        return None
+    return _with_comparison(f"attribute_is({found['attribute']}, {found['value']}", found.get("comparison_op"))
+
+
+def _threshold_of(args: list[str]) -> str | None:
+    found = _keywords(args)
+    if not found or not {"color_flags", "required_quantity"} <= set(found) \
+            or not set(found) <= {"color_flags", "required_quantity", "comparison_op"}:
+        return None
+    return _with_comparison(f"threshold({found['color_flags']}, {found['required_quantity']}",
+                            found.get("comparison_op"))
+
+
+def _with_comparison(opening: str, comparison: str | None) -> str:
+    """The helper call with its comparison, left out when it is the helpers' default."""
+    if comparison is None or comparison == "'GreaterThanOrEqual'":
+        return opening + ")"
+    return f"{opening}, comparison={comparison})"
+
+
+def _troop_of(args: list[str]) -> str | None:
+    found = _only(args, {"target_filters"})
+    if not found or not found["target_filters"].startswith("[IsTroop(), attribute_is("):
+        return None
+    items = _split_top(found["target_filters"][1:-1])
+    match = re.fullmatch(r"attribute_is\(('[^']*'), 1\)", items[1]) if len(items) == 2 else None
+    return f"troop_with({match.group(1)})" if match else None
+
+
+# Constructor names the short helpers replace, each with the function that writes its call (or None when the
+# call would not rebuild the same record). A round trip checks each one.
+_SHORT_FORMS: dict[str, Any] = {
+    "NotTriggerCondition": lambda args: _not_of(args, "condition", T.TriggerCondition),
+    "NotAbilityCondition": lambda args: _not_of(args, "condition", T.AbilityCondition),
+    "NotCardFilter": _card_not_of,
+    "OrTriggerCondition": lambda args: _or_of(args, "conditions", T.TriggerCondition),
+    "OrAbilityCondition": lambda args: _or_of(args, "conditions", T.AbilityCondition),
+    "OrCardFilter": _card_or_of,
+    "DefenseModifier": lambda args: _modifier_of(args, "def_mod"),
+    "AttackModifier": lambda args: _modifier_of(args, "atk_mod"),
+    "CardCostModifier": lambda args: _modifier_of(args, "cost_mod"),
+    "HasSourceCastingCostFilter": _cost_of,
+    "IntAttrFilter": _attribute_of,
+    "AbilityControllerHasThresholdAbilityCondition": _threshold_of,
+    "AndCardFilter": _troop_of,
+    "TriggerCardMatchesFilter": lambda args: _kind_of(args, "card_filter", "card_matches"),
+}
+_CALL_START = re.compile(r"(?<![\w.])([A-Z][A-Za-z0-9_]*)\(")
+
+
+def shorten(text: str) -> str:
+    """``text`` with each constructor call that has a short helper written as that helper. Nested calls are
+    shortened first, so the outer call sees their short forms."""
+    out, position = [], 0
+    while True:
+        match = _CALL_START.search(text, position)
+        if match is None:
+            break
+        name = match.group(1)
+        if name not in _SHORT_FORMS:
+            out.append(text[position:match.end()])
+            position = match.end()
+            continue
+        close = _close_of(text, match.end() - 1)
+        args = _split_top(shorten(text[match.end():close]))
+        short = _SHORT_FORMS[name](args)
+        out.append(text[position:match.start()])
+        if short is None:
+            out.append(f"{name}({', '.join(args)})")
+        else:
+            out.append(short)
+        position = close + 1
+    out.append(text[position:])
+    return "".join(out)
 
 
 def effect_record(guid: str) -> dict[str, Any]:

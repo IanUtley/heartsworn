@@ -45,7 +45,7 @@ class SurfaceWriteTest(unittest.TestCase):
         self.assertIsInstance(surface.atk_mod("P1"), T.AttackModifier)
         self.assertIsInstance(surface.cost_mod("P1"), T.CardCostModifier)
         text = "a=AttackModifier(input_value=EffectInputVariable(input_variable_name='P1'))"
-        self.assertEqual(W._modifier_calls(text), "a=atk_mod('P1')")
+        self.assertEqual(W.shorten(text), "a=atk_mod('P1')")
 
     def test_not_and_or_pick_the_class_their_parts_need(self):
         trigger = surface.card_matches(surface.troop_with("Soulcursed"))
