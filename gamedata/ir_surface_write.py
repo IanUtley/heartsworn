@@ -231,6 +231,21 @@ def _field_value(key: str, value: Any, names: dict[str, str]) -> str:
     return _value(value)
 
 
+def _variables_text(variables: list[Any], clauses: list[dict[str, Any]]) -> str | None:
+    """Constants written as ``{name: value}`` when that rebuilds exactly the stored list, else None."""
+    if not all(type(item) is T.AbilityConstant for item in variables):
+        return None
+    values: dict[str, Any] = {}
+    for item in variables:
+        record = item.to_record()
+        if values.setdefault(record["m_Name"], record["m_DefaultValue"]) != record["m_DefaultValue"]:
+            return None
+    rebuilt = surface.expand_variables(values, clauses)
+    if [_plain(item.to_record()) for item in rebuilt] != [_plain(item.to_record()) for item in variables]:
+        return None
+    return "{" + ", ".join(f"{key!r}: {value!r}" for key, value in values.items()) + "}"
+
+
 def ability_text(guid: str, name: str = "ABILITY") -> str:
     """The surface text for one stored ability, bound to ``name``. ``ir_python.loads`` reads it back."""
     record = stored_ability(guid)
@@ -256,6 +271,9 @@ def ability_text(guid: str, name: str = "ABILITY") -> str:
         if _record_value(value) == _record_value(_default_of(T.AbilityTemplate, key)):
             continue
         if key in EMPTY_REF_FIELDS and _value(value) == "NoRef()":
+            continue
+        if key == "m_Variables" and (shorthand := _variables_text(value, record.get("m_AbilityEffectList") or [])):
+            arguments.append(f"{argument_of[key]}={shorthand}")
             continue
         arguments.append(f"{argument_of[key]}={_field_value(key, value, names)}")
     if deprecated:

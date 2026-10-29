@@ -33,6 +33,12 @@ class SurfaceWriteTest(unittest.TestCase):
         self.assertEqual(surface.attribute_is("Soulcursed", 2).to_record()["m_Attribute"], "Soulcursed")
         self.assertEqual(surface.attribute_is("Soulcursed", 1).to_record()["m_Value"], 1)
 
+    def test_a_constant_is_written_once_and_read_back_per_effect_that_reads_it(self):
+        # Abominate's two effects both read P3, so the stored list holds P3 twice; the text says it once.
+        text = W.ability_text("1b87a102-7614-9f88-e6e0-24a0dd5d934e")
+        self.assertIn("variables={'P3': 3}", text)
+        self.assertEqual(W.round_trip_problems("1b87a102-7614-9f88-e6e0-24a0dd5d934e"), [])
+
     def test_shared_effect_names_read_back_to_their_records(self):
         ir_registry.clear()
         names = P.loads('ABILITY = ability("Draw a card.", ability_effect_list=[Clause(effect_template_id=DRAW_A_CARD)])')

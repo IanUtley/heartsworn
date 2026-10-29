@@ -28,9 +28,11 @@ and lets only these names through.
 
 from __future__ import annotations
 
+import functools
 import operator
 import re
 import uuid
+from collections import Counter as Tally
 from typing import Any
 
 from gamedata import DEFAULT_RECORD_STORE as STORE
@@ -348,12 +350,53 @@ def ability(text: str, *, on: dict[str, str] | None = None, when: Typed | None =
 BOILERPLATE: dict[str, Any] = {"m_AICustomAbilityEvaluator": []}
 
 
+@functools.lru_cache(maxsize=None)
+def _stored_effect(guid: str) -> dict[str, Any]:
+    """The stored effect template with this GUID, as plain fields (empty when it is not stored)."""
+    for record in STORE.load("AbilityEffectTemplate"):
+        if record.guid.lower() == guid.lower():
+            return record.to_dict()
+    return {}
+
+
+def _effect_of(clause: dict[str, Any]) -> dict[str, Any]:
+    """The effect a clause runs, as plain fields: a built effect, a stored one, or a name for one."""
+    effect = clause.get("m_EffectTemplateId")
+    if isinstance(effect, Typed):
+        return effect.to_record()
+    if isinstance(effect, Target):
+        return _stored_effect(effect.guid)
+    if isinstance(effect, dict) and set(effect) == {"m_Guid"}:
+        return _stored_effect(str(effect["m_Guid"]))
+    return effect if isinstance(effect, dict) else {}
+
+
+def _inputs_read(value: Any) -> list[str]:
+    """The variable names an effect's fields read, one for each place it reads one."""
+    if isinstance(value, dict):
+        found = [value["m_InputVariableName"]] if isinstance(value.get("m_InputVariableName"), str) else []
+        return found + [name for item in value.values() for name in _inputs_read(item)]
+    if isinstance(value, list):
+        return [name for item in value for name in _inputs_read(item)]
+    return []
+
+
+def expand_variables(values: dict[str, int], clauses: list[dict[str, Any]]) -> list[Typed]:
+    """Constants for ``{name: value}``, one for each effect that reads the name (at least one). Records list a
+    constant once per effect that reads it, so ``variables={"P3": 3}`` writes the same entries."""
+    readers = Tally(name for clause in clauses for name in _inputs_read(_effect_of(clause)))
+    return [T.AbilityConstant(name=name, default_value=int(value))
+            for name, value in values.items() for _ in range(max(1, readers[name]))]
+
+
 def _explicit_ability(text: str, id_: str | None, fields: dict[str, Any]) -> Typed:
     """An ability from its own fields. Nothing is filled in but the name, the ID and the boilerplate, so every
     other stored value is the one written; fields the constructor does not name are kept as ``_deprecated``."""
     deprecated = {**BOILERPLATE, **fields.pop("_deprecated", {})}
     for field in EMPTY_REF_FIELDS:
         fields.setdefault(ir_name(field), _ref(ZERO_GUID))
+    if isinstance(fields.get("variables"), dict):
+        fields["variables"] = expand_variables(fields["variables"], fields.get("ability_effect_list") or [])
     if "ability_target_template_ids" in fields:
         # A target a name stands for (``this``) is its GUID in the Records.
         fields["ability_target_template_ids"] = [
