@@ -1071,6 +1071,34 @@ def test_rowdy_look_counts_the_source_troops_cost(db):
     assert look == [910, 911, 912], look
 
 
+def test_peek_looks_at_as_many_cards_as_the_sapphire_threshold(db):
+    """Peek looks at deck cards equal to the Sapphire the player has (its threshold).
+
+    The look's authored amount is 0 and it adds the owner's Sapphire threshold, so a
+    Sapphire threshold of 6 looks at six cards.
+    """
+    from rules_port.targeting import authored_target_candidates
+
+    PEEK = "da519959-c662-4b92-b0d3-f66d1af7f946"
+    PEEK_AG = "eb7e48cd-1c85-813f-6635-d43f50cf7809"
+    SHARD = "cd41bd00-7585-4762-a721-6163bdaee3c3"
+    _copy_card(db, PEEK)
+    _copy_card(db, SHARD)
+    add_card(db, 900, 5, PEEK, loc="CastSpells")
+    for index in range(8):
+        add_card(db, 910 + index, 5, SHARD, loc="deck")
+        db.execute("UPDATE game_cards SET position=? WHERE card_uid=?",
+                   (index, 910 + index))
+    db.commit()
+    template_ids = ["747d29eb-5217-d682-63fc-688d1676d2ee",
+                    "eb7e48cd-1c85-813f-6635-d43f50cf7809"]
+
+    look = authored_target_candidates(
+        db, 1, 5, template_ids, 0, source_uid=900,
+        battle_state={"player_threshold": {16: 6}})
+    assert look == [910, 911, 912, 913, 914, 915], look
+
+
 def test_ai_revealed_troop_in_hand_is_shown_to_the_human(db):
     """A troop the AI put into its hand from a public reveal stays visible to the human.
 

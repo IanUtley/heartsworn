@@ -1794,6 +1794,12 @@ def _dispatch(handler, action, args, session, pl_t, ai_t, room, username):
             return f"Thresholds: {vals} for {target}"
 
         uid = pl_t if target == "me" else ai_t
+        # The client has no Colorless threshold counter, so a Colorless change crashes its threshold animation
+        # (BattleAnimationSetChampionThreshold). Colorless keeps its stored value; the other colours still change.
+        import battle_engine as _be_colorless
+        stored = dict(_be_colorless.load_state(session).get(
+            "player_threshold" if target == "me" else "ai_threshold") or {})
+        vals[0] = int(stored.get(1, stored.get("1", 0)) or 0)
         game = game_engine.Game(session.session_id, pl_t, ai_t)
         thresholds = {
             game_engine.ECardShards.Colorless: vals[0],

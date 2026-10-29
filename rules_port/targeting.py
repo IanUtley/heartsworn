@@ -734,6 +734,16 @@ def authored_target_candidates(db, session_id, owner_id, template_ids, index, so
         from .static_rules import effective_cost
         amount += cost_multiple * int(effective_cost(
             db, session_id, battle_state, int(source_uid)) or 0)
+    # "m_Add<Shard>" flags add the owner's threshold of that shard ("[SAPPHIRE] you have").
+    import game_engine
+    thresholds = (battle_state or {}).get(
+        "ai_threshold" if int(owner_id or 0) == 0 else "player_threshold") or {}
+    for flag, shard in (("m_AddColorless", "Colorless"), ("m_AddBlood", "Blood"),
+                        ("m_AddRuby", "Ruby"), ("m_AddSapphire", "Sapphire"),
+                        ("m_AddWild", "Wild"), ("m_AddDiamond", "Diamond")):
+        if top_n.get(flag):
+            amount += int(thresholds.get(
+                int(getattr(game_engine.ECardShards, shard)), 0) or 0)
     deck_rows = db.execute(
         "SELECT card_uid FROM game_cards WHERE session_id=? AND user_id=? "
         "AND location='deck' ORDER BY position LIMIT ?",

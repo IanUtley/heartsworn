@@ -28,6 +28,13 @@ def _int(value: Any, default: int = 0) -> int:
         return default
 
 
+def _is_chosen_secondary(spec: Any) -> bool:
+    """A "one of them" target: it picks among the cards an earlier target produced, so it is chosen when the
+    ability resolves, not when the card is cast. Same rule as rules_port.targeting.is_chosen_secondary_target."""
+    return (str(getattr(spec, "target_kind", "") or "") == "SecondaryTargetTemplate"
+            and bool(getattr(spec, "requires_input", False)))
+
+
 def _field(value: Any, name: str, default: Any = None) -> Any:
     if isinstance(value, RecordObject):
         return value.field(name, default)
@@ -358,6 +365,9 @@ class AbilityInstance:
         for index in self.referenced_target_indexes:
             spec = self.targets[index] if index < len(self.targets) else None
             if spec is None or not spec.requires_input:
+                continue
+            # A "one of them" target is chosen at resolution, after the look it picks from.
+            if _is_chosen_secondary(spec):
                 continue
             if index in self.activation.target_map:
                 continue
@@ -780,6 +790,8 @@ class PlayPlan:
                 if index >= len(ability.targets):
                     continue
                 target = ability.targets[index]
+                if _is_chosen_secondary(target):
+                    continue
                 if target.requires_input and index not in explicitly_bound:
                     slots.append((ability, index, target))
 
