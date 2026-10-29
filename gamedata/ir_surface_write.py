@@ -366,6 +366,7 @@ _SHORT_FORMS: dict[str, Any] = {
     "OrCardFilter": _card_or_of,
     "DefenseModifier": lambda args: _modifier_of(args, "def_mod"),
     "AttackModifier": lambda args: _modifier_of(args, "atk_mod"),
+    "HealHeroModifier": lambda args: _modifier_of(args, "heal"),
     "CardCostModifier": lambda args: _modifier_of(args, "cost_mod"),
     "HasSourceCastingCostFilter": _cost_of,
     "IntAttrFilter": _attribute_of,

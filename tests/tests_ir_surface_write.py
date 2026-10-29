@@ -66,6 +66,11 @@ class SurfaceWriteTest(unittest.TestCase):
         self.assertIsInstance(surface.or_(surface.troop_with("A"), surface.troop_with("B")), T.OrCardFilter)
         self.assertIsInstance(surface.not_(surface.troop_with("A")), T.NotCardFilter)
 
+    def test_heal_is_written_by_the_variable_it_heals(self):
+        self.assertIsInstance(surface.heal("Gain"), T.HealHeroModifier)
+        self.assertEqual(W.shorten("HealHeroModifier(input_value=EffectInputVariable(input_variable_name='Gain'))"),
+                         "heal('Gain')")
+
     def test_shared_effect_names_read_back_to_their_records(self):
         ir_registry.clear()
         names = P.loads('ABILITY = ability("Draw a card.", ability_effect_list=[Clause(effect_template_id=DRAW_A_CARD)])')

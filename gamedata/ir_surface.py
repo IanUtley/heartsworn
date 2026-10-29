@@ -491,6 +491,11 @@ def def_mod(variable: str) -> Typed:
     return T.DefenseModifier(input_value=T.EffectInputVariable(input_variable_name=variable))
 
 
+def heal(variable: str) -> Typed:
+    """Heal the controller's hero by a variable's value (``heal("2ForEachCounterRemovedThisWay")``)."""
+    return T.HealHeroModifier(input_value=T.EffectInputVariable(input_variable_name=variable))
+
+
 def atk_mod(variable: str) -> Typed:
     """An attack change of a variable's value (``atk_mod("P1")``: +P1 attack)."""
     return T.AttackModifier(input_value=T.EffectInputVariable(input_variable_name=variable))
@@ -547,6 +552,7 @@ FACTORIES: dict[str, Any] = {
     "threshold": threshold,
     "def_mod": def_mod,
     "atk_mod": atk_mod,
+    "heal": heal,
     "cost_mod": cost_mod,
     "attribute_mod": attribute_mod,
     "cost_is": cost_is,
