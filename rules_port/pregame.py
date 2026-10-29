@@ -35,7 +35,6 @@ def _effect_template_json(effect_guid):
         "AbilityEffectTemplate", str(effect_guid).lower()))
 
 
-
 _CONDITIONS = {}
 
 def register_condition(name):
@@ -272,51 +271,6 @@ def _target_template_flags_for_id(db, target_id):
     return _target_filter_flags(value)
 
 
-def _effect_target_flags(db, ability_guid, effect_guid, effect_order):
-    """Return the target filter attached to one direct BOM effect.
-
-    Talent ability rows historically did not store parent effect wiring in
-    SQLite.  Read the target index from the authoritative Records graph first
-    so existing databases still resolve a target index of zero correctly.
-    """
-    from pvp_db import (db_talent_target_template_ids,
-                        db_ability_effect_target_index)
-    payload = db_talent_target_template_ids(ability_guid, conn=db)
-    if not payload:
-        return set(), set()
-    try:
-        target_ids = json.loads(payload or "[]")
-    except (TypeError, ValueError):
-        target_ids = []
-    if not isinstance(target_ids, list):
-        return set(), set()
-
-    target_index = None
-    try:
-        from gamedata import DEFAULT_RECORD_STORE, ability_graph, runtime_effects
-        graph = ability_graph(DEFAULT_RECORD_STORE, str(ability_guid).lower())
-        effects = runtime_effects(graph) if graph else []
-        for index, effect in enumerate(effects):
-            if (index == int(effect_order) or
-                    str(effect.get("effect_guid") or "").lower()
-                    == str(effect_guid).lower()):
-                target_index = int(effect.get("target_index", -1))
-                break
-    except (AttributeError, TypeError, ValueError, RuntimeError):
-        target_index = None
-    if target_index is None:
-        db_row = db_ability_effect_target_index(
-            ability_guid, effect_guid, conn=db)
-        if db_row is not None:
-            try:
-                target_index = int(db_row)
-            except (TypeError, ValueError):
-                target_index = -1
-    if target_index is None or target_index < 0 or target_index >= len(target_ids):
-        return set(), set()
-    return _target_template_flags_for_id(db, target_ids[target_index])
-
-
 def _legacy_target_template_flags(db, ability_guid):
     """Return aggregate target flags for older callers."""
     from pvp_db import db_talent_target_template_ids
@@ -333,11 +287,6 @@ def _legacy_target_template_flags(db, ability_guid):
         card_types.update(types)
         zones.update(target_zones)
     return card_types, zones
-
-
-def _target_template_flags(db, ability_guid):
-    """Return aggregate card-type and exact-zone filters for a talent."""
-    return _legacy_target_template_flags(db, ability_guid)
 
 
 def _condition_contains_previous_dungeon_win(condition):

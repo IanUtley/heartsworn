@@ -204,18 +204,6 @@ def resolve_played_spell(game, session, db, handler, pl_t, ai_t, bstate,
     return "; ".join(str(l) for l in logs if l)
 
 
-def _parse_bom_param(param):
-    """Return the CardModifier 'property' from a BOM leaf's param JSON."""
-    import json
-    if not param:
-        return None
-    try:
-        d = json.loads(param)
-        return d.get("property") if isinstance(d, dict) else None
-    except (ValueError, TypeError):
-        return None
-
-
 def discover_abilities():
     """Auto-discover custom ability handlers in ``abilities/cards/``.
     Call once at startup.

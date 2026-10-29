@@ -69,8 +69,3 @@ def apply_card_stat_mod(game, session, db, handler, pl_t, ai_t, card_uid,
     return def_
 
 
-def clear_turn_stat_mods(db, session, card_uid=None):
-    """Reset this-turn stat modifiers (called at the owner's next turn start)."""
-    from pvp_db import db_clear_temporary_buffs
-    db_clear_temporary_buffs(session.session_id, card_uid, conn=db)
-    db.commit()

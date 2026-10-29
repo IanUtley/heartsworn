@@ -158,13 +158,6 @@ def extra_combats_obsolete(effect):
     return "extra combats: obsolete"
 
 
-def _resolved_target(bstate):
-    return ((bstate or {}).get("resolving_target_uid")
-            or (bstate or {}).get("player_mod_target")
-            or (bstate or {}).get("player_spell_target")
-            or (bstate or {}).get("resolving_source_uid"))
-
-
 def _push_card_in_zone(game, session, db, handler, pl_t, ai_t, bstate,
                        uid, location):
     from pvp_db import db_card_source_info

@@ -1853,29 +1853,6 @@ def effective_card_properties(db, session_id, battle_state, card_uid):
     return thresholds, subtype
 
 
-def _has_continuous_static(db, session_id, card_uid):
-    from pvp_db import db_card_ability_payload, db_ability_static_metadata
-    payload = db_card_ability_payload(session_id, int(card_uid), conn=db)
-    try:
-        abilities = json.loads(payload or "[]")
-    except (TypeError, ValueError, json.JSONDecodeError):
-        return False
-    for guid in abilities:
-        metadata = db_ability_static_metadata(str(guid).lower(), conn=db)
-        if not metadata:
-            continue
-        if not metadata[0] and not metadata[1]:
-            return True
-        # Only the authored all-zone CardCreatedEvent convention is
-        # continuous.  Triggered abilities with broad collection flags (for
-        # example Grave Nibbler) must not be treated as static modifiers.
-        raw = str(metadata[2] or "")
-        if ("CardCreatedEvent" in str(metadata[0] or "") and
-                all(zone in raw for zone in ("Deck", "Hand", "Warzone", "Discard"))):
-            return True
-    return False
-
-
 def _instance_buffs(row):
     attack = defense = rage = gladiator = 0
     attrs = int(row[3] or 0) | int(row[6] or 0) | int(row[9] or 0)

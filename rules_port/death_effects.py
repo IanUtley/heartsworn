@@ -6,28 +6,6 @@ import json
 import game_engine
 
 
-def _ability_list(db, session_id, card_uid, template_guid):
-    from pvp_db import (db_ability_activation_metadata,
-                        db_ability_trigger_metadata,
-                        db_card_ability_payload, db_template_ability_payload)
-    values = []
-    for raw in (db_template_ability_payload(template_guid, conn=db),
-                db_card_ability_payload(session_id, card_uid, conn=db)):
-        try:
-            values.extend(json.loads(raw or "[]"))
-        except (TypeError, ValueError, json.JSONDecodeError):
-            continue
-    result = []
-    for guid in dict.fromkeys(str(value).lower() for value in values):
-        trigger = db_ability_trigger_metadata(guid, conn=db)
-        activation = db_ability_activation_metadata(guid, conn=db)
-        if not trigger or "CardEnteredZone" not in str(trigger[2] or ""):
-            continue
-        condition = activation[5] if activation else ""
-        result.append((guid, condition or ""))
-    return result
-
-
 def kill_troop(context, target, *, cause="effect"):
     """Move a troop to discard and resolve its typed Deathcry abilities."""
     from pvp_db import db_card_death_info, db_kill_card_to_discard

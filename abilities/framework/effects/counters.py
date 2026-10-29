@@ -144,35 +144,6 @@ def add_card_counter(db, session_id, card_uid, name, amount=1):
     return counters[key]
 
 
-def increment_tunneling_counters(db, session, handler, game, pl_t, ai_t,
-                                 bstate, owner_id):
-    """Add one public Tunneling counter to each owned underground card."""
-    owner_id = int(owner_id or 0)
-    from pvp_db import db_underground_card_rows, db_card_mutation_field
-    rows = db_underground_card_rows(session.session_id, owner_id, conn=db)
-    changed = []
-    for card_uid, template_guid in rows:
-        payload = db_card_mutation_field(session.session_id, int(card_uid),
-                                         "permanent_buffs", conn=db)
-        try:
-            saved = json.loads(payload or "{}")
-        except (TypeError, ValueError, json.JSONDecodeError):
-            saved = {}
-        persisted = saved.get("int_attrs", {})
-        threshold = tunneling_value(db, template_guid, persisted)
-        if threshold <= 0:
-            continue
-        old = card_counters(db, session.session_id, int(card_uid)).get(
-            "tunneling", 0)
-        new = add_card_counter(db, session.session_id, int(card_uid),
-                               "tunneling", 1)
-        push_card_counters(game, session, db, handler, pl_t, ai_t,
-                           int(card_uid), bstate, changed_counter="tunneling",
-                           old_value=old)
-        changed.append((int(card_uid), old, new, threshold))
-    return changed
-
-
 def queue_tunneling_surfaces(db, session, handler, game, pl_t, ai_t, bstate,
                              owner_id):
     """Queue thresholded underground cards as normal free Surface abilities."""

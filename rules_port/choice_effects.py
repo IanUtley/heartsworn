@@ -313,9 +313,3 @@ def double_choice(context):
     return f"double choice: awaiting {len(choice_uids)} choices"
 
 
-def _resolve_child(handler, game, session, db, pl_t, ai_t, bstate,
-                   guid, source, owner, target_map=None, variables=None):
-    from .resolution import resolve_port_ability
-    return resolve_port_ability(
-        handler, game, session, db, pl_t, ai_t, bstate, guid, source, owner,
-        target_map=target_map or {}, variables=variables or {})

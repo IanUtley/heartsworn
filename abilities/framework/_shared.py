@@ -390,16 +390,6 @@ def apply_attribute_grant(game, session, db, handler, pl_t, ai_t, target_uid,
     return bits
 
 
-def number_word_to_int(word):
-    """Convert a lowercase number word ('five') to an int (None if not a word)."""
-    words = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
-             "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10,
-             "eleven": 11, "twelve": 12, "thirteen": 13, "fourteen": 14,
-             "fifteen": 15, "sixteen": 16, "seventeen": 17, "eighteen": 18,
-             "nineteen": 19, "twenty": 20}
-    return words.get((word or "").strip().lower())
-
-
 # Compatibility exports.  Counter state is now implemented in the focused
 # effects module, while older callers may continue importing from _shared.
 from .effects.counters import (  # noqa: E402,F401

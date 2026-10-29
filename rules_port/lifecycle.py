@@ -508,24 +508,6 @@ def ready_step_for_turn(db, session_id, owner_id, battle_state, side,
     return changes
 
 
-def decrement_ability_cooldowns(db, session_id, owner_id, battle_state=None):
-    """Apply C# ReadyState's active-player cooldown tick.
-
-    Ordinary card counts stay with their game_cards rows; synthetic champion
-    counts stay in the shared battle checkpoint. The caller projects updates
-    for the returned card UIDs and any non-empty champion ability GUID list.
-    """
-    from pvp_db import db_decrement_card_cooldowns_for_owner
-    cards = db_decrement_card_cooldowns_for_owner(
-        session_id, owner_id, conn=db)
-    champions = {}
-    if isinstance(battle_state, dict):
-        from .cooldowns import decrement_champion_cooldowns
-        champions = decrement_champion_cooldowns(
-            battle_state, owner_id)
-    return cards, champions
-
-
 _CANT_HEAL_AT_END_OF_TURN = "CantHealAtEndOfTurn".lower()
 _OPPOSING_TROOPS_DONT_HEAL = "OpposingTroopsDontHealAtEndOfTurn".lower()
 

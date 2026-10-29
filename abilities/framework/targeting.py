@@ -260,50 +260,9 @@ def _blocking_targets(battle_state, source_uid):
     return set()
 
 
-def _compare_value(actual, op, expected):
-    """Apply the client's EComparisons values to ordinary integers."""
-    if op in ("OneLessThan", "OneMoreThan", "TwoMoreThan"):
-        expected += {"OneLessThan": -1, "OneMoreThan": 1,
-                     "TwoMoreThan": 2}[op]
-        return actual == expected
-    return {"GreaterThanOrEqual": actual >= expected,
-            "LessThanOrEqual": actual <= expected,
-            "Equal": actual == expected,
-            "Equals": actual == expected,
-            "GreaterThan": actual > expected,
-            "LessThan": actual < expected}.get(op, True)
-
-
 def _filter_zones(collections):
     return {ZONE_MAP.get(z, z.lower()) for z in
             str(collections or "").split("|") if z}
-
-
-def _player_matches(card, source_card, player_filter):
-    """Match Compare*Filter's EPlayerCardTargets against a live card."""
-    owner = card.get("user_id")
-    source_owner = (source_card or {}).get("src_owner_id",
-                    (source_card or {}).get("user_id"))
-    if str(player_filter or "").lower() in {"self", "you", "controller"}:
-        return owner == source_owner
-    if str(player_filter or "").lower() in {
-            "opponent", "opposing", "singleopponent", "multipleopponents"}:
-        return owner != source_owner
-    return True
-
-
-def _stored_uids(stored_names, ability_state):
-    values = []
-    for item in (ability_state or {}).get("stored_targets", {}).values():
-        values.extend(item or [])
-    for key in ("StoredTargets", "stored_targets"):
-        values.extend((ability_state or {}).get(key) or [])
-    if isinstance(stored_names, dict):
-        values.extend(stored_names.get("uids") or [])
-    try:
-        return {int(value) for value in values}
-    except (TypeError, ValueError):
-        return set()
 
 
 _OWNERSHIP_FILTERS = {"IsControlledBy", "IsNotControlledBy", "DifferentOwners"}
@@ -380,8 +339,6 @@ def evaluate_card_filter(card, filter_json, source_uid, stored_names=None,
 
 def _side_of(user_id):
     return "ai" if not user_id else "player"
-
-
 
 
 def target_template(db, template_id):

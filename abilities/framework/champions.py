@@ -42,52 +42,6 @@ def validate_ability_cost(db, session, player_uid, ability_guid, bstate):
             max(0, cc - charges), max(0, eff_sc - sp))
 
 
-def apply_ability_cost(db, session, game, pl_t, player_uid, ability_guid,
-                       bstate, player_champ_scid=None,
-                       player_champ_guid=None):
-    """Deduct charges and SP for an activated ability, push update events,
-    increment the spell-power escalation counter, and return True on success.
-    """
-    ok, cc, sc, eff_sc, _, _ = validate_ability_cost(
-        db, session, player_uid, ability_guid, bstate)
-    if not ok:
-        return False
-
-    charges = bstate.get("player_charges", 0)
-    sp = bstate.get("player_spell_points", 0)
-    sp_uses = bstate.get("player_sp_uses", {}) or {}
-
-    bstate["player_charges"] = charges - cc
-    bstate["player_spell_points"] = sp - eff_sc
-
-    if sc > 0:
-        sp_uses[ability_guid] = sp_uses.get(ability_guid, 0) + 1
-        bstate["player_sp_uses"] = sp_uses
-
-    # Push deduction events
-    if cc:
-        ev = game_engine.ChampionChargePointsChangedSessionEventArgs()
-        ev.player_id = pl_t; ev.operation = 2; ev.delta = cc
-        ev.new_value = bstate["player_charges"]; game._push(ev)
-    if eff_sc:
-        ev = game_engine.ChampionSpellPointsChangedSessionEventArgs()
-        ev.player_id = pl_t; ev.operation = 2; ev.delta = eff_sc
-        ev.new_value = bstate["player_spell_points"]; game._push(ev)
-
-    # Keep the escalation on the authoritative CardDef.  ChampionCardPlayed
-    # owns the HUD view; a later CardUpdated(Champions) is interpreted by the
-    # client as a card-location change and can leave a giant chain clone.
-    if player_champ_scid and sp_uses.get(ability_guid):
-        cdef = game.card_defs.get(player_champ_scid)
-        if cdef is not None:
-            for ag, uses in sp_uses.items():
-                if int(uses) > 0:
-                    cdef.spell_point_cost_mods[
-                        game_engine.ResourceId.from_str(ag)] = int(uses)
-
-    return True
-
-
 # ── Common champion ability patterns ────────────────────────────────────────
 
 def heal_self(game, pl_t, amount, bstate, key="player_health"):
@@ -119,23 +73,6 @@ def damage_self(game, pl_t, amount, bstate, key="player_health"):
     return f"self-damage {amount} HP -> {new_val}"
 
 
-def gain_resource(game, pl_t, bstate, shard_color, key="player_resources_current"):
-    """Add 1 to the player's current resource count for *shard_color*."""
-    import struct
-    colors = {
-        "Blood": 4, "Ruby": 8, "Sapphire": 16,
-        "Wild": 32, "Diamond": 64, "Colorless": 1,
-    }
-    flag = colors.get(shard_color, 0)
-    current = bstate.get(key, 0)
-    bstate[key] = current + 1
-    ev = game_engine.PlayerTotalResourcePoolChangedSessionEventArgs()
-    ev.player_id = pl_t; ev.operation = 1; ev.delta = 1
-    ev.new_value = bstate[key]
-    game._push(ev)
-    return f"gain resource ({shard_color}) -> {bstate[key]}"
-
-
 def draw_cards(game, session, handler, pl_t, ai_t, bstate, count=1):
     """Draw *count* cards for the player."""
     for _ in range(count):
@@ -143,29 +80,3 @@ def draw_cards(game, session, handler, pl_t, ai_t, bstate, count=1):
     return f"draw {count} card(s)"
 
 
-def random_sp_gain(game, pl_t, bstate, low=3, high=5, key="player_spell_points"):
-    """Gain a random amount of spell points between *low* and *high*."""
-    gain = random.randint(low, high)
-    current = bstate.get(key, 0)
-    bstate[key] = current + gain
-    game.player_spell_points = bstate[key]
-    ev = game_engine.ChampionSpellPointsChangedSessionEventArgs()
-    ev.player_id = pl_t; ev.operation = 1; ev.delta = gain
-    ev.new_value = bstate[key]
-    game._push(ev)
-    return f"gain {gain} SP -> {bstate[key]}"
-
-
-def stack_push_ability(bstate, game, ability_guid, source_scid):
-    """Push an ability onto the chain (client stack) for later resolution."""
-    champ_uid = source_scid.uid.to_uint64() if hasattr(source_scid, 'uid') else 0
-    _be.stack_push(bstate, {
-        "kind": "ability",
-        "ability_guid": str(ability_guid),
-        "source_uid": champ_uid,
-        "instance_id": 1,
-    })
-    game.push_ability_on_chain(
-        source_scid,
-        game_engine.ResourceId.from_str(str(ability_guid)))
-    return f"pushed ability {str(ability_guid)[:8]} onto chain"

@@ -133,26 +133,6 @@ def ability_matches_keyword(db, ability_guid, keyword):
     return False
 
 
-def _ability_is_secret(graph):
-    """Read the client's ability-level Secret TAC flag.
-
-    ``secretly`` is parsed by the client into ``AbilityTemplate.tac`` rather
-    than into the localized game text or a CardModifier field. The extracted
-    Records retain that serialized TAC, so use the same flag here instead of
-    recognizing a card name or a phrase in card text.
-    """
-    try:
-        from .tac import _tac_attr_hash, decode_tac
-        serialized = graph.source.field("m_SerializedTAC")
-        data = (serialized.field("data", "")
-                if hasattr(serialized, "field") else
-                serialized.get("data", "")
-                if isinstance(serialized, dict) else "")
-        return bool(data and _tac_attr_hash("Secret") in decode_tac(data))
-    except (AttributeError, TypeError, ValueError, json.JSONDecodeError):
-        return False
-
-
 def manually_trigger_abilities(db, handler, game, session, pl_t, ai_t,
                                bstate, target_uid, keyword):
     """Resolve all matching triggered powers currently on one card.
@@ -188,37 +168,6 @@ def manually_trigger_abilities(db, handler, game, session, pl_t, ai_t,
             handler, game, session, db, pl_t, ai_t, bstate, ag,
             int(target_uid), owner_id, {}))
     return "; ".join(str(result) for result in results if result)
-def _ai_battle_target(db, session, source_uid, ability_guid, candidates):
-    """Choose an AI battle target from the data-defined legal candidates.
-
-    The client AI's useful preference for a battle deploy is a low-health
-    flier first, then a random troop that can be killed by the source.  Keep
-    the candidate set metadata-driven and only apply that tactical ordering
-    when the ability actually contains a Battle2Cards effect.
-    """
-    if not candidates:
-        return None
-    from pvp_db import (db_ability_has_effect, db_card_combat_identity,
-                        db_battle_target_stats)
-    effect = db_ability_has_effect(ability_guid, conn=db)
-    if not effect:
-        return candidates[0]
-    source = db_card_combat_identity(session.session_id, int(source_uid), conn=db)
-    damage = max(0, int(source[3] or 0)) if source else 0
-    if damage <= 0:
-        return random.choice(candidates)
-    rows = db_battle_target_stats(session.session_id, candidates, conn=db)
-    by_uid = {int(uid): (int(attrs or 0), int(health or 0))
-              for uid, attrs, health in rows}
-    fliers = [uid for uid in candidates
-              if (by_uid.get(int(uid), (0, 0))[0]
-                  & game_engine.ECardAttributes.Flight)
-              and 0 < by_uid.get(int(uid), (0, 0))[1] < damage]
-    if fliers:
-        return random.choice(fliers)
-    killable = [uid for uid in candidates
-                if 0 < by_uid.get(int(uid), (0, 0))[1] <= damage]
-    return random.choice(killable or candidates)
 
 
 def _apply_health_gain(game, bstate, pl_t, ai_t, amount, source_owner_uid,
@@ -343,7 +292,6 @@ def _resolve_ability_bom(db, handler, game, session, pl_t, ai_t, bstate,
                 bstate[key] = value
 
 
-
 def _resolve_counter_spell(db, handler, game, session, pl_t, ai_t, bstate,
                            eg, param, game_text):
     """CounterSpell leaf — interrupts a target card on the chain."""
@@ -433,7 +381,6 @@ def resolve_triggers(db, handler, game, session, pl_t, ai_t, bstate,
                   "event_previous_state": event_previous_state,
                   "event_int_attribute": event_int_attribute,
                   "event_tac": dict(event_tac or {})}))
-
 
 
 def resolve_cards_attacked(db, handler, game, session, pl_t, ai_t, bstate,
