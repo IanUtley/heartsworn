@@ -29,7 +29,8 @@ from gamedata import ir_registry
 from gamedata import mechanics_types as T
 from gamedata.mechanics_base import Typed, _argument_names, _default_of, _record_value
 from gamedata.mechanics_fields import ir_name
-from gamedata.ir_surface import EMPTY_REF_FIELDS, THIS
+from gamedata import ir_surface as surface
+from gamedata.ir_surface import EMPTY_REF_FIELDS, SHARED_EFFECTS, THIS
 
 ZERO_GUID = "00000000-0000-0000-0000-000000000000"
 THIS_GUID = THIS.guid
@@ -91,6 +92,10 @@ def _effect_fragments(clauses: list[dict[str, Any]]) -> tuple[dict[str, str], li
     for clause in clauses:
         guid = str(clause["m_EffectTemplateId"]["m_Guid"]).lower()
         if guid in names or guid == ZERO_GUID:
+            continue
+        shared = {guid_: name for name, guid_ in SHARED_EFFECTS.items()}
+        if guid in shared:
+            names[guid] = shared[guid]
             continue
         record = effect_record(guid)
         if getattr(T, _kind(record), None) is None:
@@ -192,11 +197,31 @@ def _clause_text(clause: dict[str, Any], names: dict[str, str]) -> str:
     return "Clause(" + ", ".join(arguments) + ")"
 
 
+def _condition_text(value: Any) -> str | None:
+    """A threshold condition as ``threshold(...)`` when that call rebuilds it exactly, else None."""
+    if not isinstance(value, Typed) or type(value) is not T.AbilityControllerHasThresholdAbilityCondition:
+        return None
+    record = value.to_record()
+    try:
+        built = surface.threshold(record["m_ColorFlags"], record["m_RequiredQuantity"],
+                                  comparison=record["m_ComparisonOp"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    if _same_record(built.to_record(), record):
+        return (f"threshold({record['m_ColorFlags']!r}, {record['m_RequiredQuantity']!r}"
+                f"{'' if record['m_ComparisonOp'] == 'GreaterThanOrEqual' else ', comparison=' + repr(record['m_ComparisonOp'])})")
+    return None
+
+
 def _field_value(key: str, value: Any, names: dict[str, str]) -> str:
     """A list of clauses is written clause by clause; a trigger event by its event name where one exists; a target
     list names this card as ``this``."""
     if key == "m_AbilityEffectList":
         return "[" + ", ".join(_clause_text(item, names) for item in value) + "]"
+    if key == "m_AbilityCondition":
+        call = _condition_text(value)
+        if call is not None:
+            return call
     if key == "m_AbilityTargetTemplateIds":
         return "[" + ", ".join("this" if _guid_of(item) == THIS_GUID else _value(item) for item in value) + "]"
     if key == "m_TriggerEventType" and isinstance(value, dict) and set(value) == {"m_InternalType"}:

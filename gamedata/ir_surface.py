@@ -386,6 +386,19 @@ def and_(*conditions: Typed) -> Typed:
     return T.AndTriggerCondition(conditions=list(conditions))
 
 
+# Stored effects that many abilities share, by the name the surface gives them. The name is the stored template's
+# GUID, so an ability refers to it instead of writing the effect out.
+SHARED_EFFECTS: dict[str, str] = {
+    "PLAY_FOR_FREE": "83f2845c-f200-032c-662c-3262cd5e79c7",
+}
+
+
+def threshold(color: str, quantity: int, *, comparison: str = "GreaterThanOrEqual") -> Typed:
+    """The ability's controller has ``quantity`` of a colour's threshold: "[SAPPHIRE]: 2 sapphire threshold"."""
+    return T.AbilityControllerHasThresholdAbilityCondition(color_flags=color, required_quantity=int(quantity),
+                                                           comparison_op=comparison)
+
+
 # Names a card can use: constants and factories.
 CONSTANTS: dict[str, Any] = {
     "champions": Zone("Champions"),
@@ -396,6 +409,7 @@ CONSTANTS: dict[str, Any] = {
     "turn_start": {"m_InternalType": "Game.Shared.Mechanics.TurnStartedEvent"},
     "card_entered_zone": {"m_InternalType": "Game.Shared.Mechanics.CardEnteredZoneEvent"},
     "player_controls_source": T.TriggerPlayerControlsAbilitySource(),
+    **{name: _ref(guid) for name, guid in SHARED_EFFECTS.items()},
 }
 FACTORIES: dict[str, Any] = {
     "counter": counter,
@@ -413,6 +427,7 @@ FACTORIES: dict[str, Any] = {
     "transform": transform,
     "deal_damage": deal_damage,
     "add_counter": add_counter,
+    "threshold": threshold,
     "ability": ability,
     "card_enters": card_enters,
     "card_matches": card_matches,
