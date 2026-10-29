@@ -47,6 +47,16 @@ class SurfaceWriteTest(unittest.TestCase):
         text = "a=AttackModifier(input_value=EffectInputVariable(input_variable_name='P1'))"
         self.assertEqual(W._modifier_calls(text), "a=atk_mod('P1')")
 
+    def test_not_and_or_pick_the_class_their_parts_need(self):
+        trigger = surface.card_matches(surface.troop_with("Soulcursed"))
+        self.assertIsInstance(surface.not_(trigger), T.NotTriggerCondition)
+        self.assertIsInstance(surface.or_(trigger, trigger), T.OrTriggerCondition)
+        ability_part = surface.threshold("Sapphire", 1)
+        self.assertIsInstance(surface.or_(ability_part, ability_part), T.OrAbilityCondition)
+        self.assertIsInstance(surface.not_(ability_part), T.NotAbilityCondition)
+        self.assertIsInstance(surface.or_(surface.troop_with("A"), surface.troop_with("B")), T.OrCardFilter)
+        self.assertIsInstance(surface.not_(surface.troop_with("A")), T.NotCardFilter)
+
     def test_shared_effect_names_read_back_to_their_records(self):
         ir_registry.clear()
         names = P.loads('ABILITY = ability("Draw a card.", ability_effect_list=[Clause(effect_template_id=DRAW_A_CARD)])')

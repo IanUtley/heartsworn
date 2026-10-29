@@ -430,6 +430,24 @@ def and_(*conditions: Typed) -> Typed:
     return T.AndTriggerCondition(conditions=list(conditions))
 
 
+def not_(condition: Typed) -> Typed:
+    """The condition is not met (``not_(card_matches(...))``). Works on trigger, ability and card conditions."""
+    if isinstance(condition, T.TriggerCondition):
+        return T.NotTriggerCondition(condition=condition)
+    if isinstance(condition, T.AbilityCondition):
+        return T.NotAbilityCondition(condition=condition)
+    return T.NotCardFilter(target_filter=condition)
+
+
+def or_(*conditions: Typed) -> Typed:
+    """Any of the conditions is met. Works on trigger, ability and card conditions, as ``and_`` does for triggers."""
+    if all(isinstance(condition, T.TriggerCondition) for condition in conditions):
+        return T.OrTriggerCondition(conditions=list(conditions))
+    if all(isinstance(condition, T.AbilityCondition) for condition in conditions):
+        return T.OrAbilityCondition(conditions=list(conditions))
+    return T.OrCardFilter(target_filters=list(conditions))
+
+
 # Stored effects that many abilities share, by the name the surface gives them. The name is the stored template's
 # GUID, so an ability refers to it instead of writing the effect out.
 SHARED_EFFECTS: dict[str, str] = {
@@ -528,4 +546,6 @@ FACTORIES: dict[str, Any] = {
     "card_matches": card_matches,
     "troop_with": troop_with,
     "and_": and_,
+    "not_": not_,
+    "or_": or_,
 }
