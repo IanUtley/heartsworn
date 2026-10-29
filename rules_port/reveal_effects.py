@@ -296,19 +296,14 @@ def publish_revealed_card(context, uid):
             # the owner requests the same snapshot again and leaves the hand copy
             # without art).
             return
-        # The AI's card: the human cannot see the AI's hand, so the revealed card
-        # stays public there. Send only its hand view to the human, with no second
-        # coverflow, for the same snapshot reason.
+        # The AI's card: the human cannot see the AI's hand, so the card the AI chose from its look is
+        # shown to the human in a popup. The look itself stayed private.
         scid = game_engine.SessionCardId(game_engine.UID(int(uid)))
-        _tpl, card_type, _name, cost, attack, defense, gems = \
-            context.handler._card_full_data(context.game, scid, template_guid)
-        context.game.push_card_updated(
-            scid, owner_uid(0, context.player_uid, context.ai_uid,
-                            context.bstate),
-            game_engine.ECardCollections.Hand, card_type,
-            template_id=template_guid, cost=cost, attack=attack,
-            defense=defense, gems=gems, nulling=False)
-        context.game.events[-1]._hand_reveal_viewer_uid = context.player_uid
+        ai = owner_uid(0, context.player_uid, context.ai_uid, context.bstate)
+        send_revealed_cards(
+            context, [(scid, ai, game_engine.ECardCollections.Hand,
+                       template_guid, 0)],
+            context.player_uid, ai, private_to=context.player_uid)
         return
     from pvp_db import db_game_session_pids
     opponent = next((int(pid) for pid in db_game_session_pids(

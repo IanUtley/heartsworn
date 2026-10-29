@@ -701,6 +701,44 @@ def is_chosen_secondary_target(spec):
             and bool(getattr(spec, "requires_input", False)))
 
 
+def top_n_amount(top_n, db, session_id, owner_id, source_uid, battle_state):
+    """How many deck cards a TopNOfDeck filter looks at: its authored amount plus each term it adds.
+
+    ``top_n`` is the filter's stored dict, or the interpreter's typed node. The added terms are the source's current
+    cost, the counters it removed to pay, the owner's shard thresholds (m_Add<Shard>).
+    """
+    def field(name, default=0):
+        if isinstance(top_n, dict):
+            return top_n.get(name, default)
+        return getattr(top_n, name, default)
+
+    amount = max(0, int(field("m_Amount", 0) or 0))
+    cost_multiple = int(field("m_AddSourceCardsCost", 0) or 0)
+    if cost_multiple and source_uid is not None:
+        # The source's current cost, with its modifiers ("this troop's cost" is the cost it is played at now).
+        from .static_rules import effective_cost
+        amount += cost_multiple * int(effective_cost(
+            db, session_id, battle_state, int(source_uid)) or 0)
+    if field("m_AddRemovedCounters", False):
+        # "equal to the counters removed this way": the counters the source paid as a cost.
+        paid = (battle_state or {}).get("card_counter_cost_paid") or {}
+        removed = paid.get(str(int(source_uid))) if source_uid is not None else None
+        if removed is None:
+            removed = (battle_state or {}).get("counter_cost_paid", 0)
+        amount += int(removed or 0) * int(field("m_AddRemovedCountersMultiplier", 1) or 1)
+    # "m_Add<Shard>" flags add the owner's threshold of that shard ("[SAPPHIRE] you have").
+    import game_engine
+    thresholds = (battle_state or {}).get(
+        "ai_threshold" if int(owner_id or 0) == 0 else "player_threshold") or {}
+    for flag, shard in (("m_AddColorless", "Colorless"), ("m_AddBlood", "Blood"),
+                        ("m_AddRuby", "Ruby"), ("m_AddSapphire", "Sapphire"),
+                        ("m_AddWild", "Wild"), ("m_AddDiamond", "Diamond")):
+        if field(flag, False):
+            amount += int(thresholds.get(
+                int(getattr(game_engine.ECardShards, shard)), 0) or 0)
+    return amount
+
+
 def authored_target_candidates(db, session_id, owner_id, template_ids, index, source_uid=None,
                                battle_state=None):
     """The cards an authored target of an ability can name, or None when it has no such rule.
@@ -727,23 +765,7 @@ def authored_target_candidates(db, session_id, owner_id, template_ids, index, so
     top_n = _find_filter(filter_node, "TopNOfDeck")
     if top_n is None:
         return None
-    amount = max(0, int(top_n.get("m_Amount", 0) or 0))
-    cost_multiple = int(top_n.get("m_AddSourceCardsCost", 0) or 0)
-    if cost_multiple and source_uid is not None:
-        # The source's current cost, with its modifiers ("this troop's cost" is the cost it is played at now).
-        from .static_rules import effective_cost
-        amount += cost_multiple * int(effective_cost(
-            db, session_id, battle_state, int(source_uid)) or 0)
-    # "m_Add<Shard>" flags add the owner's threshold of that shard ("[SAPPHIRE] you have").
-    import game_engine
-    thresholds = (battle_state or {}).get(
-        "ai_threshold" if int(owner_id or 0) == 0 else "player_threshold") or {}
-    for flag, shard in (("m_AddColorless", "Colorless"), ("m_AddBlood", "Blood"),
-                        ("m_AddRuby", "Ruby"), ("m_AddSapphire", "Sapphire"),
-                        ("m_AddWild", "Wild"), ("m_AddDiamond", "Diamond")):
-        if top_n.get(flag):
-            amount += int(thresholds.get(
-                int(getattr(game_engine.ECardShards, shard)), 0) or 0)
+    amount = top_n_amount(top_n, db, session_id, owner_id, source_uid, battle_state)
     deck_rows = db.execute(
         "SELECT card_uid FROM game_cards WHERE session_id=? AND user_id=? "
         "AND location='deck' ORDER BY position LIMIT ?",

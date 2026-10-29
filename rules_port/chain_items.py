@@ -368,8 +368,12 @@ def resolve_chain_item(host, port, session, db, ability, player_uid, ai_uid):
     # Consume the marker once, here, and never re-run the authored effects: the
     # finish pass owns only the zone/event projection.
     game = host.chain_new_game(session, state, player_uid, ai_uid)
-    bom_completed = (int(state.pop("completed_chain_instance_id", 0) or 0)
+    # The marker names the one paused item whose effects already ran. Only that item may consume it; a nested item
+    # resolved above it must leave it for the paused item.
+    bom_completed = (int(state.get("completed_chain_instance_id", 0) or 0)
                      == instance_id)
+    if bom_completed:
+        state.pop("completed_chain_instance_id", None)
     suspended = state.get("rules_port_suspended_chain_continuation")
     try:
         suspended_id = int((suspended or {}).get("chain_instance_id", 0) or 0)
@@ -398,7 +402,8 @@ def resolve_chain_item(host, port, session, db, ability, player_uid, ai_uid):
             host.chain_send(session, game, player_uid, ai_uid)
             return AbilityResolutionState.WAITING_FOR_INPUT
         state.pop("rules_port_suspended_chain_continuation", None)
-        state.pop("completed_chain_instance_id", None)
+        if int(state.get("completed_chain_instance_id", 0) or 0) == instance_id:
+            state.pop("completed_chain_instance_id", None)
         bom_completed = True
     kind = descriptor.get("kind")
     if kind in ("troop", "spell"):

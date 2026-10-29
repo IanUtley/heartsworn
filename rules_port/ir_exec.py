@@ -393,7 +393,10 @@ def _filter_holds(card_filter: Any, card: Card, scope: Scope) -> bool:
         zones = {part.strip().lower() for part in typed.m_Collection.split("|")}
         return card.zone in zones
     if cls == "TopNOfDeck":
-        return True   # the selection is the candidate list's (_card_candidates)
+        # The top cards are picked by _card_candidates; the filter's own owner test still applies (a "your deck"
+        # look must not take the opponent's top cards).
+        inner = getattr(typed, "m_Filter", None)
+        return inner is None or _filter_holds(inner, card, scope)
     if cls == "NameContainsFilter":
         return _name_contains(typed, card)
     if cls == "IsAbilitySource":
@@ -679,7 +682,8 @@ def _resolved_targets(root: MechanicsObject, index: int, scope: Scope) -> list[i
         return [int(uid) for uid in chosen] if isinstance(chosen, list) else [int(chosen)]
     if kind == "SourceRevealedTargetTemplate":
         return _revealed_candidates(template, index, scope)
-    if kind in ("AbilityTargetTemplate", "SourceRevealedTargetTemplate") and not template.m_IsAutoTarget \
+    if kind in ("AbilityTargetTemplate", "SourceRevealedTargetTemplate", "SecondaryTargetTemplate") \
+            and not template.m_IsAutoTarget \
             and index in scope.chosen:
         # A chosen target the player has answered: the card, or nothing when the player chose none.
         chosen = scope.chosen[index]
@@ -755,7 +759,10 @@ def _card_candidates(template: MechanicsObject, scope: Scope) -> list[int]:
     for owner in sorted({card.owner for card in cards}):
         deck = sorted((card for card in cards if card.owner == owner and card.zone == "deck"),
                       key=lambda card: card.position)
-        chosen.extend(card.uid for card in deck[:int(top.m_Amount or 0)])
+        from .targeting import top_n_amount
+        amount = top_n_amount(top, scope.context.db, scope.context.session.session_id, owner,
+                              scope.source_uid, scope.context.bstate)
+        chosen.extend(card.uid for card in deck[:amount])
     return chosen
 
 
@@ -767,6 +774,11 @@ def _revealed_candidates(template: MechanicsObject, index: int, scope: Scope) ->
     zones = _zones_of(template.m_CollectionFlags)
     taken = {int(uid) for position, value in scope.chosen.items() if position != index and value is not None
              for uid in (value if isinstance(value, list) else [value])}
+    if getattr(template, "m_IgnoreActedOn", False):
+        # "The remaining cards" ignores the cards an earlier effect acted on (the troops the free play put onto the
+        # board), so they are not moved back into the deck.
+        for values in scope.resolved_by_instance.values():
+            taken.update(int(uid) for uid in values)
     cards = {card.uid: card for card in _battle_cards(scope)}
     return [uid for uid in revealed
             if uid in cards and uid not in taken
@@ -777,8 +789,21 @@ def _revealed_candidates(template: MechanicsObject, index: int, scope: Scope) ->
 def _needs_choice(root: MechanicsObject, index: int) -> bool:
     """Whether a clause's target is a card the player picks (a non-automatic card target)."""
     template = _load("AbilityTargetTemplate", _guid(root.m_AbilityTargetTemplateIds[index]))
-    return _short(template.type_name) in ("AbilityTargetTemplate", "SourceRevealedTargetTemplate") \
+    return _short(template.type_name) in ("AbilityTargetTemplate", "SourceRevealedTargetTemplate",
+                                          "SecondaryTargetTemplate") \
         and not template.m_IsAutoTarget
+
+
+def _secondary_candidates(template: MechanicsObject, scope: Scope) -> list[int]:
+    """The cards a "one of them" target picks from: the cards the effect it names resolved to (the look), in the
+    template's zones, that pass its filter. Same rule as the native resolver's secondary target."""
+    sec = ir_exec_targets.instance_ref(_field(scope.clause, "m_SecondaryTargetIndex"))
+    pool = [int(uid) for uid in scope.resolved_by_instance.get(sec, [])]
+    zones = _zones_of(template.m_CollectionFlags)
+    cards = {card.uid: card for card in _battle_cards(scope)}
+    return [uid for uid in pool
+            if uid in cards and (not zones or cards[uid].zone in zones)
+            and _filter_holds(template.m_CardFilter, cards[uid], scope)]
 
 
 def _choice_candidates(root: MechanicsObject, index: int, scope: Scope) -> tuple[list[int], bool]:
@@ -786,6 +811,8 @@ def _choice_candidates(root: MechanicsObject, index: int, scope: Scope) -> tuple
     template = _load("AbilityTargetTemplate", _guid(root.m_AbilityTargetTemplateIds[index]))
     if _short(template.type_name) == "SourceRevealedTargetTemplate":
         return _revealed_candidates(template, index, scope), bool(template.m_Optional)
+    if _short(template.type_name) == "SecondaryTargetTemplate":
+        return _secondary_candidates(template, scope), bool(template.m_Optional)
     return _card_candidates(template, scope), bool(template.m_Optional)
 
 
@@ -1359,7 +1386,8 @@ def _run_effects(guid: str, root: MechanicsObject, scope: Scope, start: int) -> 
                                     "resolved": _resolved_json(scope),
                                     "applied": {str(k): v for k, v in scope.applied.items()}}
                     template = _load("AbilityTargetTemplate", _guid(root.m_AbilityTargetTemplateIds[index]))
-                    revealed = _short(template.type_name) == "SourceRevealedTargetTemplate"
+                    revealed = _short(template.type_name) in ("SourceRevealedTargetTemplate",
+                                                             "SecondaryTargetTemplate")
                     raise NeedsChoice(continuation, candidates, optional, revealed=revealed)
             effect_type, effect_raw = _stored("AbilityEffectTemplate", _guid(_field(clause, "m_EffectTemplateId")))
             # The targets of an effect a later clause names as its secondary target, as they are when it runs.

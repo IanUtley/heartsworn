@@ -3624,7 +3624,9 @@ def test_gearsmith_takes_the_revealed_artifact_and_stays_in_play(db):
     assert [uid for uid in order if uid in (fourth, fifth)] == [fourth, fifth]
     reveals = [e for e in game.events
                if isinstance(e, game_engine.CardsRevealedSessionEventArgs)]
-    assert len(reveals) == 1, len(reveals)
+    # The look is shown once; the artifact the AI chose is then shown to the human in a popup.
+    assert len(reveals) == 2, len(reveals)
+    assert [int(card.uid.uid64) for card in reveals[1].session_card_ids] == [artifact]
     moves = [e for e in game.events
              if isinstance(e, game_engine.CardMovedSessionEventArgs)]
     # Both cards remain in Deck. The C# cache does not synthesize class 50

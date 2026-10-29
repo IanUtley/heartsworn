@@ -19,9 +19,11 @@ def test_referenced_instances_are_the_secondary_indexes_of_the_clauses():
     assert ir_exec_targets.referenced_instances(root) == {2, 5}
 
 
-def test_follow_up_gaps_refuse_a_chosen_secondary_target_and_a_variable_count():
+def test_follow_up_gaps_allow_a_chosen_secondary_target_and_refuse_a_variable_count():
+    # A "one of them" pick is prompted for by the interpreter, so it is covered; a chosen match target is not.
     chosen = {"m_IsAutoTarget": 0}
-    assert ir_exec_targets.follow_up_gaps(chosen, "SecondaryTargetTemplate") == ["chosen follow-up target"]
+    assert ir_exec_targets.follow_up_gaps(chosen, "SecondaryTargetTemplate") == []
+    assert ir_exec_targets.follow_up_gaps(chosen, "MatchSecondaryTargetTemplate") == ["chosen follow-up target"]
     automatic = {"m_IsAutoTarget": 1, "m_MaxTargetCount": {"_t": TARGET_CONSTANT, "m_Value": 1}}
     assert ir_exec_targets.follow_up_gaps(automatic, "MatchSecondaryTargetTemplate") == []
     variable = {"m_IsAutoTarget": 1, "m_MaxTargetCount": {"_t": "Game.Shared.Mechanics.Abilities.TargetTemplates.TargetVariable"}}

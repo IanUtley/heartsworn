@@ -992,6 +992,47 @@ def test_dream_eagle_one_of_them_offers_only_the_looked_at_cards(db):
     assert entries[0]["uids"] == [910, 911, 912, 913], entries
 
 
+def test_interpreter_asks_for_one_of_them_from_the_look(db):
+    """The interpreter runs Dream Eagle's look and asks for "one of them" from the four cards it revealed."""
+    import types
+
+    import hconnect_server as hcs
+    import battle_engine
+    from rules_port.resolution import run_interpreted_trigger
+
+    EAGLE = "7f81a852-6f5e-4f37-b0a4-d9c13135daa7"
+    EAGLE_AG = "3179e9db-f8cd-fc06-3b0b-93c13ec82cde"
+    SHARD = "cd41bd00-7585-4762-a721-6163bdaee3c3"
+    _copy_card(db, EAGLE)
+    _copy_card(db, SHARD)
+    add_card(db, 900, 5, EAGLE, loc="warzone")
+    for index in range(8):
+        add_card(db, 910 + index, 5, SHARD, loc="deck")
+        db.execute("UPDATE game_cards SET position=? WHERE card_uid=?",
+                   (index, 910 + index))
+    db.commit()
+
+    handler = HandlerStub(db)
+    handler._checkpoint_engine = lambda session: battle_engine
+    handler._send_battle_events = lambda *args, **kwargs: True
+    handler._push_transaction_ack = lambda *args, **kwargs: None
+    handler._champion_targets = lambda: []
+    handler._prompt_revealed_choice = types.MethodType(
+        hcs.HCPHandler._prompt_revealed_choice, handler)
+    pl_t = game_engine.UID.make(244, 5)
+    ai_t = game_engine.UID.make(3, 1000)
+    game = game_engine.Game(1, pl_t, ai_t)
+    bstate = {"player_health": 20, "ai_health": 20, "turn_number": 1,
+              "resolving_owner_id": 5}
+    result = run_interpreted_trigger(
+        handler, game, SessionStub(), db, pl_t, ai_t, bstate, EAGLE_AG, 900, 5,
+        "CardEnteredZoneEvent", 900, {}, instance_id=1)
+
+    assert result is not None, "the interpreter refused Dream Eagle"
+    assert bstate["pending_deck_search"]["candidates"] == [910, 911, 912, 913], \
+        bstate.get("pending_deck_search")
+
+
 def test_dream_eagle_look_reveals_then_offers_one_of_them(db):
     """Dream Eagle's "one of them" is chosen after its look reveals the cards.
 
@@ -1099,12 +1140,38 @@ def test_peek_looks_at_as_many_cards_as_the_sapphire_threshold(db):
     assert look == [910, 911, 912, 913, 914, 915], look
 
 
+def test_pupil_reveals_as_many_cards_as_counters_removed(db):
+    """Pupil of Creation reveals as many deck cards as the creation counters its cost removed.
+
+    The authored amount is 0 and it adds the counters removed for the source, so a cost that removed
+    two counters reveals two cards.
+    """
+    from rules_port.targeting import authored_target_candidates
+
+    PUPIL = "79d7c968-1639-4c65-818f-8a582fe23fc0"
+    SHARD = "cd41bd00-7585-4762-a721-6163bdaee3c3"
+    _copy_card(db, PUPIL)
+    _copy_card(db, SHARD)
+    add_card(db, 900, 5, PUPIL, loc="warzone")
+    for index in range(6):
+        add_card(db, 910 + index, 5, SHARD, loc="deck")
+        db.execute("UPDATE game_cards SET position=? WHERE card_uid=?",
+                   (index, 910 + index))
+    db.commit()
+    template_ids = ["41ec30e5-0383-65e2-dfc2-2179b53353c0",
+                    "ddfe6611-0184-7e16-d08c-27be8910d63f"]
+
+    reveal = authored_target_candidates(
+        db, 1, 5, template_ids, 0, source_uid=900,
+        battle_state={"card_counter_cost_paid": {"900": 2}})
+    assert reveal == [910, 911], reveal
+
+
 def test_ai_revealed_troop_in_hand_is_shown_to_the_human(db):
     """A troop the AI put into its hand from a public reveal stays visible to the human.
 
-    The human cannot see the AI's hand, so the human gets the card's hand view. It
-    must not get a second CardsRevealed: a second coverflow requests the same snapshot
-    again and leaves the hand copy without art.
+    The human cannot see the AI's hand, so the human is shown the card in a popup: a
+    CardsRevealed private to the human, after the card's full view.
     """
     from types import SimpleNamespace
 
@@ -1129,10 +1196,14 @@ def test_ai_revealed_troop_in_hand_is_shown_to_the_human(db):
     assert len(updates) == 1, game.events
     assert int(updates[0].session_card_id.uid.uid64) == 980
     assert int(updates[0].collection) == int(game_engine.ECardCollections.Hand)
-    assert not [event for event in game.events if isinstance(
-        event, game_engine.CardsRevealedSessionEventArgs)], game.events
     assert int(updates[0]._hand_reveal_viewer_uid.uid64) == int(pl_t.uid64), \
         updates[0]._hand_reveal_viewer_uid
+    reveals = [event for event in game.events if isinstance(
+        event, game_engine.CardsRevealedSessionEventArgs)]
+    assert len(reveals) == 1, game.events
+    assert [int(card.uid.uid64) for card in reveals[0].session_card_ids] == [980]
+    assert int(reveals[0]._private_player_uid.uid64) == int(pl_t.uid64), \
+        reveals[0]._private_player_uid
 
 
 def test_revealed_cards_put_back_into_deck_are_hidden_again(db):

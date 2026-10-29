@@ -99,7 +99,8 @@ def follow_up_gaps(template: Any, kind: str) -> list[str]:
     if kind == "AbilityTriggerCardTargetTemplate" and \
             _short(template.get("m_TriggerSelector") or "TriggerSource") not in TRIGGER_SELECTORS:
         gaps.append(f"trigger selector {_short(template.get('m_TriggerSelector'))}")
-    if kind in COUNTED_KINDS and not template.get("m_IsAutoTarget"):
+    # A "one of them" target picks among the cards its effect resolved to; the interpreter prompts for that pick.
+    if kind in COUNTED_KINDS and kind != "SecondaryTargetTemplate" and not template.get("m_IsAutoTarget"):
         gaps.append("chosen follow-up target")
     for count in ("m_MaxTargetCount", "m_MinTargetCount"):
         if template.get(count) in (None, 0, "", [], {}, "0"):
