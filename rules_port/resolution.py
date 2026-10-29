@@ -1006,6 +1006,16 @@ class NativeEffectBackend:
                                 battle_state, ability, kind,
                                 ability.source_uid, target_spec, db,
                                 session.session_id)
+                            # The authored count applies to a list target: a random one draws its cards once
+                            # (C# FilterRandomTargets), and a fixed one is capped to its maximum.
+                            maximum = int(target_spec.resolved_maximum(
+                                battle_state.get("ability_variables") or
+                                getattr(ability.activation, "variables", {}) or {}) or 0)
+                            if target_spec.is_random:
+                                target_values = tuple(_random_target_sample(
+                                    target_values, maximum, battle_state))
+                            elif maximum > 0:
+                                target_values = tuple(target_values[:maximum])
                             if not target_values:
                                 # C# disables an effect whose authored list
                                 # target enumerates nothing; it never falls

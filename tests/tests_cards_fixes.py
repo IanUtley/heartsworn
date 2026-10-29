@@ -3217,3 +3217,40 @@ def test_action_target_selection_covers_intent_preference_and_legacy_fallbacks()
                   effects=[("TapCardAbilityEffectTemplate", {})]) == 202
     assert choose(None, None,
                   effects=[("DestroyCardAbilityEffectTemplate", {})]) == 201
+
+
+def test_kismet_reverie_makes_one_unlucky_sack_per_champion(db):
+    """Kismet's Reverie summons three Luck Sacks for each champion, and "one of them at random" becomes Unlucky.
+    Read as one of all the summoned sacks; the per-champion reading is still to be confirmed."""
+    from rules_port.resolution import resolve_port_played_spell
+
+    KISMET = "5e775a3f-8609-46ba-838c-28ee2ddfe7e9"
+    KISMET_AG = "fa0668ff-18c5-b088-c2cf-9f06af8cca88"
+    SACK = "d71de9a9-fcd8-41fc-822b-d0a4fd979dfd"
+    _copy_card(db, KISMET)
+    _copy_card(db, SACK)
+    add_card(db, 900, 5, KISMET, loc="CastSpells")
+    db.commit()
+
+    pl_t = game_engine.UID.make(244, 5)
+    ai_t = game_engine.UID.make(3, 1000)
+    game = game_engine.Game(1, pl_t, ai_t)
+    handler = HandlerStub(db)
+    handler._champion_targets = lambda: [
+        (10001, 5, "Controller", 20),
+        (10002, 0, "Opponent", 20),
+    ]
+    bstate = {"player_health": 20, "ai_health": 20, "turn_number": 1,
+              "resolving_owner_id": 5, "resolving_source_uid": 900}
+    resolve_port_played_spell(game, SessionStub(), db, handler, pl_t, ai_t,
+                              bstate, [KISMET_AG])
+
+    sacks = db.execute(
+        "SELECT user_id, permanent_buffs FROM game_cards WHERE template_guid=? AND location='warzone'",
+        (SACK,)).fetchall()
+    unlucky = {}
+    for user, buffs in sacks:
+        if "Unlucky" in (buffs or ""):
+            unlucky[user] = unlucky.get(user, 0) + 1
+    assert len(sacks) == 6, sacks
+    assert sum(unlucky.values()) == 1, (sacks, unlucky)
