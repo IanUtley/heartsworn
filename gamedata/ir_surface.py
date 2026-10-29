@@ -468,6 +468,21 @@ def attribute_is(attribute: str, value: int, *, comparison: str = "GreaterThanOr
     return T.IntAttrFilter(attribute=attribute, comparison_op=comparison, value=int(value))
 
 
+def def_mod(variable: str) -> Typed:
+    """A defense change of a variable's value (``def_mod("P3")``: +P3 defense)."""
+    return T.DefenseModifier(input_value=T.EffectInputVariable(input_variable_name=variable))
+
+
+def atk_mod(variable: str) -> Typed:
+    """An attack change of a variable's value (``atk_mod("P1")``: +P1 attack)."""
+    return T.AttackModifier(input_value=T.EffectInputVariable(input_variable_name=variable))
+
+
+def cost_mod(variable: str) -> Typed:
+    """A casting cost change of a variable's value (``cost_mod("P1")``: -P1 cost, as the variable is set)."""
+    return T.CardCostModifier(input_value=T.EffectInputVariable(input_variable_name=variable))
+
+
 def threshold(color: str, quantity: int, *, comparison: str = "GreaterThanOrEqual") -> Typed:
     """The ability's controller has ``quantity`` of a colour's threshold: "[SAPPHIRE]: 2 sapphire threshold"."""
     return T.AbilityControllerHasThresholdAbilityCondition(color_flags=color, required_quantity=int(quantity),
@@ -503,6 +518,9 @@ FACTORIES: dict[str, Any] = {
     "deal_damage": deal_damage,
     "add_counter": add_counter,
     "threshold": threshold,
+    "def_mod": def_mod,
+    "atk_mod": atk_mod,
+    "cost_mod": cost_mod,
     "cost_is": cost_is,
     "attribute_is": attribute_is,
     "ability": ability,

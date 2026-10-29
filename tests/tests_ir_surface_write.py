@@ -8,6 +8,7 @@ from gamedata import ir_python as P
 from gamedata import ir_registry
 from gamedata import ir_surface as surface
 from gamedata import ir_surface_write as W
+from gamedata import mechanics_types as T
 
 
 class SurfaceWriteTest(unittest.TestCase):
@@ -38,6 +39,13 @@ class SurfaceWriteTest(unittest.TestCase):
         text = W.ability_text("1b87a102-7614-9f88-e6e0-24a0dd5d934e")
         self.assertIn("variables={'P3': 3}", text)
         self.assertEqual(W.round_trip_problems("1b87a102-7614-9f88-e6e0-24a0dd5d934e"), [])
+
+    def test_modifier_calls_build_the_modifier_their_names_give(self):
+        self.assertIsInstance(surface.def_mod("P3"), T.DefenseModifier)
+        self.assertIsInstance(surface.atk_mod("P1"), T.AttackModifier)
+        self.assertIsInstance(surface.cost_mod("P1"), T.CardCostModifier)
+        text = "a=AttackModifier(input_value=EffectInputVariable(input_variable_name='P1'))"
+        self.assertEqual(W._modifier_calls(text), "a=atk_mod('P1')")
 
     def test_shared_effect_names_read_back_to_their_records(self):
         ir_registry.clear()

@@ -170,7 +170,20 @@ def _fragment_value(record: dict[str, Any]) -> str:
             shown = [repr(text), *[f"{key}={value!r}" for key, value in keywords.items()]]
             return f"{helper}({', '.join(shown)})"
     cls = getattr(T, _kind(record), None)
-    return P.dumps(cls.from_record(record))
+    return _modifier_calls(P.dumps(cls.from_record(record)))
+
+
+# A change of a variable's value, written as its helper: ``def_mod("P3")`` for DefenseModifier(...).
+_MODIFIER_CALLS = {"DefenseModifier": "def_mod", "AttackModifier": "atk_mod", "CardCostModifier": "cost_mod"}
+
+
+def _modifier_calls(text: str) -> str:
+    """Each change of a variable's value written as its helper call. The text rebuilds the same record, so a
+    round trip still checks it."""
+    for cls, helper in _MODIFIER_CALLS.items():
+        text = re.sub(rf"{cls}\(input_value=EffectInputVariable\(input_variable_name=('[^']*')\)\)",
+                      rf"{helper}(\1)", text)
+    return text
 
 
 def effect_record(guid: str) -> dict[str, Any]:
