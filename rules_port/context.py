@@ -4309,9 +4309,16 @@ class EffectContext:
                     from_choosing = filter_restricts_to_zone(
                         card_filter, "Choosing")
                     from_deck = filter_restricts_to_zone(card_filter, "Deck")
+                    # A match-secondary target ("search target opponent's deck for a card") names its zones on the
+                    # template, not on a card filter: a chosen pick from a deck is the same deck pick.
+                    match_secondary = str(target.target_kind or "").endswith(
+                        "MatchSecondaryTargetTemplate")
+                    if match_secondary:
+                        from_choosing = False
+                        from_deck = "deck" in str(target.collection_flags or "").lower()
                     if (not target.requires_input or
-                            not str(target.target_kind or "").endswith(
-                                "AbilityTargetTemplate") or
+                            not (match_secondary or str(target.target_kind or "").endswith(
+                                "AbilityTargetTemplate")) or
                             not (from_choosing or from_deck)):
                         continue
                     candidates = legal_targets(
@@ -4323,6 +4330,26 @@ class EffectContext:
                             self.handler, "_champion_targets", lambda: [])()
                                    or []),
                         battle_state=self.bstate)
+                    if match_secondary and candidates:
+                        # "Search target opposing champion's deck": only the deck of the champion the ability stored
+                        # (its owner), not every deck the template's player filter names.
+                        stored = set()
+                        for key in ("stored_targets", "stored_targets_this_turn", "stored_targets_by_card",
+                                    "stored_targets_by_card_this_turn"):
+                            for values in (self.bstate.get(key) or {}).values():
+                                for uid in (values if isinstance(values, (list, tuple)) else [values]):
+                                    if uid is not None:
+                                        stored.add(int(uid))
+                        champion_owner = {int(uid): int(owner) for owner, uid in
+                                          (self.bstate.get("champ_map") or {}).items()}
+                        owners = {champion_owner[uid] for uid in stored if uid in champion_owner}
+                        if owners:
+                            owner_rows = dict(self.db.execute(
+                                "SELECT card_uid, user_id FROM game_cards WHERE session_id=? AND card_uid IN (%s)"
+                                % ",".join("?" * len(candidates)),
+                                (self.session.session_id, *[int(uid) for uid in candidates])).fetchall())
+                            candidates = [uid for uid in candidates
+                                          if int(owner_rows.get(int(uid), -1) or 0) in owners]
                     if candidates:
                         choice_target = (
                             index, [int(uid) for uid in candidates], from_deck)

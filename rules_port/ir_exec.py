@@ -2169,7 +2169,7 @@ def coverage(guid: str) -> list[str]:
                 missing.append("play that only activates")
             continue
         if kind == "RevealCardsAbilityEffectTemplate":
-            if str(effect.get("m_PlayerRevealTargets") or "Unknown") not in ("Unknown", "Everyone", "Self"):
+            if str(effect.get("m_PlayerRevealTargets") or "Unknown") not in ("Unknown", "Everyone", "Self", "Opponents"):
                 missing.append(f"reveal to {effect.get('m_PlayerRevealTargets')}")
             continue
         if kind == "RandomizeVariableEffectTemplate":

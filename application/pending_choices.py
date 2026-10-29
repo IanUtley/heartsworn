@@ -594,6 +594,16 @@ class PendingChoicesMixin:
         # top deathcry's "You" template makes the client find no targets and
         # instantly commit.
         search_ability, search_template = self._deck_search_ability(ability_guid)
+        matching_targets = []
+        pick_index = 0
+        if kind == "matching_target":
+            # The picked deck card is the child's own chosen target (not an automatic one). The prompt names the child
+            # and that target's slot; the client accepts the pick only against the ability's own target list.
+            search_ability, search_template = None, None
+            graph = _hc._records_ability_graph(self, ability_guid)
+            if graph is not None:
+                matching_targets = [str(target.guid) for target in graph.targets]
+                pick_index = int((continuation or {}).get("target_index") or 0)
         prompt_ability = search_ability or ability_guid
         pend = {
             "ability_guid": prompt_ability,
@@ -612,6 +622,9 @@ class PendingChoicesMixin:
         # collection is covered by the template.  The deathcry's own template
         # ("You"/Warzone) left the picker with a bare cursor.
         target_id = search_template or prompt_ability
+        if kind == "matching_target" and matching_targets:
+            # The client accepts a picker slot only with the template the ability itself names at that slot.
+            target_id = matching_targets[pick_index]
 
         def build_prompt(g, player_uid):
             # Present temporary candidates in the client's Choosing zone.  The
@@ -629,10 +642,21 @@ class PendingChoicesMixin:
                 c_tpl = c_row[0]
                 _tpl2, ct2, _n2, cost2, atk2, def2, _g2 = self._card_full_data(
                     g, c_scid, c_tpl, c_row[1])
-                g.push_card_updated(c_scid, player_uid,
-                                    _hc.game_engine.ECardCollections.Choosing, ct2,
+                # A candidate keeps its real owner. The chooser sees it through a temporary view tagged for them,
+                # so a card from the opponent's deck is shown to the chooser and stays hidden from the other player.
+                card_owner = pl_t if (c_row[2] or 0) != 0 else ai_t
+                g.push_card_updated(c_scid, card_owner,
+                                    (_hc.game_engine.ECardCollections.Deck if kind == "matching_target"
+                                     else _hc.game_engine.ECardCollections.Choosing), ct2,
                                     template_id=c_tpl, cost=cost2, attack=atk2,
-                                    defense=def2)
+                                    defense=def2,
+                                    # A deck pick shows the cards face-down (nulled), as the hidden deck does, so
+                                    # the picker does not animate every card's face in.
+                                    nulling=(kind == "matching_target"),
+                                    state=0,
+                                    **({"int_attrs": {}} if kind == "matching_target" else {}))
+                g.events[-1]._hand_reveal_viewer_uid = player_uid
+                g.events[-1]._temporary_reveal = True
             ev = g._make_event(_hc.game_engine.PlayerOptionListSessionEventArgs)
             ev.player_id = player_uid
             opt = g._make_event(_hc.game_engine.PlayerOptionSessionEventArgs)
@@ -641,14 +665,15 @@ class PendingChoicesMixin:
             inst = g._make_event(_hc.game_engine.OptionInstanceSessionEventArgs)
             inst.opt_id = _hc.game_engine.ResourceId.from_str(prompt_ability)
             tgt = g._make_event(_hc.game_engine.TargetInstanceSessionEventArgs)
-            tgt.target_index = 0
+            tgt.target_index = pick_index if matching_targets else 0
             tgt.target_id = _hc.game_engine.ResourceId.from_str(target_id)
             # ConfigureAbility matches target instances through this parallel
             # target-template list.  Without it the client can render the
             # candidates but keep the outer BattleStateTarget alive after a
             # selection because it cannot associate the chosen card with the
             # nested search ability's target.
-            inst.target_ids.append(_hc.game_engine.ResourceId.from_str(target_id))
+            for parallel_id in (matching_targets or [target_id]):
+                inst.target_ids.append(_hc.game_engine.ResourceId.from_str(parallel_id))
             tgt.targets = [_hc.game_engine.SessionCardId(_hc.game_engine.UID(int(u)))
                            for u in pend["candidates"]]
             inst.target_instances.append(tgt)

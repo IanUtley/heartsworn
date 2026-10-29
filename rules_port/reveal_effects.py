@@ -240,6 +240,11 @@ def reveal_cards(context):
             # Only the controller's packet carries a self-only look (the packet
             # filter drops a private event for every other viewer).
             event._private_player_uid = controller_uid
+        elif (not context.bstate.get("pvp") and reveal_targets.lower() == "opponents"
+              and int(owner or 0) != 0):
+            # Revealed to the opponent only: in PvE the opponent is the AI, which receives no client packets, so
+            # the human player's packet must not carry the reveal.
+            event._private_player_uid = context.ai_uid
         # The client builds the coverflow from the revealed card views the
         # moment CardsRevealed arrives, and hidden deck cards have no view until
         # their CardUpdated lands. Send the card updates first.

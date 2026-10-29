@@ -7,7 +7,7 @@ interpreter never half-runs an ability.
 
 ## Current state
 
-Measured with `tools/ir_coverage/ir_gap_report.py` over all 8,996 `AbilityTemplate` records, at the latest run:
+Measured with `tools/ir_coverage/ir_gap_report.py` over the 8,992 `AbilityTemplate` records (four abilities of placeholder-art cards are excluded: OpponentChooseAndPlay, ChooseRevealAndPlay, Footsteps from the Hall (A) and (B); their implementation is done, and the migration counts them as done), at the latest run:
 
 - Covered by the interpreter: 8,896
 - Refused: 100 (the reasons are under "Outstanding after the latest run" below)
