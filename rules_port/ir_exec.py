@@ -704,8 +704,17 @@ def _resolved_targets(root: MechanicsObject, index: int, scope: Scope) -> list[i
             return [_player_champion(scope, others[0])]
         raise NotImplementedError(f"player target {player}")
     if kind in FOLLOW_UP_KINDS:
-        return ir_exec_targets.follow_up_targets(template, _guid(root.m_AbilityTargetTemplateIds[index]),
-                                                 _guid(root.m_AbilityTemplateId), scope)
+        listed = ir_exec_targets.follow_up_targets(template, _guid(root.m_AbilityTargetTemplateIds[index]),
+                                                   _guid(root.m_AbilityTemplateId), scope)
+        if kind in ir_exec_targets.LIST_TARGET_KINDS:
+            # The native resolver draws a random list target once and caps a fixed one to its count.
+            count = target_count(template.m_MaxTargetCount, scope.variables)
+            if template.m_IsRandomTarget:
+                if index not in scope.picked:
+                    scope.picked[index] = random_picks(listed, count, scope.context.bstate)
+                return list(scope.picked[index])
+            return capped(listed, count)
+        return listed
     raise NotImplementedError(f"target {kind}")
 
 
@@ -2019,7 +2028,7 @@ def coverage(guid: str) -> list[str]:
         if kind in FOLLOW_UP_KINDS:
             missing.extend(follow_up_gaps(template, kind))
         if template.get("m_IsRandomTarget") and template.get("m_CardFilter") is None \
-                and kind != "MatchSecondaryTargetTemplate":
+                and kind not in ("MatchSecondaryTargetTemplate",) + tuple(ir_exec_targets.LIST_TARGET_KINDS):
             # Without a card filter, the live pool drops every card (it reads the filter as "no card matches"), while C#
             # takes all of them. The interpreter follows C#, so such a random target stays with the native resolver.
             missing.append("random target without a card filter")

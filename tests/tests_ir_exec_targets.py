@@ -28,8 +28,9 @@ def test_follow_up_gaps_allow_a_chosen_secondary_target_and_refuse_a_variable_co
     assert ir_exec_targets.follow_up_gaps(automatic, "MatchSecondaryTargetTemplate") == []
     variable = {"m_IsAutoTarget": 1, "m_MaxTargetCount": {"_t": "Game.Shared.Mechanics.Abilities.TargetTemplates.TargetVariable"}}
     assert ir_exec_targets.follow_up_gaps(variable, "MatchSecondaryTargetTemplate") == ["target MaxTargetCount"]
-    # A list target is not limited by a count in the live resolver, so a count is refused rather than ignored.
-    assert ir_exec_targets.follow_up_gaps(automatic, "SourceBuriedTargetTemplate") == ["target MaxTargetCount"]
+    # A list target takes a constant count, as the native resolver caps it; a variable count is still refused.
+    assert ir_exec_targets.follow_up_gaps(automatic, "SourceBuriedTargetTemplate") == []
+    assert ir_exec_targets.follow_up_gaps(variable, "SourceBuriedTargetTemplate") == ["target MaxTargetCount"]
 
 
 def test_follow_up_gaps_refuse_the_trigger_target_selector():

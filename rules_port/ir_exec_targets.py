@@ -105,7 +105,9 @@ def follow_up_gaps(template: Any, kind: str) -> list[str]:
     for count in ("m_MaxTargetCount", "m_MinTargetCount"):
         if template.get(count) in (None, 0, "", [], {}, "0"):
             continue
-        if kind not in COUNTED_KINDS or _type_of(template.get(count)) != "TargetConstant":
+        # A list target (created, stored, drawn, voided, buried cards) takes a constant count as the native resolver does.
+        if (kind not in COUNTED_KINDS and kind not in LIST_TARGET_KINDS) \
+                or _type_of(template.get(count)) != "TargetConstant":
             gaps.append(f"target {count[2:]}")
     return gaps
 
