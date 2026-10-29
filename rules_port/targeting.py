@@ -701,12 +701,14 @@ def is_chosen_secondary_target(spec):
             and bool(getattr(spec, "requires_input", False)))
 
 
-def authored_target_candidates(db, session_id, owner_id, template_ids, index):
+def authored_target_candidates(db, session_id, owner_id, template_ids, index, source_uid=None,
+                               battle_state=None):
     """The cards an authored target of an ability can name, or None when it has no such rule.
 
     A SecondaryTargetTemplate ("one of them") picks from the previous target instance, so it follows that target
-    back. A TopNOfDeck target is the first N cards of the owner's deck in deck order. ``legal_targets`` does not apply
-    that limit, so a picker built from it offers the whole deck.
+    back. A TopNOfDeck target is the first N cards of the owner's deck in deck order, where N is its authored amount
+    plus, when it says so, the source card's cost ("look at cards equal to this troop's cost"). ``legal_targets`` does
+    not apply that limit, so a picker built from it offers the whole deck.
     """
     if index < 0 or index >= len(template_ids):
         return None
@@ -716,7 +718,8 @@ def authored_target_candidates(db, session_id, owner_id, template_ids, index):
     if row is None:
         return None
     if row[0] == "SecondaryTargetTemplate":
-        return authored_target_candidates(db, session_id, owner_id, template_ids, index - 1)
+        return authored_target_candidates(db, session_id, owner_id, template_ids, index - 1,
+                                          source_uid=source_uid, battle_state=battle_state)
     try:
         filter_node = json.loads(row[1] or "{}")
     except (TypeError, ValueError, json.JSONDecodeError):
@@ -725,6 +728,12 @@ def authored_target_candidates(db, session_id, owner_id, template_ids, index):
     if top_n is None:
         return None
     amount = max(0, int(top_n.get("m_Amount", 0) or 0))
+    cost_multiple = int(top_n.get("m_AddSourceCardsCost", 0) or 0)
+    if cost_multiple and source_uid is not None:
+        # The source's current cost, with its modifiers ("this troop's cost" is the cost it is played at now).
+        from .static_rules import effective_cost
+        amount += cost_multiple * int(effective_cost(
+            db, session_id, battle_state, int(source_uid)) or 0)
     deck_rows = db.execute(
         "SELECT card_uid FROM game_cards WHERE session_id=? AND user_id=? "
         "AND location='deck' ORDER BY position LIMIT ?",

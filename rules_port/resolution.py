@@ -1248,7 +1248,8 @@ class NativeEffectBackend:
                                 db, session.session_id,
                                 int(ability.responsible_player_id or 0),
                                 [spec.guid for spec in ability.metadata.targets],
-                                target_index)
+                                target_index, source_uid=ability.source_uid,
+                                battle_state=battle_state)
                             if authored is not None:
                                 candidates = tuple(authored)
                             else:

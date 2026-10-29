@@ -603,7 +603,8 @@ class NativeTriggerBackend:
                     template = graph.targets[explicit[0]].guid
                     candidates = authored_target_candidates(
                         db, session.session_id, source_card_owner,
-                        [target.guid for target in graph.targets], explicit[0])
+                        [target.guid for target in graph.targets], explicit[0],
+                        source_uid=source_uid, battle_state=battle_state)
                     if candidates is None:
                         candidates = legal_targets(
                             db, session.session_id, source_card_owner, template,

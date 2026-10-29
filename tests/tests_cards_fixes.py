@@ -1044,6 +1044,33 @@ def test_dream_eagle_look_reveals_then_offers_one_of_them(db):
                       ).fetchone()[0] == "warzone"
 
 
+def test_rowdy_look_counts_the_source_troops_cost(db):
+    """Dreamsmoke Diva's Rowdy looks at as many deck cards as the troop costs.
+
+    The look's authored amount is 0 and it adds the source card's cost, so a cost-3 troop
+    looks at three cards. A look that reads only the authored amount offers none.
+    """
+    from rules_port.targeting import authored_target_candidates
+
+    DIVA = "a3653641-89dd-4808-a1af-b194d0b7107a"
+    DIVA_AG = "2f46ca6a-e42d-48a3-6b49-1c5c17e65906"
+    SHARD = "cd41bd00-7585-4762-a721-6163bdaee3c3"
+    _copy_card(db, DIVA)
+    _copy_card(db, SHARD)
+    add_card(db, 900, 5, DIVA, loc="warzone")
+    for index in range(6):
+        add_card(db, 910 + index, 5, SHARD, loc="deck")
+        db.execute("UPDATE game_cards SET position=? WHERE card_uid=?",
+                   (index, 910 + index))
+    db.commit()
+    template_ids = json.loads(db.execute(
+        "SELECT target_template_ids FROM card_abilities_meta WHERE ability_guid=?",
+        (DIVA_AG,)).fetchone()[0])
+
+    look = authored_target_candidates(db, 1, 5, template_ids, 1, source_uid=900)
+    assert look == [910, 911, 912], look
+
+
 def test_ai_revealed_troop_in_hand_is_shown_to_the_human(db):
     """A troop the AI put into its hand from a public reveal stays visible to the human.
 

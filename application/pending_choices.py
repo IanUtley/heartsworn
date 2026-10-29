@@ -156,7 +156,7 @@ class PendingChoicesMixin:
             from rules_port.targeting import authored_target_candidates
             authored = authored_target_candidates(
                 _hc._db, session.session_id, prompt_owner_id,
-                all_target_ids, index)
+                all_target_ids, index, source_uid=source_uid, battle_state=bstate)
             if position < len(candidate_sets) and candidate_sets[position]:
                 uids = [int(u) for u in candidate_sets[position]]
             elif authored is not None:
