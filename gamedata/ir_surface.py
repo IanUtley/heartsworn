@@ -501,8 +501,12 @@ def cost_mod(variable: str) -> Typed:
     return T.CardCostModifier(input_value=T.EffectInputVariable(input_variable_name=variable))
 
 
-def attribute_mod(attribute: str, operation: str, value: int) -> Typed:
-    """A card's integer attribute changes by a number (``attribute_mod("Momentum", "Add", 1)``)."""
+def attribute_mod(attribute: str, operation: str, value: int | None = None, *, variable: str | None = None) -> Typed:
+    """A card's integer attribute changes by a number (``attribute_mod("Momentum", "Add", 1)``) or by a variable
+    (``attribute_mod("Momentum", "Add", variable="rageVal")``)."""
+    if variable is not None:
+        return T.IntAttrModifier(attribute=attribute, operation=operation,
+                                 value_field=T.EffectInputVariable(input_variable_name=variable))
     return T.IntAttrModifier(attribute=attribute, operation=operation, value=int(value))
 
 

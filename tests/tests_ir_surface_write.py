@@ -49,6 +49,12 @@ class SurfaceWriteTest(unittest.TestCase):
         self.assertIsInstance(surface.attribute_mod("Momentum", "Add", 1), T.IntAttrModifier)
         self.assertEqual(W.shorten("IntAttrModifier(attribute='Momentum', operation='Add', value=1)"),
                          "attribute_mod('Momentum', 'Add', 1)")
+        self.assertEqual(W.shorten("IntAttrModifier(attribute='Momentum', operation='Add', "
+                                   "value_field=EffectInputVariable(input_variable_name='rageVal'))"),
+                         "attribute_mod('Momentum', 'Add', variable='rageVal')")
+        ir_registry.clear()
+        read = P.loads("MOD = attribute_mod('Momentum', 'Add', variable='rageVal')")["MOD"]
+        self.assertEqual(read.to_record()["m_ValueField"]["m_InputVariableName"], "rageVal")
 
     def test_not_and_or_pick_the_class_their_parts_need(self):
         trigger = surface.card_matches(surface.troop_with("Soulcursed"))

@@ -320,10 +320,14 @@ def _attribute_of(args: list[str]) -> str | None:
 
 def _attribute_mod_of(args: list[str]) -> str | None:
     found = _keywords(args)
-    if not found or not {"attribute", "operation", "value"} <= set(found) \
-            or not set(found) <= {"attribute", "operation", "value"}:
+    if not found or not {"attribute", "operation"} <= set(found):
         return None
-    return f"attribute_mod({found['attribute']}, {found['operation']}, {found['value']})"
+    if set(found) == {"attribute", "operation", "value"}:
+        return f"attribute_mod({found['attribute']}, {found['operation']}, {found['value']})"
+    name = _variable_of(found["value_field"]) if set(found) == {"attribute", "operation", "value_field"} else None
+    if name is None:
+        return None
+    return f"attribute_mod({found['attribute']}, {found['operation']}, variable={name})"
 
 
 def _threshold_of(args: list[str]) -> str | None:
