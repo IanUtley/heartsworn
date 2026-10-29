@@ -318,6 +318,14 @@ def _attribute_of(args: list[str]) -> str | None:
     return _with_comparison(f"attribute_is({found['attribute']}, {found['value']}", found.get("comparison_op"))
 
 
+def _attribute_mod_of(args: list[str]) -> str | None:
+    found = _keywords(args)
+    if not found or not {"attribute", "operation", "value"} <= set(found) \
+            or not set(found) <= {"attribute", "operation", "value"}:
+        return None
+    return f"attribute_mod({found['attribute']}, {found['operation']}, {found['value']})"
+
+
 def _threshold_of(args: list[str]) -> str | None:
     found = _keywords(args)
     if not found or not {"color_flags", "required_quantity"} <= set(found) \
@@ -357,6 +365,7 @@ _SHORT_FORMS: dict[str, Any] = {
     "CardCostModifier": lambda args: _modifier_of(args, "cost_mod"),
     "HasSourceCastingCostFilter": _cost_of,
     "IntAttrFilter": _attribute_of,
+    "IntAttrModifier": _attribute_mod_of,
     "AbilityControllerHasThresholdAbilityCondition": _threshold_of,
     "AndCardFilter": _troop_of,
     "TriggerCardMatchesFilter": lambda args: _kind_of(args, "card_filter", "card_matches"),

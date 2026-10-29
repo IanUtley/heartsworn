@@ -501,6 +501,11 @@ def cost_mod(variable: str) -> Typed:
     return T.CardCostModifier(input_value=T.EffectInputVariable(input_variable_name=variable))
 
 
+def attribute_mod(attribute: str, operation: str, value: int) -> Typed:
+    """A card's integer attribute changes by a number (``attribute_mod("Momentum", "Add", 1)``)."""
+    return T.IntAttrModifier(attribute=attribute, operation=operation, value=int(value))
+
+
 def threshold(color: str, quantity: int, *, comparison: str = "GreaterThanOrEqual") -> Typed:
     """The ability's controller has ``quantity`` of a colour's threshold: "[SAPPHIRE]: 2 sapphire threshold"."""
     return T.AbilityControllerHasThresholdAbilityCondition(color_flags=color, required_quantity=int(quantity),
@@ -539,6 +544,7 @@ FACTORIES: dict[str, Any] = {
     "def_mod": def_mod,
     "atk_mod": atk_mod,
     "cost_mod": cost_mod,
+    "attribute_mod": attribute_mod,
     "cost_is": cost_is,
     "attribute_is": attribute_is,
     "ability": ability,
