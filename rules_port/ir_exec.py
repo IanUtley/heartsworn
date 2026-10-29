@@ -1574,6 +1574,13 @@ def _move_cards(root: MechanicsObject, clause: Any, effect_raw: dict[str, Any], 
     (rules_port.context move_card_to_zone), with the target passed explicitly and the caster bridged for the leaf."""
     context = scope.context
     targets = _targets(root, int(_field(clause, "m_TargetTemplateIndex") or 0), scope)
+    destination = _short(effect_raw.get("m_DestinationCollection")).lower()
+    if destination in ("", "none"):
+        # The zone the triggering card entered (the event's destination), as the native move names it.
+        destination = str(scope.event.get("to") or "").lower()
+        if destination not in MOVE_DESTINATIONS:
+            raise NotImplementedError(f"move into the entered zone {destination or 'unknown'}")
+        effect_raw = dict(effect_raw, m_DestinationCollection=destination)
     previous_template = context.effect_template_override
     context.effect_template_override = effect_raw
     try:
@@ -2142,7 +2149,9 @@ def coverage(guid: str) -> list[str]:
             continue
         if kind == "MoveCardToZoneEffectTemplate":
             destination = _short(effect.get("m_DestinationCollection")).lower()
-            if destination not in MOVE_DESTINATIONS:
+            # "put it into that zone": a move with no authored zone goes to the zone the triggering card entered.
+            entered = destination in ("", "none") and trigger == "CardEnteredZoneEvent"
+            if destination not in MOVE_DESTINATIONS and not entered:
                 missing.append(f"move to {destination or 'no zone'}")
             if str(effect.get("m_AllCardsOfTargetInZone") or "None") not in ("None", ""):
                 missing.append("move of every card in a zone")

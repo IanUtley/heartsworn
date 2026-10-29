@@ -3254,3 +3254,37 @@ def test_kismet_reverie_makes_one_unlucky_sack_per_champion(db):
             unlucky[user] = unlucky.get(user, 0) + 1
     assert len(sacks) == 6, sacks
     assert sum(unlucky.values()) == 1, (sacks, unlucky)
+
+
+def test_entered_zone_move_puts_the_top_card_into_the_zone_the_card_entered(db):
+    """"When this enters your hand, put the top card of your deck into that zone": the move's zone is the zone the
+    triggering card entered, not a fixed one, so a card that entered the hand gives the deck's top card to the hand."""
+    from rules_port import ir_exec
+    from rules_port.context import EffectContext
+
+    CARD = "a9a1830e-db67-47c0-a668-e4121ff894ac"
+    SHARD = "cd41bd00-7585-4762-a721-6163bdaee3c3"
+    _copy_card(db, CARD)
+    _copy_card(db, SHARD)
+    add_card(db, 900, 5, CARD, loc="hand")
+    for index in range(3):
+        add_card(db, 910 + index, 5, SHARD, loc="deck")
+        db.execute("UPDATE game_cards SET position=? WHERE card_uid=?", (index, 910 + index))
+    db.commit()
+
+    pl_t = game_engine.UID.make(244, 5)
+    ai_t = game_engine.UID.make(3, 1000)
+    game = game_engine.Game(1, pl_t, ai_t)
+    handler = HandlerStub(db)
+    handler._champion_targets = lambda: [
+        (10001, 5, "Controller", 20), (10002, 0, "Opponent", 20)]
+    bstate = {"player_health": 20, "ai_health": 20, "turn_number": 1,
+              "resolving_owner_id": 5, "resolving_source_uid": 900,
+              "champ_map": {5: 10001, 0: 10002}}
+    context = EffectContext.from_rules_port(
+        game, SessionStub(), db, handler, pl_t, ai_t, bstate, CARD, ability=None)
+    ir_exec.run_ability(CARD, "CardEnteredZoneEvent", context=context, source_uid=900, owner_uid=5,
+                        event={"player": 5, "to": "Hand", "card": 900})
+
+    top = db.execute("SELECT location FROM game_cards WHERE card_uid=910").fetchone()[0]
+    assert top == "hand", top
