@@ -335,19 +335,23 @@ def ability(text: str, *, on: dict[str, str] | None = None, when: Typed | None =
     if record is None:
         # A new ability: the boilerplate the Records give an ability with no special rules.
         obj.ignores_chain = 1
-        obj.serialized_tac = {"data": "AgAAAAAA"}
         for field in EMPTY_REF_FIELDS:
             setattr(obj, field, _ref(ZERO_GUID))
-        obj.m_AICustomAbilityEvaluator = []
-        obj._record_order = [*T.AbilityTemplate.fields, "m_AICustomAbilityEvaluator"]
+        for name, value in BOILERPLATE.items():
+            setattr(obj, name, value)
+        obj._record_order = [*T.AbilityTemplate.fields, *BOILERPLATE]
         return obj
     return _fill(obj, record, values)
 
 
+# Fields every ability carries whatever its rules are, so the text leaves them out and they are filled in here.
+BOILERPLATE: dict[str, Any] = {"m_AICustomAbilityEvaluator": []}
+
+
 def _explicit_ability(text: str, id_: str | None, fields: dict[str, Any]) -> Typed:
-    """An ability from its own fields. Nothing is filled in but the name and ID, so every stored
-    value is the one written; fields the constructor does not name are kept as ``_deprecated``."""
-    deprecated = dict(fields.pop("_deprecated", {}))
+    """An ability from its own fields. Nothing is filled in but the name, the ID and the boilerplate, so every
+    other stored value is the one written; fields the constructor does not name are kept as ``_deprecated``."""
+    deprecated = {**BOILERPLATE, **fields.pop("_deprecated", {})}
     for field in EMPTY_REF_FIELDS:
         fields.setdefault(ir_name(field), _ref(ZERO_GUID))
     if "ability_target_template_ids" in fields:
@@ -376,10 +380,7 @@ def card_matches(card_filter: Typed) -> Typed:
 
 def troop_with(attribute: str) -> Typed:
     """A troop with an integer attribute of at least 1 (``troop_with("Soulcursed")``)."""
-    return T.AndCardFilter(target_filters=[
-        T.IsTroop(),
-        T.IntAttrFilter(attribute=attribute, comparison_op="GreaterThanOrEqual", value=1),
-    ])
+    return T.AndCardFilter(target_filters=[T.IsTroop(), attribute_is(attribute, 1)])
 
 
 def and_(*conditions: Typed) -> Typed:
@@ -390,7 +391,37 @@ def and_(*conditions: Typed) -> Typed:
 # GUID, so an ability refers to it instead of writing the effect out.
 SHARED_EFFECTS: dict[str, str] = {
     "PLAY_FOR_FREE": "83f2845c-f200-032c-662c-3262cd5e79c7",
+    "PLUS_1_ATTACK": "7c00113b-fef7-957b-0444-dd5a77a7ae25",
+    "PLUS_1_DEFENSE": "f90b4b7c-9a6e-3072-1404-4cbd8dde1e7c",
+    "PLUS_2_ATTACK": "8e0ffd26-c71b-0fb8-2e94-00c8751bc97d",
+    "PLUS_2_DEFENSE": "5a7a65d9-527d-eaa8-bcac-8f86763c1ceb",
+    "PLUS_3_ATTACK": "b30ae9c3-4cbc-e85c-ddc5-f4e89b6834af",
+    "MINUS_1_ATTACK": "ffb1bbc2-c8b9-c679-c12d-223674f19b21",
+    "COST_MINUS_1": "4d5acf22-b1ea-adc9-9f92-6c7367185019",
+    "VOID_ALL_ACTIONS": "c82ca6c8-7979-398e-53be-a39dd318f000",
+    "TARGET_THE_REMEMBERED": "619aafc3-25b4-4457-fed9-70c0be527555",
+    "TARGET_IT": "243848a3-5b51-aa7a-4c15-fa4b01bf9887",
+    "DRAW_A_CARD": "3a099fff-dbc9-06c9-65bc-8ae87bbfcb0f",
+    "DISCARD_A_CARD": "96f1a81e-d9cc-32cb-c394-07916af5e54e",
+    "DESTROY_TARGET_TROOP": "53d2ee04-7d60-9cae-1093-81b2bb1eba58",
+    "EXHAUST_TARGET_OPPOSING_TROOP": "56494baf-f133-f8b3-5f8e-f3b736dba824",
+    "REVERT_TARGET_TROOP": "bfa8a6b2-ed38-177f-1b1d-a34cd92f9e69",
+    "FORGET_ALL_CARDS": "466da7d5-8011-b6eb-4c11-454f195e72ed",
+    "REMEMBER_TARGET_OPPOSING_CHAMPION_OR_TROOP": "10bbd59b-c642-39e0-f5cf-f6f7d4a84d23",
+    "PUT_CHOICE_ZONE_INTO_RESOURCES": "5569e62c-545a-cd52-85be-b1464d634a49",
+    "PREVIOUS_TARGET_DEALS_DAMAGE": "05948871-0785-3213-7e71-1e3592bb6ce8",
+    "INVOKE_DISCARD_A_CARD_AT_RANDOM": "05b6b0c5-f9cf-ac6f-4373-d13a94e6a99b",
 }
+
+
+def cost_is(cost: int, *, comparison: str = "GreaterThanOrEqual") -> Typed:
+    """The source card's casting cost compares to a number (``cost_is(3)``: a cost of 3 or more)."""
+    return T.HasSourceCastingCostFilter(casting_cost=int(cost), comparison_op=comparison)
+
+
+def attribute_is(attribute: str, value: int, *, comparison: str = "GreaterThanOrEqual") -> Typed:
+    """A card's integer attribute compares to a number (``attribute_is("Soulcursed", 1)``)."""
+    return T.IntAttrFilter(attribute=attribute, comparison_op=comparison, value=int(value))
 
 
 def threshold(color: str, quantity: int, *, comparison: str = "GreaterThanOrEqual") -> Typed:
@@ -428,6 +459,8 @@ FACTORIES: dict[str, Any] = {
     "deal_damage": deal_damage,
     "add_counter": add_counter,
     "threshold": threshold,
+    "cost_is": cost_is,
+    "attribute_is": attribute_is,
     "ability": ability,
     "card_enters": card_enters,
     "card_matches": card_matches,

@@ -245,6 +245,11 @@ def ability_text(guid: str, name: str = "ABILITY") -> str:
         if key in ("_t", "_v") or key in HEADER:
             continue
         value = getattr(root, key)
+        if key in surface.BOILERPLATE:
+            # Written only where the stored value differs from the boilerplate the explicit path fills in.
+            if value != surface.BOILERPLATE[key]:
+                deprecated[key] = value
+            continue
         if key not in argument_of:
             deprecated[key] = value
             continue
