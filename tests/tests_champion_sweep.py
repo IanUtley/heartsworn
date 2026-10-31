@@ -1192,6 +1192,12 @@ def _run_case(db, metadata, path, *, option_check=True):
     graph = _metadata_graph(metadata)
     board = _seed_board(db, metadata)
     state = _new_state(metadata)
+    # Player troops that already dealt damage to an opposing champion this turn (for "that dealt damage" counts).
+    from rules_port.statistics import add_card_stat as _add_card_stat
+    for (_uid,) in db.execute(
+            "SELECT card_uid FROM game_cards WHERE session_id=? AND user_id=? AND location='warzone' "
+            "AND COALESCE(is_champion,0)=0 ORDER BY card_uid LIMIT 1", (SESSION_ID, PLAYER_PID)):
+        _add_card_stat(state, int(_uid), PLAYER_PID, "DamageDealtToOpponent", 1)
     handler = PvPHandlerStub(
         db, metadata["champion_guid"], board["champion_abilities"])
     handler._current_bstate = state
