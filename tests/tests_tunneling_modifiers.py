@@ -127,7 +127,87 @@ def test_megahulk_reduced_below_zero_surfaces():
     assert history == [(1, 3, 0)], history
 
 
+
+
+
+SUB_ABILITY = "9543d275-f046-d225-e1be-af514335adca"
+SUB_TARGET_TEMPLATE = "bd2d0a91-be12-76d0-b183-786b16c928cc"
+SECOND_TROOP = 0x702
+
+
+def _choice_board(db):
+    """The player's Excavation Bot is in play. Two of the player's troops are underground: the Megahulk and a second
+    Robot, so the Deploy must ask the player which one to target rather than pick one."""
+    db.execute("DELETE FROM game_cards")
+    matrix._insert_card(db, HULK, matrix.PLAYER_OWNER, "underground", MEGAHULK, 0)
+    matrix._insert_card(db, SECOND_TROOP, matrix.PLAYER_OWNER, "underground", CHARGE_BOT, 0)
+    matrix._insert_card(db, BOT_UID, matrix.PLAYER_OWNER, "warzone", EXCAVATION_CARD, 0)
+    db.commit()
+
+
+def _resolve_choice(db, target_map):
+    import db as db_module
+    previous_default = db_module._db
+    db_module._db = db
+    handler = matrix.HandlerStub(db)
+    session = matrix.SessionStub()
+    state = matrix._new_state(handler)
+    state["turn_player"] = "player"
+    state["resolving_owner_id"] = matrix.PLAYER_OWNER
+    state["resolving_source_uid"] = BOT_UID
+    with contextlib.redirect_stdout(io.StringIO()):
+        game = handler._fresh_game(session, matrix.PLAYER_UID, matrix.AI_UID, state)
+        resolve_port_ability(handler, game, session, db, matrix.PLAYER_UID, matrix.AI_UID,
+                             state, SUB_ABILITY, BOT_UID, matrix.PLAYER_OWNER, target_map=target_map)
+        matrix._drain_triggers(handler, game, session, db, state)
+    db_module._db = previous_default
+    return state
+
+
+def _counters_of(db, uid):
+    buffs = json.loads(db.execute(
+        "SELECT permanent_buffs FROM game_cards WHERE card_uid=?", (uid,)).fetchone()[0] or "{}")
+    return int((buffs.get("counters", {}) or {}).get("tunneling", 0))
+
+
+OPPOSING_TROOP = 0x703
+
+
+def test_excavation_deploy_adds_counters_only_to_the_chosen_underground_troop():
+    """The Deploy's target is one of your own underground troops, chosen by you. Nothing is picked for you, and a
+    troop that is not yours or not underground is refused."""
+    db = sqlite3.connect(matrix.SRC)
+    db.row_factory = sqlite3.Row
+    _choice_board(db)
+    matrix._insert_card(db, OPPOSING_TROOP, matrix.AI_OWNER, "underground", CHARGE_BOT, 0)
+    db.commit()
+    # No choice made: the engine does not pick an underground troop for the player.
+    _resolve_choice(db, {})
+    assert (_counters_of(db, HULK), _counters_of(db, SECOND_TROOP)) == (0, 0)
+    # Choose the Megahulk: it gets two counters, the other troop none.
+    _resolve_choice(db, {0: [HULK]})
+    assert (_counters_of(db, HULK), _counters_of(db, SECOND_TROOP)) == (2, 0)
+    # Choose the second Robot instead.
+    db = sqlite3.connect(matrix.SRC)
+    db.row_factory = sqlite3.Row
+    _choice_board(db)
+    _resolve_choice(db, {0: [SECOND_TROOP]})
+    assert (_counters_of(db, HULK), _counters_of(db, SECOND_TROOP)) == (0, 2)
+    # The choices offered are your own underground troops: the opposing troop is not among them.
+    from rules_port.targeting import legal_targets
+    db = sqlite3.connect(matrix.SRC)
+    db.row_factory = sqlite3.Row
+    _choice_board(db)
+    matrix._insert_card(db, OPPOSING_TROOP, matrix.AI_OWNER, "underground", CHARGE_BOT, 0)
+    db.commit()
+    offered = legal_targets(db, 1, matrix.PLAYER_OWNER, SUB_TARGET_TEMPLATE, BOT_UID,
+                            both_players=True, champions=[], battle_state={})
+    assert set(offered) == {HULK, SECOND_TROOP}, offered
+
+
 if __name__ == "__main__":
+    test_excavation_deploy_adds_counters_only_to_the_chosen_underground_troop()
+    print("PASS Excavation Bot Deploy targets only the chosen underground troop")
     test_megahulk_tunneling_counts_down_from_printed_value()
     test_megahulk_reduced_below_zero_surfaces()
     print("ok")
