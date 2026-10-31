@@ -112,7 +112,22 @@ def _db():
     # Session state is written from HConnect while the separate tournament
     # scheduler may be updating the same WAL database.  Use the same wait
     # policy as db.py so a transient writer collision does not abort a turn.
+    if _DB_PATH == ":memory:":
+        # A new ":memory:" connection is an empty database; use the shared connection that holds the schema.
+        # Callers close what they open, so the shared connection is handed out with close() disabled.
+        return _SharedMemoryConnection(connection_db._db)
     return connection_db.connect(_DB_PATH)
+
+
+class _SharedMemoryConnection:
+    def __init__(self, conn):
+        self._conn = conn
+
+    def __getattr__(self, name):
+        return getattr(self._conn, name)
+
+    def close(self):
+        pass
 
 
 def _next_instance(conn=None):

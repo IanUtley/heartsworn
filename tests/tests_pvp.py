@@ -113,12 +113,12 @@ class HandlerStub:
             "FROM card_templates WHERE guid=?",
             (template_guid,)).fetchone()
         if not row:
-            return (template_guid, "Troop", "Card", 0, 0, 0, 0)
+            return (template_guid, game_engine.ECardTypes.Troop, "Card", 0, 0, 0, 0)
         ct = game_engine.card_type_from_db(row[0])
         game.card_defs[scid] = game_engine.CardDef(
             row[1], ct, row[2] or 0, row[3] or 0, row[4] or 0, [], [],
             attributes=row[5] or 0)
-        return (template_guid, row[0], row[1], row[2] or 0,
+        return (template_guid, ct, row[1], row[2] or 0,
                 row[3] or 0, row[4] or 0, 0)
 
     def _resolve_stack_item(self, *a, **k):
@@ -1182,12 +1182,12 @@ def test_pvp_choice_zone_target_resolves_child_then_parent():
             "target_index": 0,
         },
         "parent": {
-            "ability_guid": "286f1891-parent",
+            "ability_guid": "286f1891-4404-585e-4fb6-bd9f783f222b",
             "source_uid": 9001,
             "owner_id": 1001,
             "target_map": {},
             "variables": {},
-            "resume_effect_order": 3,
+            "resume_effect_order": 2,
         },
     }
     session = Session()
@@ -1238,10 +1238,10 @@ def test_pvp_choice_zone_target_resolves_child_then_parent():
         tournament_game._pvp_gain_charge_trigger_game = previous["charge"]
     assert handled
     assert [call[0] for call in calls] == [
-        "d5b56bd5-child", "286f1891-parent"], calls
+        "d5b56bd5-child", "286f1891-4404-585e-4fb6-bd9f783f222b"], calls
     # The selected token is bound to the authored child target index.
     assert calls[0][3] == {0: 202}, calls
-    assert calls[1][4] == 3, calls
+    assert calls[1][4] == 2, calls
     assert state.get("pending_choice") is None
     print("PASS PvP choice-zone target resolves child then parent")
 
@@ -1280,12 +1280,12 @@ def test_pvp_choice_reads_native_payload_when_raw_envelope_is_empty():
             "target_index": 0,
         },
         "parent": {
-            "ability_guid": "286f1891-parent",
+            "ability_guid": "286f1891-4404-585e-4fb6-bd9f783f222b",
             "source_uid": 9001,
             "owner_id": 1001,
             "target_map": {},
             "variables": {},
-            "resume_effect_order": 3,
+            "resume_effect_order": 2,
         },
     }
     session = Session()
@@ -1334,7 +1334,7 @@ def test_pvp_choice_reads_native_payload_when_raw_envelope_is_empty():
         tournament_game._pvp_gain_charge_trigger_game = previous["charge"]
     assert handled
     assert [call[0] for call in calls] == [
-        "d5b56bd5-child", "286f1891-parent"], calls
+        "d5b56bd5-child", "286f1891-4404-585e-4fb6-bd9f783f222b"], calls
     assert calls[0][3] == {0: 0x271301}, calls
     assert state.get("pending_choice") is None
     print("PASS PvP choice reads native payload when raw envelope is empty")

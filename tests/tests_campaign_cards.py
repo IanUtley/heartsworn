@@ -30,6 +30,8 @@ def test_card_overlay_shadows_assigns_and_reverts():
     cards.CUSTOM_DIR = work
     cards.CUSTOM_CARDS_PATH = work / "CardTemplates.json"
     cards.CUSTOM_SETS_PATH = work / "CardSetTemplate.json"
+    # The editor hides custom sets by default (cards.SHOW_CUSTOM_SETS); this test exercises them, so show them here.
+    cards.SHOW_CUSTOM_SETS = True
     cards._CACHE.clear()
     db = sqlite3.connect(":memory:")
     db.execute("CREATE TABLE card_templates (guid TEXT, set_guid TEXT, name TEXT, rarity TEXT, "
@@ -158,8 +160,9 @@ def test_card_keywords_and_int_attributes():
     after = json.loads((work / "CardTemplates.json").read_text(encoding="utf-8"))[0]
     assert after["m_AttributeFlags"] == "FirstStrike"
     assert card_attributes.tac_ints(after["m_SerializedTAC"]["data"]) == {"Lethal": 1}
+    # A save always records the socket count (cards.py: m_SocketCount = len(sockets)); this fixture has none, so 0.
     assert {k for k in set(after) | set(before) if after.get(k) != before.get(k)} == {
-        "m_AttributeFlags", "m_SerializedTAC"}
+        "m_AttributeFlags", "m_SerializedTAC", "m_SocketCount"}
 
 
 def test_set_incdata_holds_the_done_cards():

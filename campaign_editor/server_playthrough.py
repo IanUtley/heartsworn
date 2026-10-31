@@ -162,6 +162,7 @@ def run(race: str, zones: set[str], verbose: bool = False,
                     class Session:
                         session_name = f"camp_{camp_id}"
                         session_id = 0
+                        turn_order = None
                     won = not lose_first
                     lose_first = False
                     campaign.handle_battle_gameend(handler, db, Session(), won, 1)
@@ -300,6 +301,7 @@ def _starter_run(db, campaign, handler, responses, pushes, champ_id, camp_id, ro
             class Session:
                 session_name = f"camp_{camp_id}"
                 session_id = 0
+                turn_order = None
             pushes.clear()
             campaign.handle_battle_gameend(handler, db, Session(), True, 1)
             call(campaign._handle_gameend, {"Winners": [1], "Losers": []})
@@ -361,6 +363,7 @@ def _explore_core(db, campaign, rules_loader, handler, responses, pushes,
                     class Session:
                         session_name = f"camp_{camp_id}"
                         session_id = 0
+                        turn_order = None
                     pushes.clear()
                     campaign.handle_battle_gameend(handler, db, Session(), True, 1)
                     call(campaign._handle_gameend, {"Winners": [1], "Losers": []})

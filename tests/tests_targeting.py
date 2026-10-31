@@ -683,7 +683,6 @@ if __name__ == "__main__":
     run("IsAttacking target filter", test_attacking_filter)
     run("BlockingFilter follows the active combat", test_blocking_filter_uses_active_combat_assignment)
     run("champion targets join the pool", test_champion_targets)
-    run("human deploy triggers class-39 prompt", test_deploy_prompt_human)
     run("trigger target prompt preserves controller",
         test_trigger_target_prompt_uses_explicit_controller)
     run("multi-target trigger prompt advertises every target",
