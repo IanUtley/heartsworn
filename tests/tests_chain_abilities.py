@@ -3494,8 +3494,11 @@ def test_hand_card_shows_its_current_cost(db):
     """The client shows the cost the server last pushed for a hand card;
     board-dependent static costs (Pterobot) must be re-pushed."""
     import hconnect_server as hcs
+    import db as db_module
     # The cards and the queries that read them must share the test database.
+    previous_default = db_module._db
     hcs._db = db
+    db_module._db = db
     live = db
     session_id = 97531
     ptero, bot = "bef4c375-71cd-4cd7-a8b6-8f7ef6cf6bad", "02ed9695-207a-4c23-a3f8-13c7b001203d"
@@ -3539,6 +3542,7 @@ def test_hand_card_shows_its_current_cost(db):
     assert pushed[-1] == (0x101, 7), pushed
     live.execute("DELETE FROM game_cards WHERE session_id=?", (session_id,))
     live.commit()
+    db_module._db = previous_default
 
 
 AG_GEARSMITH_DEPLOY = "8f2d3151-c6c2-1831-27e6-7bc96df000e5"
@@ -3717,6 +3721,9 @@ def _tamed_board(db):
         source_card_id=0x501, source_player_id=0,
         data={"event_source_collection": "CastSpells",
               "event_destination_collection": "warzone"})
+    # Writes on a plain test connection do not move the server's board-write counter, which the card memo keys on.
+    import db as _db_module
+    _db_module._note_write()
     return handler, bstate
 
 
