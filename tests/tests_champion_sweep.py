@@ -1042,9 +1042,19 @@ def _drain_stack(db, handler, session, state, game):
     raise ChampionSweepFailure("native PvP stack exceeded 256 resolutions")
 
 
+_REVEALED_KINDS = ("revealed_troop", "revealed_card")
+
+
 def _pending_choices(state):
     pending = state.get("pending_choice")
     if not isinstance(pending, dict):
+        # A revealed-card pick is stored as a deck-search continuation, with its candidates.
+        revealed = state.get("pending_deck_search")
+        if isinstance(revealed, dict) and revealed.get("kind") in _REVEALED_KINDS:
+            values = [int(c) for c in revealed.get("candidates") or ()]
+            if not values:
+                raise ChampionSweepFailure(f"revealed continuation {revealed.get('kind')!r} has no candidates")
+            return revealed, values
         return None, []
     values = []
     for value in pending.get("choice_uids") or ():
@@ -1380,12 +1390,20 @@ def _run_case(db, metadata, path, *, option_check=True):
             raise ChampionSweepFailure(
                 f"{metadata['ability_guid']}: invalid choice path {path!r}")
         state["trace_ability_resolution"] = True
-        # "Target opposing champion chooses one" hands the choice to the
-        # opponent; answer as whoever owns the pending choice.
-        tournament_game._pvp_resolve_choice(
-            handler, session, b"", int(pending.get("owner_id") or PLAYER_PID),
-            typed_payload={"activation_data": {
-                "target_map": {0: [int(selected_uid)]}}})
+        if pending.get("kind") in _REVEALED_KINDS:
+            # The client answers a revealed pick through the revealed-choice handler, keyed by its continuation's target.
+            target_index = int((pending.get("continuation") or {}).get("target_index", 0) or 0)
+            tournament_game._pvp_resolve_revealed_choice(
+                handler, session, b"", int(pending.get("owner_id") or PLAYER_PID),
+                typed_payload={"activation_data": {
+                    "target_map": {target_index: [int(selected_uid)]}}})
+        else:
+            # "Target opposing champion chooses one" hands the choice to the
+            # opponent; answer as whoever owns the pending choice.
+            tournament_game._pvp_resolve_choice(
+                handler, session, b"", int(pending.get("owner_id") or PLAYER_PID),
+                typed_payload={"activation_data": {
+                    "target_map": {0: [int(selected_uid)]}}})
         if not state.get("resolution_paused"):
             _drain_stack(db, handler, session, state, game)
 
@@ -1424,7 +1442,7 @@ def _run_choice_paths(db, metadata, prefix=(), max_depth=8):
             f"{metadata['ability_guid']}: choice continuation exceeded "
             f"{max_depth} levels")
     kind = str(result["pending"].get("kind") or "")
-    if kind not in {"choice_zone_target", "choice_zone_copy", "double_choice"}:
+    if kind not in {"choice_zone_target", "choice_zone_copy", "double_choice", *_REVEALED_KINDS}:
         if kind in {"conversation", "trigger", "revealed_choice",
                     "discard_continuation", "discard_ability", "deck_search"}:
             _SWEEP_STATS["non_choice_continuation"] += 1
