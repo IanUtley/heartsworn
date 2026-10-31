@@ -101,6 +101,11 @@ class PvPHandlerStub(HandlerStub):
         self._player_champ_guid = champion_guid
         self._player_champ_abilities = list(champion_abilities)
 
+    def _push_discard_prompt(self, *args, **kwargs):
+        # The production prompt (the stub in HandlerStub is a no-op): a human discarder gets the hand picker.
+        from application.combat import CombatMixin
+        return CombatMixin._push_discard_prompt(self, *args, **kwargs)
+
     def _champion_targets(self):
         state = getattr(self, "_current_bstate", None) or {}
         return [
@@ -1158,6 +1163,31 @@ def _rulesport_champion_activation(db, metadata, state, source_uid, target_map, 
     return session._rules_port_battle_state
 
 
+
+def _answer_discard_prompts(db, handler, session, state, game):
+    """Answer a hand-discard prompt the way the client does: pick the first card in the discarding player's hand."""
+    for _ in range(8):
+        # The discard prompt lives in the shared PvP state the answer reads, not necessarily in this trigger's dict.
+        state = tournament_game.pvp_load_state(session) or state
+        native = state.get("pending_discard_continuation")
+        if not isinstance(native, dict):
+            return
+        from gamedata import DEFAULT_RECORD_STORE, ability_graph
+        owner = int(native.get("owner_id", PLAYER_PID) or PLAYER_PID)
+        child = ability_graph(DEFAULT_RECORD_STORE, str(native.get("ability_guid") or "").lower())
+        target_guid = str(state.get("pending_discard_target_template") or "").lower()
+        index = next((i for i, t in enumerate(child.targets) if str(t.guid).lower() == target_guid), None) \
+            if child is not None else None
+        hand = [int(row[0]) for row in db.execute(
+            "SELECT card_uid FROM game_cards WHERE session_id=? AND user_id=? AND location IN ('hand','choosing') "
+            "ORDER BY card_uid", (SESSION_ID, owner))]
+        if index is None or not hand:
+            return
+        tournament_game._pvp_resolve_discard_prompt(
+            handler, session, b"", owner,
+            typed_payload={"activation_data": {"target_map": {index: [hand[0]]}}})
+        _drain_stack(db, handler, session, state, game)
+
 def _run_case(db, metadata, path, *, option_check=True):
     graph = _metadata_graph(metadata)
     board = _seed_board(db, metadata)
@@ -1321,6 +1351,7 @@ def _run_case(db, metadata, path, *, option_check=True):
         if not state.get("resolution_paused"):
             _drain_stack(db, handler, session, state, game)
 
+    _answer_discard_prompts(db, handler, session, state, game)
     settled_skipped = _fixture_skippable_guids(
         db, graph, handler, state, source_uid)
     fixture_skipped = set(pre_skipped) | set(settled_skipped)
