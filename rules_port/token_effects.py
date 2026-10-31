@@ -379,6 +379,8 @@ def _matching_template_candidates(context, card_filter, banned_guids=(),
                                       or threshold_data.get("values") or [])],
                      "thresholds": candidate_thresholds,
                      "subtype": row[6] or "",
+                     # IsSocketable reads the template's socket count (row[8]); without it a socket filter never matches.
+                     "socket_count": int(row[8] or 0) if len(row) > 8 else 0,
                      "attributes": int(row[7] or 0), "user_id": owner,
                      # Printed stats for HasAttackValue/HasDefenseValue
                      # pools (Tashi One-Horn's random 1/1 troop).
