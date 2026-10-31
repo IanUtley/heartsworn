@@ -773,6 +773,9 @@ def _effect_contract_error(effect, trace, graph=None):
             _field(template, "m_CardCollection", "warzone"))
         if destination in {"", "unknown"}:
             destination = "warzone"
+        # A per-occurrence count ("for each bspiderling that entered this turn") that resolves to zero summons nothing.
+        if str(trace.get("result") or "").strip() == "summoned 0 token(s)":
+            return None
         new_warzone = [
             change for change in trace.get("card_changes") or ()
             if not change.get("before") and
