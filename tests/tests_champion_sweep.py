@@ -46,7 +46,7 @@ from rules_port.coverage import NATIVE_EFFECTS, STRUCTURAL_EFFECTS
 from rules_port.resolution import resolve_port_ability, resolve_port_trigger
 from rules_port.targeting import legal_targets_for
 from rules_port.triggers import TriggerEvent, dispatch_native_trigger
-from tests.tests_combat import HandlerStub
+from tests.tests_combat import HandlerStub, add_card
 
 
 SESSION_ID = 1
@@ -419,6 +419,36 @@ def _metadata_graph(metadata):
     return graph
 
 
+
+_SATISFY_ZONES = ("warzone", "discard", "void", "deck", "hand", "underground")
+
+
+def _satisfy_target(db, target, source_uid, handler, state):
+    """Add one card the target's filter accepts, so a required target exists. The engine is the judge: a template is
+    kept only if it becomes a legal target in one of the target's zones."""
+    from rules_port.targeting import template_zones, target_template
+    template = target_template(db, target.guid)
+    allowed = [zone for zone in _SATISFY_ZONES
+               if zone in {str(z).lower() for z in template_zones(template)}] if template else []
+    templates = [row[0] for row in db.execute(
+        "SELECT guid FROM card_templates WHERE COALESCE(is_pve,0)=0 AND COALESCE(no_pvp,0)=0 "
+        "AND COALESCE(equipment_modified,0)=0 AND card_type NOT LIKE '%Choice%' ORDER BY guid LIMIT 1500")]
+    next_uid = 90000
+    for zone in allowed:
+        for tpl in templates:
+            uid = next_uid
+            add_card(db, uid, PLAYER_PID, tpl, zone)
+            champions = handler._champion_targets()
+            legal = legal_targets_for(
+                db, SESSION_ID, PLAYER_PID, target, source_uid,
+                both_players=True, champions=champions, battle_state=state)
+            if uid in {int(x) for x in legal}:
+                return [int(x) for x in legal]
+            db.execute("DELETE FROM game_cards WHERE session_id=? AND card_uid=?", (SESSION_ID, uid))
+            db.commit()
+            next_uid += 1
+    return []
+
 def _target_map(db, graph, handler, state, source_uid):
     """Bind every available explicit target from the typed target graph."""
     champions = handler._champion_targets()
@@ -433,6 +463,8 @@ def _target_map(db, graph, handler, state, source_uid):
             db, SESSION_ID, PLAYER_PID, target, int(source_uid),
             both_players=True, champions=champions, battle_state=state)
         minimum = int(getattr(target, "minimum", 0) or 0)
+        if not candidates and not (getattr(target, "optional", False) or minimum == 0):
+            candidates = _satisfy_target(db, target, int(source_uid), handler, state)
         if not candidates:
             if getattr(target, "optional", False) or minimum == 0:
                 continue
