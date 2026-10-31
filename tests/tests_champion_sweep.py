@@ -796,7 +796,8 @@ def _effect_contract_error(effect, trace, graph=None):
 
 
 def _target_has_no_candidates(db, graph, handler, state, source_uid, effect):
-    """True when an automatic effect target enumerates nothing on the board."""
+    """True when an effect's target enumerates nothing on the board: an automatic target, or an optional choice that
+    therefore resolves to nothing."""
     try:
         index = int(getattr(effect, "target_index", -1))
     except (TypeError, ValueError):
@@ -828,7 +829,10 @@ def _target_has_no_candidates(db, graph, handler, state, source_uid, effect):
                 or (state.get("stored_targets_by_card") or {})):
             return False
         return True
-    if kind in _SPECIAL_TARGET_KINDS or not getattr(target, "is_auto", False):
+    optional_choice = (not getattr(target, "is_auto", False) and
+                       (getattr(target, "optional", False) or
+                        int(getattr(target, "minimum", 0) or 0) == 0))
+    if kind in _SPECIAL_TARGET_KINDS or not (getattr(target, "is_auto", False) or optional_choice):
         return False
     from rules_port.targeting import target_uses_both_players
     try:
