@@ -23,8 +23,9 @@ Measured with `tools/ir_coverage/ir_gap_report.py` over the 8,996 `AbilityTempla
 | Refused by `coverage()` | 1,788 (19.9%) |
 | Coverage check raises (bad Records data) | 1 |
 
-The interpreter is off by default. It runs only when `HEX_IR_ENGINE=1` is set at start-up, or `!irengine on` is
-sent in game. The equivalence harness (`tests/ir_equivalence.py`) confirms that covered abilities leave the same
+The interpreter is on by default in `restart.sh` and the Docker image (`HEX_IR_ENGINE=1`); set `HEX_IR_ENGINE=0` to
+turn it off at start-up. The code default is still off, so tests and imports that do not go through those launchers
+run the native resolver. `!irengine on|off` changes it in game. The equivalence harness (`tests/ir_equivalence.py`) confirms that covered abilities leave the same
 battle state as the live engine, but it only covers turn and trigger-event abilities, and it cannot yet build a
 scenario for most setup abilities.
 

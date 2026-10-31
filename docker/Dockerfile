@@ -83,6 +83,9 @@ EXPOSE 9933 8081 8765
 HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
     CMD ["python3", "/hex/docker/healthcheck.py"]
 
+# The IR interpreter engine is on by default. Override with -e HEX_IR_ENGINE=0 to run the native resolver.
+ENV HEX_IR_ENGINE=1
+
 # Supervisor entrypoint: keep all services under one process supervisor.
 COPY docker/docker_entrypoint.sh /hex/docker_entrypoint.sh
 RUN chmod +x /hex/docker_entrypoint.sh

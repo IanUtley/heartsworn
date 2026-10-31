@@ -33,6 +33,9 @@ export HEX_CAMPAIGN_EDITOR_PORT="${HEX_CAMPAIGN_EDITOR_PORT:-8765}"
 # HEX_CAMPAIGN_EDITOR_KEY name one.
 export HEX_CAMPAIGN_EDITOR_TLS="${HEX_CAMPAIGN_EDITOR_TLS:-1}"
 
+# The IR interpreter engine is on by default. Set HEX_IR_ENGINE=0 to run the native resolver.
+export HEX_IR_ENGINE="${HEX_IR_ENGINE:-1}"
+
 # Validate the gamedata mount and create a persistent database when this is a
 # first deployment. Services open SQLite only after this has completed.
 python3 /hex/docker/docker_bootstrap.py
