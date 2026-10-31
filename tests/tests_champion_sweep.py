@@ -448,7 +448,11 @@ def _satisfy_target(db, target, source_uid, handler, state):
     template = target_template(db, target.guid)
     allowed = [zone for zone in _SATISFY_ZONES
                if zone in {str(z).lower() for z in template_zones(template)}] if template else []
-    templates = [row[0] for row in db.execute(
+    filter_text = str((template or {}).get("filter_json") or "") if template else ""
+    named = [row for row in db.execute(
+        "SELECT guid, name FROM card_templates WHERE name IS NOT NULL AND name != ''")
+        if row[1] in filter_text]
+    templates = [row[0] for row in named] + [row[0] for row in db.execute(
         "SELECT guid FROM card_templates WHERE COALESCE(is_pve,0)=0 AND COALESCE(no_pvp,0)=0 "
         "AND COALESCE(equipment_modified,0)=0 AND card_type NOT LIKE '%Choice%' ORDER BY guid LIMIT 1500")]
     next_uid = 90000
