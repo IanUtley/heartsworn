@@ -29,8 +29,11 @@ from rules_port.resolution import resolve_port_ability  # noqa: E402
 from rules_port.triggers import dispatch_native_trigger  # noqa: E402
 from rules_port.tunneling import advance, queue_surfaces, tunneling_value  # noqa: E402
 
+# The card Excavation Bot (Robot, 4/3/2) and its Deploy: choose one of your underground troops, add two tunneling counters.
+EXCAVATION_CARD = "0d77f670-caaf-4e12-a605-35bd9c704191"
+EXCAVATION_DEPLOY = "8e167978-9b2f-0ec6-5202-05b02f692bca"
+BOT_UID = 0x701
 EXCAVATION_BOT = "25ce3c67-3b47-4f64-a3c0-66eb30486b6f"
-TUNNEL_A_ROBOT = "5ff7edb6-454d-cb1a-287f-087b5b430f98"
 CHARGE_BOT = "7325706e-6bf1-4ca4-8d6b-5da13ac069f4"
 # The alternate-art template's TAC starts with BaseVersionGuid.
 MEGAHULK = "0c7a4e38-25ab-45e4-9d6b-faefea971b89"
@@ -50,7 +53,9 @@ def _seat(db, robots):
         (matrix.SESSION_ID, matrix.AI_OWNER, matrix.AI_CHAMP, EXCAVATION_BOT, EXCAVATION_BOT,
          "warzone", 0, 0, json.dumps(abilities), "Champion", 0, 0, 0, 0, 0, "{}", "{}", "{}",
          0, EXCAVATION_BOT, 1))
-    matrix._insert_card(db, HULK, matrix.AI_OWNER, "hand", MEGAHULK, 0)
+    # The Megahulk is already underground: the Excavation Bot's Deploy chooses it.
+    matrix._insert_card(db, HULK, matrix.AI_OWNER, "underground", MEGAHULK, 0)
+    matrix._insert_card(db, BOT_UID, matrix.AI_OWNER, "warzone", EXCAVATION_CARD, 0)
     for index in range(robots):
         matrix._insert_card(db, 20100 + index, matrix.AI_OWNER, "warzone", CHARGE_BOT, index)
     db.commit()
@@ -78,8 +83,8 @@ def _run(robots, max_turns=20):
     with contextlib.redirect_stdout(io.StringIO()):
         game = handler._fresh_game(session, matrix.PLAYER_UID, matrix.AI_UID, state)
         resolve_port_ability(handler, game, session, db, matrix.PLAYER_UID, matrix.AI_UID,
-                             state, TUNNEL_A_ROBOT, matrix.AI_CHAMP, matrix.AI_OWNER,
-                             target_map={})
+                             state, EXCAVATION_DEPLOY, BOT_UID, matrix.AI_OWNER,
+                             target_map={0: [HULK]})
         matrix._drain_triggers(handler, game, session, db, state)
     counter, threshold, attrs = _hulk(db)
     assert threshold == 15 and "Tunneling" not in attrs, \
@@ -108,10 +113,11 @@ def _run(robots, max_turns=20):
 
 
 def test_megahulk_tunneling_counts_down_from_printed_value():
-    # One Robot: counter 2+t meets 15-t at turn 7 (9 >= 8), not turn 1.
+    # One seated Robot plus the Excavation Bot: Tunneling is 15 - 2 = 13 on turn 1 and drops 2 per turn (one per
+    # Robot). The Deploy's 2 counters gain 1 per turn, so 2 + t meets 15 - 2t at turn 5 (7 >= 5).
     history = _run(robots=1)
-    assert history[0] == (1, 3, 14), history[0]
-    assert history[-1] == (7, 9, 8), history
+    assert history[0] == (1, 3, 13), history[0]
+    assert history[-1] == (5, 7, 5), history
     assert all(counter < threshold for _turn, counter, threshold in history[:-1]), history
 
 
