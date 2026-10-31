@@ -1112,6 +1112,9 @@ def _rulesport_champion_activation(db, metadata, state, source_uid, target_map, 
     tournament_game._db = db
     handler = hconnect_server.HCPHandler(None, ("127.0.0.1", 0))
     handler.user_profile = {"id": PLAYER_PID, "name": "sweep"}
+    # Champion targets (IsHero filters, including the opposing champion) come from the handler's champion scids.
+    handler._player_champ_scid = game_engine.SessionCardId(game_engine.UID(PLAYER_CHAMP_UID))
+    handler._ai_champ_scid = game_engine.SessionCardId(game_engine.UID(OPPONENT_CHAMP_UID))
     handler.client_reck_id = PLAYER_PID
     handler.send = lambda header, body: None
     session = gs.GameSession(SESSION_ID, SESSION_ID * 1000, "tourney-sweep", PLAYER_PID)
