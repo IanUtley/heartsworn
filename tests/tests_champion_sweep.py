@@ -743,6 +743,9 @@ def _effect_contract_error(effect, trace, graph=None):
         if not (_card_changes_to(trace, "discard") or
                 _card_changes_to(trace, "underground")):
             return "discard/bury produced no persisted zone change"
+    # A void whose authored target enumerates nothing (cards with the same name, none in the fixture) voids nothing.
+    if effect_type == "VoidCardAbilityEffectTemplate" and str(trace.get("result") or "") == "void: no target":
+        return None
     if effect_type == "VoidCardAbilityEffectTemplate" and not \
             _card_changes_to(trace, "void"):
         return "void effect produced no persisted void change"
