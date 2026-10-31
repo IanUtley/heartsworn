@@ -974,7 +974,8 @@ def _trigger_event(graph, board):
         # The player's champion gained health: its own heal is the event, and it is the source the trigger names.
         source = PLAYER_CHAMP_UID
         target = None
-        data["event_health_gained"] = 1
+        # The engine's emit_champion_healed carries the old and new health as the event's TAC.
+        data["event_tac"] = {"old_health": 20, "new_health": 23}
     elif event_type in {"TurnStartedEvent", "TurnEndedEvent",
                         "GameStartedEvent", "CombatEndedEvent"}:
         source = None
