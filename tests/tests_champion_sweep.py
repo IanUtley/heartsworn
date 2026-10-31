@@ -101,6 +101,24 @@ class PvPHandlerStub(HandlerStub):
         self._player_champ_guid = champion_guid
         self._player_champ_abilities = list(champion_abilities)
 
+    def __getattr__(self, name):
+        # Any server method the sweep's stub does not define runs as the production method on this stub.
+        if name.startswith("_") and not name.startswith("__"):
+            import types
+            from hconnect_server import HCPHandler
+            method = getattr(HCPHandler, name, None)
+            if callable(method):
+                return types.MethodType(method, self)
+        raise AttributeError(name)
+
+    def _checkpoint_engine(self, *args, **kwargs):
+        from hconnect_server import HCPHandler
+        return HCPHandler._checkpoint_engine(self, *args, **kwargs)
+
+    def _hide_candidates_to_deck(self, *args, **kwargs):
+        from hconnect_server import HCPHandler
+        return HCPHandler._hide_candidates_to_deck(self, *args, **kwargs)
+
     def _push_discard_prompt(self, *args, **kwargs):
         # The production prompt (the stub in HandlerStub is a no-op): a human discarder gets the hand picker.
         from application.combat import CombatMixin
