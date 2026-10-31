@@ -631,6 +631,21 @@ def _card_changes_to(entry, destination):
     return result
 
 
+_CURRENT_DB = {"db": None}
+
+
+def _moved_card_already_in(entry, destination):
+    """A move onto the zone the card already occupies is a no-op: the trace records nothing, and the card's stored
+    location is the destination."""
+    import re as _re
+    match = _re.search(r"moved 0x([0-9a-fA-F]+) to ", str(entry.get("result") or ""))
+    db = _CURRENT_DB["db"]
+    if not match or db is None:
+        return False
+    row = db.execute("SELECT location FROM game_cards WHERE card_uid=?", (int(match.group(1), 16),)).fetchone()
+    return bool(row) and _normalise_zone(row[0]) == _normalise_zone(destination)
+
+
 def _card_was_already_in(entry, destination):
     destination = _normalise_zone(destination)
     for change in entry.get("card_changes") or ():
@@ -716,7 +731,8 @@ def _effect_contract_error(effect, trace, graph=None):
         if destination in {"hand", "discard", "deck", "void", "warzone",
                            "underground"} and not _card_changes_to(
                                trace, destination) and not \
-                _card_was_already_in(trace, destination):
+                _card_was_already_in(trace, destination) and not \
+                _moved_card_already_in(trace, destination):
             return f"move to {destination} produced no persisted zone change"
     if effect_type in {"BuryCardAbilityEffectTemplate",
                        "DiscardCardAbilityEffectTemplate",
@@ -1269,6 +1285,7 @@ def _answer_discard_prompts(db, handler, session, state, game):
         _drain_stack(db, handler, session, state, game)
 
 def _run_case(db, metadata, path, *, option_check=True):
+    _CURRENT_DB["db"] = db
     # Random picks (reveals, random summons) fall back to the global RNG; seed it per attachment so runs repeat.
     import hashlib as _hashlib
     import random as _random
