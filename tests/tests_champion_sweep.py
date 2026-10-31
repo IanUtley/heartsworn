@@ -1248,7 +1248,15 @@ def _run_case(db, metadata, path, *, option_check=True):
             if str(value.get("ability_guid") or "").lower()
             == metadata["ability_guid"]
         ]
-        if not matching:
+        # A native dispatch can resolve the ability during the trigger itself, leaving nothing on the stack. Running the
+        # fallback again would resolve it a second time over the same targets.
+        traced_natively = any(
+            str(entry.get("ability_guid") or "").lower() == metadata["ability_guid"]
+            for entry in state.get("ability_trace") or ())
+        if not matching and traced_natively:
+            _SWEEP_STATS["trigger_native_immediate"] += 1
+            trigger_mode = "native"
+        elif not matching:
             # The native dispatcher has still been exercised, but a generic
             # event fixture cannot truthfully satisfy every authored trigger
             # predicate (for example an exact card filter or a losing-game
