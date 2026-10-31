@@ -140,6 +140,9 @@ class _Handler(hconnect_server.HCPHandler):
         self.scnt = 0
         self.sid = "test"
         self.sent = []
+        # The server's __init__ builds the application dispatcher; deck requests dispatch through it.
+        self._application = hconnect_server.ApplicationCommandDispatcher(
+            event_publisher=lambda *_args, **_kwargs: None)
 
     def send(self, headers, body=b""):
         self.sent.append(body)
