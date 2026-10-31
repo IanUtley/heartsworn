@@ -1120,6 +1120,9 @@ def _rulesport_champion_activation(db, metadata, state, source_uid, target_map, 
             hconnect_server.UID_TYPE["ServicePlayer"], uid), 0)
     session.turn_order = state
     session._rules_port_battle_state = state
+    # The server reads session rows by column name, and its connections return sqlite3.Row.
+    db.row_factory = sqlite3.Row
+    session._persist(conn=db)
     handler._current_bstate = state
     game = game_engine.Game(SESSION_ID, PLAYER_UID, OPPONENT_UID)
     handler._maybe_attach_rules_port(session, game, state)
