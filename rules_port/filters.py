@@ -2002,7 +2002,7 @@ class TopNOfDeck:
                 source_x_cost = _v(
                     source, "resource_x_cost_paid", "card_x_cost_paid",
                     "x_cost", default=None)
-                source_uid = _id(source)
+                source_uid = _optional_id(source)
                 paid_by_card = context.get("card_x_cost_paid") or {}
                 if source_uid is not None and isinstance(paid_by_card, dict):
                     source_key = str(int(source_uid))
@@ -2023,7 +2023,7 @@ class TopNOfDeck:
             if self.add_removed_counters:
                 removed = _v(source, "counter_cost_paid",
                              "removed_counters", default=None)
-                source_uid = _id(source)
+                source_uid = _optional_id(source)
                 paid_by_card = context.get("card_counter_cost_paid") or {}
                 if source_uid is not None and isinstance(paid_by_card, dict):
                     source_key = str(int(source_uid))
@@ -2176,6 +2176,17 @@ class BeingBlockedByFilter:
 def _id(value):
     return int(_v(value, "card_uid", "session_card_id", "id", default=value)
                or 0)
+
+
+def _optional_id(value):
+    """The card id of ``value`` when it names one, else None (a bare payload such as ``{"resource_x_cost_paid": 1}``)."""
+    raw = _v(value, "card_uid", "session_card_id", "id", default=None)
+    if raw is None or isinstance(raw, dict):
+        return None
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return None
 
 
 def _identity(value):

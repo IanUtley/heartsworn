@@ -175,9 +175,11 @@ def test_matching_target_filter_pool_uses_target_as_source():
         allowed = {"Troop", "BasicAction", "QuickAction", "Artifact",
                    "Constant", "Bane", "Choice", "Resource"}
         for guid in pool:
-            values = json.loads(db.execute(
+            # Thresholds are stored as {"values": [...], "list": [...]}; a card without any is stored as "[]".
+            thresholds = json.loads(db.execute(
                 "SELECT threshold_json FROM card_templates WHERE guid=?",
-                (guid,)).fetchone()[0] or "{}").get("values") or []
+                (guid,)).fetchone()[0] or "{}")
+            values = (thresholds.get("values") if isinstance(thresholds, dict) else None) or []
             nonzero = [index for index, count in enumerate(values)
                        if int(count or 0) > 0]
             assert nonzero == [5], (guid, values)
@@ -194,9 +196,11 @@ def test_matching_target_filter_pool_uses_target_as_source():
             source_uid=4242, player=5)
         assert disjoint_pool, "disjoint-shard filter produced no candidates"
         for guid in disjoint_pool:
-            values = json.loads(db.execute(
+            # Thresholds are stored as {"values": [...], "list": [...]}; a card without any is stored as "[]".
+            thresholds = json.loads(db.execute(
                 "SELECT threshold_json FROM card_templates WHERE guid=?",
-                (guid,)).fetchone()[0] or "{}").get("values") or []
+                (guid,)).fetchone()[0] or "{}")
+            values = (thresholds.get("values") if isinstance(thresholds, dict) else None) or []
             if len(values) > 5:
                 assert not int(values[5] or 0), (guid, values)
     finally:
