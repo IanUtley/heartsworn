@@ -1378,6 +1378,7 @@ class EffectContext:
         inherited = target is None
         target = (self.resolved_target(source_fallback=False)
                   if target is None else target)
+        discarder = None
         if (inherited and target is not None and
                 not self.bstate.get("pvp")):
             # A child "discard a card" inherits its parent's resolved target
@@ -1391,6 +1392,10 @@ class EffectContext:
             location = str(db_card_location(
                 self.session.session_id, int(target), conn=self.db) or "")
             if location.lower() not in ("hand", "choosing"):
+                # The champion is the player who discards: its hand holds the card, whoever controls the ability.
+                from pvp_db import db_card_owner_id
+                discarder = db_card_owner_id(
+                    self.session.session_id, int(target), conn=self.db)
                 target = None
         if target is None:
             # A hand-discard effect is an asynchronous target request, not a
@@ -1413,10 +1418,15 @@ class EffectContext:
                     pending["instance_id"] = int(
                         getattr(self.ability, "instance_id", 1) or 1)
                     self.bstate["pending_discard_continuation"] = pending
-                    result = prompt(
-                        self.game, self.session, self.player_uid,
-                        self.ai_uid, self.bstate,
-                        ability_guid=self.bstate.get("resolving_ability", ""))
+                    if discarder is not None:
+                        self.bstate["discard_controller"] = discarder
+                    try:
+                        result = prompt(
+                            self.game, self.session, self.player_uid,
+                            self.ai_uid, self.bstate,
+                            ability_guid=self.bstate.get("resolving_ability", ""))
+                    finally:
+                        self.bstate.pop("discard_controller", None)
                     # AI discard is completed synchronously by the host
                     # projection; a human discard leaves the port paused.
                     # A best-effort target with no legal cards is a resolved
@@ -3720,6 +3730,13 @@ class EffectContext:
     def destroy(self, target: int | None = None) -> str:
         """Destroy a resolved card or champion through the normal death path."""
         target = self.resolved_target() if target is None else target
+        import db as db_layer
+        db_layer.log_req(
+            "    Destroy: target=%s keys=%s" % (
+                hex(int(target)) if target is not None else None,
+                {key: self.bstate.get(key) for key in (
+                    "player_spell_target", "player_mod_target", "resolving_target_uid",
+                    "resolving_source_uid")}))
         if target is None:
             return "destroy: no target"
         target = int(target)

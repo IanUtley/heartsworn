@@ -802,6 +802,16 @@ def rules_path(zone_id: str) -> Path:
     return RULES_DIR / f"{zone_id}.json"
 
 
+def zone_issues(db: sqlite3.Connection | None) -> dict[str, int]:
+    """``{zone id: warnings and errors in its Rules check}`` for every zone."""
+    counts = {}
+    for zone in zones():
+        _built, problems = rules(db, zone["id"])
+        counts[zone["id"]] = sum(1 for p in problems
+                                 if p.get("level") in ("warn", "error") and not p.get("accepted"))
+    return counts
+
+
 def rules(db: sqlite3.Connection | None, zone_id: str = AREA_TEMPLATE
           ) -> tuple[dict[str, Any] | None, list[dict[str, str]]]:
     """Rules for evaluation, exactly as the server's campaign runtime builds
@@ -811,6 +821,13 @@ def rules(db: sqlite3.Connection | None, zone_id: str = AREA_TEMPLATE
     built, problems = rules_loader.rules(db, zone_id)
     if built is None:
         return None, []
+    import check_names
+    accepted = check_names.accepted_issues()
+    template = str((_catalog_data.zone(zone_id) or {}).get("server_template") or "")
+    # The zone's own flag notes give way to the campaign-wide ones (check_names.flag_problems).
+    problems = [dict(p, accepted=(zone_id, p["where"], p["text"]) in accepted)
+                for p in [p for p in problems if p.get("where") != "flags"]
+                + check_names.zone_problems(built, template)]
     engine = _rules_module()
     with _RULES_LOCK:
         cached = _RULES_CACHE.get(zone_id)

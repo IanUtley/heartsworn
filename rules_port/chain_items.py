@@ -664,6 +664,10 @@ def resolve_ability_item(host, session, db, game, state, item, player_uid,
                 from .resolution import prompt_interpreted_reveal
                 prompt_interpreted_reveal(host, game, session, db, player_uid, ai_uid, state, pause)
                 return
+            except ir_exec.NeedsConversation:
+                # The leaf queued the encounter conversation and saved the pause; the client's answer resumes the
+                # interpreter. Left uncaught, it dropped the client's connection.
+                return
     resolve_port_ability(
         host, game, session, db, player_uid, ai_uid, state, ability_guid,
         source_uid, owner_id, target_map=target_map,

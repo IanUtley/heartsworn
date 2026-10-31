@@ -487,10 +487,18 @@ def server_catalog(db: sqlite3.Connection, template: str = AREA_TEMPLATE,
                     for r in campaign_content.edges() if r["campaign_template"] == template),
                    key=lambda r: str(r["to_node"]))
     # Conversations an ability starts mid-battle (ConversationAbilityEffect):
-    # they are not an encounter's pre-battle talk.
-    triggered = {str(row[0]).lower() for row in _query(db,
-        "SELECT DISTINCT param FROM ability_effects "
-        "WHERE effect_type='ConversationAbilityEffectTemplate' AND param<>''")}
+    # they are not an encounter's pre-battle talk. A conversation an ability
+    # starts only when the game starts (GameStartedEvent) is still the zone's own talk.
+    import pvp_db
+    started_at_start: dict[str, list[bool]] = {}
+    for ability, conversation in _query(db,
+            "SELECT DISTINCT ability_guid, param FROM ability_effects "
+            "WHERE effect_type='ConversationAbilityEffectTemplate' AND param<>''"):
+        trigger = _json(pvp_db.db_ability_raw_json(ability, conn=db), {}).get("m_TriggerEventType")
+        kind = str(trigger.get("m_InternalType", "")) if isinstance(trigger, dict) else ""
+        started_at_start.setdefault(str(conversation).lower(), []).append(
+            kind.endswith("GameStartedEvent"))
+    triggered = {conversation for conversation, flags in started_at_start.items() if not all(flags)}
     return {"node_conversations": node_conversations,
             "quest_links": quest_links, "encounters": encounters,
             "quests": quests, "edges": edges,

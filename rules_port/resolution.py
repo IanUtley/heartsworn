@@ -2110,12 +2110,40 @@ def _answers_from_target_map(target_map: dict[Any, Any]) -> dict[int, int | list
     return answers
 
 
+def _ai_revealed_pick(handler, session, battle_state, ai_uid, player_uid, candidates):
+    """The card the AI picks from a reveal: its most valuable card by the AI's card evaluation, then cost, then uid
+    (the order the AI uses to rank cards elsewhere). Falls back to the first candidate the evaluator cannot read."""
+    from ai_eval import build_evaluator
+    evaluator = build_evaluator(handler, session, battle_state, ai_uid, player_uid)
+    cards = [card for card in (evaluator.card_for_uid(int(uid)) for uid in candidates) if card is not None]
+    if not cards:
+        return int(candidates[0])
+    best = max(cards, key=lambda card: (evaluator.get_card_value(card), int(card.cost or 0), int(card.card_uid)))
+    return int(best.card_uid)
+
+
 def prompt_interpreted_reveal(handler, game, session, db, player_uid, ai_uid, battle_state, pause):
     """Show the player an interpreted ability's pick: among the cards a reveal showed, through the client's
     revealed-card picker; or, from the deck, through the deck-search picker (Darkspire Priestess's search). The
     interpreter's continuation is kept with the prompt. The answer resumes the interpreter (see
     application/pending_choices.py). Returns "waiting"."""
     continuation = pause.continuation
+    # The AI chose this pick (its ability was cast by the AI in PvE), so it answers the pick itself and the
+    # interpreter carries on. Only the player's own picks are shown to the player.
+    if pause.revealed and not battle_state.get("pvp") and int(continuation["owner_uid"]) != int(player_uid) \
+            and pause.candidates:
+        from rules_port.context import EffectContext
+        pick = _ai_revealed_pick(handler, session, battle_state, ai_uid, player_uid, pause.candidates)
+        battle_state.pop("resolution_paused", None)
+        try:
+            ir_exec.resume_ability(
+                continuation, pick,
+                context=EffectContext.from_rules_port(game, session, db, handler, player_uid, ai_uid,
+                                                      battle_state, ""))
+        except ir_exec.NeedsChoice as next_pause:
+            return prompt_interpreted_reveal(handler, game, session, db, player_uid, ai_uid, battle_state,
+                                             next_pause)
+        return "interpreter"
     target_index = int(continuation["target_index"])
     native_shape = {
         "ability_guid": continuation["ability_guid"], "source_uid": continuation["source_uid"],

@@ -1784,7 +1784,7 @@
       "!conversation(Brutecrown Bluff - Burgg's Shanty - First conversation)"
      ],
      "actions": {
-      "A8": [
+      "accept_gnoll": [
        "set_flag(brutecrown_chose_burgg)"
       ]
      }
@@ -1798,10 +1798,8 @@
     "priority": 2,
     "enabled": true,
     "trigger_json": {
-     "label": "Burgg's Shanty - repeating conversation",
-     "source": "import_dungeons.py",
      "actions": {
-      "A4": [
+      "accept_gnoll": [
        "set_flag(brutecrown_chose_burgg)"
       ]
      }
@@ -2509,7 +2507,7 @@
       "!conversation(Brutecrown Bluff - Vargar's Shed - First conversation)"
      ],
      "actions": {
-      "A7": [
+      "accept_gnoll": [
        "set_flag(brutecrown_chose_vargar)"
       ]
      }
@@ -2526,7 +2524,7 @@
      "label": "Vargar's Shed - repeating conversation",
      "source": "import_dungeons.py",
      "actions": {
-      "A4": [
+      "accept_gnoll": [
        "set_flag(brutecrown_chose_vargar)"
       ]
      }
@@ -2546,7 +2544,7 @@
       "!conversation(Brutecrown Bluff - Zagg's Tent - First conversation)"
      ],
      "actions": {
-      "A14": [
+      "accept_gnoll": [
        "set_flag(brutecrown_chose_zagg)"
       ]
      }
@@ -2563,7 +2561,7 @@
      "label": "Zagg's Tent - repeating conversation",
      "source": "import_dungeons.py",
      "actions": {
-      "A3": [
+      "accept_gnoll": [
        "set_flag(brutecrown_chose_zagg)"
       ]
      }

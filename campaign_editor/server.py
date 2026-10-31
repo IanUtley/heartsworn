@@ -294,6 +294,9 @@ class EditorHandler(BaseHTTPRequestHandler):
                 self._file(cards.CUSTOM_DIR, path[len("/custom/"):])
             elif path == "/api/zones":
                 self._json(catalog.zones())
+            elif path == "/api/zone-issues":
+                # Read-only: each zone's Rules-check warnings and errors, for the zone list.
+                self._json(self._with_db(catalog.zone_issues))
             elif path == "/api/area":
                 self._json(self._with_db(
                     lambda db: dict(catalog.area_payload(db, zone_id),
@@ -622,6 +625,13 @@ class EditorHandler(BaseHTTPRequestHandler):
             if url.path == "/api/edit/card-set":
                 self._json(self._with_db(lambda db: cards.assign_to_set(
                     db, body.get("guids"), body.get("set_guid"))))
+                return
+            if url.path == "/api/edit/issue-accept":
+                # Accept a Rules-check problem as known (or un-accept it): it stops being listed.
+                import check_names
+                self._json(check_names.set_accepted(
+                    str(body.get("zone") or ""), str(body.get("where") or ""),
+                    str(body.get("text") or ""), bool(body.get("accept", True))))
                 return
             if url.path == "/api/edit/card-map":
                 chosen = self._with_db(lambda db: editing.save_card_map(

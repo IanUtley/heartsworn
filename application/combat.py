@@ -4,6 +4,13 @@ import json
 import random
 
 
+def discarding_player(bstate, ability_controller):
+    """The player who discards for a discard prompt: the controller of the card the effect discards from (the
+    discard operation records it when the effect targets a champion), else the ability's controller."""
+    discarder = bstate.get("discard_controller")
+    return ability_controller if discarder is None else discarder
+
+
 class CombatMixin:
     """Methods of HCPHandler, mixed into it (see hconnect_server)."""
 
@@ -164,7 +171,12 @@ class CombatMixin:
                 phase_ev = game._make_event(
                     _hc.game_engine.TurnPhaseUpdatedSessionEventArgs)
                 phase_ev.turn_phase = port.current_turn_phase
-                phase_ev.active_player_id = chooser
+                # The phase belongs to the port's active player. Naming the chooser as active made the
+                # client start its own AssignDamage flow on the AI's combat, which cleared the picker's options.
+                active = getattr(port, "active_player_id", None) or chooser
+                phase_ev.active_player_id = (
+                    active if isinstance(active, _hc.game_engine.UID)
+                    else _hc.game_engine.UID(int(getattr(active, "uid64", active))))
                 phase_ev.priority_player_id = chooser
                 picker_packet.insert(0, phase_ev)
             _hc.log_req("    [DEBUG-PACKET] picker sent as its own packet: " + ", ".join(
@@ -417,6 +429,11 @@ class CombatMixin:
                     and can_attack_card(
                         _hc._db, session.session_id, bstate, uid, attrs or 0)):
                 ready.append(_hc.game_engine.SessionCardId(_hc.game_engine.UID(uid)))
+        from rules_port.runtime_adapter import defending_champion_immune
+        if ready and defending_champion_immune(self, self.user_profile["id"]):
+            # The champion is the only attack target and it can't be attacked; troops only block, so no attack is legal.
+            ready = []
+            _hc.log_req("    Attack options withheld: opposing champion can't be attacked")
         ev = game._make_event(_hc.game_engine.PlayerOptionListSessionEventArgs)
         ev.player_id = pl_t
         for scid in ready:
@@ -1025,16 +1042,15 @@ class CombatMixin:
             # CardDiscardedEvent for "discards a card" triggers).
             self._discard_same_cost(game, session, pl_t, ai_t, bstate)
             return
-        # AI-controlled abilities must never open a human card picker.  The
-        # responsible owner is carried by the resolver checkpoint; choose a
-        # random card from that owner's hand and let the normal discard
-        # mutation/event path apply it.
-        owner_id = bstate.get("resolving_owner_id")
+        # An AI discarder must never open a human card picker.  Choose a random
+        # card from the AI's hand and let the normal discard mutation/event
+        # path apply it.  A human discarder gets the picker below.
+        discarder = discarding_player(bstate, bstate.get("resolving_owner_id"))
         human_owner = self.user_profile.get("id") if isinstance(
             self.user_profile, dict) else None
-        if owner_id is not None and int(owner_id or 0) != int(human_owner or -1):
+        if discarder is not None and int(discarder or 0) != int(human_owner or -1):
             rows = [(row[1],) for row in _hc.db_ordered_zone_rows(
-                session.session_id, int(owner_id), "hand", conn=_hc._db)]
+                session.session_id, int(discarder), "hand", conn=_hc._db)]
             if rows:
                 chosen = int(random.choice(rows)[0])
                 gd, _owner_uid = self._discard_card_to_owner(

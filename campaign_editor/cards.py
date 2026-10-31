@@ -72,12 +72,14 @@ IMPL_ENUM = "ECardImplStage"
 IMPL_DONE = "Done"
 
 _GUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
+ZERO_GUID = "00000000-0000-0000-0000-000000000000"
 _BASE_COLUMNS = ("guid", "set_guid", "name", "rarity", "cost", "attack", "defense",
                  "card_type", "subtype", "threshold_json", "abilities_json", "variable_cost",
                  "socket_count", "is_pve")
 _BASE_SQL = "SELECT " + ", ".join(_BASE_COLUMNS) + " FROM card_templates"
 _RECORDS_SETS = RECORDS / "CardSetTemplate.jsonl"
 _RECORDS_CARDS = RECORDS / "CardTemplate.jsonl"
+_RECORDS_ITEMS = RECORDS / "InventoryItemData.jsonl"
 CUSTOM_DIR = REPO / "custom_sets"
 CUSTOM_CARDS_PATH = CUSTOM_DIR / "CardTemplates.json"
 CUSTOM_SETS_PATH = CUSTOM_DIR / "CardSetTemplate.json"
@@ -170,8 +172,36 @@ def _set_guid(value: Any) -> str:
 
 # ---------------------------------------------------------------- Records extras
 
+def _load_records_equipment(path: Path | None) -> list[dict[str, str]]:
+    """``[{guid, name}]`` for every Records equipment item, by name."""
+    items = []
+    if path is None:
+        return items
+    for line in path.read_text(encoding="utf-8").splitlines():
+        try:
+            text = json.loads(line) if line.strip() else None
+        except ValueError:
+            continue
+        if not isinstance(text, str) or not re.search(r'"_t"\s*:\s*"[^"]*InventoryEquipmentData"', text):
+            continue
+        guid = re.search(r'"m_Id"\s*:\s*\{\s*"m_Guid"\s*:\s*"([^"]+)"', text)
+        name = re.search(r'"m_Name"\s*:\s*"((?:[^"\\]|\\.)*)"', text)
+        if guid and name:
+            items.append({"guid": guid.group(1).lower(),
+                          "name": json.loads(f'"{name.group(1)}"').strip()})
+    return sorted(items, key=lambda item: item["name"].lower())
+
+
+def _equipment_items() -> list[dict[str, str]]:
+    return _cached("records-equipment", _RECORDS_ITEMS, _load_records_equipment)
+
+
 def _load_records_extras(path: Path | None) -> dict[str, dict[str, Any]]:
-    """``{card GUID: faction, text, flavor, unique, art}`` for every Records CardTemplate."""
+    """``{card GUID: faction, text, flavor, unique, art}`` for every Records CardTemplate.
+
+    ``equipment_slots`` lists the equipment item each slot requires ("" for an empty
+    slot); ``equipment_modified`` marks the equipped alternate of a base card.
+    """
     extras: dict[str, dict[str, Any]] = {}
     if path is None:
         return extras
@@ -192,7 +222,12 @@ def _load_records_extras(path: Path | None) -> dict[str, dict[str, Any]]:
             continue
         unique = re.search(r'"m_Unique"\s*:\s*(\d+)', text)
         rage = re.search(r'"m_RageValue"\s*:\s*(\d+)', text)
+        modified = re.search(r'"m_EquipmentModifiedCard"\s*:\s*(\d+)', text)
+        slots = re.search(r'"m_EquipmentSlots"\s*:\s*\[(.*?)\]', text, re.S)
+        slot_guids = re.findall(r'"m_Guid"\s*:\s*"([^"]+)"', slots.group(1)) if slots else []
         extras[guid.group(1).lower()] = {
+            "equipment_modified": bool(int(modified.group(1))) if modified else False,
+            "equipment_slots": ["" if g.lower() == ZERO_GUID else g.lower() for g in slot_guids],
             "faction": field(text, "m_Faction", "None") or "None",
             "text": field(text, "m_GameText"),
             "rage": int(rage.group(1)) if rage else 0,
@@ -467,6 +502,7 @@ def options() -> dict[str, Any]:
         "keywords": card_attributes.keywords(),
         "int_attributes": card_attributes.int_attributes(),
         "impl_stages": impl_stages(),
+        "equipment": _equipment_items(),
     }
 
 
@@ -621,6 +657,7 @@ def get_card(db, guid: str) -> dict[str, Any]:
     record, source = merged[guid]
     set_guid = record["set_guid"]
     record = dict(_display_extras(guid, record), **record)
+    extra = _records_extras().get(guid, {})
     return {
         "card": dict(record),
         "ability_links": _ability_links_view(record),
@@ -628,6 +665,9 @@ def get_card(db, guid: str) -> dict[str, Any]:
         "set_name": _set_names().get(set_guid, ""),
         "can_revert": source == "edited",
         "frame": frame_for(record, _set_number(set_guid)),
+        # The equipped alternate of a base card lists the item each slot requires.
+        "equipment_modified": bool(extra.get("equipment_modified")),
+        "equipment_slots": list(extra.get("equipment_slots", [])),
         "options": options(),
     }
 

@@ -155,12 +155,12 @@
       "ChampionIsRace(Human)"
      ],
      "speaker": "Warlock of Aettir",
+     "edited_actions": true,
      "actions": {
-      "A0": [
+      "*": [
        "teleport(crayburn,InnerBailey)"
       ]
-     },
-     "edited_actions": true
+     }
     }
    },
    {
@@ -217,7 +217,7 @@
      ],
      "speaker": "Iddi",
      "actions": {
-      "A0": [
+      "*": [
        "teleport(crayburn,TowerGate)"
       ]
      },
@@ -1474,7 +1474,13 @@
       "outcome:fail",
       "ChampionIsRace(Vennen)"
      ],
-     "speaker": "Bloodsoaked Brawler"
+     "speaker": "Bloodsoaked Brawler",
+     "actions": {
+      "*": [
+       "teleport(crayburn,InnerBailey)"
+      ]
+     },
+     "edited_actions": true
     }
    },
    {

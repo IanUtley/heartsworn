@@ -115,9 +115,12 @@ def _project(context, uid, owner, guid, old, new, champion=False):
             secret_counter_owner_uid=owner_uid(owner or 0,
                                                context.player_uid,
                                                context.ai_uid, context.bstate))
+    # Tunneling progress is public (the opponent sees its underground counter),
+    # so its class-54 refresh goes to both players; other counters stay private.
+    public_counter = str(guid).lower() == TUNNELING_COUNTER_GUID
     context.game.push_card_counters_changed(
         scid, game_engine.ResourceId.from_str(guid), int(new), int(old),
-        private_player_uid=recipient)
+        private_player_uid=None if public_counter else recipient)
 
 
 def project_counter_cost_change(context, source_uid, counter_guid,

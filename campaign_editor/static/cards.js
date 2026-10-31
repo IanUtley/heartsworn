@@ -549,6 +549,19 @@ function intAttributesFieldset(card, options, disabled, editable) {
       <div id="card-int-rows">${rows || `<p class="muted small-text" data-int-none>None.</p>`}</div>${add}</fieldset>`;
 }
 
+// The equipped alternate of a base card: one dropdown per equipment slot. Read-only until
+// equipment editing is added, so a save never changes the slots.
+function equipmentFieldset(slots, items) {
+  const byGuid = new Map(items.map((item) => [item.guid, item.name]));
+  const choose = (current) => `<option value="">(none)</option>` + items.map((item) =>
+    `<option value="${esc(item.guid)}"${item.guid === current ? " selected" : ""}>${esc(item.name)}</option>`).join("") +
+    (current && !byGuid.has(current) ? `<option value="${esc(current)}" selected>${esc(current)} (missing from Records)</option>` : "");
+  return `<fieldset class="card-equipment" title="The equipment this card's alternate needs. Shown for reference; editing comes later.">
+      <legend>Equipment</legend>
+      ${slots.map((guid, i) => `<label class="field">Slot ${i + 1} <select name="equipment_${i}" disabled>${choose(guid)}</select></label>`).join("")}
+    </fieldset>`;
+}
+
 function renderCardForm() {
   const { card, source, options, can_revert: canRevert } = cardOpen;
   const editable = canEditCards();
@@ -587,6 +600,7 @@ function renderCardForm() {
       </fieldset>
       ${keywordsFieldset(card, options, disabled)}
       ${intAttributesFieldset(card, options, disabled, editable)}
+      ${cardOpen.equipment_modified ? equipmentFieldset(cardOpen.equipment_slots || [], options.equipment || []) : ""}
       ${editable ? `<div class="actions"><button type="submit" class="primary">Save card</button>` +
         (canRevert ? `<button type="button" data-card-revert>Revert to Records</button>` : "") + `</div>` : ""}
       </form>

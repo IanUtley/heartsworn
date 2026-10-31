@@ -254,6 +254,8 @@ class Game:
         self.session_id = UID(session_id)
         self.player_uid = player_uid
         self.ai_uid = ai_uid
+        # Champions whose authored abilities grant SpellShield (projected as the card attribute, as the client reads it).
+        self.spellshield_champion_uids = set()
         self.next_card_id = 1
         self.turn_number = 0
         self.current_phase = ETurnPhases.PreGame
@@ -434,8 +436,11 @@ class Game:
         ev.cost = kwargs.get('cost', cdef.cost if cdef else 0)
         ev.controller = player_uid
         ev.attributes = kwargs.get('attributes', cdef.attributes if cdef else ECardAttributes.Unknown)
+        if int(cid.uid.uid64) in self.spellshield_champion_uids:
+            ev.attributes = int(ev.attributes) | ECardAttributes.SpellShield
         ev.lethal = kwargs.get('lethal', getattr(cdef, 'lethal', False) if cdef else False)
         ev.int_attrs = dict(kwargs.get('int_attrs', getattr(cdef, 'int_attrs', {}) or {}))
+        ev.affecting_abilities = list(kwargs.get('affecting_abilities', []))
         # The client's Armor icon reads the dedicated armor fields, not int_attrs.
         ev.armor = int(ev.int_attrs.get('Armor', 0) or 0)
         if effective_card_type & ECardTypes.Champion:  # DEBUG-ARMOR

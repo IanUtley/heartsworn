@@ -26,6 +26,10 @@ const PHASE_NAMES = { 3: "Choose play/draw", 4: "Mulligan", 5: "Start", 6: "Star
   18: "Combat damage", 19: "Second main", 20: "End phase", 21: "Discard", 22: "End turn", 24: "Game over" };
 const PHASE_TRACK = [[7, "Ready"], [9, "Draw"], [10, "Main"], [12, "Attack"], [14, "Block"],
   [18, "Damage"], [19, "Main 2"], [20, "End"]];
+// The battle sound for each turn phase the client plays (BattleAnimationTurnPhase in the client).
+const PHASE_SOUNDS = { 6: "Aud_FX_Start_Turn", 10: "Aud_FX_Main_Phase", 11: "Aud_FX_Combat_Phase",
+  12: "Aud_FX_Declare_Attackers", 14: "Aud_FX_Declare_Defense", 18: "Aud_FX_Combat_Damage",
+  19: "Aud_FX_Second_Main_Phase", 21: "Aud_FX_Discard_Phase" };
 const PASS_LABELS = { 2: "Ready", 4: "Continue to combat", 6: "Resolve", 7: "Continue to second main",
   9: "End turn", 11: "End turn", 14: "Resolve combat", 15: "Pass", 16: "Pass" };
 const SLEEVES = ["classic", "blood", "ruby", "sapphire", "wild", "diamond", "cosmic"];
@@ -80,6 +84,7 @@ function want(section, guid) {
 function applyEvent(ev) {
   switch (ev.type) {
     case "GameStarted":
+      sfx("Aud_FX_Game_Start", "game");
       ev.turn_order.forEach((pid, i) => {
         S.championTemplates[pid] = ev.champion_template_ids[i];
         if (!S.names[pid]) S.names[pid] = ev.champion_names[i];
@@ -110,9 +115,12 @@ function applyEvent(ev) {
     case "DeckCreated":
       S.decks[ev.player_id] = { sleeve: ev.deck_sleeve_id, board: ev.gameboard_id, coin: ev.coin_id };
       break;
-    case "TurnPhaseUpdated":
+    case "TurnPhaseUpdated": {
+      const was = S.phase.turn_phase;
       S.phase = ev;
+      if (ev.turn_phase !== was) phaseSound(ev.turn_phase, ev.active_player_id);
       break;
+    }
     case "GreenLight":
       S.greenlight[ev.player_id] = ev.context;
       break;
@@ -146,6 +154,7 @@ function applyEvent(ev) {
     case "BlockersAssigned": {
       const combat = S.combats.get(ev.attacker_id) || { attacker: ev.attacker_id };
       combat.blockers = ev.blocking_card_ids || [];
+      sfx("Aud_FX_Card_Declare_Block", "combat");
       S.combats.set(ev.attacker_id, combat);
       break;
     }
@@ -154,6 +163,8 @@ function applyEvent(ev) {
       break;
     case "ChampionHealthChanged": {
       const delta = ev.new_damage_value - ev.old_damage_value;
+      if (delta > 0) sfx("Aud_FX_Card_Single_Melee_Damage_Medium_01", "combat");
+      if (delta < 0) sfx("Aud_FX_Champion_Life_Up", "combat");
       if (delta) floatAtChampion(ev.player_id, delta > 0 ? `-${delta}` : `+${-delta}`, delta > 0 ? "damage" : "heal");
       break;
     }
@@ -406,7 +417,13 @@ function board3d() {
         if (S.ui.mode === "modal") { S.ui = { mode: null }; $("#modal").classList.add("hidden"); }
         clickCard(uid);
       },
-      onHover: (uid) => { if (uid) showPreview(uid); else $("#preview").innerHTML = ""; },
+      onHover: (uid) => {
+        sfx(uid ? "Aud_FX_Card_Hover" : "Aud_FX_Card_UnHover", "hover");
+        if (uid) showPreview(uid); else $("#preview").innerHTML = "";
+      },
+      // A hand card dragged onto the table plays on release (the same rule as the HTML hand).
+      onDrop: (uid) => playDropped(uid),
+      onDropZone: (over) => $("#board").classList.toggle("drop-target", over),
     });
     document.body.classList.toggle("webgl", !!S.board3d);
   }
@@ -506,6 +523,10 @@ function renderBoard3d(b) {
     const war = [...cardsIn(pid, COLL.Warzone), ...cardsIn(pid, COLL.Underground)];
     war.forEach((c, i) => entries.push(boardEntry(c, zone, i, war.length, plan)));
   }
+  for (const [pid, zone] of [[S.opp, "opp-hand"], [S.me, "mine-hand"]]) {
+    const hand = cardsIn(pid, COLL.Hand);
+    hand.forEach((c, i) => entries.push(boardEntry(c, zone, i, hand.length, plan)));
+  }
   S.chain.forEach((item, i) => {
     const src = S.cards.get(item.source) || { uid: item.source, controller: 0, card_id: NO_GUID };
     const entry = { ...boardEntry(src, "chain", i, S.chain.length, plan), top: i === S.chain.length - 1 };
@@ -561,6 +582,7 @@ function render() {
   document.body.dataset.board = boardChoice();
   document.body.dataset.combat = phase >= 11 && phase <= 18 ? "1" : "";
   document.body.classList.toggle("chain-active", S.chain.length > 0);
+  const b = board3d();
   renderChampion(S.opp, "#opp-champion");
   renderChampion(S.me, "#my-champion");
   renderHands();
@@ -572,10 +594,14 @@ function render() {
   renderActions();
   renderModal();
   markChainTargets();
-  const b = board3d();
   if (b) renderBoard3d(b);
   $("#log").innerHTML = S.log.map((l) => `<div>${esc(l(cardName))}</div>`).join("");
   animateMoves(before);
+  cardSounds();
+  if (S.prompt && S.prompt.kind === "ended" && !S.endSounded) {
+    S.endSounded = true;
+    sfx(S.prompt.you_won ? "Aud_FX_Game_Victory" : "Aud_FX_Game_Defeat", "game");
+  }
   hideFlying();
 }
 
@@ -606,7 +632,8 @@ function interactive(uid) {
   }
   if (S.prompt && S.prompt.kind === "priority" && !S.busy) {
     const o = S.options.get(uid);
-    if (o && o.instances.length && (o.state & (USAGE.Play | USAGE.Activate))) return "playable";
+    if (o && o.instances.length && (o.state & USAGE.Play)) return "playable";
+    if (o && o.instances.length && (o.state & USAGE.Activate)) return "activatable";
   }
   return "";
 }
@@ -671,6 +698,12 @@ function fan(cards, sign) {
 
 function renderHands() {
   const opp = cardsIn(S.opp, COLL.Hand);
+  // On the 3D board the hands are drawn there; the HTML fans stay as the flat board's hands.
+  if (S.board3d) {
+    $("#opp-hand").innerHTML = `<span class="hand-count">${opp.length} in hand</span>`;
+    $("#my-hand").innerHTML = "";
+    return;
+  }
   $("#opp-hand").innerHTML = fan(opp, -1) + `<span class="hand-count">${opp.length} in hand</span>`;
   $("#my-hand").innerHTML = fan(cardsIn(S.me, COLL.Hand), 1);
 }
@@ -965,6 +998,14 @@ function showPile(owner, collection) {
 
 function handRects() {
   const out = new Map();
+  if (S.board3d) {
+    // The hands are on the 3D board, so a card leaving one flies from where the board draws it.
+    for (const card of [...cardsIn(S.me, COLL.Hand), ...cardsIn(S.opp, COLL.Hand)]) {
+      const r = S.board3d.screenRect(card.uid);
+      if (r && r.width) out.set(card.uid, r);
+    }
+    return out;
+  }
   document.querySelectorAll("#my-hand [data-uid], #opp-hand [data-uid]").forEach((el) => {
     const r = el.getBoundingClientRect();
     if (r.width) out.set(Number(el.dataset.uid), r);
@@ -986,6 +1027,69 @@ function burstAt(p) {
   el.style.top = `${p.y}px`;
   document.body.appendChild(el);
   setTimeout(() => el.remove(), 850);
+}
+
+// Sound groups the player can switch off in the menu. Hover sounds start off.
+const SFX_GROUPS = { hover: "Card hover sounds", phase: "Turn phase sounds", moves: "Card move sounds",
+  combat: "Combat sounds", interface: "Pass and cancel sounds", game: "Game start and end sounds" };
+function sfxOff() {
+  const saved = storage("hex.sfxOff");
+  return saved === null ? ["hover"] : JSON.parse(saved);
+}
+
+// Plays a battle or UI sound from the client folder (see hex_assets.js) unless its group is switched off.
+// Silent until the folder is read.
+function sfx(name, group) {
+  if (window.HexAssets && !(group && sfxOff().includes(group))) HexAssets.playSound(name);
+}
+
+function sfxSettingsHTML() {
+  const off = sfxOff();
+  return `<div class="sfx-settings"><b>Sound effects</b>${Object.entries(SFX_GROUPS).map(([group, label]) =>
+    `<label><input type="checkbox" data-sfx="${group}" ${off.includes(group) ? "" : "checked"}> ${label}</label>`).join("")}</div>`;
+}
+
+function phaseSound(phase, activePlayer) {
+  if (phase === 20) sfx(activePlayer === S.me ? "Aud_FX_End_Phase_Player" : "Aud_FX_End_Phase_Opponent", "phase");
+  else if (PHASE_SOUNDS[phase]) sfx(PHASE_SOUNDS[phase], "phase");
+}
+
+// The sound for a card moving between collections, or null when the client has none for the move.
+function moveSound(from, to, tpl) {
+  const troop = tpl && tpl.type === "Troop", artifact = tpl && tpl.type === "Artifact";
+  if (to === COLL.Hand) {
+    if (from === COLL.Deck) return "Aud_FX_Card_Draw";
+    if (from === COLL.Discard || from === COLL.Void) return "Aud_FX_Card_Recover_Hand";
+  }
+  if (to === COLL.Discard) {
+    if (troop) return "Aud_FX_Card_Troop_Graveyard";
+    if (artifact) return "Aud_FX_Card_Artifact_General_Graveyard";
+  }
+  if (to === COLL.Void) return "Aud_FX_Card_Void";
+  if (to === COLL.Warzone && (from === COLL.Discard || from === COLL.Void)) return "Aud_FX_Card_Recover_Play";
+  return null;
+}
+
+// The cards as they were at the last render, to find moves, draws and taps since then.
+let lastCards = new Map();
+
+// Sounds for what changed on the cards since the last render: moves between collections, and tapping
+// or readying on the board.
+function cardSounds() {
+  for (const card of S.cards.values()) {
+    const was = lastCards.get(card.uid);
+    if (!was) continue;
+    if (was.collection !== card.collection) {
+      const tpl = S.catalog.cards[(card.card_id || "").toLowerCase()];
+      const sound = moveSound(was.collection, card.collection, tpl);
+      if (sound) sfx(sound, "moves");
+    } else if (card.collection === COLL.Warzone && (was.state & CSTATE.Tapped) !== (card.state & CSTATE.Tapped)) {
+      const tpl = S.catalog.cards[(card.card_id || "").toLowerCase()];
+      if (card.state & CSTATE.Tapped) sfx(tpl && tpl.type === "Artifact" ? "Aud_FX_Card_Artifact_General_Exhaust" : "Aud_FX_Card_Troop_Exhaust", "moves");
+      else sfx("Aud_FX_Card_Readying", "moves");
+    }
+  }
+  lastCards = new Map([...S.cards.values()].map((c) => [c.uid, { collection: c.collection, state: c.state }]));
 }
 
 function animateMoves(before) {
@@ -1220,13 +1324,13 @@ document.addEventListener("mouseover", (e) => {
 function handleAct(name) {
   const ui = S.ui;
   switch (name) {
-    case "pass": return act({ type: "pass" });
+    case "pass": sfx("Aud_FX_Combat_Interface_Pass_Priority", "interface"); return act({ type: "pass" });
     case "play_first": case "draw_first": case "keep": case "mulligan": return act({ type: name });
     case "commit-attack": return act({ type: "attack", attackers: [...(ui.chosen || [])] });
     case "commit-defense": return act({ type: "defend", blocks: ui.blocks || {} });
     case "choose-none": return act({ type: "choose", card: null });
     case "confirm-targets": return finishTargets();
-    case "cancel": S.ui = { mode: null }; return render();
+    case "cancel": sfx("Aud_FX_Cancel_Action", "interface"); S.ui = { mode: null }; return render();
     case "close-modal": S.ui = { mode: null }; $("#modal").classList.add("hidden"); return render();
     case "new-match": return backToLobby();
     default: return null;
@@ -1365,8 +1469,12 @@ $("#menu-button").addEventListener("click", () => {
       <label>Gameboard <select id="menu-board">${boardOptions()}</select></label>
       <label>Sound volume <input type="range" id="menu-volume" min="0" max="100" step="5" value="${storage("hex.volume") ?? 50}"> <span id="menu-volume-value">${storage("hex.volume") ?? 50}%</span></label>
     </div>
+    ${sfxSettingsHTML()}
     <div class="buttons"><button class="secondary" data-act="new-match">Concede and leave</button></div>`);
   $("#menu-sleeve").addEventListener("change", (e) => { storage("hex.sleeve", e.target.value); render(); });
+  document.querySelectorAll("[data-sfx]").forEach((box) => box.addEventListener("change", () => {
+    storage("hex.sfxOff", JSON.stringify(Object.keys(SFX_GROUPS).filter((g) => !document.querySelector(`[data-sfx="${g}"]`).checked)));
+  }));
   $("#menu-board").addEventListener("change", (e) => { storage("hex.board", e.target.value); render(); });
   $("#menu-volume").addEventListener("input", (e) => {
     $("#menu-volume-value").textContent = `${e.target.value}%`;

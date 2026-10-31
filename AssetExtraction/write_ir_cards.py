@@ -1,4 +1,4 @@
-"""Write ability card files (ir_cards/*.py) from the stored Records.
+"""Write ability card files (tests/ir_cards/troop_*.py) from the stored Records.
 
     python3 AssetExtraction/write_ir_cards.py <ability GUID> [<ability GUID> ...]
 
@@ -146,7 +146,7 @@ def write(guid):
 
 
 def main(guids):
-    out_dir = os.path.join(ROOT, "ir_cards")
+    out_dir = os.path.join(ROOT, "tests", "ir_cards")
     for guid in guids:
         text, guid8 = write(guid.lower())
         path = os.path.join(out_dir, f"troop_{guid8}.py")

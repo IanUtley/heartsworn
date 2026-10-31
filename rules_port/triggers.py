@@ -240,11 +240,17 @@ class NativeTriggerBackend:
                 battle_state["gain_threshold_color"] = event.data[
                     "gain_threshold_color"]
 
+        import time as _time
+        _discover_started = _time.monotonic()
         discovered = RecordsTriggerDiscovery(
             db, handler, session, player_uid, ai_uid, battle_state).discover(
                 event.event_type, event.source_card_id,
                 event.source_player_id, event.target_card_id,
                 event.data.get("zones"))
+        _discover_seconds = _time.monotonic() - _discover_started
+        if _discover_seconds > 0.05:
+            import db as db_layer
+            db_layer.log_req(f"    Trigger discovery {event_name}: {_discover_seconds:.3f}s")
         logs = []
         seen = set()
         champions = []

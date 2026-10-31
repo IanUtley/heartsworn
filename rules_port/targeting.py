@@ -584,6 +584,7 @@ def _champion_filter_cards(champions, battle_state=None):
     battle state.
     """
     state = battle_state or {}
+    attributes = {int(uid): int(bits) for uid, bits in (state.get("champion_attributes") or {}).items()}
     raw_guids = state.get("champ_guid_map") or {}
     guids = {}
     if isinstance(raw_guids, dict):
@@ -615,6 +616,8 @@ def _champion_filter_cards(champions, battle_state=None):
             "name": champion[2] if len(champion) > 2 else "Champion",
             "subtype": _champion_subtype(guid),
             "attack": 0,
+            # Ability-granted attributes (see CardPlayMixin._champion_targets).
+            "attributes": attributes.get(uid, 0),
             "defense": int(champion[3] or 0)
             if len(champion) > 3 else 0,
             "counters": counters,

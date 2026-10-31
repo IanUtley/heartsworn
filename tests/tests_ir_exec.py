@@ -162,14 +162,14 @@ def test_spitfire_elemental_damages_each_opposing_champion_and_troop(db):
 
 
 def test_burning_runs_from_the_loaded_card_file(db):
-    """The interpreter runs Burning from its card file (ir_cards/surface/burning.py): the root and the two
+    """The interpreter runs Burning from its card file (tests/ir_cards/surface/burning.py): the root and the two
     effects come from the card, and the outcome is the same as from the Records."""
-    from ir_cards.load import load_card
+    from tests.ir_cards.load import load_card
     from rules_port import ir_exec
     from rules_port.builtin_rules import BURNING_ABILITY_GUID
     from rules_port.context import EffectContext
 
-    ir_exec.register_card(load_card("ir_cards/surface/burning.py"))
+    ir_exec.register_card(load_card(os.path.join(os.path.dirname(os.path.abspath(__file__)), "ir_cards", "surface", "burning.py")))
     try:
         assert ("AbilityTemplate", BURNING_ABILITY_GUID) in ir_exec._CARD_RECORDS
         pl_t, ai_t, game, handler, bstate, player_champ, ai_champ = _setup(db)
@@ -236,11 +236,11 @@ def test_a_python_only_card_runs_in_the_interpreter(db):
 def test_named_guids_resolve_across_cards_and_refuse_clashes(db):
     """A template bound to a name in one card is found by name from later text; a clashing name is refused."""
     from gamedata import ir_python, ir_registry
-    from ir_cards.load import load_card
+    from tests.ir_cards.load import load_card
 
     ir_registry.clear()
     try:
-        load_card("ir_cards/custom/start_of_turn_two_damage.py")
+        load_card(os.path.join(os.path.dirname(os.path.abspath(__file__)), "ir_cards", "custom", "start_of_turn_two_damage.py"))
         clause = ir_python.loads(
             'X = Clause(effect_template_id=Named("start_of_turn_two_damage.DEAL_TWO"), target_template_index=0)')["X"]
         assert clause.get("m_EffectTemplateId") == {"m_Guid": "00000000-0000-0000-0000-00000000c0df"}, clause

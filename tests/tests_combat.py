@@ -95,6 +95,11 @@ class HandlerStub:
             game_engine.UID.make(244, 5))
         self._ai_champ_scid = game_engine.SessionCardId(
             game_engine.UID.make(3, 1000))
+        self.game_ends = []
+
+    def _finish_battle_gameend(self, session, won, winners, losers):
+        """Record the game end a champion's destruction causes (the live path also updates campaign progress)."""
+        self.game_ends.append((bool(won), [int(uid) for uid in winners], [int(uid) for uid in losers]))
 
     def _fresh_game(self, session, pl_t, ai_t, bstate):
         g = game_engine.Game(session.session_id, pl_t, ai_t)
@@ -2293,3 +2298,15 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+def test_discarding_player_is_the_champion_controller():
+    """An AI-controlled "opposing champion discards" effect makes the player discard, not the AI.
+
+    The discard operation records the targeted champion's controller; without that record the ability's
+    controller discards, as before.
+    """
+    from application.combat import discarding_player
+
+    assert discarding_player({"discard_controller": 248345604340}, 0) == 248345604340
+    assert discarding_player({}, 0) == 0

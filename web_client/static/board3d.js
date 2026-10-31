@@ -9,13 +9,73 @@ import * as THREE from "./vendor/three.module.min.js";
 import { SLEEVES, canvas, artImage, artImages, ellipsize, paintFace, paintSleeve } from "./card_face.js";
 
 const CARD_W = 1.2, CARD_H = 1.68, CARD_T = 0.03;
+// A hand card is 1/CARDS_ON_SCREEN of the screen height. The hand is HAND_DEPTH of the way from the camera
+// to the table's middle, so its cards look bigger than the board's cards, which are further away (0.65 of the hand's size).
+const CARDS_ON_SCREEN = 5, HAND_DEPTH = 0.65;
 const FIELD_R = 4.3, RING_R = 6.5, RING_Y = 0.12;
 const ROW_Z = 2.2, CHAIN_Y = 0.6, REST_Y = 0.14;
+// The hands lie along a large circle across the bottom of the view (the top of the screen for the
+// opponent's), so the hand turns only a few degrees. Each card stands face-on with its top on that circle.
+// Cards always overlap: each one advances HAND_OVERLAP of a card width from the last.
+const HAND_OVERLAP = 0.6;
+const HAND_ARC_RADIUS = 20;   // card heights
+// A resting hand card drops this many card heights off the screen: its type line and rules text
+// (the lower 35% of the face, from y=407 of 625) are hidden until the card is hovered.
+const HAND_HIDDEN = 0.35;
+const HAND_ARC_RISE = 1 - HAND_HIDDEN;   // the arc's top, so the apex card's hidden part is below the edge
+const HAND_STACK = 0.002;  // each hand card sits this much nearer the camera than the one to its left, so overlaps never flicker
+// The camera: where it aims on the table.
+const CAMERA_LOOK_Z = 0.55;
+const HAND_SIDE = { "mine-hand": 1, "opp-hand": -1 };
+// A dragged card floats at DRAG_LIFT and leans into its movement, up to DRAG_LEAN_MAX radians.
+const DRAG_LIFT = 0.6, DRAG_LEAN = 0.06, DRAG_LEAN_MAX = 0.35;
+const DRAG_THRESHOLD = 6;        // px of movement before a press becomes a drag
+const DRAG_CLICK_WINDOW = 400;   // ms after a drop in which the trailing click is ignored
+const PLAY_EDGE_Z = 3.2;         // a card dropped nearer the camera than this is over the hand, not the table
 
 // Same palette as the CSS gameboards in style.css.
 
 const GLOW = { playable: "#7cf0ff", selectable: "#ffe066", selected: "#ffb020", "chosen-attacker": "#ff5a3c",
   attacking: "#ff5a3c", blocking: "#7ad3ff", top: "#ffd27a" };
+// Highlights drawn as a shader border: flames around a playable card, a golden aura around an activatable one.
+const EFFECTS = { playable: 0, activatable: 1 };
+const EFFECT_VERT = `
+varying vec2 vUv;
+void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }
+`;
+const EFFECT_FRAG = `
+uniform float uTime;
+uniform float uMode;
+varying vec2 vUv;
+float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+float noise(vec2 p) {
+  vec2 i = floor(p), f = fract(p);
+  f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), f.x), mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), f.x), f.y);
+}
+void main() {
+  // The plane is 1.32 by 1.26 card sizes, so the card fills 0.38 by 0.40 of it from the centre.
+  vec2 q = vUv - 0.5;
+  vec2 e = abs(q) - vec2(0.3788, 0.3968);
+  float d = length(max(e, 0.0)) + min(max(e.x, e.y), 0.0);   // distance outside the card's edge
+  float ring = smoothstep(0.0, 0.01, d) * (1.0 - smoothstep(0.0, 0.12, d));
+  vec3 col;
+  float a;
+  if (uMode < 0.5) {
+    // Flames: tongues that rise from the border and flicker as they climb.
+    float n = 0.6 * noise(vec2(vUv.x * 30.0, vUv.y * 10.0 - uTime * 3.0)) + 0.4 * noise(vec2(vUv.x * 60.0, vUv.y * 22.0 - uTime * 5.0));
+    float heat = n * (1.0 - d / 0.12);
+    a = ring * smoothstep(0.25, 0.55, heat);
+    col = mix(vec3(1.0, 0.35, 0.05), vec3(1.0, 0.92, 0.45), smoothstep(0.4, 0.8, heat));
+  } else {
+    // Golden aura: a bright band that turns round the card.
+    float turn = 0.5 + 0.5 * sin(atan(q.y, q.x) * 6.0 - uTime * 2.0);
+    a = ring * (0.7 + 0.3 * turn);
+    col = vec3(1.0, 0.8, 0.3);
+  }
+  gl_FragColor = vec4(col, a);
+}
+`;
 
 // Arc colours: a green attack, a red block, a gold target (chain targets and picked targets).
 const ARC = { attack: "#42ff6e", block: "#ff3d3d", target: "#ffb020" };
@@ -206,6 +266,7 @@ const BOARD_CAMERA_PULL = 1.1;
 const ARENA_BACKGROUND = "#0d1210";
 
 function randomIn([lo, hi]) { return lo + Math.random() * (hi - lo); }
+function clampLean(angle) { return Math.max(-DRAG_LEAN_MAX, Math.min(DRAG_LEAN_MAX, angle)); }
 
 // Colour at t (0..1) along gradient stops; the constant colour when there are none.
 function gradientAt(stops, t, fallback) {
@@ -338,6 +399,70 @@ class ParticleEmitter {
 
 // The battleboard as three.js meshes: its playing surface and props, scaled so
 // the surface spans the arena ring and centred on it.
+/* -- mist --------------------------------------------------------- */
+
+const MIST_PUFFS = 7;
+const MIST_HEIGHT = 0.35;   // above the table, below the hands
+
+// A soft cloud made from overlapping radial gradients, so it needs no game art.
+function mistTexture() {
+  const size = 256, [c, ctx] = canvas(size);
+  for (let i = 0; i < 48; i++) {
+    const x = Math.random() * size, y = Math.random() * size, r = 26 + Math.random() * 60;
+    const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+    g.addColorStop(0, "rgba(255,255,255,0.55)");
+    g.addColorStop(1, "rgba(255,255,255,0)");
+    ctx.fillStyle = g;
+    ctx.fillRect(x - r, y - r, 2 * r, 2 * r);
+  }
+  // Fade the cloud to nothing at the canvas edge, so the plane has no square outline.
+  ctx.globalCompositeOperation = "destination-in";
+  const edge = ctx.createRadialGradient(size / 2, size / 2, size * 0.2, size / 2, size / 2, size / 2);
+  edge.addColorStop(0, "rgba(0,0,0,1)");
+  edge.addColorStop(1, "rgba(0,0,0,0)");
+  ctx.fillStyle = edge;
+  ctx.fillRect(0, 0, size, size);
+  ctx.globalCompositeOperation = "source-over";
+  return texture(c);
+}
+
+// Drifting mist: each puff orbits the table on an ellipse at its own slow speed, wobbling
+// in and out and breathing in opacity, so the mist flows around the board without a seam.
+class Mist {
+  constructor(scene) {
+    this.group = new THREE.Group();
+    this.puffs = [];
+    const map = mistTexture();
+    for (let i = 0; i < MIST_PUFFS; i++) {
+      const material = new THREE.MeshBasicMaterial({ map, color: "#d6e2e8", transparent: true,
+        opacity: 0, depthWrite: false });
+      const mesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), material);
+      mesh.rotation.x = -Math.PI / 2;
+      mesh.renderOrder = 3;
+      this.group.add(mesh);
+      this.puffs.push({
+        mesh, material,
+        angle: (i / MIST_PUFFS) * Math.PI * 2 + Math.random() * 0.6,
+        speed: 0.05 + Math.random() * 0.04,               // radians per second
+        radius: 3.8 + Math.random() * 2.2,
+        size: 3.4 + Math.random() * 2.4,
+        wobble: 0.3 + Math.random() * 0.4, phase: Math.random() * Math.PI * 2,
+      });
+    }
+    scene.add(this.group);
+  }
+
+  update(t, dt) {
+    for (const p of this.puffs) {
+      p.angle += p.speed * dt;
+      const r = p.radius * (1 + 0.08 * Math.sin(t * p.wobble + p.phase));
+      p.mesh.position.set(Math.cos(p.angle) * r * 1.2, MIST_HEIGHT, Math.sin(p.angle) * r * 0.8);
+      p.mesh.scale.setScalar(p.size);
+      p.material.opacity = 0.16 + 0.1 * Math.sin(t * 0.4 + p.phase);
+    }
+  }
+}
+
 // Board-space height of the view's top and bottom edges, along the centre
 // line of the board, at ground level. Used to frame the board by its daises.
 function groundZAt(camera, ndcY) {
@@ -474,7 +599,14 @@ class Board3D {
     this.container = container;
     this.callbacks = callbacks;
     this.cards = new Map();      // uid -> { mesh, face, glow, target }
+    window.hexBoard = this;      // the board, for inspecting cards in the browser console
     this.hovered = null;
+    this.press = null;           // a pointer down on one of your hand cards, not yet a drag
+    this.drag = null;            // { rec, point } while a hand card follows the pointer
+    this.dragPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -DRAG_LIFT);
+    this.dragEndedAt = 0;
+    this.effectTime = { value: 0 };   // shared by the border effects, in seconds
+    this.effects = new Map();         // "mode:hand" -> the shader material for that effect
     this.combat = false;
     this.clock = new THREE.Clock();
 
@@ -485,6 +617,7 @@ class Board3D {
     renderer.toneMappingExposure = 1.05;
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    renderer.autoClear = false;   // frame() clears the table and the hand separately
     container.appendChild(renderer.domElement);
     // Arcs are drawn on a 2D layer above the table, so they can reach the HTML portraits.
     this.arcCanvas = document.createElement("canvas");
@@ -510,6 +643,13 @@ class Board3D {
     this.scene.add(this.arena);
     this.cardGroup = new THREE.Group();
     this.scene.add(this.cardGroup);
+    // The hand is drawn after the table, in its own scene with the same light, so it covers the table while its
+    // cards still hide each other by depth.
+    this.handScene = new THREE.Scene();
+    this.handGroup = new THREE.Group();
+    const handSun = new THREE.DirectionalLight("#fff1dc", 2.2);
+    handSun.position.copy(sun.position);
+    this.handScene.add(this.handGroup, new THREE.HemisphereLight("#fff6e6", "#1a1a22", 1.1), handSun);
 
     this.cardGeo = new THREE.BoxGeometry(CARD_W, CARD_T, CARD_H);
     this.glowGeo = new THREE.PlaneGeometry(CARD_W * 1.32, CARD_H * 1.26);
@@ -521,9 +661,13 @@ class Board3D {
     this.burstLight.position.set(0, 1.4, 0);
     this.burstAge = 9;
     this.scene.add(this.burstSprite, this.burstLight);
+    this.mist = new Mist(this.scene);
 
     const el = renderer.domElement;
+    el.addEventListener("pointerdown", (e) => this.onPress(e));
     el.addEventListener("pointermove", (e) => this.pointer(e, false));
+    el.addEventListener("pointerup", () => this.release());
+    el.addEventListener("pointercancel", () => this.cancelDrag());
     el.addEventListener("pointerleave", () => this.hover(null));
     el.addEventListener("click", (e) => this.pointer(e, true));
     new ResizeObserver(() => this.resize()).observe(container);
@@ -542,8 +686,13 @@ class Board3D {
     // Keep the whole field in view on narrow screens: pull back as the aspect narrows.
     const back = Math.max(1, 1.55 / this.camera.aspect) * (this.cameraPull || 1);
     this.camera.position.set(0, 11.6 * back, 7.4 * back);
-    this.camera.lookAt(0, 0, 0.55);
+    // Aim at the middle of the table, so both hands and the chain stay in frame.
+    this.camera.lookAt(0, 0, CAMERA_LOOK_Z);
     this.camera.updateProjectionMatrix();
+    // Cards scale with the view: a hand card, at the hand's depth, is 1/CARDS_ON_SCREEN of the visible height.
+    const hand = HAND_DEPTH * this.camera.position.distanceTo(new THREE.Vector3(0, 0, CAMERA_LOOK_Z));
+    const visible = 2 * hand * Math.tan(THREE.MathUtils.degToRad(this.camera.fov / 2));
+    this.cardScale = visible / (CARDS_ON_SCREEN * CARD_H);
   }
 
   /* -- arena -------------------------------------------------------- */
@@ -618,16 +767,51 @@ class Board3D {
 
   /* -- cards -------------------------------------------------------- */
 
+  // Where a hand card rests: its centre, the turn that faces it to the camera, and the lift that shows
+  // its lower part when hovered. The card's top sits on the hand's arc, in a plane facing the camera at the table's middle.
+  handPose(entry) {
+    const cam = this.camera, side = HAND_SIDE[entry.zone], k = this.cardScale;
+    const w = CARD_W * k, cardH = CARD_H * k;
+    const fwd = cam.getWorldDirection(new THREE.Vector3());
+    const right = new THREE.Vector3(1, 0, 0).applyQuaternion(cam.quaternion);
+    const up = new THREE.Vector3(0, 1, 0).applyQuaternion(cam.quaternion).multiplyScalar(side);
+    // The hand's plane: HAND_DEPTH of the way from the camera to the table's middle, facing the camera.
+    const handDepth = HAND_DEPTH * cam.position.distanceTo(new THREE.Vector3(0, 0, CAMERA_LOOK_Z));
+    const middle = cam.position.clone().addScaledVector(fwd, handDepth);
+    const halfH = handDepth * Math.tan(THREE.MathUtils.degToRad(cam.fov / 2));
+    // A large circle whose top sits HAND_ARC_RISE card heights above the screen's edge. Cards are spaced
+    // HAND_OVERLAP of a card width apart, closer only when the hand would otherwise leave the screen.
+    const rise = HAND_ARC_RISE * cardH, R = HAND_ARC_RADIUS * cardH;
+    const cy = -halfH + rise - R;
+    const widest = Math.max(halfH * cam.aspect - w, 0);
+    const spacing = entry.count > 1 ? Math.min(HAND_OVERLAP * w, (2 * widest) / (entry.count - 1)) : 0;
+    const phi = ((entry.index - (entry.count - 1) / 2) * spacing) / R;
+    const u = R * Math.sin(phi), height = R * Math.cos(phi);
+    const radial = right.clone().multiplyScalar(Math.sin(phi)).addScaledVector(up, Math.cos(phi));
+    const onArc = middle.clone().addScaledVector(right, u).addScaledVector(up, cy + height);
+    const face = fwd.clone().negate();
+    const down = radial.clone().negate();
+    // The card hangs from its top edge on the arc, so its centre is half a card below that point.
+    const centre = onArc.addScaledVector(radial, -cardH / 2).addScaledVector(face, entry.index * HAND_STACK);
+    const x = new THREE.Vector3().crossVectors(face, down);
+    const turn = new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(x, face, down));
+    const lift = radial.clone().multiplyScalar(HAND_HIDDEN * cardH);
+    return { centre, turn, lift };
+  }
+
   slot(entry) {
-    // World position for a card: warzone rows on either side, chain across the middle.
-    const n = entry.count, spacing = Math.min(1.42, (entry.zone === "chain" ? 7 : 8.2) / Math.max(n, 1));
-    const x = (entry.index - (n - 1) / 2) * spacing;
-    if (entry.zone === "chain") return new THREE.Vector3(x, CHAIN_Y + (entry.top ? 0.12 : 0), 0);
+    // World position for a card: hands in view at the screen's edges, warzone rows on either side, chain across the middle.
+    if (entry.zone in HAND_SIDE) return this.handPose(entry).centre;
+    const n = entry.count;
+    const k = this.cardScale;
+    const spacing = Math.min(1.42, (entry.zone === "chain" ? 7 : 8.2) / Math.max(n, 1));
+    const x = (entry.index - (n - 1) / 2) * spacing * k;
+    if (entry.zone === "chain") return new THREE.Vector3(x, (CHAIN_Y + (entry.top ? 0.12 : 0)) * k, 0);
     const side = entry.zone === "mine" ? 1 : -1;
     // Attackers step towards the centre; a blocker steps in a little less. A tapped
     // troop (an attacker after its attack) rests a little back from the centre line.
-    const lunge = entry.attacking ? -side * 0.55 : entry.blocking ? -side * 0.3 : entry.tapped ? side * 0.25 : 0;
-    return new THREE.Vector3(x, REST_Y, side * ROW_Z + lunge);
+    const lunge = (entry.attacking ? -side * 0.55 : entry.blocking ? -side * 0.3 : entry.tapped ? side * 0.25 : 0) * k;
+    return new THREE.Vector3(x, REST_Y, side * ROW_Z * k + lunge);
   }
 
   update(entries) {
@@ -646,18 +830,26 @@ class Board3D {
       rec.target = this.slot(entry);
       if (rec.fresh) { rec.mesh.position.copy(rec.target); rec.fresh = false; }
       rec.mesh.visible = !entry.hidden;
-      const glow = GLOW[entry.highlight] || (entry.top ? GLOW.top : null);
-      rec.glow.visible = !!glow;
-      if (glow) rec.glow.material.color.set(glow);
+      const mode = EFFECTS[entry.highlight];
+      if (mode !== undefined) {
+        rec.glow.material = this.effect(mode, entry.zone in HAND_SIDE);
+        rec.glow.visible = true;
+      } else {
+        const glow = GLOW[entry.highlight] || (entry.top ? GLOW.top : null);
+        rec.glow.material = rec.baseGlow;
+        rec.glow.visible = !!glow;
+        if (glow) rec.baseGlow.color.set(glow);
+      }
       rec.mesh.material[2].color.setScalar(entry.tapped ? 0.62 : 1);
     }
     for (const [key, rec] of this.cards) {
       if (seen.has(key)) continue;
-      this.cardGroup.remove(rec.mesh);
+      rec.mesh.parent.remove(rec.mesh);
       rec.mesh.material.forEach((m) => { if (m.map) m.map.dispose(); m.dispose(); });
-      rec.glow.material.dispose();
+      rec.baseGlow.dispose();
       this.cards.delete(key);
       if (this.hovered === rec) this.hovered = null;
+      if (this.drag && this.drag.rec === rec) this.cancelDrag();
     }
   }
 
@@ -669,14 +861,28 @@ class Board3D {
     const mesh = new THREE.Mesh(this.cardGeo, [edge, edge, top, back, edge, edge]);
     mesh.castShadow = true;
     mesh.userData.uid = entry.uid;
-    const glow = new THREE.Mesh(this.glowGeo, new THREE.MeshBasicMaterial({
-      map: this.glowTex, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending }));
+    const hand = entry.zone in HAND_SIDE;
+    const baseGlow = new THREE.MeshBasicMaterial({
+      map: this.glowTex, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending });
+    const glow = new THREE.Mesh(this.glowGeo, baseGlow);
     glow.rotation.x = -Math.PI / 2;
     glow.position.y = -CARD_T;
     glow.visible = false;
     mesh.add(glow);
-    this.cardGroup.add(mesh);
-    return { mesh, glow, fresh: true, faceKey: null };
+    (hand ? this.handGroup : this.cardGroup).add(mesh);
+    // base: the card's resting yaw and tilt; lean: the tip a drag gives it (x: pitch, y: roll, radians).
+    return { mesh, glow, baseGlow, fresh: true, faceKey: null, base: new THREE.Vector3(), lean: new THREE.Vector2() };
+  }
+
+  // The shader border for a highlight (mode 0: flames, 1: golden aura), shared by the cards that show it.
+  effect(mode, hand) {
+    const key = `${mode}:${hand}`;
+    if (!this.effects.has(key)) {
+      this.effects.set(key, new THREE.ShaderMaterial({ vertexShader: EFFECT_VERT, fragmentShader: EFFECT_FRAG,
+        uniforms: { uTime: this.effectTime, uMode: { value: mode } }, transparent: true, depthWrite: false,
+        blending: THREE.AdditiveBlending }));
+    }
+    return this.effects.get(key);
   }
 
   paint(rec, face, faceKey) {
@@ -692,19 +898,72 @@ class Board3D {
 
   /* -- interaction -------------------------------------------------- */
 
-  pick(e) {
+  // The camera ray through a pointer event.
+  aim(e) {
     const r = this.renderer.domElement.getBoundingClientRect();
     const ndc = new THREE.Vector2(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
     this.raycaster.setFromCamera(ndc, this.camera);
-    const hits = this.raycaster.intersectObjects([...this.cards.values()].filter((c) => c.mesh.visible).map((c) => c.mesh), false);
+    return this.raycaster;
+  }
+
+  pick(e) {
+    const hits = this.aim(e).intersectObjects([...this.cards.values()].filter((c) => c.mesh.visible).map((c) => c.mesh), false);
     if (!hits.length) return null;
     return [...this.cards.values()].find((c) => c.mesh === hits[0].object) || null;
   }
 
-  pointer(e, click) {
+  // A press on one of your hand cards: a click if the pointer stays put, a drag once it moves.
+  onPress(e) {
+    if (e.button !== 0) return;
     const rec = this.pick(e);
-    if (click) { if (rec) this.callbacks.onClick(rec.entry.uid); return; }
-    this.hover(rec);
+    if (!rec || rec.entry.zone !== "mine-hand") return;
+    this.press = { rec, x: e.clientX, y: e.clientY };
+    this.renderer.domElement.setPointerCapture(e.pointerId);
+  }
+
+  pointer(e, click) {
+    if (click) {
+      // The click that ends a drag is not a second play.
+      if (performance.now() - this.dragEndedAt < DRAG_CLICK_WINDOW) return;
+      const rec = this.pick(e);
+      if (rec) this.callbacks.onClick(rec.entry.uid);
+      return;
+    }
+    if (this.press && !this.drag && Math.hypot(e.clientX - this.press.x, e.clientY - this.press.y) >= DRAG_THRESHOLD) {
+      this.drag = { rec: this.press.rec, point: this.press.rec.mesh.position.clone(), over: false };
+      this.press = null;
+      this.renderer.domElement.style.cursor = "grabbing";
+      this.hover(null);
+    }
+    if (this.drag) { this.dragTo(e); return; }
+    this.hover(this.pick(e));
+  }
+
+  // Move the dragged card to where the pointer is on the table, and report when that is the play area.
+  dragTo(e) {
+    this.aim(e).ray.intersectPlane(this.dragPlane, this.drag.point);
+    const over = this.drag.point.z < PLAY_EDGE_Z;
+    if (over !== this.drag.over) {
+      this.drag.over = over;
+      this.callbacks.onDropZone(over);
+    }
+  }
+
+  release() {
+    this.press = null;
+    if (!this.drag) return;
+    const { rec, point } = this.drag;
+    this.cancelDrag();
+    this.dragEndedAt = performance.now();
+    if (point.z < PLAY_EDGE_Z) this.callbacks.onDrop(rec.entry.uid);
+  }
+
+  cancelDrag() {
+    this.press = null;
+    if (!this.drag) return;
+    if (this.drag.over) this.callbacks.onDropZone(false);
+    this.drag = null;
+    this.renderer.domElement.style.cursor = "";
   }
 
   hover(rec) {
@@ -732,7 +991,8 @@ class Board3D {
     if (!rec) return null;
     const t = rec.target, xs = [], ys = [];
     for (const [dx, dz] of [[-0.5, -0.5], [0.5, -0.5], [-0.5, 0.5], [0.5, 0.5]]) {
-      const p = this.project(new THREE.Vector3(t.x + dx * CARD_W, t.y, t.z + dz * CARD_H));
+      const corner = new THREE.Vector3(dx * CARD_W, 0, dz * CARD_H).multiplyScalar(this.cardScale).applyQuaternion(rec.mesh.quaternion);
+      const p = this.project(corner.add(t));
       xs.push(p.x); ys.push(p.y);
     }
     const left = Math.min(...xs), top = Math.min(...ys);
@@ -801,22 +1061,46 @@ class Board3D {
   frame() {
     const dt = Math.min(this.clock.getDelta(), 0.05), t = this.clock.elapsedTime;
     const k = 1 - Math.pow(0.0015, dt);   // frame-rate independent easing
+    const kd = 1 - Math.pow(0.0005, dt);  // a dragged card keeps close to the pointer
+    this.effectTime.value = t;
     for (const rec of this.cards.values()) {
-      const m = rec.mesh, e = rec.entry, target = rec.target.clone();
-      const hovered = rec === this.hovered;
-      if (hovered) target.y += 0.35;
+      const m = rec.mesh, e = rec.entry, hand = e.zone in HAND_SIDE;
+      const dragging = !!this.drag && this.drag.rec === rec, hovered = rec === this.hovered;
+      // A hand is placed against the screen each frame, so it keeps its edge through a resize.
+      const pose = hand ? this.handPose(e) : null;
+      rec.target = this.slot(e);
+      const target = dragging ? this.drag.point.clone() : rec.target.clone();
+      if (hand && hovered && !dragging) target.copy(pose.centre).add(pose.lift);   // a hovered hand card rises into full view
+      else if (hovered && !dragging) target.y += 0.35 * this.cardScale;
       if (e.zone === "chain") target.y += Math.sin(t * 2 + e.index) * 0.04;
-      m.position.lerp(target, k);
-      // Tapped troops (attackers stay tapped until they ready) lie 90 degrees anticlockwise.
-      const rotY = e.attacking || e.tapped ? TAP_ATTACK : 0;
-      m.rotation.y += (rotY - m.rotation.y) * k;
-      // tilt a little towards the camera so faces read better
-      const tilt = e.zone === "chain" ? 0.55 : (hovered ? 0.3 : 0.1);
-      m.rotation.x += (tilt - m.rotation.x) * k;
-      const s = hovered ? 1.12 : 1;
+      const before = m.position.clone();
+      // A dragged card sits exactly under the pointer; other cards glide to their places.
+      if (dragging) m.position.copy(target);
+      else m.position.lerp(target, k);
+      // A dragged card tips its leading edge towards where it moves, and levels off once let go.
+      const v = m.position.clone().sub(before).divideScalar(Math.max(dt, 1e-3));
+      const lean = dragging ? new THREE.Vector2(v.z, -v.x).multiplyScalar(DRAG_LEAN) : new THREE.Vector2();
+      lean.set(clampLean(lean.x), clampLean(lean.y));
+      rec.lean.lerp(lean, dragging ? kd : k);
+      if (hand) {
+        m.quaternion.copy(pose.turn);
+      } else {
+        const b = rec.base;
+        // Tapped troops (attackers stay tapped until they ready) lie 90 degrees anticlockwise.
+        const rotY = e.attacking || e.tapped ? TAP_ATTACK : 0;
+        b.y += (rotY - b.y) * k;
+        // tilt a little towards the camera so faces read better
+        const tilt = e.zone === "chain" ? 0.55 : (hovered ? 0.3 : 0.1);
+        b.x += (tilt - b.x) * k;
+        m.rotation.set(b.x, b.y, 0);
+      }
+      // The lean is applied in world space, after the resting turn, so it tips the card the same way whatever its yaw.
+      m.quaternion.premultiply(new THREE.Quaternion().setFromEuler(new THREE.Euler(rec.lean.x, 0, rec.lean.y)));
+      const s = (hovered ? 1.12 : 1) * this.cardScale;
       m.scale.setScalar(m.scale.x + (s - m.scale.x) * k);
       if (rec.glow.visible) rec.glow.material.opacity = 0.75 + Math.sin(t * 5) * 0.25;
     }
+    this.mist.update(t, dt);
     const pixelScale = this.renderer.domElement.height / (2 * Math.tan(THREE.MathUtils.degToRad(this.camera.fov / 2)));
     for (const e of this.emitters || []) e.update(dt, pixelScale);
     this.burstAge += dt;
@@ -824,7 +1108,10 @@ class Board3D {
     this.burstSprite.material.opacity = b * 0.8;
     this.burstSprite.scale.setScalar(1 + (1 - b) * 5);
     this.burstLight.intensity = b * 25;
+    this.renderer.clear();
     this.renderer.render(this.scene, this.camera);
+    this.renderer.clearDepth();
+    this.renderer.render(this.handScene, this.camera);
     this.drawArcs(t);
   }
 }

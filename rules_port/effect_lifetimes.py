@@ -86,6 +86,20 @@ def record_grant(state, *, source_uid, target_uid, ability_guid,
         state.setdefault(_STATE_KEY, []).append(entry)
 
 
+def grants_on_card(state, card_uid):
+    """``[(source_uid, ability GUID)]`` for each duration-bound ability granted to a card by another card: the
+    grants the client's "affected by" list shows on that card."""
+    try:
+        uid = int(card_uid)
+    except (TypeError, ValueError):
+        return []
+    with _LIFETIME_LOCK:
+        return [(int(item["source_uid"]), str(item["ability_guid"]).lower())
+                for item in (state or {}).get(_STATE_KEY, ())
+                if isinstance(item, dict) and item.get("target_uid") == uid and
+                item.get("ability_guid") and item.get("source_uid") is not None]
+
+
 def champion_grants(state, champion_uid):
     """Return duration-bound ability GUIDs currently granted to a champion."""
     try:

@@ -76,7 +76,7 @@ export class HexInstall {
     this.pixels = new Map();       // art number -> Promise<{width, height, rgba} | null>
     this.clips = new Map();        // "art|clip" -> Promise<Uint8Array | null>
     this.boards = new Map();       // board key -> Promise<board | null>
-    this.sounds = null;            // AudioContext, created on first playback
+    this.soundIndex = null;        // shared clip name -> where its audio sits (see indexSounds)
   }
 
   // Indexes every card bundle once. A card's art is in several HARC archives
@@ -165,6 +165,50 @@ export class HexInstall {
     return bank ? vorbisBankToOgg(bank, clip.m_Frequency) : bytes;
   }
 
+  // Bytes of a shared sound clip (battle and UI effects such as Aud_FX_Main_Phase), as Ogg. The clips sit
+  // in the Hex_Data sharedassets files, indexed once by name. Returns null for a clip this reader cannot decode.
+  async soundBytes(name) {
+    // A name can sit in more than one file; the first copy this reader can decode is used.
+    for (const at of (await this.sounds()).get(name) || []) {
+      const source = await this.tree.file(`Hex_Data/${at.source}`);
+      const bank = parseVorbisBank(await source.read(at.offset, at.size));
+      if (bank) return vorbisBankToOgg(bank, at.frequency);
+    }
+    return null;
+  }
+
+  // The clip a sound name plays: the name itself, or for a sound group (such as Aud_FX_Card_Draw, whose
+  // variants are Aud_FX_Card_Draw_01 and so on) one variant picked at random. Null when there is none.
+  async soundName(name) {
+    const index = await this.sounds();
+    if (index.has(name)) return name;
+    const variants = [...index.keys()].filter((n) => n.startsWith(`${name}_`) && /^\d+$/.test(n.slice(name.length + 1)));
+    return variants.length ? variants[Math.floor(Math.random() * variants.length)] : null;
+  }
+
+  sounds() {
+    if (!this.soundIndex) this.soundIndex = this.indexSounds();
+    return this.soundIndex;
+  }
+
+  // Every AudioClip in the sharedassets files, by name, as a list of its copies. These files keep no TypeTree, so each clip's
+  // fields are read from its bytes (see audioClipFields).
+  async indexSounds() {
+    const index = new Map();
+    const files = (await this.tree.list("Hex_Data")).filter((n) => /^sharedassets\d+\.assets$/.test(n));
+    for (const file of files) {
+      const source = await this.tree.file(`Hex_Data/${file}`);
+      const bytes = await source.read(0, source.size);
+      const serialized = parseSerializedFile(bytes);
+      for (const object of serialized.objects.filter((o) => o.classId === CLASS_AUDIO_CLIP)) {
+        const clip = audioClipFields(bytes, object);
+        if (!index.has(clip.name)) index.set(clip.name, []);
+        index.get(clip.name).push(clip);
+      }
+    }
+    return index;
+  }
+
   // A battleboard: its textured meshes in Unity's world space, converted to
   // three.js axes (Unity is left-handed, so Z is mirrored and winding flips).
   // Battleboard keys: the AssetBundles/gameboards/<key>.ab files that hold a
@@ -209,6 +253,28 @@ export class HexInstall {
     }
     return this.boards.get(key);
   }
+}
+
+const CLASS_AUDIO_CLIP = 83;
+
+// The fields of an AudioClip stored without a TypeTree (Unity 5.6): name, load type, channels, frequency,
+// bits, length, two flags, then its resource as { m_Source, m_Offset, m_Size }.
+function audioClipFields(bytes, object) {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  let at = object.byteStart;
+  const text = () => {
+    const length = view.getInt32(at, true);
+    const value = new TextDecoder().decode(bytes.subarray(at + 4, at + 4 + length));
+    at = (at + 4 + length + 3) & ~3;
+    return value;
+  };
+  const name = text();
+  const frequency = view.getInt32(at + 8, true);
+  at += 32;   // load type, channels, frequency, bits, length, the two flags
+  const source = text().split("/").pop();
+  const offset = Number(view.getBigUint64(at, true));
+  const size = Number(view.getBigUint64(at + 8, true));
+  return { name, frequency, source, offset, size };
 }
 
 function serializedName(bundle) {

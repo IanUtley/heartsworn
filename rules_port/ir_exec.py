@@ -85,7 +85,7 @@ _KEY_FIELD = {"AbilityTemplate": "m_AbilityTemplateId", "AbilityEffectTemplate":
 def register_card(names: dict[str, Any]) -> None:
     """Make a loaded card's root and effect and target templates the ones the interpreter runs.
 
-    ``names`` is what ``ir_cards.load.load_card`` returns: the card's typed objects by name."""
+    ``names`` is what ``tests.ir_cards.load.load_card`` returns: the card's typed objects by name."""
     from gamedata.mechanics_base import Typed
     for value in names.values():
         if not isinstance(value, Typed):
@@ -261,6 +261,19 @@ def _champion_owners(bstate: dict[str, Any]) -> dict[int, int]:
     return {int(uid): int(owner) for owner, uid in (bstate.get("champ_map") or {}).items()}
 
 
+def _champion_owners_with_handler(context: Any) -> dict[int, int]:
+    """Champion UID -> owner id: the battle state's champion map, plus each side's champion the handler holds when the
+    map lacks it (a state built outside setup has no map, and its champions would be invisible to triggers)."""
+    owners = _champion_owners(context.bstate)
+    handler = getattr(context, "handler", None)
+    profile = getattr(handler, "user_profile", None) or {}
+    for owner, attribute in ((int(profile.get("id", 0) or 0), "_player_champ_scid"), (0, "_ai_champ_scid")):
+        champion = getattr(handler, attribute, None)
+        if champion is not None and owner not in owners.values():
+            owners[int(champion.uid.uid64)] = owner
+    return owners
+
+
 def _battle_cards(scope: Scope) -> list[Card]:
     """Every card of the battle: the champions, then the session's other cards."""
     context = scope.context
@@ -273,7 +286,7 @@ def _battle_cards(scope: Scope) -> list[Card]:
         "FROM game_cards WHERE session_id=?", (context.session.session_id,)).fetchall()
     # A champion is a game_cards row too: it is listed once, as its row, and only a champion without one is synthetic.
     row_uids = {int(row[0]) for row in rows}
-    for uid, owner in _champion_owners(bstate).items():
+    for uid, owner in _champion_owners_with_handler(context).items():
         if uid not in row_uids:
             cards.append(Card(uid=uid, owner=owner, zone="champions", is_champion=True,
                               card_type="Champion",
@@ -846,6 +859,12 @@ def _player_champion(scope: Scope, owner: int) -> int:
     for uid, champion_owner in _champion_owners(scope.context.bstate).items():
         if champion_owner == int(owner):
             return uid
+    # A battle state without its champion map (a trigger resolved from a state built outside setup) still has each
+    # side's champion on the handler.
+    handler = getattr(scope.context, "handler", None)
+    champion = getattr(handler, "_ai_champ_scid" if int(owner) == 0 else "_player_champ_scid", None)
+    if champion is not None:
+        return int(champion.uid.uid64)
     raise NotImplementedError(f"player {owner} has no champion in the battle")
 
 

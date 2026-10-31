@@ -159,6 +159,41 @@ class SQLiteCardMutationAdapter:
     __call__ = apply_card_moved
 
 
+def graph_attribute_bits(graph) -> int:
+    """ECardAttributes bits an ability grants its card while the card is in play (authored AttributeModifiers)."""
+    from rules_port.filters import _attribute_bits
+    bits = 0
+    for effect in graph.effects:
+        modifier = getattr(effect.template, "m_Modifier", None)
+        if str(getattr(modifier, "type_name", "")).rsplit(".", 1)[-1] != "AttributeModifier":
+            continue
+        if str(effect.duration).lower() == "whilecardinplay":
+            bits |= _attribute_bits(getattr(modifier, "m_AttributeFlags", ""))
+    return bits
+
+
+def defending_champion_immune(source, attacker_owner_id) -> bool:
+    """Whether the opposing champion's authored AttackImmunityModifier covers any card. ``source`` is the handler whose
+    current champion abilities (refreshed on transform) hold the champion's form in play; None means unknown."""
+    from gamedata import DEFAULT_RECORD_STORE, ability_graph
+    if source is None:
+        return False
+    # PvE: the AI champion is owner 0, so an attacker owned by anyone else attacks the AI champion.
+    attribute = "_ai_champ_ability_guids" if int(attacker_owner_id or 0) else "_player_champ_abilities"
+    for value in getattr(source, attribute, None) or ():
+        graph = ability_graph(DEFAULT_RECORD_STORE, str(getattr(value, "guid", value)).lower())
+        if graph is None:
+            continue
+        for effect in graph.effects:
+            modifier = getattr(effect.template, "m_Modifier", None)
+            if str(getattr(modifier, "type_name", "")).rsplit(".", 1)[-1] != "AttackImmunityModifier":
+                continue
+            card_filter = getattr(modifier, "m_CardFilter", None)
+            if str(getattr(card_filter, "type_name", "")).rsplit(".", 1)[-1] == "AnyCard":
+                return True
+    return False
+
+
 class PvpRuntimeFacts:
     """Facts required by C#-ported predicates, backed by existing APIs.
 
@@ -181,6 +216,8 @@ class PvpRuntimeFacts:
         self.ai_uid = ai_uid
         self.play_validator = play_validator
         self.target_validator = target_validator
+        # The handler whose current champion abilities (refreshed on transform) back champion-authored rules.
+        self.champion_source = None
         # Importing pvp_db initializes the shared SQLite connection. Keep it
         # lazy so merely importing rules_port never waits on a live writer.
         self._pvp = pvp_api or importlib.import_module("pvp_db")
@@ -794,6 +831,9 @@ class PvpRuntimeFacts:
             owner_id = _raw_player_id(player_id)
         return int(owner_id)
 
+    def _defending_champion_immune(self, attacker: RuntimeCard) -> bool:
+        return defending_champion_immune(self.champion_source, attacker.owner_id)
+
     def can_attack(self, attacker: RuntimeCard, defender: RuntimeCard, player_id) -> bool:
         from .combat_rules import card_int_attr
         if not (attacker.owner_id == self._resolved_owner_id(player_id) and
@@ -813,6 +853,9 @@ class PvpRuntimeFacts:
         # StealthCantAttackAbilityTemplateId).
         from .stealth import defending_champion_is_stealthed
         if defending_champion_is_stealthed(self, attacker, defender):
+            return False
+        # C# Card.CanBeAttacked: an opposing champion's authored "can't be attacked" stops an attack on the champion face.
+        if defender is None and self._defending_champion_immune(attacker):
             return False
         # C# Card.CanAttack: a Defensive troop cannot attack unless it carries
         # the IgnoresDefensive int-attribute.

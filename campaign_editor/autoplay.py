@@ -61,6 +61,10 @@ RACE_ORDER = list(catalog.FACTION_OF_RACE)
 
 # ---------------------------------------------------------------- zones
 
+# How many lost gnomes the run picks up per visit at Gnomes Come Home's count picker.
+GNOME_CARRY = 5
+
+
 def zone_scope(home: str) -> list[str]:
     """``home`` and every dungeon/panorama reached from it (recursively).
 
@@ -532,6 +536,13 @@ def _step(db, zone_id, state, memo) -> dict[str, Any]:
 
     picker = engine.count_picker(rules, state, current) if current else None
     if picker:
+        # Gnomes Come Home: the party carries five lost gnomes at a time (the set picker's count is the new
+        # total carried, so the run adds up to five to what it already carries).
+        if picker["mode"] == "set" and picker["from"] == "gnomes_unsafe":
+            pickup = min(GNOME_CARRY, picker["available"] - picker["start"])
+            count = picker["start"] + pickup
+            return {"apply": {"type": "count_choice", "node": current, "count": count},
+                    "why": f"carry {pickup} more gnomes ({picker['from']}, carrying {count})"}
         return {"apply": {"type": "count_choice", "node": current,
                           "count": picker["available"]},
                 "why": f"carry all {picker['available']} ({picker['from']})"}

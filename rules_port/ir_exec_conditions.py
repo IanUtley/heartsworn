@@ -102,6 +102,20 @@ def _champions(context: Any) -> list[tuple]:
     return rows
 
 
+def _secondary_uids(scope: Any) -> tuple[int, ...]:
+    """The cards the clause's secondary target names (C# EffectSecondaryTarget). A condition with SameOwner reads
+    their owner, so an effect such as "destroy that champion if its deck has 250 Eggs" needs them."""
+    from rules_port import ir_exec_targets
+    from rules_port.ir_exec import _field
+    clause = getattr(scope, "clause", None)
+    if clause is None:
+        return ()
+    instance = ir_exec_targets.instance_ref(_field(clause, "m_SecondaryTargetIndex"))
+    if instance is None or int(instance) < 0:
+        return ()
+    return tuple(int(uid) for uid in (scope.resolved_by_instance.get(instance) or ()))
+
+
 def condition_context(scope: Any, *, target: int | None = None, event_type: str | None = None) -> ConditionContext:
     """A condition context for the ability in ``scope``. The source and its controller are the ability's own; the
     trigger is the event's card, or ``target`` when an effect condition tests a target. ``event_type`` is the event a
@@ -117,7 +131,7 @@ def condition_context(scope: Any, *, target: int | None = None, event_type: str 
         pl_t=getattr(context, "player_uid", None), ai_t=getattr(context, "ai_uid", None), champions=champions,
         trigger_owner_id=event.get("player"),
         event_source_collection=event.get("from"), event_destination_collection=event.get("to"),
-        event_tac=event.get("event_tac"))
+        event_tac=event.get("event_tac"), effect_secondary_target_uids=_secondary_uids(scope))
     # The ability's bound variables (a number the player chose, say) are what its filters read, as the native path reads
     # them from the ability's activation.
     condition.ability_variables = dict(scope.variables or {})

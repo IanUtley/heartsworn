@@ -61,8 +61,22 @@ def push_card_state(game, session, db, handler, player_uid, ai_uid, card_uid,
     }
     collection = collections.get(str(location or "").lower(),
                                  game_engine.ECardCollections.Warzone)
+    # The client's "affected by" list: each ability another card granted this one, as (source card template,
+    # ability template). A champion source has no card row, so only card-sourced grants can be named.
+    from .effect_lifetimes import grants_on_card
+    # The client lists each pair once: a repeated grant of the same ability from the same card adds no line.
+    affecting = []
+    listed = set()
+    for source_uid, ability_guid in grants_on_card(battle_state, card_uid):
+        source = db_card_zone_details(session.session_id, source_uid, conn=db)
+        pair = (str(source[0]).lower(), ability_guid) if source else None
+        if pair and pair not in listed:
+            listed.add(pair)
+            affecting.extend([game_engine.ResourceId.from_str(pair[0]),
+                              game_engine.ResourceId.from_str(pair[1])])
     game.push_card_updated(
         scid, recipient, collection, card_type, template_id=template_guid,
         attack=attack, defense=defense, cost=cost, state=int(new_state or 0),
-        gems=gems, nulling=str(location or "").lower() == "deck")
+        gems=gems, nulling=str(location or "").lower() == "deck",
+        affecting_abilities=affecting)
     return True

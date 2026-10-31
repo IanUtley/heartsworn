@@ -88,7 +88,7 @@ canvas.dragging { cursor: grabbing; }
 .frame-facts dd { margin: 0; }
 .card-edit { display: grid; gap: 6px; }
 .card-edit h3 { margin: 0; }
-.card-threshold { display: grid; gap: 4px; }
+.card-threshold, .card-equipment { display: grid; gap: 4px; }
 .threshold-row { display: flex; gap: 6px; align-items: center; }
 .threshold-row input { width: 64px; }
 .keyword-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 2px 8px; }
@@ -514,3 +514,13 @@ input:not([type=checkbox]):not([type=radio]) { max-width: 100%; }
 .graph-target { border-style: dashed; }
 .graph-stage { position: relative; }
 .graph-tools { display: flex; gap: 6px; align-items: center; margin: 4px 0; }
+
+/* OK switch on a Rules-check problem; an accepted problem stays listed but dimmed. */
+.issue.accepted { opacity: 0.6; }
+.switch { display: inline-flex; align-items: center; gap: 4px; margin-left: 8px; cursor: pointer; white-space: nowrap; }
+.switch input { appearance: none; width: 28px; height: 16px; border-radius: 8px; background: var(--line, #555); position: relative; cursor: pointer; margin: 0; }
+.switch input::after { content: ""; position: absolute; top: 2px; left: 2px; width: 12px; height: 12px; border-radius: 50%; background: #fff; transition: left 0.15s; }
+.switch input:checked { background: var(--accent, #3a8a5c); }
+.switch input:checked::after { left: 14px; }
+.switch input:disabled { cursor: default; opacity: 0.6; }
+

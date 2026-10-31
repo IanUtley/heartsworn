@@ -24,6 +24,7 @@ import tests.tests_builtin_counter_rules as scenarios  # noqa: E402  (sets up th
 import db as dbmod  # noqa: E402
 from tests.tests_combat import SessionStub, add_card, make_db  # noqa: E402
 
+SPIDERLING_EGG = "32bf0698-63d0-483f-9fc1-7f0d75808192"   # the Spiderling Egg (subtype Egg)
 TROOP_OWNER = 5          # the player (owns the player champion)
 OPPOSING_OWNER = 0       # the AI (owns the AI champion)
 
@@ -117,13 +118,17 @@ def _scenario(ability_guid, opposing_troops, moved=None, extra=(), champion=Fals
     if previous is not None and previous is not db:
         previous.close()
     pl_t, ai_t, game, handler, bstate, player_champ, ai_champ = scenarios._setup(db)
+    LAST_HANDLER[0] = handler
     bstate["_rules_rng"] = _SeededRng(zlib.crc32(ability_guid.encode()))
     # The battle's champions have templates, as a live battle's do: a subtype filter reads its champion's subtype.
     if getattr(handler, "_ai_champ_guid", None) is None:
         handler._ai_champ_guid = _test_champion_guid()
         handler._player_champ_guid = _test_champion_guid()
-    for uid, owner, zone, buffs in extra:
-        add_card(db, uid, owner, scenarios.TPL_GLADIATOR, loc=zone)
+    for entry in extra:
+        # (uid, owner, zone, permanent_buffs[, template guid]); the template defaults to the gladiator.
+        uid, owner, zone, buffs = entry[:4]
+        template = entry[4] if len(entry) > 4 else scenarios.TPL_GLADIATOR
+        add_card(db, uid, owner, template, loc=zone)
         db.execute("UPDATE game_cards SET permanent_buffs=? WHERE card_uid=?", (buffs, uid))
     if champion:
         # A champion built-in: the champions carry the ability, so no troop is placed for it. A moved card
@@ -245,6 +250,10 @@ def _client_events(game, start=0):
     return out
 
 
+# The handler of the scenario last built, so a snapshot can read what it recorded (game ends).
+LAST_HANDLER = [None]
+
+
 def _snapshot(db, bstate, player_champ, ai_champ, game=None, start_events=0):
     rows = db.execute(
         "SELECT card_uid, user_id, location, card_damage, permanent_buffs FROM game_cards "
@@ -256,6 +265,7 @@ def _snapshot(db, bstate, player_champ, ai_champ, game=None, start_events=0):
         "champion_counters": copy.deepcopy(bstate.get("champion_counters") or {}),
         "cards": [(uid, owner, location, damage, json.loads(buffs or "{}"))
                   for uid, owner, location, damage, buffs in rows],
+        "game_ends": list(getattr(LAST_HANDLER[0], "game_ends", [])),
     }
 
 
@@ -360,7 +370,15 @@ def _live(case):
             db.commit()
     from rules_port.resolution import resolve_port_trigger
     started = time.perf_counter()
-    if case.get("moved"):
+    if case.get("queued"):
+        # The trigger as the chain holds it once the player has answered its chosen target: the AI's champion. The
+        # chain resolves it (resolve_port_trigger reads the answer from the item), as the live game does.
+        bstate.setdefault("stack", []).append({
+            "kind": "trigger", "ability_guid": case["ability"], "source_uid": SOURCE_UID,
+            "target_uid": int(ai_champ), "trigger_source_uid": SOURCE_UID, "trigger_target_uid": None,
+            "trigger_event_type": case["event"], "trigger_event_data": {},
+            "source_owner_uid": TROOP_OWNER, "instance_id": 1})
+    elif case.get("moved"):
         uid, owner, zone_from, zone_to = case["moved"][:4]
         dispatch_native_trigger(db=db, handler=handler, game=game, session=SessionStub(),
                                 player_uid=pl_t, ai_uid=ai_t, battle_state=bstate,
@@ -540,6 +558,19 @@ CHAMPION_CASES = [
      "ability": "e2464b7a", "event": "CardEnteredZoneEvent", "champion": True,
      "moved": (301, TROOP_OWNER, "warzone", "discard"),
      "extra": [(302, TROOP_OWNER, "warzone", CURSED)], "opposing": [], "prepare": _cursed_death},
+    # Brood Baron: at the start of its controller's turn, one copy of each Egg in the target opposing champion's deck
+    # goes into that deck; with 250 or more Eggs there, the target champion is destroyed (the alternate win).
+    {"name": "Brood Baron: copies each Egg into the opposing deck", "ability": "8d2ff877-651a-7a80-0926-10c167f09e5b",
+     "event": "TurnStartedEvent", "champion": False, "opposing": [],
+     "extra": [(401, OPPOSING_OWNER, "deck", "{}", SPIDERLING_EGG), (402, OPPOSING_OWNER, "deck", "{}", SPIDERLING_EGG),
+               (403, OPPOSING_OWNER, "deck", "{}", SPIDERLING_EGG)],
+     "queued": True, "prepare": _nothing},
+    # With 250 or more Eggs in the opposing deck after the copies, the Baron destroys the target champion (the alternate
+    # win). 250 Eggs start in the deck, so the copies make 500 and the condition holds.
+    {"name": "Brood Baron: destroys the opposing champion at 250 or more Eggs", "seconds": 300,
+     "ability": "8d2ff877-651a-7a80-0926-10c167f09e5b", "event": "TurnStartedEvent", "champion": False, "opposing": [],
+     "extra": [(401 + i, OPPOSING_OWNER, "deck", "{}", SPIDERLING_EGG) for i in range(250)],
+     "queued": True, "prepare": _nothing},
 ]
 
 TURN_EVENTS = {"TurnStartedEvent", "TurnEndedEvent", "CardEnteredZoneEvent"}
@@ -765,13 +796,13 @@ def auto_cases(limit):
 
 
 def _card_roots():
-    """The ability GUIDs of the card files in ir_cards/, each loaded and registered for the interpreter."""
+    """The ability GUIDs of the card files in tests/ir_cards/, each loaded and registered for the interpreter."""
     import glob
-    from ir_cards.load import load_card
+    from tests.ir_cards.load import load_card
     from rules_port import ir_exec
     roots = {}
-    paths = glob.glob(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "ir_cards", "*.py"))
-    paths += glob.glob(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "ir_cards", "surface", "*.py"))
+    paths = glob.glob(os.path.join(os.path.dirname(os.path.abspath(__file__)), "ir_cards", "*.py"))
+    paths += glob.glob(os.path.join(os.path.dirname(os.path.abspath(__file__)), "ir_cards", "surface", "*.py"))
     for path in sorted(paths):
         if os.path.basename(path) == "__init__.py" or os.path.basename(path) == "load.py":
             continue
@@ -1112,7 +1143,7 @@ def _evaluate_case(case, from_cards, card_roots):
         print("CASE", case["name"], flush=True)
     _generated[0] = 0
     try:
-        with _time_limit(CASE_SECONDS):
+        with _time_limit(case.get("seconds", CASE_SECONDS)):
             live = _live(case)
             live_seconds = LAST_TIMING[0]
             if live is None:
@@ -1122,7 +1153,7 @@ def _evaluate_case(case, from_cards, card_roots):
             interpreted_seconds = LAST_TIMING[0]
     except CaseTimeout:
         # A chain that does not settle (a summon whose tokens summon more) is reported, not compared.
-        return "uncovered", (case["name"], [f"the live chain did not settle within {CASE_SECONDS}s"])
+        return "uncovered", (case["name"], [f"the live chain did not settle within {case.get('seconds', CASE_SECONDS)}s"])
     except NotImplementedError as exc:
         return "uncovered", (case["name"], [str(exc)])
     except NotRunByInterpreter as exc:
@@ -1221,7 +1252,7 @@ def main():
               f"min {ratios[0]:.2f}x, max {ratios[-1]:.2f}x")
 
 
-# Expected results for the custom (Python-only) cards in ir_cards/custom/: the source troop's card_damage
+# Expected results for the custom (Python-only) cards in tests/ir_cards/custom/: the source troop's card_damage
 # after its root runs once for its trigger. A custom card has no live counterpart, so it is checked
 # against these values, not side by side.
 CUSTOM_EXPECTED = {
@@ -1232,11 +1263,11 @@ CUSTOM_EXPECTED = {
 def custom_cards():
     """Run each custom card's root once on a fresh battle and check it against its expected values."""
     import glob
-    from ir_cards.load import load_card
+    from tests.ir_cards.load import load_card
     from rules_port import ir_exec
     from rules_port.context import EffectContext
     results = []
-    for path in sorted(glob.glob(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..",
+    for path in sorted(glob.glob(os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                               "ir_cards", "custom", "*.py"))):
         stem = os.path.basename(path)[:-3]
         names = load_card(path)

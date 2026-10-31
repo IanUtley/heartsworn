@@ -1,4 +1,4 @@
-"""Load a card file: the IR text in ir_cards/<name>.py, as the names it binds."""
+"""Load a card file: the IR text in tests/ir_cards/<name>.py, as the names it binds."""
 
 from pathlib import Path
 

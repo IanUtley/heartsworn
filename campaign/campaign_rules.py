@@ -119,7 +119,9 @@ the first whose ``when`` holds is what the node offers now.
 
 ``rules["count_pickers"]`` maps a node to ``{"from": counter, "to": counter}``:
 after a conversation there, while ``from`` is at least 1, the node offers a
-count picker (0..``from``); see ``count_picker``.
+count picker (0..``from``); see ``count_picker``.  With ``"mode": "set"`` the
+two counters share one pool: the picker runs 0..(``from`` + ``to``), the answer
+becomes the new ``to``, and ``from`` takes the rest.
 """
 
 from __future__ import annotations
@@ -884,6 +886,13 @@ def explain_entries(rules: dict[str, Any], state: dict[str, Any],
 
 # ---------------------------------------------------------------- node offers
 
+def _held_entries(rules: dict[str, Any], state: dict[str, Any], node_id: str) -> list[Any]:
+    """Ids of the node's conversation entries with ending actions whose ``when`` holds in ``state``."""
+    return [
+        e.get("id") for e in ((rules.get("nodes") or {}).get(node_id) or {}).get("entries") or ()
+        if e.get("kind") == "conversation" and e.get("actions") and evaluate(e.get("when"), state, node_id)]
+
+
 def active_entry(rules: dict[str, Any], state: dict[str, Any],
                  node: str) -> dict[str, Any] | None:
     """The node entry that holds now: what the node offers.
@@ -1166,13 +1175,28 @@ def count_picker(rules: dict[str, Any], state: dict[str, Any],
     spec = (rules.get("count_pickers") or {}).get(node)
     if not isinstance(spec, dict) or not spec.get("from") or not spec.get("to"):
         return None
+    counters = state.get("counters") or {}
     try:
-        available = int((state.get("counters") or {}).get(spec["from"], 0) or 0)
+        source = int(counters.get(spec["from"], 0) or 0)
+        target = int(counters.get(spec["to"], 0) or 0)
     except (TypeError, ValueError):
         return None
+    # Offered only while the source still has something to move, in either mode (a set picker's pool includes the
+    # target, so without this it would be offered again after every pick).
+    if source < 1:
+        return None
+    if spec.get("mode") == "set":
+        # Set mode: the two counters share one pool (``from`` + ``to``), and
+        # the answer becomes the new ``to``; the slider starts at ``to``.
+        available = source + target
+        start = target
+    else:
+        available = source
+        start = source
     if available < 1:
         return None
-    return {"from": str(spec["from"]), "to": str(spec["to"]), "available": available}
+    return {"from": str(spec["from"]), "to": str(spec["to"]), "available": available,
+            "start": start, "mode": spec.get("mode") or "add"}
 
 
 def apply(rules: dict[str, Any], state: dict[str, Any],
@@ -1204,6 +1228,9 @@ def apply(rules: dict[str, Any], state: dict[str, Any],
                 _has_gate(rules, node_id, "completed"):
             # Nothing to resolve here: arriving completes the location.
             node.update({"completed": True, "retryable": False})
+        # The conversation entries that hold on arrival. Their ending actions run when the conversation ends, even if
+        # the conversation itself flips their conditions first (a count picker moving the gnomes, say).
+        node["held_entries"] = _held_entries(rules, state, node_id)
         _dispatch(rules, state, {"type": "visit", "node": node_id}, log)
     elif kind == "conversation_end":
         entry = active_entry(rules, state, node_id) if node_id else None
@@ -1214,9 +1241,10 @@ def apply(rules: dict[str, Any], state: dict[str, Any],
             entry = next((e for e in ((rules.get("nodes") or {}).get(node_id) or {})
                           .get("entries") or () if e.get("conversation") == wanted),
                          entry)
-        # Every entry for this conversation whose ``when`` held as it ended
+        # Every entry for this conversation whose ``when`` held on arrival
         # runs its actions (one conversation can start several quests, e.g.
         # Tamed plus the faction quest), as the server grants every row.
+        held = set((nodes.get(node_id) or {}).get("held_entries") or ())
         # A battle's pre-battle conversation is the entry's ``pre``; its endings
         # (and their actions) belong to it just like a conversation entry's.
         ran = [entry] if entry is not None and _entry_conversation(entry) == (
@@ -1233,7 +1261,7 @@ def apply(rules: dict[str, Any], state: dict[str, Any],
                     .get("entries") or ()
                     if e is not entry and e.get("kind") == "conversation"
                     and _entry_conversation(e) == _entry_conversation(entry)
-                    and e.get("actions") and evaluate(e.get("when"), state, node_id)]
+                    and e.get("actions") and e.get("id") in held]
         for name in action.get("events") or ():
             _dispatch(rules, state, {"type": "script_event", "name": name,
                                      "node": node_id}, log)
@@ -1281,6 +1309,10 @@ def apply(rules: dict[str, Any], state: dict[str, Any],
                 # (``talkedAt(Node017)`` tags refer to that node).
                 at_parent = nodes.setdefault(parent, {})
                 at_parent["talks"] = int(at_parent.get("talks", 0)) + 1
+        if node_id:
+            # The next conversation at this node is offered on the state this one left (its finished talk now counts
+            # for talkedAt), so its held entries are taken after the count, not on arrival.
+            nodes.setdefault(node_id, {})["held_entries"] = _held_entries(rules, state, node_id)
         # A conversation whose ending starts a battle (encounter(...)) does not
         # finish its node: the battle's result does, as its victory completes it.
         started_battle = (state.get("encounter") or {}).get("node") == node_id
@@ -1297,6 +1329,11 @@ def apply(rules: dict[str, Any], state: dict[str, Any],
             "type": "conversation_end", "node": node_id,
             "conversation": action.get("conversation") or (
                 entry or {}).get("conversation", "")}, log)
+        _walk_back_if_held(rules, state, node_id, log)
+    elif kind == "encounter_cancel":
+        # The player declined the battle offered here: a node that still holds
+        # them sends them back where they came from (as a conversation does).
+        state.pop("encounter", None)
         _walk_back_if_held(rules, state, node_id, log)
     elif kind == "encounter_result":
         entry = active_entry(rules, state, node_id)
@@ -1395,7 +1432,10 @@ def apply(rules: dict[str, Any], state: dict[str, Any],
             raise RulesError(f"count {count} is outside 0..{picker['available']}")
         counters = state.setdefault("counters", {})
         counters[picker["from"]] = picker["available"] - count
-        counters[picker["to"]] = int(counters.get(picker["to"], 0) or 0) + count
+        if picker["mode"] == "set":
+            counters[picker["to"]] = count
+        else:
+            counters[picker["to"]] = int(counters.get(picker["to"], 0) or 0) + count
         _dispatch(rules, state, {"type": "count_choice", "node": node_id,
                                  "count": count}, log)
     elif kind == "script_event":
@@ -1827,6 +1867,8 @@ def validate(rules: dict[str, Any], *, known_conversations=None,
             add("error", where, "count picker needs from and to counter names")
         elif spec["from"] == spec["to"]:
             add("error", where, "count picker from and to must differ")
+        elif spec.get("mode", "add") not in ("add", "set"):
+            add("error", where, "count picker mode must be add or set")
     # Card-selector options read flags in ``when`` and set them in actions.
     for scene, options in (rules.get("mod_choices") or {}).items():
         for option in options or ():

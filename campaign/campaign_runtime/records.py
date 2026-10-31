@@ -214,14 +214,51 @@ def _ends(answer: dict[str, Any]) -> bool:
         return True
 
 
+def _path_events(found: dict[str, Any]) -> dict[str, list[str]]:
+    """``{answer id: ServerScriptEvent names the server has when that answer ends the conversation}``.
+
+    The client sends an event when its answer is picked, and the runtime keeps the last one until the
+    conversation closes. So an answer without an event of its own ends with the last event on its path
+    from the starting question.
+    """
+    reached: dict[str, set[str]] = {}
+    seen: set[tuple[str, str]] = set()
+    stack = [(str(found.get("start", "")), "")]
+    while stack:
+        question, last = stack.pop()
+        if (question, last) in seen:
+            continue
+        seen.add((question, last))
+        for aid in (found["questions"].get(question) or {}).get("answers", ()):
+            answer = found["answers"].get(aid)
+            if answer is None:
+                continue
+            names = [event["EventName"] for event in answer["events"]
+                     if event.get("type") == "ServerScriptEvent" and event.get("EventName")]
+            current = names[-1] if names else last
+            if not _ends(answer):
+                stack.append((str(answer["next"]), current))
+            elif current:
+                reached.setdefault(aid, set()).add(current)
+    return {aid: sorted(names) for aid, names in reached.items()}
+
+
 def conversation_endings(found: dict[str, Any]) -> list[dict[str, Any]]:
     question_of = {aid: qid for qid, q in found["questions"].items()
                    for aid in q["answers"]}
+    on_path = _path_events(found)
     endings = []
     for aid, answer in found["answers"].items():
         if not _ends(answer):
             continue
         ending, visible = ending_id(aid, answer)
+        if not visible and on_path.get(aid):
+            # Ends by an event sent earlier on its path: that event is the ending the server sees.
+            for name in on_path[aid]:
+                endings.append({"answer": aid, "question": question_of.get(aid, ""),
+                                "text": answer["text"], "ending": name,
+                                "event": True, "server_visible": True})
+            continue
         endings.append({"answer": aid, "question": question_of.get(aid, ""),
                         "text": answer["text"], "ending": ending,
                         "event": visible, "server_visible": visible})

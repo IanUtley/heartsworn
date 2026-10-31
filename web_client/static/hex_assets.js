@@ -184,13 +184,26 @@ function setVolume(level) {
 // should not interrupt a battle.
 async function playClip(art, clip) {
   if (!ART.test(art || "") || !clip) return;
-  const key = `${art}|${clip}`;
+  await playStored(`clip:${art}|${clip}`, () => state.install.clipBytes(art, clip));
+}
+
+// A shared battle or UI sound by its clip name (Aud_FX_Main_Phase and the like), from storage or the folder.
+// Sounds wait for the folder: nothing is cached until it has been read, so a sound asked for early still plays.
+async function playSound(name) {
+  if (!name || !state.install) return;
+  const clip = await state.install.soundName(name);
+  if (clip) await playStored(`sfx:${clip}`, () => state.install.soundBytes(clip));
+}
+
+// Plays a stored sound, keeping its decoded buffer for the next play. loadBytes reads it from the folder
+// when storage has none. Errors are silent.
+async function playStored(key, loadBytes) {
   if (!state.clips.has(key)) {
     state.clips.set(key, (async () => {
-      let bytes = await cacheGet(`clip:${key}`);
+      let bytes = await cacheGet(key);
       if (!bytes && state.install) {
-        bytes = await state.install.clipBytes(art, clip);
-        if (bytes) cachePut(`clip:${key}`, bytes);
+        bytes = await loadBytes();
+        if (bytes) cachePut(key, bytes);
       }
       if (!bytes) return null;
       return audioContext().decodeAudioData(bytes.slice().buffer);
@@ -259,6 +272,7 @@ window.HexAssets = {
   cardChrome,
   preloadCardChrome,
   playClip,
+  playSound,
   setVolume,
   gameboard,
 };

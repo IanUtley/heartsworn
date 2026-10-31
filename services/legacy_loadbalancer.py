@@ -2131,6 +2131,14 @@ def handle_readytostartgame_22031(handler, target, instance, data_type, reqid, c
     # after Mulligan, just as we already carry starting health.
     handler._player_starting_charges = getattr(game, "player_charges", 0)
     handler._ai_starting_charges = getattr(game, "ai_charges", 0)
+    # PreGame resources and thresholds (a champion's "gain 3 resources, 3 Ruby
+    # threshold") live in the PreGame state only; the battle state seeded after
+    # mulligan reads them from here, or the first resource play starts at 1.
+    handler._pregame_resource_seed = {
+        key: pregame_bstate[key] for key in (
+            "player_resources", "player_total_resources", "player_threshold",
+            "ai_resources", "ai_total_resources", "ai_threshold")
+        if key in pregame_bstate}
     # Persist the PreGame-boosted health so the DB battle state is
     # seeded from the ACTUAL value, not the un-boosted starting health.
     # Shard Attuned bumps game.player_health during PreGame; bstate is

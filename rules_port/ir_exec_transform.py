@@ -92,13 +92,20 @@ def refusals(kind: str, effect: dict[str, Any], target_kind: str) -> list[str]:
 def run(kind: str, effect: dict[str, Any], targets: list[int], context: Any, *, count: int | None = None) -> None:
     """Run one effect on each target, in order, through the live leaf for its kind."""
     runner = _RUNNERS[kind]
+    import db as db_layer
+    db_layer.log_req(f"    Effect {kind}: {len(targets)} target(s) {[hex(int(t)) for t in targets]}")
     previous = context.effect_template_override
     context.effect_template_override = effect
+    context.bstate["_defer_deck_placement"] = True
     try:
         for target in targets:
             with _resolving_target(context.bstate, int(target)):
                 runner(context, int(target), count)
     finally:
+        context.bstate.pop("_defer_deck_placement", None)
+        if context.bstate.get("_deferred_random_deck"):
+            from rules_port.token_effects import flush_random_deck_placement
+            flush_random_deck_placement(context)
         context.effect_template_override = previous
 
 
@@ -165,7 +172,7 @@ def _conscript(context: Any, target: int, count: int | None) -> None:
 def _copy_token(context: Any, target: int, count: int | None) -> None:
     # C# CreateTokenCopyAbilityEffectTemplate: copies of the target, as many as the effect's count.
     from rules_port.token_effects import create_token_copy
-    create_token_copy(context, count=count)
+    create_token_copy(context, count=count, target=target)
 
 
 def _create_matching(context: Any, target: int, count: int | None) -> None:

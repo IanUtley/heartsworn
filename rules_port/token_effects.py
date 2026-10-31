@@ -946,10 +946,26 @@ def summon_token(context, payload=None, *, target=None, owner=None):
     return f"summoned {len(made)} token(s)"
 
 
-def create_token_copy(context, count=None):
-    """Create authored replicas from the resolved target. ``count`` is the interpreter's bound amount; without it
-    the count is read from the effect template."""
-    target = context.resolved_target()
+def flush_random_deck_placement(context):
+    """Place the copies waiting for a random deck slot, one batch per owner. Each placement call rewrites the deck's
+    positions, so a batch costs one rewrite however many copies it places."""
+    pending = context.bstate.pop("_deferred_random_deck", None) or []
+    from pvp_db import db_randomly_insert_deck_cards
+    by_owner = {}
+    for owner_id, uid in pending:
+        by_owner.setdefault(owner_id, []).append(uid)
+    for owner_id, uids in by_owner.items():
+        db_randomly_insert_deck_cards(
+            context.session.session_id, owner_id, uids,
+            conn=context.db, rng=context.bstate.get("_rules_rng"))
+
+
+def create_token_copy(context, count=None, target=None):
+    """Create authored replicas from the target. ``target`` is the card the interpreter runs the effect on; without it
+    the resolved target is read. ``count`` is the interpreter's bound amount; without it the count is read from the
+    effect template."""
+    if target is None:
+        target = context.resolved_target()
     if target is None:
         return "copy: no target"
     from pvp_db import (db_card_zone_details, db_copy_template_payload,
@@ -991,7 +1007,14 @@ def create_token_copy(context, count=None):
         return "copy: zero copies"
     # C# CreateTokenCopies adds GetCreationBonuses once for the copied
     # template before creating the batch.
-    count += _creation_count_bonus(context, row[0])
+    base_count = count
+    bonus = _creation_count_bonus(context, row[0])
+    count += bonus
+    import db as db_layer
+    db_layer.log_req(
+        f"    CopyEffect: source={hex(int(context.bstate.get('resolving_source_uid') or 0))} "
+        f"target={hex(int(target))} copy_of={row[0]} base={base_count} bonus={bonus} "
+        f"copies={count} into={context.bstate.get('resolving_owner_id')}")
     destination = str(context.template_value(
         "m_CardCollection", "") or "").rsplit(".", 1)[-1].lower()
     if not destination:
@@ -1046,6 +1069,8 @@ def create_token_copy(context, count=None):
         source_gem = 0
     if not source_gem:
         source_gem = None
+    import time
+    started = time.monotonic()
     for _ in range(count):
         uid = next_game_card_uid(context.db, context.session.session_id)
         db_insert_generated_card(
@@ -1053,6 +1078,31 @@ def create_token_copy(context, count=None):
             payload[0], payload[1], payload[2],
             db_next_game_card_row_id(context.session.session_id, conn=context.db),
             conn=context.db, gems=source_gem)
+        # C# checks a card that would enter a zone before it enters: a "would enter ... instead" replacement (such as
+        # the opposing-deck void) handles the copy, and it does not enter.
+        if context._emit_trigger(
+                "CardWouldEnterZoneEvent", uid, owner_id,
+                event_source_collection="None",
+                event_destination_collection=location):
+            context.db.execute(
+                "DELETE FROM game_cards WHERE session_id=? AND card_uid=?",
+                (context.session.session_id, uid))
+            continue
+        if location == "deck":
+            # The copy's place in the deck follows the authored m_CardLocation, as a move's does: Top or Bottom is
+            # the end, and Unknown is a random slot (C# FinishMovingCard).
+            from pvp_db import db_insert_deck_card_at, db_randomly_insert_deck_cards
+            card_location = str(context.template_value(
+                "m_CardLocation", "") or "").rsplit(".", 1)[-1].lower()
+            if card_location in ("top", "bottom"):
+                db_insert_deck_card_at(
+                    context.session.session_id, owner_id, uid, 0,
+                    from_bottom=card_location == "bottom", conn=context.db)
+            else:
+                # A runner that places several copies defers the random placement to one batch at its end.
+                context.bstate.setdefault("_deferred_random_deck", []).append((int(owner_id), int(uid)))
+                if not context.bstate.get("_defer_deck_placement"):
+                    flush_random_deck_placement(context)
         replica_type = None
         replica_subtype = ""
         if is_replica:
@@ -1081,9 +1131,20 @@ def create_token_copy(context, count=None):
             **({"sub_type": replica_subtype} if replica_subtype else {}))
         created.append(uid)
     context.db.commit()
+    import db as db_layer
+    placed = time.monotonic()
+    publish_time = trigger_time = 0.0
+    from .triggers import dispatch_trigger
     for uid in created:
+        t0 = time.monotonic()
         _publish_created_card(context, uid, owner_id, payload[0])
-        from .triggers import dispatch_trigger
+        t1 = time.monotonic()
         dispatch_trigger(context, "CardEnteredZoneEvent", uid, owner_id,
                          data={"event_destination_collection": location})
+        trigger_time += time.monotonic() - t1
+        publish_time += t1 - t0
+    db_layer.log_req(
+        f"    CopyEffect timing: {len(created)} copies: create+place {placed - started:.2f}s, "
+        f"publish {publish_time:.2f}s, trigger dispatch {trigger_time:.2f}s, "
+        f"total {time.monotonic() - started:.2f}s")
     return f"copied {len(created)}x {row[0][:8]} to {location}"

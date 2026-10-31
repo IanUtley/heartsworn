@@ -721,12 +721,22 @@
     "flag": "tamed:06c14db8"
    }
   },
+  "Node053": {
+   "completed": [
+    "completedQuest(q_gnomes_come_home)"
+   ]
+  },
   "Node055": {
    "impassable": [
     "counter(gnomes_carried,1)"
    ],
    "completed": [
-    "counter(gnomes_safe,20)"
+    [
+     "counter(gnomes_safe,20)"
+    ],
+    [
+     "flag(beat_worm_queen)"
+    ]
    ]
   },
   "Node057": {
@@ -764,12 +774,19 @@
    ],
    "impassable": [
     "counter(gnomes_carried,1)"
+   ],
+   "retryable": [
+    "counter(gnomes_carried,1)"
    ]
   },
   "Node060": {
    "completed": [
-    "counter(gnomes_safe,20)",
-    "flag(beat_worm_e3)"
+    [
+     "counter(gnomes_safe,20)"
+    ],
+    [
+     "flag(beat_worm_e3)"
+    ]
    ],
    "hidden": [
     "!visited(Node057)"
@@ -785,7 +802,12 @@
   },
   "Node062": {
    "completed": [
-    "counter(gnomes_safe,20)"
+    [
+     "counter(gnomes_safe,20)"
+    ],
+    [
+     "flag(beat_worm_w1)"
+    ]
    ],
    "hidden": [
     "!visited(Node057)"
@@ -796,7 +818,12 @@
   },
   "Node063": {
    "completed": [
-    "counter(gnomes_safe,20)"
+    [
+     "counter(gnomes_safe,20)"
+    ],
+    [
+     "flag(beat_worm_w2)"
+    ]
    ],
    "hidden": [
     "!visited(Node057)"
@@ -1023,31 +1050,36 @@
    "completed",
    "visible",
    "hidden",
-   "impassable"
+   "impassable",
+   "retryable"
   ],
   "Node060": [
    "impassable",
    "completed",
    "visible",
-   "hidden"
+   "hidden",
+   "retryable"
   ],
   "Node059": [
    "impassable",
    "completed",
    "visible",
-   "hidden"
+   "hidden",
+   "retryable"
   ],
   "Node058": [
    "impassable",
    "completed",
    "visible",
-   "hidden"
+   "hidden",
+   "retryable"
   ],
   "Node062": [
    "completed",
    "visible",
    "hidden",
-   "impassable"
+   "impassable",
+   "retryable"
   ],
   "Node061": [
    "completed",
@@ -1090,13 +1122,18 @@
   "Node055": [
    "impassable",
    "completed"
+  ],
+  "Node053": [
+   "retryable",
+   "completed"
   ]
  },
  "runtime": "rules",
  "count_pickers": {
   "Node057": {
    "from": "gnomes_unsafe",
-   "to": "gnomes_carried"
+   "to": "gnomes_carried",
+   "mode": "set"
   }
  },
  "offer_order": {
@@ -1142,6 +1179,12 @@
    "tagged:7e793fe5:ed926c27",
    "tagged:270bf0b5",
    "tagged:7e793fe5"
+  ],
+  "Node053": [
+   "tagged:164c0f53",
+   "tagged:e2e9d651",
+   "tagged:d49c9cec",
+   "tagged:4693a5ae"
   ]
  }
 }

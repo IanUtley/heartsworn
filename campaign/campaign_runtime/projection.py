@@ -238,8 +238,8 @@ def project(rules: dict[str, Any], state: dict[str, Any],
             data["autostart"] = bool(
                 info.get("visible") and not info.get("completed") and
                 not_fork(node) and
-                (info.get("impassable") or info.get("autostart") or first_talk or pre_talk
-                 or ltype == "ShroomHaus") and not played)
+                ((info.get("impassable") or first_talk or pre_talk) and node == state.get("current")
+                 or info.get("autostart") or ltype == "ShroomHaus") and not played)
         if pending_visit and info.get("visible") and not info.get("completed"):
             # Offered now: the client starts it, so it plays on entry.
             data["autostart"] = True
@@ -277,7 +277,7 @@ def project(rules: dict[str, Any], state: dict[str, Any],
     if picker:
         # 0..the counter still to move; the slider starts at all of them.
         low, high, count = count_picker_vars(picker["from"])
-        pdata.update({low: 0, high: picker["available"], count: picker["available"]})
+        pdata.update({low: 0, high: picker["available"], count: picker["start"]})
     pdata["CampaignGroup"] = zone_entry.get("campaign_group") or TEMP_TYPES.get(kind, "AREA")
     if kind == "panorama":
         # Panorama NPC portraits stay actionable on the quick-navigation bar.

@@ -13,7 +13,7 @@ server does not import them.
 | `card_audit.py` | Static parity audit of card mechanics between the Python port and the C# client. |
 | `coverage_log.py` | Reads the scoped lines of one isolated Unity headless coverage run. |
 
-The IR card files in `ir_cards/` are different: they are the input corpus that
+The IR card files in `tests/ir_cards/` are different: they are the input corpus that
 `tests/ir_equivalence.py` runs (with `IR_EQ_CARDS=1`), not a report.
 
 Run each script from the repository root, for example

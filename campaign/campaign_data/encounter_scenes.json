@@ -1560,7 +1560,12 @@
     "ai_deck_personality": "BigThreats",
     "scene_tags": [
      "counter(gnomes_carried,1)"
-    ]
+    ],
+    "actions_json": {
+     "victory": [
+      "set_flag(beat_worm_queen)"
+     ]
+    }
    },
    {
     "guid": "049bdcd0-3387-4ee1-b66f-8b4a9b04a7ec",
@@ -1664,7 +1669,12 @@
      "xp": 90,
      "one_time": false
     },
-    "ai_deck_personality": "BigThreats"
+    "ai_deck_personality": "BigThreats",
+    "actions_json": {
+     "victory": [
+      "set_flag(beat_worm_w1)"
+     ]
+    }
    },
    {
     "guid": "61ad1c64-774b-41eb-abb9-b9f59e63e89d",
@@ -1678,7 +1688,12 @@
      "xp": 90,
      "one_time": false
     },
-    "ai_deck_personality": "Default"
+    "ai_deck_personality": "Default",
+    "actions_json": {
+     "victory": [
+      "set_flag(beat_worm_w2)"
+     ]
+    }
    },
    {
     "guid": "15a69fad-bea2-467e-b68e-b56f1af884d6",

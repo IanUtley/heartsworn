@@ -647,10 +647,10 @@
       "*": [
        "complete_step(az01_three_braves,Step3B)"
       ],
-      "A12": [
+      "choice_no_install": [
        "complete_step(az01_three_braves,Step3C)"
       ],
-      "A16": [
+      "choice_install": [
        "complete_step(az01_three_braves,Step3C)"
       ]
      },
@@ -716,7 +716,7 @@
       "!questStarted(az01_three_braves)"
      ],
      "actions": {
-      "A1": [
+      "*": [
        "start_quest(az01_three_braves)"
       ]
      }
@@ -2512,7 +2512,7 @@
       ]
      },
      "tags": [
-      "conversation(AZ1 - Node 46 - Robot - Step 4 - Install Regulator,A16)"
+      "conversation(AZ1 - Node 46 - Robot - Step 4 - Install Regulator,choice_install)"
      ]
     }
    },
@@ -2523,17 +2523,17 @@
      "label": "Gnomes Come Home - Lost Gnomes - Step 2",
      "source": "conversation_name",
      "tags": [
-      "talkedAt(Node057)",
-      "counter(gnomes_unsafe,1)"
+      [
+       "talkedAt(Node057)",
+       "counter(gnomes_unsafe,1)"
+      ],
+      [
+       "counter(gnomes_carried,1)"
+      ]
      ],
      "actions": {
-      "A0": [
-       "clear_flag(beat_worm_w1)",
-       "clear_flag(beat_work_w2)",
-       "clear_flag(beat_worm_queen)",
-       "clear_flag(beat_worm_e1)",
-       "clear_flag(beat_worm_e2)",
-       "clear_flag(beat_worm_e3)"
+      "*": [
+       "clear_flag(beat_worm_*)"
       ]
      }
     }
@@ -2567,7 +2567,8 @@
      "label": "Gnomes Come Home - Abandoned Camp - Step 2",
      "source": "conversation_name",
      "tags": [
-      "talkedAt(Node053)"
+      "talkedAt(Node053)",
+      "!counter(gnomes_carried,1)"
      ]
     }
    },
@@ -2578,23 +2579,11 @@
      "label": "Gnomes Come Home - Abandoned Camp - Step 3",
      "source": "conversation_name",
      "tags": [
-      "counter(gnomes_carried,1)",
-      "counter(gnomes_unsafe,1)"
-     ]
-    }
-   },
-   {
-    "campaign_template": "AZ1",
-    "conversation_guid": "e2e9d651-073a-4245-9df7-795b17393833",
-    "trigger_json": {
-     "label": "Gnomes Come Home - Abandoned Camp - Step 4",
-     "source": "conversation_name",
-     "tags": [
-      "!counter(gnomes_unsafe,1)"
+      "counter(gnomes_carried,1)"
      ],
      "actions": {
       "*": [
-       "complete_step(q_gnomes_come_home,Step2)"
+       "move_counter(gnomes_carried,gnomes_safe)"
       ]
      }
     }
@@ -2760,7 +2749,7 @@
      "label": "Bluejay - Step 4b - Player did NOT install regulator",
      "source": "conversation_name",
      "tags": [
-      "conversation(AZ1 - Node 46 - Robot - Step 4 - Install Regulator,A12)"
+      "conversation(AZ1 - Node 46 - Robot - Step 4 - Install Regulator,choice_no_install)"
      ],
      "actions": {
       "*": [
@@ -2789,6 +2778,24 @@
      "tags": [
       "counter(gnomes_carried,1)"
      ]
+    }
+   },
+   {
+    "campaign_template": "AZ1",
+    "conversation_guid": "e2e9d651-073a-4245-9df7-795b17393833",
+    "trigger_json": {
+     "label": "Gnomes Come Home - Abandoned Camp - Step 4",
+     "source": "conversation_name",
+     "tags": [
+      "counter(gnomes_safe,20)",
+      "!completedQuest(q_gnomes_come_home)"
+     ],
+     "actions": {
+      "*": [
+       "complete_step(q_gnomes_come_home,Step2)",
+       "complete_step(q_gnomes_come_home,Step2_INFO)"
+      ]
+     }
     }
    }
   ],

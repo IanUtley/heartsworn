@@ -615,6 +615,10 @@ class TransactionsMixin:
             fra_start_state = (setup_encounter.get(
                 "_fra_starting_battle_state", {})
                 if isinstance(setup_encounter, dict) else {})
+            # PreGame resources/thresholds (a champion's setup gains) apply
+            # unless the saved start state already carries them.
+            fra_start_state = {**(getattr(self, "_pregame_resource_seed", None) or {}),
+                               **fra_start_state}
             bstate["player_resources"] = int(
                 fra_start_state.get("player_resources", 0) or 0)
             bstate["player_total_resources"] = int(
@@ -2645,6 +2649,15 @@ class TransactionsMixin:
         self._current_bstate = bstate
         cur_phase = current_checkpoint_phase(bstate)
         native_phase_advanced = False
+        from rules_port.session import _same_player_uid
+        port = getattr(session, "_rules_port_session", None)
+        if (cur_phase == _hc.game_engine.ETurnPhases.AssignDamage and port is not None and
+                _same_player_uid(port.active_player_id, ai_t)):
+            # The AI attacks this turn, so the damage is already resolved and the damage order is not ours to give.
+            # Re-resolving on a stale order from the client would deal the damage twice.
+            _hc.log_req("    AssignDamageOrder ignored: the AI is the attacking player")
+            self._push_transaction_ack(session)
+            return True
         if cur_phase == _hc.game_engine.ETurnPhases.AssignDamage:
             n_att = len(bstate.get("player_attackers") or {})
             # The AssignDamageOrderTransaction carries the player's

@@ -147,7 +147,7 @@ class Zone:
     def apply(self, action):
         before = self.eng.get("current")
         self.eng, _log = engine.apply(self.rules, self.eng, action)
-        if (action.get("type") in ("conversation_end", "encounter_result") and
+        if (action.get("type") in ("conversation_end", "encounter_result", "encounter_cancel") and
                 before and self.eng.get("current") != before):
             # The rules walked the player back (an impassable node held them):
             # the client's token must walk there too.
@@ -171,7 +171,10 @@ class Zone:
 
     def battle_node(self):
         started = self.eng.get("encounter") or {}
-        return started.get("node") or self.rt.get("active")
+        # A start with no named location (the client sends it right after a
+        # forced move, when the server holds no active node) fights where the
+        # token stands.
+        return started.get("node") or self.rt.get("active") or self.eng.get("current")
 
     def refresh_choices(self):
         """Offer the card-selector options of the battle about to start."""
@@ -244,7 +247,24 @@ class Zone:
 
 # ---------------------------------------------------------------- events
 
+def _client_location_name(name: str) -> str:
+    """The rules node a client location names.  The client may send its own
+    location record as text (``{'Data': {'id': 'Node058'}, 'Name': 'Node058'}``,
+    as its LastNode shows); the rules name is the record's Name."""
+    text = str(name or "")
+    if not text.startswith("{"):
+        return text
+    try:
+        record = json.loads(text.replace("'", '"'))
+    except ValueError:
+        return text
+    if not isinstance(record, dict):
+        return text
+    return str(record.get("Name") or (record.get("Data") or {}).get("id") or text)
+
+
 def _resolve_node(zone: Zone, name: str) -> str:
+    name = _client_location_name(name)
     for loc in zone.state.get("VisLocs") or ():
         data = (loc or {}).get("Data") or {}
         if name in (data.get("node"), data.get("name"), data.get("title"),
@@ -350,6 +370,13 @@ def arrive(zone: Zone, node: str, route: list[str] | None = None):
 def visit_path(zone: Zone, oparms):
     values = oparms[0] if oparms and isinstance(oparms[0], list) else oparms
     ids = [str(v) for v in (values or ()) if v]
+    # A walk-back is a one-shot order.  The client only acknowledges it with
+    # force_move when its token is elsewhere; already on the node (e.g. the
+    # map reloaded at LastNode after a lost battle) it aborts silently, so
+    # the order would outlive it and drag the next walk back, leaving that
+    # node's battle to start from a node with no encounter.  A new walk
+    # starts from where the rules hold the player, so drop any stale one.
+    zone.rt.pop("force_move", None)
     seen = zone.eng.setdefault("visited_paths", [])
     route, walked, blocked = _route(zone, str(zone.eng.get("current") or ""), ids)
     for pid in walked:
@@ -949,6 +976,7 @@ def handle_sendevent(handler, db, zone_id, env_json, comp, session_id, reqid,
         elif event == "count_choice":
             count_choice(handler, zone, oparms)
         elif event == "enc_cancel":
+            zone.apply({"type": "encounter_cancel", "node": str(zone.eng.get("current") or "")})
             zone.rt.pop("active", None)
             zone.rt["parked"] = True
         elif event == "start":

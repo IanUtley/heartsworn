@@ -2463,6 +2463,12 @@ class CardPlayMixin:
     def _champion_targets(self):
         """[(card_uid, user_id, name, health)] for both champions — the client
         can target champions (IsHero filters), so they join targeting pools."""
+        # Ability-granted attributes (SpellShield and the rest) travel in the battle state, which the targeting code
+        # reads (rules_port/targeting.py _champion_filter_cards).
+        bstate = getattr(self, "_current_bstate", None)
+        if isinstance(bstate, dict):
+            bstate["champion_attributes"] = {
+                str(uid): bits for uid, bits in self._champion_attribute_bits().items()}
         out = []
         p = getattr(self, "_player_champ_scid", None)
         if p is not None:

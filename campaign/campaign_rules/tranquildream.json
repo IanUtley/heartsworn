@@ -103,6 +103,21 @@
    "completed": [
     "completedQuest(q_tranquil_dream,1)"
    ]
+  },
+  "NodeB": {
+   "visible": []
+  },
+  "NodeC": {
+   "visible": []
+  },
+  "NodeD": {
+   "visible": []
+  },
+  "NodeE": {
+   "visible": []
+  },
+  "NodeF": {
+   "visible": []
   }
  },
  "edited_states": {

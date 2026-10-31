@@ -1069,6 +1069,32 @@ class TurnFlowMixin:
         _be.save_state(session, bstate)
         return c
 
+    def _champion_attribute_bits(self):
+        """``{champion uid: ECardAttributes bits}`` that the champion's current abilities grant (the handler's champion
+        lists, refreshed on transform). The client reads these from the champion's card attributes."""
+        from gamedata import DEFAULT_RECORD_STORE, ability_graph
+        from rules_port.runtime_adapter import graph_attribute_bits
+        bits_by_uid = {}
+        for scid_attr, list_attr in (("_ai_champ_scid", "_ai_champ_ability_guids"),
+                                     ("_player_champ_scid", "_player_champ_abilities")):
+            scid = getattr(self, scid_attr, None)
+            if scid is None:
+                continue
+            bits = 0
+            for value in getattr(self, list_attr, None) or ():
+                graph = ability_graph(DEFAULT_RECORD_STORE, str(getattr(value, "guid", value)).lower())
+                if graph is not None:
+                    bits |= graph_attribute_bits(graph)
+            if bits:
+                bits_by_uid[int(scid.uid.uid64)] = int(bits)
+        return bits_by_uid
+
+    def _spellshield_champion_uids(self):
+        """Champion SessionCardIds whose current abilities grant SpellShield."""
+        import game_engine
+        spellshield = int(game_engine.ECardAttributes.SpellShield)
+        return {uid for uid, bits in self._champion_attribute_bits().items() if bits & spellshield}
+
     def _fresh_game(self, session, pl_t, ai_t, bstate):
         """A fresh Game event-builder fully populated from the DB battle state.
 
@@ -1081,6 +1107,7 @@ class TurnFlowMixin:
         """
         import hconnect_server as _hc
         game = _hc.game_engine.Game(session.session_id, pl_t, ai_t)
+        game.spellshield_champion_uids = self._spellshield_champion_uids()
         game.max_hand_size = self._max_hand_size(session)
         game.player_resources = bstate.get("player_resources", 0)
         game.player_total_resources = bstate.get("player_total_resources", 0)

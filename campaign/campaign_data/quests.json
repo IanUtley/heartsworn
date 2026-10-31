@@ -61,6 +61,7 @@
    {
     "script_name": "q_gnomes_come_home",
     "rewards_json": {
+     "chest_guid": "7b8390fd-7d3d-44d4-b285-1aeae3aef98b",
      "cards": [
       {
        "guid": "0508927a-0e01-45c7-9413-81159898323c",

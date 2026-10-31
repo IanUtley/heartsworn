@@ -1448,9 +1448,14 @@ function renderSim() {
     }).join("")}</ol>`;
   }
   if (rules && rules.problems && rules.problems.length) {
-    html += `<h3>Rules check</h3>${rules.problems.map((p) => `<div class="issue"><span class="lvl ${p.level}">${p.level}</span>${esc(p.where)}: ${esc(p.text)}</div>`).join("")}`;
+    // An OK switch marks a problem as a known issue: it stays listed, marked accepted, and is left out of the zone list.
+    html += `<h3>Rules check</h3>${rules.problems.map((p) => `<div class="issue${p.accepted ? " accepted" : ""}"><span class="lvl ${p.level}">${p.level}</span>${esc(p.where)}: ${esc(p.text)}
+      <label class="switch" title="${isAdmin ? "Accept as a known issue" : "Accepted as a known issue"}"><input type="checkbox" class="issue-ok" data-where="${esc(p.where)}" data-text="${esc(p.text)}"${p.accepted ? " checked" : ""}${isAdmin ? "" : " disabled"}><span>OK</span></label></div>`).join("")}`;
   }
   body.innerHTML = html;
+  for (const box of body.querySelectorAll(".issue-ok")) {
+    box.onchange = () => acceptIssue(box.dataset.where, box.dataset.text, box.checked);
+  }
 }
 
 // ---------------------------------------------------------------- simulation state table
@@ -4371,10 +4376,32 @@ els.zone.addEventListener("change", () => {
   return loadZone(starterZone(viewRace()));
 });
 
+// Zones whose Rules check has warnings or errors get a ⚠ in the list (filled in once the check has run).
+function markZoneIssues() {
+  getJSON("/api/zone-issues").then((counts) => {
+    for (const option of els.zone.querySelectorAll("option")) {
+      option.dataset.label ??= option.textContent;
+      option.textContent = counts[option.value] ? `⚠ ${option.dataset.label}` : option.dataset.label;
+      option.title = counts[option.value] ? `${counts[option.value]} Rules check problem(s)` : "";
+    }
+  }).catch(() => {});
+}
+
+// Accept (or un-accept) a Rules-check problem as known, then refresh the rules panel and the zone list.
+async function acceptIssue(where, text, accept) {
+  try {
+    await postJSON("/api/edit/issue-accept", { zone: zoneId, where, text, accept });
+    rules = await getJSON(`/api/rules?zone=${encodeURIComponent(zoneId)}`);
+    markZoneIssues();
+    renderSim();
+  } catch (error) { els.status.textContent = error.message; }
+}
+
 async function start() {
   resize();
   let zoneList = [];
   try { zoneList = await getJSON("/api/zones"); } catch (error) { els.status.textContent = error.message; return; }
+  markZoneIssues();
   // Race starter (AZ0) panoramas get their own heading.
   const groupOf = (z) => (z.kind === "panorama" && z.race ? "intro" : z.kind);
   const groups = { overworld: "Overworlds", dungeon: "Dungeons", panorama: "Panoramas",
