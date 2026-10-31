@@ -412,6 +412,7 @@ def test_champion_warm_rebuild_does_not_emit_card_updated(db):
     from domain import game as gmod
 
     handler = object.__new__(hcs.HCPHandler)
+    handler.user_profile = {"id": 5}
     handler._player_champ_scid = game_engine.SessionCardId(
         game_engine.UID.make(244, 5))
     handler._ai_champ_scid = game_engine.SessionCardId(
@@ -472,6 +473,7 @@ def test_champion_board_cards_are_reannounced_once_client_is_live(db):
     from domain import game as gmod
 
     handler = object.__new__(hcs.HCPHandler)
+    handler.user_profile = {"id": 5}
     handler.scnt = 0
     pl_t = game_engine.UID.make(244, 5)
     ai_t = game_engine.UID.make(3, 1000)
@@ -1253,7 +1255,7 @@ def test_deck_search_prompt_target_id(db):
             game.card_defs[scid] = game_engine.CardDef(
                 "Darkspire Enforcer", game_engine.ECardTypes.Troop,
                 2, 3, 2, [], [])
-            return (template_guid, "Troop", "Darkspire Enforcer", 2, 3, 2, 0)
+            return (template_guid, game_engine.ECardTypes.Troop, "Darkspire Enforcer", 2, 3, 2, 0)
         h._card_full_data = _full_data
         bstate = {"_next_instance_id": 1, "turn_number": 1}
         game = game_engine.Game(1, pl_t, ai_t)
