@@ -970,6 +970,11 @@ def _trigger_event(graph, board):
         target = source
     elif event_type == "GainThresholdEvent":
         data["gain_threshold_color"] = game_engine.SHARD_TO_FLAG["wild"]
+    elif event_type == "ChampionHealedEvent":
+        # The player's champion gained health: its own heal is the event, and it is the source the trigger names.
+        source = PLAYER_CHAMP_UID
+        target = None
+        data["event_health_gained"] = 1
     elif event_type in {"TurnStartedEvent", "TurnEndedEvent",
                         "GameStartedEvent", "CombatEndedEvent"}:
         source = None
@@ -1253,6 +1258,11 @@ def _answer_discard_prompts(db, handler, session, state, game):
         _drain_stack(db, handler, session, state, game)
 
 def _run_case(db, metadata, path, *, option_check=True):
+    # Random picks (reveals, random summons) fall back to the global RNG; seed it per attachment so runs repeat.
+    import hashlib as _hashlib
+    import random as _random
+    _random.seed(int(_hashlib.md5(
+        f"{metadata['ability_guid']}/{path!r}".encode()).hexdigest()[:8], 16))
     graph = _metadata_graph(metadata)
     board = _seed_board(db, metadata)
     state = _new_state(metadata)
@@ -1336,6 +1346,15 @@ def _run_case(db, metadata, path, *, option_check=True):
     elif graph.trigger_event_type:
         event = _trigger_event(graph, board)
         game = handler._fresh_game(session, PLAYER_UID, OPPONENT_UID, state)
+        # A required explicit target the trigger names (a cleric to buff) must exist on the board for it to resolve.
+        for target in graph.targets:
+            if (getattr(target, "requires_input", False) and not getattr(target, "is_auto", False)
+                    and int(getattr(target, "minimum", 0) or 0) > 0):
+                legal = legal_targets_for(
+                    db, SESSION_ID, PLAYER_PID, target, int(source_uid), both_players=True,
+                    champions=handler._champion_targets(), battle_state=state)
+                if not legal:
+                    _satisfy_target(db, target, int(source_uid), handler, state)
         dispatch_native_trigger(
             db=db, handler=handler, game=game, session=session,
             player_uid=PLAYER_UID, ai_uid=OPPONENT_UID,
