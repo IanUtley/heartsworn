@@ -1379,8 +1379,7 @@ class EffectContext:
         target = (self.resolved_target(source_fallback=False)
                   if target is None else target)
         discarder = None
-        if (inherited and target is not None and
-                not self.bstate.get("pvp")):
+        if inherited and target is not None:
             # A child "discard a card" inherits its parent's resolved target
             # aliases.  When the parent targeted a champion ("target champion
             # discards a card", Concubunny Yuka) that champion is who
