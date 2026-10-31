@@ -1,8 +1,12 @@
 """Editor Play defaults to the champion played most recently."""
 
+import os
 import sqlite3
+import sys
 
-from tests.test_db import fresh_database
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+
+from tests.test_db import fresh_database  # noqa: E402
 
 SRC = fresh_database()
 

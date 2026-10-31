@@ -1,6 +1,7 @@
 """Focused shared trigger publication checks for RulesPort effects/phases."""
 
 import json
+import sqlite3
 import os
 import sys
 from types import SimpleNamespace
@@ -153,11 +154,18 @@ class _SummonContext:
         return None
 
 
-def _conscript_is_filtered_repeatable_and_publishes_faction_in_both_modes(db):
-    candidate_guid = "f0000000-0000-0000-0000-000000000001"
+def _conscript_is_filtered_repeatable_and_publishes_faction_in_both_modes(shared_db):
+    # Work on a copy: this test removes the other troops so its one Aria candidate is the only match.
+    db = sqlite3.connect(":memory:")
+    shared_db.backup(db)
+    # A real Records Aria troop (m_Faction "Aria", cost 1): conscript takes its faction from Records.
+    candidate_guid = "0a400cc4-21fe-4172-a4a7-d95d8af8cc82"
+    db.execute("DELETE FROM card_templates WHERE card_type LIKE 'Troop%' AND guid != ?", (candidate_guid,))
     db.execute(
-        "INSERT OR REPLACE INTO card_templates VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
-        (candidate_guid, "Aria Troop", "Troop", 1, 1, 1, 0, "[]", "[]",
+        "INSERT OR REPLACE INTO card_templates (guid, name, card_type, cost, attack, defense, socket_count, "
+        "threshold_json, abilities_json, subtype, no_pvp, is_pve, sacrifice_target) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        (candidate_guid, "The Ancestors' Chosen", "Troop", 1, 1, 1, 0, "[]", "[]",
          "", 0, 0, 0))
     for pvp, source_owner, target_owner in ((False, 5, 0), (True, 51, 52)):
         session_id = 1 if not pvp else 2

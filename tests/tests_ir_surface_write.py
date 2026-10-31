@@ -1,9 +1,13 @@
 """The surface writer: a sample of stored abilities is written as surface text and read back to the same Records,
 and text that does not bind one ability is refused."""
 
+import os
+import sys
 import unittest
 
-from gamedata import DEFAULT_RECORD_STORE as STORE
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+
+from gamedata import DEFAULT_RECORD_STORE as STORE  # noqa: E402
 from gamedata import ir_python as P
 from gamedata import ir_registry
 from gamedata import ir_surface as surface

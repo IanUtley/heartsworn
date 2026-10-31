@@ -262,10 +262,6 @@ def _run_sweep(all_cards=False):
                     fh.write(traceback.format_exc())
     finally:
         db.close()
-        try:
-            os.remove(sandbox_path)
-        except OSError:
-            pass
     label = "card catalog" if all_cards else "Set 1"
     print(f"{label} sweep: {passed}/{len(abilities)} abilities resolved cleanly")
     if fails:

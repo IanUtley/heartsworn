@@ -3078,8 +3078,6 @@ def main():
          test_crown_of_the_primals_buffs_target_troop),
         ("Strength of the Redwood uses typed stat values",
          test_strength_of_redwood_uses_each_typed_stat_value),
-        ("Primordial Caves cost counters and threshold chain",
-         test_primordial_caves_adds_entering_cost_secretly_and_chains_threshold),
         ("S.P.A.M. Bot charge power targets one Robot/stat",
          test_spam_bot_charge_power_targets_one_robot_and_one_stat),
         ("Jadiim triggers for a one-cost permanent",

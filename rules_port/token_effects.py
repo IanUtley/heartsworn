@@ -278,6 +278,28 @@ def _authored_banned_guids(context):
     return set()
 
 
+def _template_faction(guid):
+    """The faction a card template's Records entry names (m_Faction), or None for an unknown template."""
+    from rules_port.filters import _template_of
+    template = _template_of({"template_guid": guid})
+    if template is None:
+        return None
+    faction = template.field("m_Faction")
+    return str(faction) if faction not in (None, "", "None") else None
+
+
+def _conscript_faction(context, payload):
+    """The faction a conscript draws from: the named one, else the conscripting card's own faction."""
+    named = payload.get("conscript_faction")
+    if named and str(named) != "None":
+        return str(named)
+    from pvp_db import db_card_zone_details
+    source_uid = context.bstate.get("resolving_source_uid")
+    source = db_card_zone_details(
+        context.session.session_id, int(source_uid or 0), conn=context.db) if source_uid is not None else None
+    return _template_faction(source[0]) if source else None
+
+
 def _matching_template_candidates(context, card_filter, banned_guids=(),
                                   source_uid=None, player=None):
     """Return the typed templates matching one Records ``CardFilter``.
@@ -684,6 +706,12 @@ def summon_token(context, payload=None, *, target=None, owner=None):
         else:
             candidates = _matching_template_candidates(
                 context, card_filter, banned_guids)
+            if payload.get("conscript_event"):
+                # Conscript draws from one faction: the one the payload names, else the conscripting card's own.
+                faction = _conscript_faction(context, payload)
+                if faction:
+                    candidates = [guid for guid in candidates
+                                  if _template_faction(guid) == faction]
         if candidates:
             if combined_cost > 0:
                 selected_guids = _combined_cost_choices(
