@@ -717,6 +717,9 @@ def _effect_contract_error(effect, trace, graph=None):
     if effect_type in {"BuryCardAbilityEffectTemplate",
                        "DiscardCardAbilityEffectTemplate",
                        "DiscardOrSacrificeCardAbilityEffectTemplate"}:
+        # A bury whose count is zero (for each Chaostouched you control, with none on the board) moves nothing.
+        if str(trace.get("result") or "").endswith(" 0 cards"):
+            return None
         if not (_card_changes_to(trace, "discard") or
                 _card_changes_to(trace, "underground")):
             return "discard/bury produced no persisted zone change"
