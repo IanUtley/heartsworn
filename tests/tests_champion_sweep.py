@@ -1453,6 +1453,14 @@ def _run_case(db, metadata, path, *, option_check=True):
     settled_skipped = _fixture_skippable_guids(
         db, graph, handler, state, source_uid)
     fixture_skipped = set(pre_skipped) | set(settled_skipped)
+    # The resolver may record its trace on the live PvP state rather than this dict; read both.
+    live_state = tournament_game.pvp_load_state(session) or {}
+    if live_state is not state and live_state.get("ability_trace"):
+        known = [repr(entry) for entry in state.get("ability_trace") or []]
+        state.setdefault("ability_trace", [])
+        for entry in live_state["ability_trace"]:
+            if repr(entry) not in known:
+                state["ability_trace"].append(entry)
     traces = _assert_complete(
         graph, state, static=static_attachment,
         fixture_skipped=fixture_skipped)
