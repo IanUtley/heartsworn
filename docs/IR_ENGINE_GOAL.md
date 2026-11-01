@@ -15,13 +15,13 @@ Three measurable parts:
 
 ## Where we are
 
-Measured with `tools/ir_coverage/ir_gap_report.py` over the 8,996 `AbilityTemplate` records in the Records:
+Measured with `tools/ir_coverage/ir_gap_report.py` over the 8,992 `AbilityTemplate` records in the Records (four placeholder-art abilities are excluded, as the report does):
 
 | Measure | Value |
 | --- | --- |
-| Covered by the interpreter | 7,207 (80.1%) |
-| Refused by `coverage()` | 1,788 (19.9%) |
-| Coverage check raises (bad Records data) | 1 |
+| Covered by the interpreter | 8,915 (99.1%) |
+| Refused by `coverage()` | 77 (0.9%) |
+| Coverage check raises (bad Records data) | 0 |
 
 The interpreter is on by default in `restart.sh` and the Docker image (`HEX_IR_ENGINE=1`); set `HEX_IR_ENGINE=0` to
 turn it off at start-up. The code default is still off, so tests and imports that do not go through those launchers

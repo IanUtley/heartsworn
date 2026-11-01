@@ -9,8 +9,8 @@ interpreter never half-runs an ability.
 
 Measured with `tools/ir_coverage/ir_gap_report.py` over the 8,992 `AbilityTemplate` records (four abilities of placeholder-art cards are excluded: OpponentChooseAndPlay, ChooseRevealAndPlay, Footsteps from the Hall (A) and (B); their implementation is done, and the migration counts them as done), at the latest run:
 
-- Covered by the interpreter: 8,896
-- Refused: 100 (the reasons are under "Outstanding after the latest run" below)
+- Covered by the interpreter: 8,915
+- Refused: 77 (the reasons are under "Outstanding after the latest run" below)
 - Coverage errors (the coverage check raising on bad Records data): 0 at this run
 
 Regenerate the numbers and the full reason list from the current code and Records:
@@ -37,44 +37,62 @@ from sockets, payments, remembered powers and random picks (62 of the 66 grants 
 
 ## Outstanding after the latest run
 
-The 100 refused abilities, by refusal reason. An ability with several reasons is counted under each, so the
-column sums to more than 100. Regenerate with `python3 tools/ir_coverage/ir_gap_report.py --top 200`.
+The 77 refused abilities, by refusal reason. An ability with several reasons is counted under each, so the
+column sums to 85, which is more than 77. Regenerate with `python3 tools/ir_coverage/ir_gap_report.py --top 200`.
 
 | Reason | Abilities |
 | --- | ---: |
-| `chosen follow-up target` (`ir_exec_targets.follow_up_gaps`) | 14 |
-| `target MaxTargetCount` / `target MinTargetCount` (a list target's count) | 7 / 7 |
-| `DestroyCard for a player target` (the game-over path) | 5 |
-| `effect StoreListAttrAbilityEffectTemplate` (shard picks, run as invoked children) | 5 |
+| `DestroyCard for a player target` | 5 |
+| `effect StoreListAttrAbilityEffectTemplate` | 5 |
 | `cost duration EndOfTurn` | 5 |
-| `stat duration WhileCardInPlay` / `AttributeModifier duration WhileCardInPlay` / `IntAttrModifier duration WhileCardInPlay` / `cost duration WhileCardInPlay` | 4 / 3 / 1 / 1 |
-| `move to none` (a zone move with no destination) | 4 |
+| `stat duration WhileCardInPlay` | 4 |
+| `chosen follow-up target` | 4 |
 | `IntAttrModifier duration WhileCardOnTopOfDeck` | 4 |
 | `invoked: chosen follow-up target` | 4 |
 | `effect LoadPlayerDeckAbilityEffectTemplate` | 4 |
-| `effect condition AbilityVariableCondition` (a "began the game with N cards" test) | 2 |
-| `reveal to Opponents` | 2 |
-| `multi-card target` (count 2 min / max, count 3, count 2147483647, and invoked forms) | 2 / 2 / 1 / 1 / 1 / 1 |
-| `target TargetsAPlayerOrHisStuff` (interrupts) | 2 |
-| `random target without a card filter` (C# takes every card; the live pool drops them) | 2 |
-| `trigger CombatEndedEvent` (no card template in the harness) | 2 |
+| `AttributeModifier duration WhileCardInPlay` | 3 |
+| `effect condition AbilityVariableCondition` | 2 |
+| `multi-card target (m_MaxTargetCount 2)` | 2 |
+| `multi-card target (m_MinTargetCount 2)` | 2 |
+| `target TargetsAPlayerOrHisStuff` | 2 |
+| `trigger CombatEndedEvent` | 2 |
 | `grant duration BeginningOfOpponentsTurn` | 2 |
 | `stat duration UntilEndOfDungeon` | 2 |
-| `effect FinishResolvingCardAbilityEffectTemplate`, `BuiltInPlayCardAbilityEffectTemplate`, `TransformCardIntoReplicaAbilityEffectTemplate`, `DiscardOrSacrificeCardAbilityEffectTemplate`, `CopyAbilityEffectTemplate`, `DoubleChoiceAbilityEffectTemplate` | 1 each |
-| `target player filter Unknown`, `target DuplicateCardTargetTemplate` | 1 each |
-| `effect condition RequiresDateTime`, `NotAbilityCondition`, `NotContingentAbilityCondition` | 1 each |
-| `counter operation Set` (remove all counters from a target; C# clears the counter collection) | 1 |
+| `effect BuiltInPlayCardAbilityEffectTemplate` | 1 |
+| `effect FinishResolvingCardAbilityEffectTemplate` | 1 |
+| `target player filter Unknown` | 1 |
+| `effect condition RequiresDateTime` | 1 |
+| `effect TransformCardIntoReplicaAbilityEffectTemplate` | 1 |
+| `counter operation Set` | 1 |
 | `move of every card in a zone` | 1 |
+| `multi-card target (m_MaxTargetCount 2147483647)` | 1 |
+| `invoked: multi-card target (m_MaxTargetCount 2147483647)` | 1 |
 | `damage shield without a lifetime` | 1 |
 | `expression name INS` | 1 |
-| `int attribute doubled`, `int attribute operation Unknown` | 1 each |
 | `TransformSelfAbilityEffectTemplate of a player` | 1 |
-| `random invocation`, `invoke with no ability` | 1 each |
-| `cost duration UntilItLeavesYourHand`, `cost duration BeginningOfOwnersTurn` | 1 each |
-| `IntAttrModifier duration UntilDamaged`, `DamageMultiplierModifier duration BeginningOfOwnersTurn` | 1 each |
-| `remove all charges`, `ChargePointsModifier without a typed amount` | 1 each |
+| `random invocation` | 1 |
+| `invoke with no ability` | 1 |
+| `cost duration UntilItLeavesYourHand` | 1 |
+| `multi-card target (m_MaxTargetCount 3)` | 1 |
+| `invoked: multi-card target (m_MaxTargetCount 3)` | 1 |
+| `effect DiscardOrSacrificeCardAbilityEffectTemplate` | 1 |
+| `effect CopyAbilityEffectTemplate` | 1 |
+| `int attribute doubled` | 1 |
+| `int attribute operation Unknown` | 1 |
+| `effect DoubleChoiceAbilityEffectTemplate` | 1 |
+| `target DuplicateCardTargetTemplate` | 1 |
+| `effect condition NotContingentAbilityCondition` | 1 |
+| `cost duration BeginningOfOwnersTurn` | 1 |
+| `IntAttrModifier duration UntilDamaged` | 1 |
+| `DamageMultiplierModifier duration BeginningOfOwnersTurn` | 1 |
+| `ChargePointsModifier without a typed amount` | 1 |
+| `remove all charges` | 1 |
+| `effect condition NotAbilityCondition` | 1 |
+| `effect FinishMovingCardToWarzoneEffectTemplate` | 1 |
+| `cost duration WhileCardInPlay` | 1 |
+| `IntAttrModifier duration WhileCardInPlay` | 1 |
 
-Notes on the largest entries:
+Notes on the largest entries (the counts in these notes are from an earlier run, and the table above is the current one):
 
 - **Chosen follow-up pickers and multi-card targets (about 26 with the invoked forms).** These need the native pick
   prompts mirrored in the interpreter, with a parity check per ability. The deck-search picker is already wired for a
