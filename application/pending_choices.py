@@ -1916,7 +1916,7 @@ class PendingChoicesMixin:
                 session, pl_t, ai_t, bstate, pend, chosen_uid, inner_bytes)
         if pend.get("kind") == "matching_target":
             return self._resolve_pending_matching_target(
-                session, pl_t, ai_t, bstate, pend, chosen_uid)
+                session, pl_t, ai_t, bstate, pend, chosen_uid, picks=picks)
         native_continuation = pend.get("continuation")
         if ((picks or (chosen_uid and chosen_uid in pend["candidates"]))
                 and isinstance(native_continuation, dict)
@@ -2011,7 +2011,7 @@ class PendingChoicesMixin:
         return True
 
     def _resolve_pending_matching_target(self, session, pl_t, ai_t, bstate,
-                                         pend, chosen_uid):
+                                         pend, chosen_uid, picks=None):
         """Resume a typed deck target that does not move the selected card.
 
         The class-39 picker temporarily presents legal deck cards in the
@@ -2025,7 +2025,7 @@ class PendingChoicesMixin:
 
         bstate.pop("resolution_paused", None)
         candidates = [int(uid) for uid in (pend.get("candidates") or [])]
-        if not chosen_uid or int(chosen_uid) not in candidates:
+        if picks is None and (not chosen_uid or int(chosen_uid) not in candidates):
             _hc.log_req(f"    Matching-target answer invalid: "
                     f"chosen={hex(int(chosen_uid)) if chosen_uid else 'none'} "
                     f"candidates={candidates}")
@@ -2042,16 +2042,17 @@ class PendingChoicesMixin:
         continuation = pend.get("continuation") or {}
         interpreted = continuation.get("interpreter")
         if isinstance(interpreted, dict):
-            # The interpreter paused for this deck match (rules_port/ir_exec.py). Resume it with the card, then finish the
-            # chain as the deck-search branch does.
+            # The interpreter paused for this deck match (rules_port/ir_exec.py). Resume it with the card(s), then finish
+            # the chain as the deck-search branch does.
             from rules_port import ir_exec
             from rules_port.context import EffectContext
             from rules_port.resolution import prompt_interpreted_reveal
-            _hc.log_req(f"    Matching-target choice {hex(int(chosen_uid))}: resuming the interpreter")
+            answer = list(picks) if picks else int(chosen_uid)
+            _hc.log_req(f"    Matching-target choice {answer}: resuming the interpreter")
             bstate.pop("pending_deck_search", None)
             try:
                 ir_exec.resume_ability(
-                    interpreted, int(chosen_uid),
+                    interpreted, answer,
                     context=EffectContext.from_rules_port(g, session, _hc._db, self, pl_t, ai_t, bstate, ""))
             except ir_exec.NeedsChoice as pause:
                 prompt_interpreted_reveal(self, g, session, _hc._db, pl_t, ai_t, bstate, pause)

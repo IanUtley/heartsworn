@@ -2119,9 +2119,14 @@ def coverage(guid: str) -> list[str]:
             # A chosen revealed target takes several picks through the client's target picker (the pick's count is
             # bounded by the template, and the answer is checked against it when the interpreter resumes).
             chosen_revealed = kind == "SourceRevealedTargetTemplate" and not template.get("m_IsAutoTarget")
+            # A chosen match from the deck or the discard pile picks several cards through the same picker, as a
+            # revealed pick does; its answer is checked against the count when the interpreter resumes.
+            chosen_match = kind == "MatchSecondaryTargetTemplate" and not template.get("m_IsAutoTarget") and \
+                str(template.get("m_CollectionFlags") or "") in ("Deck", "Discard")
             if isinstance(count, dict) and count.get("m_Value") is not None and int(count["m_Value"]) != 1 \
                     and not (bound == "m_MinTargetCount" and int(count["m_Value"]) == 0) \
-                    and kind != "AbilityTargetTemplate" and not automatic_follow_up and not chosen_revealed:
+                    and kind != "AbilityTargetTemplate" and not automatic_follow_up and not chosen_revealed \
+                    and not chosen_match:
                 missing.append(f"multi-card target ({bound} {count['m_Value']})")
             elif isinstance(count, dict) and count.get("m_Value") is None and not (
                     _short(count.get("_t")) == "TargetVariable" and
