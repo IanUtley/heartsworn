@@ -20,7 +20,8 @@ Measured with `tools/ir_coverage/ir_gap_report.py` over the 8,992 `AbilityTempla
 | Measure | Value |
 | --- | --- |
 | Covered by the interpreter | 8,936 (99.4%) |
-| Refused by `coverage()` | 56 (0.6%) |
+| Refused by `coverage()` (reachable) | 41 (0.5%) |
+| Orphans (refused, unreachable from any game record) | 15 |
 | Coverage check raises (bad Records data) | 0 |
 
 The interpreter is on by default in `restart.sh` and the Docker image (`HEX_IR_ENGINE=1`); set `HEX_IR_ENGINE=0` to
