@@ -1764,12 +1764,38 @@ def _repeat(parent_guid: str, position: int, effect_raw: dict[str, Any], root: M
         _invoke(parent_guid, position, effect_raw["m_RepeatingEffect"], scope, owners)
 
 
+ZERO_GUID = "00000000-0000-0000-0000-000000000000"
+
+
+def sack_pool(unlucky: bool) -> list[str]:
+    """The abilities of the Lucky (or Unlucky) pool, as the native pool lists them: the abilities of the cards named
+    "Luck Sack ..." (or "Unlucky Sack..."). Reads the card table, so it needs the database the server runs on."""
+    from pvp_db import db_card_template_abilities_by_name_prefix
+    import db as db_layer
+    prefix = "Unlucky Sack" if unlucky else "Luck Sack "
+    pool: list[str] = []
+    for _guid_value, abilities_json in db_card_template_abilities_by_name_prefix(prefix, conn=db_layer._db):
+        try:
+            values = json.loads(abilities_json or "[]")
+        except (TypeError, ValueError, json.JSONDecodeError):
+            continue
+        pool.extend(str(ability).lower() for ability in values if ability)
+    return pool
+
+
 def _invoke(parent_guid: str, position: int, effect_raw: dict[str, Any], scope: Scope, owners: list[int]) -> None:
     """C# ActivateAbilityEffectTemplate: run the invoked ability once for each owner the invoke's target names (the
     controller of "You invoke", each opposing champion of "Each opposing champion invokes"), as a child of the same
     source and event. Its own trigger is not checked. A choice the child pauses for is kept with this invoke as the
     outer frame of its continuation, so resuming the child then carries on from the invoking clause."""
     child_guid = _guid(effect_raw.get("m_AbilityToInvoke"))
+    if effect_raw.get("m_RandomlyLuckyOrUnlucky"):
+        # C# ActivateAbilityEffectTemplate with m_RandomlyLuckyOrUnlucky invokes a random Lucky (or, on an Unlucky card,
+        # Unlucky) ability, and its authored invoke is ignored. The native pool picks it (context._random_sack_ability).
+        with _bridge_caster(scope.context.bstate, owner=scope.owner_uid, source=scope.source_uid):
+            child_guid = scope.context._random_sack_ability() or ZERO_GUID
+    if not child_guid or child_guid == ZERO_GUID:
+        return
     child_root = _load("AbilityTemplate", child_guid)
     for owner in owners:
         child_scope = Scope(context=scope.context, source_uid=int(scope.source_uid), owner_uid=int(owner),
@@ -2290,10 +2316,19 @@ def coverage(guid: str) -> list[str]:
             missing.extend(_repeat_gaps(effect))
             continue
         if kind == "ActivateAbilityEffectTemplate":
-            if effect.get("m_RandomlyLuckyOrUnlucky"):
-                missing.append("random invocation")
             child = _guid(effect.get("m_AbilityToInvoke"))
             stack = _coverage_stack()
+            if effect.get("m_RandomlyLuckyOrUnlucky"):
+                # Every ability the random pool can pick (Lucky, and Unlucky) must run, so each is checked as a child.
+                for pool_child in sack_pool(True) + sack_pool(False):
+                    if pool_child in stack:
+                        continue
+                    stack.add(pool_child)
+                    try:
+                        missing.extend(f"invoked: {item}" for item in coverage(pool_child))
+                    finally:
+                        stack.discard(pool_child)
+                continue
             if child == "00000000-0000-0000-0000-000000000000":
                 missing.append("invoke with no ability")
             elif child in stack:

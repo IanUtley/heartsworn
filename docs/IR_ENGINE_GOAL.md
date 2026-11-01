@@ -19,7 +19,7 @@ Measured with `tools/ir_coverage/ir_gap_report.py` over the 8,992 `AbilityTempla
 
 | Measure | Value |
 | --- | --- |
-| Covered by the interpreter | 8,977 (99.8%) |
+| Covered by the interpreter | 8,978 (99.8%) |
 | Refused by `coverage()` (reachable) | 0 (0.0%) |
 | Orphans (refused, unreachable from any game record) | 15 |
 | Coverage check raises (bad Records data) | 0 |
@@ -96,7 +96,7 @@ Exit for each: its refusal reason is gone from the gap report, with a passing te
 ## Non-goals
 
 - **Records data errors.** The Records are the authority. Where a record is wrong, the fix is in the extraction,
-  not in the interpreter. One known case: `9b36aabc-dffc-edf3-eaf9-cd514adf3d6a`, whose clause points at a null template.
+  not in the interpreter. One case was `9b36aabc-dffc-edf3-eaf9-cd514adf3d6a`, whose invoke points at a null template. The client picks a random Lucky ability there (the invoke is `m_RandomlyLuckyOrUnlucky`), so the interpreter now runs that pick as the native pool does, and the record is not a data error.
 - **Client changes.** The client cannot be changed, so every fix is server side.
 - **Rules questions.** Where C# and the live native path disagree (for example, a random target with no card filter),
   the goal is to ask which is right before changing either. The interpreter follows C# by default.

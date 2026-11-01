@@ -66,10 +66,9 @@ def reachable_guids(store):
 
 
 # The Records entries that are known data errors, not interpreter gaps (IR_ENGINE_GOAL.md, non-goals). Each is
-# listed by name in the gap document, and the Records fix is what closes it.
-RECORDS_ERRORS = {
-    "9b36aabc-dffc-edf3-eaf9-cd514adf3d6a",   # its clause points at a null template
-}
+# listed by name in the gap document, and the Records fix is what closes it. (9b36aabc is not one now: its null
+# invoke is a random Lucky pick, which the interpreter runs as the native pool does.)
+RECORDS_ERRORS = set()
 
 
 def referrers(store):
@@ -89,11 +88,11 @@ def referrers(store):
     return kinds, parents
 
 
-def covered_in_context(guid, refusals, kinds, parents):
-    """Whether a refused ability runs correctly inside the abilities that invoke it (its parents), because every
-    ability above it is covered. A card or champion that names it directly makes it a root: it is not covered in
-    context. (An invoked child's refusal also shows on its parent as "invoked: ...", so a covered parent has checked
-    the child in its linked context.)"""
+def covered_in_context(guid, refusals, kinds, parents, coverage, coverage_stack):
+    """Whether a refused ability runs correctly inside the abilities that invoke it. Each ability above it must be
+    covered, and it must be covered as an invoked child of each one: the check runs it with the invoking ability on the
+    coverage stack, which is the linked context an invoke runs it in. A card or champion that names it directly makes
+    it a root, and a root is not covered in context."""
     if any(kinds.get(parent) not in ABILITY_PART_KINDS for parent in parents.get(guid, ())):
         return False
     ancestors = set()
@@ -105,9 +104,16 @@ def covered_in_context(guid, refusals, kinds, parents):
         ancestors.add(current)
         stack.extend(parents.get(current, ()))
     abilities = [item for item in ancestors if kinds.get(item) == "AbilityTemplate"]
-    if not abilities:
+    if not abilities or any(item in refusals for item in abilities):
         return False
-    return all(item not in refusals for item in abilities)
+    for ability in abilities:
+        coverage_stack.add(ability)
+        try:
+            if coverage(guid):
+                return False
+        finally:
+            coverage_stack.discard(ability)
+    return True
 
 
 def main(argv=None):
@@ -138,8 +144,9 @@ def main(argv=None):
     kinds, parents = referrers(STORE)
     orphans = sorted(guid for guid in refusals if guid not in reachable)
     records_errors = sorted(guid for guid in refusals if guid in RECORDS_ERRORS)
+    from rules_port.ir_exec import _coverage_stack
     in_context = sorted(guid for guid in refusals if guid in reachable and guid not in RECORDS_ERRORS and
-                        covered_in_context(guid, refusals, kinds, parents))
+                        covered_in_context(guid, refusals, kinds, parents, coverage, _coverage_stack()))
     excluded = set(orphans) | set(records_errors) | set(in_context)
     reasons = collections.Counter()
     for guid, missing in refusals.items():
@@ -150,7 +157,7 @@ def main(argv=None):
     print(f"refused {len(refusals)}")
     print(f"orphans {len(orphans)} (refused, and not reachable from any card or other game record)")
     print(f"records errors {len(records_errors)} (Records data to fix; not interpreter gaps)")
-    print(f"covered in context {len(in_context)} (refused only as a standalone root; every ability above them is covered)")
+    print(f"covered in context {len(in_context)} (refused only as a standalone root; each ability above them is covered, and runs them as an invoked child)")
     print(f"refused, reachable {len(refusals) - len(orphans) - len(records_errors) - len(in_context)}")
     print(f"coverage errors {broken}")
     for reason, count in reasons.most_common(args.top):

@@ -17,6 +17,8 @@ WORKER_BOT_FACTORY_ABILITY_GUID = "0a1766d9-af3c-a4e2-2188-eb5369c9d0f0"
 YOU_MAY_PAY_ABILITY_GUID = "a1b7ce40-4dc9-86ed-6dde-be332ac1ed65"
 PUCID_ABILITY_GUID = "27204a54-4781-d9ba-2b19-35a8d91de52f"
 COLDHEART_REAVER_ABILITY_GUID = "7272ba75-60ae-0611-3897-74a7a3c6551f"
+DOUBLE_CHOICE_ABILITY_GUID = "e733900d-fc08-c701-7e8b-6fac23b09aba"
+INTERRUPT_COUNTER_ABILITY_GUID = "152e2e9a-f40e-187f-9bbb-70a0ca6c7bd5"
 X_COST_ABILITY_GUID = "2fbbc43a-2487-c3dc-b44a-69cc26b2a1e2"
 
 
@@ -711,9 +713,52 @@ def test_a_chosen_target_with_no_maximum_takes_any_number_of_candidates():
     assert ir_exec._pick_bounds(template, [1, 2, 3], True, SimpleNamespace(variables={})) == (0, 3)
 
 
+def test_a_player_double_choice_pauses_the_interpreter_for_the_answer(db):
+    """A player's DoubleChoice runs through the native choice stage: the interpreter pauses (NeedsConversation), and the
+    choice's pending state carries the interpreter's continuation, so the client's answer resumes the interpreter."""
+    from rules_port import ir_exec
+    from rules_port.context import EffectContext
+
+    pl_t, ai_t, game, handler, bstate, _player_champ, _ai_champ = _setup(db)
+    add_card(db, 900, 5, TPL_GLADIATOR, loc="warzone")
+    db.commit()
+    context = EffectContext.from_rules_port(game, SessionStub(), db, handler, pl_t, ai_t, bstate, "")
+    try:
+        ir_exec.run_ability(DOUBLE_CHOICE_ABILITY_GUID, "CardEnteredZoneEvent", context=context, source_uid=900,
+                            owner_uid=5, event={"player": 5, "card": 900, "to": "warzone"})
+        raise AssertionError("the player's double choice did not pause")
+    except ir_exec.NeedsConversation as pause:
+        continuation = pause.continuation
+    pending = bstate.get("pending_choice") or {}
+    assert pending.get("kind") == "double_choice", pending
+    assert pending.get("interpreter", {}).get("ability_guid") == DOUBLE_CHOICE_ABILITY_GUID, pending
+    assert continuation["ability_guid"] == DOUBLE_CHOICE_ABILITY_GUID, continuation
+
+
+def test_a_chain_interrupt_counters_the_spell_the_player_answered_with(db):
+    """An interrupt that counters a spell targeting the player runs with the player's answer (the spell on the chain),
+    and the countered spell leaves the chain for the discard pile."""
+    from rules_port import ir_exec
+    from rules_port.context import EffectContext
+
+    pl_t, ai_t, game, handler, bstate, _player_champ, _ai_champ = _setup(db)
+    add_card(db, 900, 5, TPL_GLADIATOR, loc="warzone")
+    add_card(db, 700, 0, TPL_GLADIATOR, loc="CastSpells")
+    db.commit()
+    context = EffectContext.from_rules_port(game, SessionStub(), db, handler, pl_t, ai_t, bstate, "")
+    ir_exec.run_ability(INTERRUPT_COUNTER_ABILITY_GUID, None, context=context, source_uid=900, owner_uid=5,
+                        event={"player": 5}, answers={0: 700})
+    location = dict(db.execute("SELECT card_uid, location FROM game_cards WHERE card_uid = 700").fetchall())
+    assert location == {700: "discard"}, location
+
+
 if __name__ == "__main__":
+    import inspect
+
     import db as dbmod
-    for run in (test_a_chosen_target_with_no_maximum_takes_any_number_of_candidates,
+    for run in (test_a_chain_interrupt_counters_the_spell_the_player_answered_with,
+                test_a_player_double_choice_pauses_the_interpreter_for_the_answer,
+                test_a_chosen_target_with_no_maximum_takes_any_number_of_candidates,
                 test_remove_all_counters_removes_each_counter_the_card_holds,
                 test_a_dungeon_opposing_bonus_is_recorded_once_per_resolution,
                 test_a_top_of_deck_int_attr_expires_when_its_source_leaves_the_top,
@@ -735,7 +780,11 @@ if __name__ == "__main__":
                 test_oakhenge_matches_the_client_oracle_run_when_the_revealed_cards_are_resources,
                 test_the_engine_takes_a_chosen_target_only_once_it_is_answered):
         dbmod._db = make_db()
-        run(dbmod._db)
+        # Some tests take the database; the others need none.
+        if inspect.signature(run).parameters:
+            run(dbmod._db)
+        else:
+            run()
     print("ok")
 
 
