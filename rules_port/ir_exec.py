@@ -726,6 +726,15 @@ def _resolved_targets(root: MechanicsObject, index: int, scope: Scope) -> list[i
         if chosen is None:
             return []
         return [int(uid) for uid in chosen] if isinstance(chosen, list) else [int(chosen)]
+    if kind == "DuplicateCardTargetTemplate" and template.m_IsAutoTarget:
+        # The cards that have a duplicate in their zone (same owner, zone and name), as the native enumeration finds
+        # them (rules_port.targeting.legal_targets).
+        from rules_port.targeting import legal_targets
+        context = scope.context
+        champions = getattr(context.handler, "_champion_targets", lambda: [])() or []
+        return [int(uid) for uid in legal_targets(
+            context.db, context.session.session_id, int(scope.owner_uid), _guid(root.m_AbilityTargetTemplateIds[index]),
+            int(scope.source_uid), both_players=True, champions=champions, battle_state=context.bstate)]
     if kind == "PlayerTargetTemplate":
         # An automatic player target: the controller ("You") or the one opponent. Its champion stands for
         # the player, as the live resolver's player target does for damage and the summoned tokens' owner.
@@ -1946,7 +1955,7 @@ STAT_DURATIONS = {"Permanent", "EndOfTurn"}
 # responsible player's next turn, as native records it.
 LINKED_STAT_DURATIONS = STAT_DURATIONS | {"WhileCardInPlay", "BeginningOfOwnersTurn", "UntilEndOfDungeon"}
 SUPPORTED_TARGETS = {"AbilitySourceCardTargetTemplate", "AbilityTargetTemplate", "PlayerTargetTemplate",
-                     "SourceRevealedTargetTemplate"} | FOLLOW_UP_KINDS
+                     "SourceRevealedTargetTemplate", "DuplicateCardTargetTemplate"} | FOLLOW_UP_KINDS
 # The player targets run without a choice: "You", and the one opponent (its random pick is that one player).
 SUPPORTED_PLAYER_TARGETS = {"Self", "SingleOpponent"}
 
