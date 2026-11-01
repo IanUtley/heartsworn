@@ -1,12 +1,12 @@
 """Polling worker for replay artifact generation.
 
-The format/database work lives in :mod:`replay`; this module is only the
+The format/database work lives in :mod:`services.replay`; this module is only the
 long-running process wrapper used by ``restart.sh`` and Docker.
 """
 
 import time
 
-from replay import DB_PATH, POLL_SECONDS, REPLAY_DIR, process_once
+from services.replay import DB_PATH, POLL_SECONDS, REPLAY_DIR, process_once
 
 
 def run():

@@ -283,6 +283,39 @@ def _match_secondary_values(db, session_id, ability, effect, target_spec,
     sec = -1 if sec_value is None else int(sec_value)
     if sec < 0:
         return ()
+
+    def fix_champion_owner(card, uid):
+        """Give synthetic champion targets their persisted controller ID.
+
+        Champions have no ``game_cards`` row.  The generic source-card
+        projection therefore falls back to the resolving player's ID, which
+        can make a MatchSecondary ``m_SameOwner`` target match the wrong
+        player's cards (for example, a Vampire's "their hand" reveal).
+        """
+        if not card:
+            return card
+        owner = None
+        for raw_owner, raw_uid in (battle_state.get("champ_map") or {}).items():
+            try:
+                if int(raw_uid) == int(uid):
+                    owner = int(raw_owner)
+                    break
+            except (TypeError, ValueError):
+                continue
+        if owner is None:
+            for row in champions or ():
+                try:
+                    if int(row[0]) == int(uid):
+                        owner = int(row[1])
+                        break
+                except (IndexError, TypeError, ValueError):
+                    continue
+        if owner is not None:
+            card["user_id"] = owner
+            card["owner_id"] = owner
+            card["controller_id"] = owner
+        return card
+
     raw = _resolved_effect_target_values(
         ability, sec, battle_state, resolved_by_instance)
     from .targeting import legal_targets, _source_card
@@ -294,6 +327,7 @@ def _match_secondary_values(db, session_id, ability, effect, target_spec,
             db, session_id, int(value), ability.responsible_player_id,
             battle_state)
         if view:
+            fix_champion_owner(view, value)
             secondary.append((int(value), view))
     if not secondary:
         return ()
@@ -308,6 +342,7 @@ def _match_secondary_values(db, session_id, ability, effect, target_spec,
             battle_state)
         if not view:
             continue
+        fix_champion_owner(view, uid)
         for other_uid, other in secondary:
             if cant_be_prev and int(uid) == other_uid:
                 continue
@@ -465,6 +500,65 @@ def _choose_ai_explicit_target_map(handler, session, battle_state,
         # Target selection must not make an otherwise resolvable ability fail
         # because a legacy/incomplete AI snapshot is unavailable.
         return None
+# C# PayCardActionCost appends each paid card to the ability instance list
+# that list-attr variables read ("for each troop exhausted this way",
+# "equal to the voided troop's [ATK]").
+_COST_LIST_NAMES = {
+    "exhaust": "ExhaustedCards",
+    "void": "VoidedCards",
+    "sacrifice": "SacrificedCards",
+    "discard": "DiscardedCards",
+}
+
+
+def _cost_card_lists(ability):
+    """Return ``{list_name: [uid, ...]}`` for every paid card-cost kind."""
+    out = {}
+    for kind, list_name in _COST_LIST_NAMES.items():
+        uids = _exhausted_cost_cards(ability, kind=kind)
+        if uids:
+            out[list_name] = uids
+    return out
+
+
+def _exhausted_cost_cards(ability, kind="exhaust"):
+    """Cards paid for one kind of ``ability``'s additional costs.
+
+    C# records exhausted cards in the ability instance's ``ExhaustedCards``
+    list, which CountListAttr variables read ("for each troop exhausted this
+    way" on the Construction Plans); other card costs have their own lists
+    (``_COST_LIST_NAMES``).  The activation keeps each cost's selection by its
+    index in the graph's additional cost targets.
+    """
+    metadata = getattr(ability, "metadata", None)
+    graph = getattr(metadata, "graph", None)
+    activation = getattr(ability, "activation", None)
+    costs = tuple(getattr(graph, "additional_cost_targets", ()) or ())
+    if not costs or activation is None:
+        return []
+    cost_map = getattr(activation, "cost_target_map", {}) or {}
+    target_map = getattr(activation, "target_map", {}) or {}
+    out = []
+    for index, (cost_kind, _guid) in enumerate(costs):
+        if str(cost_kind).lower() != kind:
+            continue
+        selected = cost_map.get(index, cost_map.get(str(index)))
+        if not selected and kind == "exhaust":
+            # Mono flattens exhaust selections into TargetMap; other kinds
+            # are only trusted from the dedicated cost map.
+            selected = target_map.get(index, target_map.get(str(index)))
+        if selected is None:
+            continue
+        if not isinstance(selected, (list, tuple, set)):
+            selected = (selected,)
+        for value in selected:
+            try:
+                uid = int(getattr(value, "uid64", value))
+            except (TypeError, ValueError):
+                continue
+            if uid not in out:
+                out.append(uid)
+    return out
 
 
 class NativeEffectBackend:
@@ -530,6 +624,19 @@ class NativeEffectBackend:
         # summoned no Spider).  The legacy resolver sets the same key; mirror
         # it here, then restore the caller's value on exit.
         battle_state["session_id"] = int(session.session_id)
+        for list_name, paid in _cost_card_lists(ability).items():
+            # Union with anything the host's cost payment already recorded
+            # for this activation; the activation's own cost map survives the
+            # chain round trip even when the host's flat list did not (PvP
+            # Bun'jitsu summoned a bare 3/3 Abomination).
+            lists = battle_state.setdefault("ability_lists", {})
+            if list_name == "ExhaustedCards":
+                lists[list_name] = list(paid)
+                continue
+            current = lists.get(list_name)
+            current = list(current) if isinstance(current, list) else []
+            current.extend(uid for uid in paid if uid not in current)
+            lists[list_name] = current
         battle_state["resolving_ability"] = ability.ability_template_id
         battle_state["resolving_source_uid"] = ability.source_uid
         battle_state["resolving_owner_id"] = int(
@@ -585,16 +692,51 @@ class NativeEffectBackend:
             condition_id = str(field(effect_value, "condition_guid", ""))
             if not condition_id or condition_id == "0" * 36:
                 return True
+            secondary_value = field(
+                effect_value, "secondary_target_index", -1)
+            secondary_index = int(
+                -1 if secondary_value is None else secondary_value)
+            secondary_target_uids = ()
+            if secondary_index >= 0:
+                secondary_target_uids = tuple(
+                    resolved_by_instance.get(secondary_index, ()) or ())
+                if not secondary_target_uids:
+                    def has_instance(candidate):
+                        candidate_id = field(
+                            candidate, "effect_instance_id", -1)
+                        return int(-1 if candidate_id is None else
+                                   candidate_id) == secondary_index
+
+                    referenced = next(
+                        (candidate for candidate in effects
+                         if has_instance(candidate)), None)
+                    target_index_value = (field(
+                        referenced, "target_index", -1)
+                        if referenced is not None else -1)
+                    referenced_index = int(
+                        -1 if target_index_value is None
+                        else target_index_value)
+                    raw_targets = (ability.activation.target_map.get(
+                        referenced_index, ()) if referenced_index >= 0 else ())
+                    if raw_targets is None:
+                        raw_targets = ()
+                    if not isinstance(raw_targets, (tuple, list, set)):
+                        raw_targets = (raw_targets,)
+                    secondary_target_uids = tuple(
+                        int(value) for value in raw_targets
+                        if value is not None)
             condition_context = ConditionContext(
                 db, session, battle_state,
                 event_type="AbilityEffectEvent",
                 ability_source_uid=ability.source_uid,
                 ability_source_owner_id=ability.responsible_player_id,
                 trigger_uid=target_value,
+                extra_target=target_value,
                 pl_t=player_uid, ai_t=ai_uid,
                 champions=champion_targets,
                 event_int_attribute=None,
-                event_tac=event_tac)
+                event_tac=event_tac,
+                effect_secondary_target_uids=secondary_target_uids)
             return bool(evaluate_effect_condition(
                 db, condition_id, condition_context))
 
@@ -714,6 +856,7 @@ class NativeEffectBackend:
                 battle_state["resolving_effect_guid"] = effect_guid
                 target_values = ability.activation.target_map.get(
                     target_index, ()) if target_index >= 0 else ()
+                target_spec = None
                 native_waiting = False
                 if not target_values and target_index >= 0:
                     target_spec = (ability.metadata.targets[target_index]
@@ -722,7 +865,11 @@ class NativeEffectBackend:
                     if target_spec is not None:
                         kind = str(target_spec.target_kind or "")
                         if kind == "AbilitySourceCardTargetTemplate":
-                            target_values = (ability.source_uid,)
+                            from .targeting import ability_source_target_uid
+                            target_values = (ability_source_target_uid(
+                                db, session.session_id,
+                                ability.source_uid, target_spec.guid,
+                                ability.responsible_player_id),)
                         elif kind.endswith("PlayerTargetTemplate"):
                             # A PlayerTargetTemplate identifies a champion in
                             # the client session, not the controller's raw
@@ -859,6 +1006,16 @@ class NativeEffectBackend:
                                 battle_state, ability, kind,
                                 ability.source_uid, target_spec, db,
                                 session.session_id)
+                            # The authored count applies to a list target: a random one draws its cards once
+                            # (C# FilterRandomTargets), and a fixed one is capped to its maximum.
+                            maximum = int(target_spec.resolved_maximum(
+                                battle_state.get("ability_variables") or
+                                getattr(ability.activation, "variables", {}) or {}) or 0)
+                            if target_spec.is_random:
+                                target_values = tuple(_random_target_sample(
+                                    target_values, maximum, battle_state))
+                            elif maximum > 0:
+                                target_values = tuple(target_values[:maximum])
                             if not target_values:
                                 # C# disables an effect whose authored list
                                 # target enumerates nothing; it never falls
@@ -889,6 +1046,51 @@ class NativeEffectBackend:
                                 ability.responsible_player_id,
                                 target_spec.guid, ability.source_uid, raw,
                                 battle_state)
+                            if (target_spec.requires_input and
+                                    int(ability.responsible_player_id or 0) != 0):
+                                # "Put one of them": the player picks among the cards the
+                                # look produced, after that effect has run. A choice already
+                                # made for this target (the resumed continuation) is used as is.
+                                from .targeting import is_chosen_secondary_target
+                                prior = ability.activation.target_map.get(target_index)
+                                prior_values = (prior if isinstance(prior, (list, tuple))
+                                                else (prior,))
+                                allowed = {int(uid) for uid in target_values}
+                                chosen = tuple(int(uid) for uid in prior_values
+                                               if uid is not None and int(uid) in allowed)
+                                needs_choice = bool(target_values) and (
+                                    len(target_values) > 1 or target_spec.optional or
+                                    int(target_spec.minimum or 0) == 0)
+                                if chosen:
+                                    target_values = chosen
+                                elif needs_choice and is_chosen_secondary_target(target_spec):
+                                    prompt = getattr(handler, "_prompt_revealed_choice", None)
+                                    if callable(prompt):
+                                        continuation = {
+                                            "ability_instance_id": int(ability.instance_id),
+                                            "ability_guid": ability.ability_template_id,
+                                            "source_uid": int(ability.source_uid or 0),
+                                            "owner_id": int(ability.responsible_player_id or 0),
+                                            "target_map": {
+                                                str(key): value for key, value in
+                                                ability.activation.target_map.items()},
+                                            "variables": dict(ability.activation.variables or {}),
+                                            "resume_effect_order": int(position),
+                                            "target_index": int(target_index),
+                                        }
+                                        prompt(
+                                            game, session, player_uid, ai_uid,
+                                            battle_state, ability.ability_template_id,
+                                            int(ability.source_uid or 0),
+                                            int(ability.responsible_player_id),
+                                            list(target_values),
+                                            list(battle_state.get("revealed_cards") or []),
+                                            optional=bool(target_spec.optional or
+                                                          int(target_spec.minimum or 0) == 0),
+                                            continuation=continuation)
+                                        battle_state["resolution_paused"] = True
+                                        native_waiting = True
+                                        target_values = ()
                         elif kind == "MatchSecondaryTargetTemplate":
                             target_values = _match_secondary_values(
                                 db, session.session_id, ability, effect,
@@ -897,6 +1099,18 @@ class NativeEffectBackend:
                                     handler, "_champion_targets",
                                     lambda: [])() or []),
                                 resolved_by_instance=resolved_by_instance)
+                            # This specialized enumerator bypasses the base
+                            # auto-target branch below, so apply its authored
+                            # random and maximum-count semantics here too.
+                            maximum = int(target_spec.resolved_maximum(
+                                battle_state.get("ability_variables") or
+                                getattr(ability.activation, "variables", {}) or
+                                {}) or 0)
+                            if target_spec.is_random:
+                                target_values = _random_target_sample(
+                                    target_values, maximum, battle_state)
+                            elif maximum > 0:
+                                target_values = tuple(target_values[:maximum])
                         elif target_spec.target_kind == "SourceRevealedTargetTemplate":
                             from .targeting import (revealed_target_uids,
                                                     _target_ignore_acted_on)
@@ -933,6 +1147,21 @@ class NativeEffectBackend:
                                 target_spec.guid,
                                 battle_state.get("revealed_cards") or [],
                                 battle_state=battle_state, acted_on_uids=acted_on)
+                            if not candidates:
+                                # Nothing revealed matches (no artifact among
+                                # the cards, or every card was already taken).
+                                # C# enumerates an empty target list and the
+                                # effect does nothing; it must not fall back
+                                # to the source card (Gearsmith moved itself
+                                # into the deck).
+                                applied[instance_id] = condition_passes(
+                                    effect, None)
+                                for key in ("resolving_target_uid",
+                                            "player_mod_target",
+                                            "player_spell_target",
+                                            "grant_target"):
+                                    battle_state.pop(key, None)
+                                continue
                             # A SourceRevealed target is input-bearing only when
                             # the authored template asks the player to choose.
                             # Oakhenge's child ability targets "a revealed troop"
@@ -941,7 +1170,16 @@ class NativeEffectBackend:
                             # the player to pick twice and re-moved the chosen
                             # card, and the extra pause left the spell on the
                             # chain without priority.
+                            # A single non-optional candidate is not a choice:
+                            # the client's single-target path (AutoTargetCoverflow)
+                            # needs card views the combined reveal never created,
+                            # so resolve it directly instead of sending a picker
+                            # with one target.
+                            single_forced = (len(candidates) == 1 and not (
+                                target_spec.optional or
+                                int(target_spec.minimum or 0) == 0))
                             if (candidates and target_spec.requires_input
+                                    and not single_forced
                                     and int(ability.responsible_player_id or 0) != 0):
                                 prompt = getattr(handler, "_prompt_revealed_choice", None)
                                 if callable(prompt):
@@ -967,7 +1205,11 @@ class NativeEffectBackend:
                                         int(ability.responsible_player_id),
                                         candidates,
                                         list(battle_state.get("revealed_cards") or []),
-                                        optional=bool(target_spec.optional),
+                                        # "Up to one" (minimum 0) may be
+                                        # declined like an optional target.
+                                        optional=bool(
+                                            target_spec.optional or
+                                            int(target_spec.minimum or 0) == 0),
                                         continuation=continuation)
                                     battle_state["resolution_paused"] = True
                                     native_waiting = True
@@ -997,18 +1239,38 @@ class NativeEffectBackend:
                                 _max = int(target_spec.maximum or 0)
                                 target_values = tuple(
                                     candidates[:_max] if _max > 0 else candidates)
+                                # A card chosen from a revealed set ("put a
+                                # revealed Human into your hand") stays public
+                                # when it moves to hand (move_card_to_zone).
+                                chosen = battle_state.setdefault(
+                                    "source_revealed_chosen", [])
+                                chosen.extend(
+                                    int(uid) for uid in target_values
+                                    if int(uid) not in chosen)
                         elif target_spec.is_auto:
                             from .targeting import target_uses_both_players
                             both_players = target_uses_both_players(
                                 db, target_spec.guid)
-                            candidates = tuple(legal_targets(
+                            # A "top N of your deck" look takes the first N deck cards; legal_targets does not
+                            # apply that limit and would offer every card in the listed zones.
+                            from .targeting import authored_target_candidates
+                            authored = authored_target_candidates(
                                 db, session.session_id,
                                 int(ability.responsible_player_id or 0),
-                                target_spec.guid, ability.source_uid,
-                                both_players=both_players,
-                                champions=(getattr(handler, "_champion_targets",
-                                                   lambda: [])() or []),
-                                battle_state=battle_state))
+                                [spec.guid for spec in ability.metadata.targets],
+                                target_index, source_uid=ability.source_uid,
+                                battle_state=battle_state)
+                            if authored is not None:
+                                candidates = tuple(authored)
+                            else:
+                                candidates = tuple(legal_targets(
+                                    db, session.session_id,
+                                    int(ability.responsible_player_id or 0),
+                                    target_spec.guid, ability.source_uid,
+                                    both_players=both_players,
+                                    champions=(getattr(handler, "_champion_targets",
+                                                       lambda: [])() or []),
+                                    battle_state=battle_state))
                             if not candidates:
                                 # C# GetAutoTargets yields an empty set when no
                                 # card matches the filter.  Falling through to
@@ -1018,6 +1280,7 @@ class NativeEffectBackend:
                                 # hand"/"your crypt") then moved the champion
                                 # into the deck.  An effect with no auto-target
                                 # card simply does nothing.
+                                applied[instance_id] = False
                                 continue
                             if target_spec.is_random:
                                 # A random auto-target (e.g. Infernal Professor's
@@ -1056,11 +1319,47 @@ class NativeEffectBackend:
                             target_values = resolved_targets
                 if native_waiting:
                     break
+                hand_discard_waiting_for_input = False
+                if (effect_type == "DiscardCardAbilityEffectTemplate" and
+                        target_spec is not None and
+                        target_spec.requires_input and not target_values):
+                    # A Records-authored hand target for DiscardCard is a
+                    # class-23 prompt boundary. Let the leaf receive None so
+                    # EffectContext.discard can save its continuation and
+                    # publish the normal hand picker. Other empty input
+                    # targets remain unapplied as below.
+                    from .targeting import filter_restricts_to_zone
+                    hand_filter = target_spec.card_filter
+                    to_dict = getattr(hand_filter, "to_dict", None)
+                    if callable(to_dict):
+                        hand_filter = to_dict()
+                    hand_discard_waiting_for_input = filter_restricts_to_zone(
+                        hand_filter, "Hand")
+                if (target_spec is not None and
+                        target_spec.requires_input and not target_values and
+                        not hand_discard_waiting_for_input):
+                    # An input-bearing target with no selected legal cards
+                    # resolves as an empty target instance when its minimum
+                    # is zero. C# leaves that effect unapplied; it does not
+                    # pass a null target to the leaf (which can fall back to
+                    # the source card).
+                    applied[instance_id] = False
+                    for key in ("resolving_target_uid", "player_mod_target",
+                                "player_spell_target", "grant_target"):
+                        battle_state.pop(key, None)
+                    continue
                 if not target_values:
                     target_values = (None,)
                 if not isinstance(target_values, (tuple, list)):
                     target_values = (target_values,)
                 effect_targets = tuple(target_values)
+                if (effect_type == "RevealCardsAbilityEffectTemplate" and
+                        len(target_values) > 1):
+                    # C# RevealCards receives the full AbilityTargetInstance
+                    # once. Keep that set in effect_targets for the leaf, and
+                    # invoke the self-targeted effect only once to avoid
+                    # replaying the same reveal for each card.
+                    target_values = tuple(target_values[:1])
                 resolved_by_instance[instance_id] = tuple(
                     int(value) for value in effect_targets
                     if value is not None)
@@ -1088,7 +1387,21 @@ class NativeEffectBackend:
                     target_values = (next(
                         (value for value in target_values
                          if value is not None), None),)
-                for target in target_values:
+                # A picker paused an earlier target of this effect: the
+                # resumed effect skips the targets it already resolved.
+                resume_target = battle_state.pop("rules_port_resume_target", None)
+                first_target = 0
+                if (isinstance(resume_target, dict) and
+                        int(resume_target.get("position", -1)) == position):
+                    first_target = int(resume_target.get("index", 0) or 0)
+                for target_offset, target in enumerate(target_values):
+                    if target_offset < first_target:
+                        continue
+                    battle_state["rules_port_current_target"] = {
+                        "ability_guid": str(getattr(
+                            ability, "ability_template_id", "") or "").lower(),
+                        "position": position, "index": target_offset,
+                        "count": len(target_values)}
                     if target is None:
                         battle_state.pop("resolving_target_uid", None)
                         for key in ("player_mod_target", "player_spell_target",
@@ -1145,10 +1458,38 @@ class NativeEffectBackend:
                     applied[instance_id] = True
                     battle_state.setdefault("rules_port_effect_results", []).append(
                         {"instance_id": instance_id, "result": str(result)})
+                    if (battle_state.get("resolution_paused") and
+                            target_offset + 1 < len(target_values)):
+                        # Each target is its own choice (one champion's deck pick, then the next's): stop here and
+                        # resume at the next target when the pick is answered.
+                        _record_resume_target(battle_state, {
+                            "ability_guid": str(getattr(
+                                ability, "ability_template_id", "") or "").lower(),
+                            "position": position, "index": target_offset + 1})
+                        break
+                battle_state.pop("rules_port_current_target", None)
                 if battle_state.get("resolution_paused"):
                     battle_state["rules_port_resume_effect_order"] = position
                     break
         finally:
+            if battle_state.get("trace_ability_resolution"):
+                # ``applied_effects`` is scoped to one resolver call, but the
+                # contract sweep compares traces after nested and repeated
+                # abilities have returned. Preserve the aggregate outcome by
+                # ability while that opt-in trace is enabled so effect IDs
+                # from a different ability cannot make a valid trace look
+                # unapplied.
+                ability_guid = str(
+                    getattr(ability, "ability_template_id", "") or ""
+                ).lower()
+                if ability_guid:
+                    by_ability = battle_state.setdefault(
+                        "_ability_effect_status_by_guid", {})
+                    status = by_ability.setdefault(ability_guid, {})
+                    for effect_instance_id, was_applied in applied.items():
+                        key = str(effect_instance_id)
+                        status[key] = bool(status.get(key, False) or
+                                           was_applied)
             runtime_values = battle_state.get("ability_runtime_state") or {}
             instance_values = runtime_values.get(instance_key)
             if isinstance(instance_values, dict):
@@ -1185,6 +1526,9 @@ class NativeEffectBackend:
                     battle_state["applied_effects"] = previous_applied
 
 
+_EVENT_INSTANCE_STATS = frozenset({"DamageDealt"})
+
+
 class PortAbilityResolver:
     """Resolve one port-owned ability and persist its UI continuation."""
 
@@ -1200,7 +1544,17 @@ class PortAbilityResolver:
         self.battle_state = battle_state
         self.effect_groups = effect_groups
         self.event_tac = {}
+        # Named instance IntAttrs the triggering event hands to the ability
+        # instance (CardDealtDamageEvent's ``DamageDealt``).  The hashed TAC
+        # map above keeps only integer keys, so carry these separately.
+        self.event_instance_stats = {}
         for key, value in (event_tac or {}).items():
+            if key in _EVENT_INSTANCE_STATS:
+                try:
+                    self.event_instance_stats[key] = int(value or 0)
+                except (TypeError, ValueError):
+                    pass
+                continue
             try:
                 self.event_tac[int(key)] = value
             except (TypeError, ValueError):
@@ -1218,9 +1572,13 @@ class PortAbilityResolver:
         from .persistence import load_state
         requested_resume = self.battle_state.get(
             "rules_port_resume_effect_order")
+        requested_target = self.battle_state.get("rules_port_resume_target")
         current_state = load_state(self.game_session)
         if isinstance(current_state, dict) and current_state:
             self.battle_state = current_state
+        if requested_target is not None:
+            # The parent's paused target travels with the resume request, as the effect order does.
+            self.battle_state["rules_port_resume_target"] = requested_target
         # The continuation caller may have supplied a newer in-memory offset
         # than the last checkpoint. Preserve it across the reload. Conversely
         # an explicitly fresh nested child must not inherit its parent's
@@ -1242,6 +1600,14 @@ class PortAbilityResolver:
         # parent ability merely because its target map is empty.
         if resume_order is not None:
             self.battle_state.pop("resolution_paused", None)
+        elif self.event_instance_stats:
+            # C# IntAttrAbilityVariable reads the AbilityInstance TAC; a
+            # triggered instance starts with its event's values there, so
+            # Inferno Goliath's "a burning counter for each damage dealt"
+            # reads the event's damage rather than its own (zero) damage.
+            from .statistics import seed_ability_stats
+            seed_ability_stats(self.battle_state, self.event_instance_stats,
+                               instance_id=getattr(ability, "instance_id", 0))
         try:
             self.effect_backend(
                 handler=self.handler, game=self.game, session=self.game_session,
@@ -1297,8 +1663,9 @@ class PortAbilityResolver:
             port_session.persist()
         elif resume_order is not None and not self.battle_state.get(
                 "resolution_paused"):
-            for key in ("rules_port_resume_effect_order", "pending_discard_ability",
-                        "pending_discard_target_template", "pending_discard_scid"):
+            for key in ("rules_port_resume_effect_order", "rules_port_resume_target",
+                        "pending_discard_ability", "pending_discard_target_template",
+                        "pending_discard_scid"):
                 self.battle_state.pop(key, None)
         if self.battle_state.get("resolution_paused"):
             return AbilityResolutionState.WAITING_FOR_INPUT
@@ -1306,7 +1673,7 @@ class PortAbilityResolver:
 
 
 def build_port_ability(ability_guid, source_uid, owner_id, *, instance_id=1,
-                       target_map=None, variables=None):
+                       target_map=None, variables=None, cost_target_map=None):
     """Build one typed ability instance from the authoritative Records graph."""
     from gamedata import DEFAULT_RECORD_STORE, ability_graph
     from gamedata.play_plan import AbilityInstance as MetadataAbility
@@ -1321,8 +1688,14 @@ def build_port_ability(ability_guid, source_uid, owner_id, *, instance_id=1,
     ability = AbilityInstance(
         instance_id=int(instance_id), metadata=metadata,
         activating_player_id=owner_id, responsible_player_id=owner_id)
-    ability.bind_activation({"target_map": target_map or {},
-                             "variables": variables or {}})
+    activation = {"target_map": target_map or {},
+                  "variables": variables or {}}
+    if cost_target_map:
+        # Additional-cost selections (exhaust/sacrifice/...) paid when the
+        # ability was activated; effects such as Construction Plans count
+        # them ("for each troop exhausted this way").
+        activation["cost_target_map"] = cost_target_map
+    ability.bind_activation(activation)
     return ability
 
 
@@ -1331,7 +1704,8 @@ def resolve_port_ability(handler, game, session, db, player_uid, ai_uid,
                          *, target_map=None, variables=None,
                          resume_from_order=None, instance_id=1,
                          native_effect=None,
-                         effect_groups=None, event_tac=None):
+                         effect_groups=None, event_tac=None,
+                         cost_target_map=None):
     """Resolve a persisted continuation through the port-owned lifecycle."""
     log_targets = target_map
     if not log_targets:
@@ -1344,7 +1718,8 @@ def resolve_port_ability(handler, game, session, db, player_uid, ai_uid,
                        log_targets)
     ability = build_port_ability(
         ability_guid, source_uid, owner_id, instance_id=instance_id,
-        target_map=target_map, variables=variables)
+        target_map=target_map, variables=variables,
+        cost_target_map=cost_target_map)
     # The resume offset is persisted in the existing session snapshot because
     # the continuation may have crossed a reconnect boundary.
     if resume_from_order is not None:
@@ -1363,6 +1738,24 @@ def resolve_port_ability(handler, game, session, db, player_uid, ai_uid,
         effect_groups=effect_groups, event_tac=event_tac)(ability)
 
 
+def _record_resume_target(battle_state, record):
+    """Keep a paused effect's next target on the parent continuation of the pending pick.
+
+    The pick's continuation is what is persisted and handed back when the
+    player answers, so the target index has to live there.  The parent is the
+    ability whose ActivateAbility effect raised the pick.
+    """
+    for key in ("pending_deck_search", "pending_choice", "pending_trigger"):
+        pending = battle_state.get(key)
+        continuation = pending.get("continuation") if isinstance(pending, dict) else None
+        parent = continuation.get("parent") if isinstance(continuation, dict) else None
+        if (isinstance(parent, dict) and
+                str(parent.get("ability_guid") or "").lower() == record["ability_guid"]):
+            parent["rules_port_resume_target"] = dict(record)
+            return True
+    return False
+
+
 def resume_ability_continuation_parents(
         handler, game, session, db, player_uid, ai_uid, battle_state,
         continuation):
@@ -1371,6 +1764,37 @@ def resume_ability_continuation_parents(
     continuation = dict(continuation or {})
     parent = ((continuation or {}).get("parent")
               if isinstance(continuation, dict) else None)
+
+    def suspend_for_trigger(current):
+        pending_trigger = state.get("pending_trigger")
+        if (not isinstance(pending_trigger, dict) or
+                isinstance(pending_trigger.get("continuation"), dict)):
+            return
+        try:
+            chain_instance_id = int(
+                state.get("paused_chain_instance_id", 0) or 0)
+        except (TypeError, ValueError):
+            chain_instance_id = 0
+        if chain_instance_id <= 0:
+            return
+        suspended = dict(current)
+        paused_order = state.get("rules_port_resume_effect_order")
+        if paused_order is None:
+            paused_order = state.get("resolving_effect_order")
+        if paused_order is not None:
+            # The trigger was raised by the effect at this order; that effect
+            # has already applied before the resolver exposes its pause point.
+            suspended["resume_effect_order"] = int(paused_order) + 1
+        state["rules_port_suspended_chain_continuation"] = {
+            "chain_instance_id": chain_instance_id,
+            "continuation": {"parent": suspended},
+        }
+
+    if (state.get("resolution_paused") and any(state.get(key) for key in (
+            "pending_choice", "pending_trigger", "pending_deck_search",
+            "pending_conversation", "pending_discard_ability"))):
+        suspend_for_trigger(continuation)
+        return AbilityResolutionState.WAITING_FOR_INPUT
     if not isinstance(parent, dict):
         # A class-23 picker can outlive the process that created it. Older
         # checkpoints stored the child continuation but not the suspended
@@ -1429,16 +1853,34 @@ def resume_ability_continuation_parents(
                 target_map = activation.get("target_map")
             if variables is None:
                 variables = activation.get("variables")
+        resume_order = int(parent.get("resume_effect_order", 0) or 0)
+        paused_target = parent.get("rules_port_resume_target")
+        if isinstance(paused_target, dict) and str(
+                paused_target.get("ability_guid") or "").lower() == parent_guid:
+            # The picker paused a target of this effect: re-enter that effect and
+            # let its target loop skip the targets already resolved.
+            resume_order = int(paused_target["position"])
+            state["rules_port_resume_target"] = {
+                "position": resume_order, "index": int(paused_target["index"])}
         result = resolve_port_ability(
             handler, game, session, db, player_uid, ai_uid, state,
             parent_guid, parent.get("source_uid"),
             int(parent.get("owner_id", 0) or 0),
             target_map=target_map or {}, variables=variables or {},
-            resume_from_order=int(parent.get("resume_effect_order", 0) or 0),
+            resume_from_order=resume_order,
             instance_id=int(parent.get(
                 "ability_instance_id", parent.get("instance_id", 1)) or 1),
             event_tac=parent.get("event_tac"))
         if state.get("resolution_paused"):
+            # A nested trigger can pause an already-resumed card ability after
+            # the picker child has completed. Keep the current parent and its
+            # remaining ancestors on the paused native chain item; otherwise
+            # the next chain pass starts the printed BOM from effect zero.
+            # Ordinary pickers own their own continuation and are resumed by
+            # their transaction handler, so this marker is only needed for a
+            # pending triggered-ability prompt, which has no child
+            # continuation of its own.
+            suspend_for_trigger(parent)
             return result
         parent = parent.get("parent")
 
@@ -1454,15 +1896,27 @@ def resume_ability_continuation_parents(
         port_session = getattr(session, "_rules_port_session", None)
         pending_activation = getattr(port_session, "pending_activation", None)
         if port_session is not None and isinstance(pending_activation, dict):
+            # The slot names whichever ability level stored the pause last:
+            # for an invoked picker (Giant Corpse Fly's Deploy invoking
+            # DiscardACard) that is the suspended ActivateAbility PARENT, not
+            # the child continuation.  Match any level of the resumed chain,
+            # or the stale slot keeps ``_push_main_phase_options`` treating
+            # the player as mid-prompt for the rest of the game.
+            resumed_ids = set()
+            cursor = continuation
+            while isinstance(cursor, dict):
+                try:
+                    resumed_ids.add(int(cursor.get(
+                        "ability_instance_id", cursor.get("instance_id"))))
+                except (TypeError, ValueError):
+                    pass
+                cursor = cursor.get("parent")
             try:
                 pending_id = int(pending_activation.get(
                     "ability_instance_id", -1))
-                continuation_id = int((continuation or {}).get(
-                    "ability_instance_id",
-                    (continuation or {}).get("instance_id", -2)))
             except (TypeError, ValueError):
-                pending_id = continuation_id = -1
-            if pending_id == continuation_id:
+                pending_id = None
+            if pending_id is not None and pending_id in resumed_ids:
                 port_session.pending_activation = None
                 port_session.persist()
     return result
@@ -1470,8 +1924,9 @@ def resume_ability_continuation_parents(
 
 def resolve_port_played_spell(game, session, db, handler, player_uid, ai_uid,
                                battle_state, ability_guids, *,
-                               activations=None, played_from_hand=False):
-    """Resolve all authored abilities on a spell through the port lifecycle.
+                               activations=None, played_from_hand=False,
+                               voided_cost_uids=()):
+    """Resolve all authored cast abilities through the port lifecycle.
 
     Card play is a multi-ability activation, not a special legacy resolver.
     Each graph is still sourced from Records, while scheduling, continuations,
@@ -1513,6 +1968,24 @@ def resolve_port_played_spell(game, session, db, handler, player_uid, ai_uid,
         previous_lists = {
             key: (list(value) if isinstance(value, list) else value)
             for key, value in previous_lists.items()}
+    voided_cost_uids = list(dict.fromkeys(
+        int(uid) for uid in (voided_cost_uids or ())
+        if uid is not None and int(uid) > 0))
+    # Cost results belong to this cast's ability instance. Start from a clean
+    # VoidedCards list so stale values from an older play cannot opt Scrounge
+    # in or change a "for each troop voided this way" amount.
+    scoped_lists = (dict(previous_lists)
+                    if isinstance(previous_lists, dict) else {})
+    for key, value in tuple(scoped_lists.items()):
+        if isinstance(value, list):
+            scoped_lists[key] = list(value)
+    scoped_lists.pop("VoidedCards", None)
+    if voided_cost_uids:
+        scoped_lists["VoidedCards"] = list(voided_cost_uids)
+    if scoped_lists:
+        bstate["ability_lists"] = scoped_lists
+    else:
+        bstate.pop("ability_lists", None)
     logs = []
     try:
         guid_values = list(ability_guids or [])
@@ -1522,9 +1995,16 @@ def resolve_port_played_spell(game, session, db, handler, player_uid, ai_uid,
             graph = ability_graph(DEFAULT_RECORD_STORE, guid)
             if graph is None:
                 raise RuntimeError(f"played ability {guid} is missing from Records")
+            # Session.ActivateAutomaticAbilities calls Card.GetAutomaticAbilities,
+            # whose IsAutomatic predicate excludes manual, triggered, and
+            # indexed abilities. Triggered abilities are dispatched from their
+            # authored session events; replaying one here when PlayCardEffect
+            # casts its source can recursively play the same card forever.
+            if (graph.manual or graph.trigger_event_type or
+                    int(graph.ability_index) >= 0 or not graph.effects):
+                continue
             if (tac_int(graph.serialized_tac, "Scrounge", 0) and
-                    not ((bstate.get("ability_lists") or {}).get(
-                        "VoidedCards") or [])):
+                    not voided_cost_uids):
                 continue
             activation = activation_map.get(guid)
             target_map = (dict(activation.target_map)
@@ -1591,7 +2071,12 @@ def resolve_port_played_spell(game, session, db, handler, player_uid, ai_uid,
                         tail = parent
                 break
     finally:
-        if not bstate.get("resolution_paused"):
+        if bstate.get("resolution_paused"):
+            bstate["_played_card_ability_lists_scope"] = {
+                "source_uid": int(source_uid or 0),
+                "previous_lists": previous_lists,
+            }
+        else:
             if previous_lists is None:
                 bstate.pop("ability_lists", None)
             else:
@@ -1606,6 +2091,194 @@ def resolve_port_played_spell(game, session, db, handler, player_uid, ai_uid,
             else:
                 bstate["_spell_played_from_hand"] = previous_played_from_hand
     return "; ".join(str(value) for value in logs if value)
+
+
+def restore_played_card_ability_lists(battle_state, source_uid=None):
+    """Restore ability lists after a played card's paused BOM completes."""
+    state = battle_state or {}
+    scope = state.get("_played_card_ability_lists_scope")
+    if not isinstance(scope, dict):
+        return
+    try:
+        scoped_source = int(scope.get("source_uid") or 0)
+        requested_source = (None if source_uid is None
+                            else int(source_uid or 0))
+    except (TypeError, ValueError):
+        return
+    if requested_source is not None and scoped_source != requested_source:
+        return
+    previous_lists = scope.get("previous_lists")
+    if previous_lists is None:
+        state.pop("ability_lists", None)
+    else:
+        state["ability_lists"] = previous_lists
+    state.pop("_played_card_ability_lists_scope", None)
+
+
+def resolve_port_played_permanent(game, session, db, handler, player_uid,
+                                  ai_uid, battle_state, item, owner_id, *,
+                                  bom_completed=False):
+    """Resolve a permanent's authored cast abilities before it enters play.
+
+    A permanent may gain a triggered ability while being cast (Scrounge is a
+    common example). Resolve its cast graphs while it is still in CastSpells,
+    then let the caller publish the CastSpells -> Warzone transition so the
+    entry trigger scan sees the newly granted abilities. A suspended cast is
+    resumed by the chain continuation and calls back with ``bom_completed``.
+    """
+    state = battle_state or {}
+    source_uid = int(item.get("source_uid") or 0)
+    if bom_completed:
+        restore_played_card_ability_lists(state, source_uid)
+        for key in ("player_spell_target", "resolving_source_uid",
+                    "resolving_owner_id", "x_cost"):
+            state.pop(key, None)
+        return ""
+
+    ability_guids = item.get("ability_guids") or ()
+    if not source_uid or not ability_guids:
+        return ""
+
+    state["player_spell_target"] = item.get("target_uid")
+    state["resolving_source_uid"] = source_uid
+    state["resolving_owner_id"] = int(owner_id or 0)
+    state["x_cost"] = int(item.get("x_cost") or 0)
+    result = resolve_port_played_spell(
+        game, session, db, handler, player_uid, ai_uid, state,
+        ability_guids, activations=item.get("activations"),
+        played_from_hand=bool(item.get("played_from_hand")),
+        voided_cost_uids=item.get("voided_cost_uids", ()))
+    if not state.get("resolution_paused"):
+        for key in ("player_spell_target", "resolving_source_uid",
+                    "resolving_owner_id", "x_cost"):
+            state.pop(key, None)
+    return result
+
+
+def _answers_from_target_map(target_map: dict[Any, Any]) -> dict[int, int | list[int] | None]:
+    """A chain item's target map as the interpreter's answers: each target index to the card chosen, the list of cards
+    when several were chosen, or None."""
+    answers: dict[int, int | list[int] | None] = {}
+    for index, value in (target_map or {}).items():
+        values = value if isinstance(value, (list, tuple, set)) else (value,)
+        chosen = [int(item) for item in values if item is not None and str(item).lstrip("-").isdigit()]
+        answers[int(index)] = chosen if len(chosen) > 1 else (chosen[0] if chosen else None)
+    return answers
+
+
+def _ai_revealed_pick(handler, session, battle_state, ai_uid, player_uid, candidates):
+    """The card the AI picks from a reveal: its most valuable card by the AI's card evaluation, then cost, then uid
+    (the order the AI uses to rank cards elsewhere). Falls back to the first candidate the evaluator cannot read."""
+    from ai_eval import build_evaluator
+    evaluator = build_evaluator(handler, session, battle_state, ai_uid, player_uid)
+    cards = [card for card in (evaluator.card_for_uid(int(uid)) for uid in candidates) if card is not None]
+    if not cards:
+        return int(candidates[0])
+    best = max(cards, key=lambda card: (evaluator.get_card_value(card), int(card.cost or 0), int(card.card_uid)))
+    return int(best.card_uid)
+
+
+def prompt_interpreted_reveal(handler, game, session, db, player_uid, ai_uid, battle_state, pause):
+    """Show the player an interpreted ability's pick: among the cards a reveal showed, through the client's
+    revealed-card picker; or, from the deck, through the deck-search picker (Darkspire Priestess's search). The
+    interpreter's continuation is kept with the prompt. The answer resumes the interpreter (see
+    application/pending_choices.py). Returns "waiting"."""
+    continuation = pause.continuation
+    # The AI chose this pick (its ability was cast by the AI in PvE), so it answers the pick itself and the
+    # interpreter carries on. Only the player's own picks are shown to the player.
+    if pause.revealed and not battle_state.get("pvp") and int(continuation["owner_uid"]) != int(player_uid) \
+            and pause.candidates:
+        from rules_port.context import EffectContext
+        pick = _ai_revealed_pick(handler, session, battle_state, ai_uid, player_uid, pause.candidates)
+        battle_state.pop("resolution_paused", None)
+        try:
+            ir_exec.resume_ability(
+                continuation, pick,
+                context=EffectContext.from_rules_port(game, session, db, handler, player_uid, ai_uid,
+                                                      battle_state, ""))
+        except ir_exec.NeedsChoice as next_pause:
+            return prompt_interpreted_reveal(handler, game, session, db, player_uid, ai_uid, battle_state,
+                                             next_pause)
+        return "interpreter"
+    target_index = int(continuation["target_index"])
+    native_shape = {
+        "ability_guid": continuation["ability_guid"], "source_uid": continuation["source_uid"],
+        "owner_id": continuation["owner_uid"], "target_index": target_index, "target_map": {},
+        "variables": {}, "resume_effect_order": int(continuation["position"]), "ability_instance_id": 1,
+        "interpreter": continuation,
+    }
+    if pause.revealed:
+        prompt = getattr(handler, "_prompt_revealed_choice", None)
+        if not callable(prompt):
+            raise RuntimeError("the interpreter paused for a revealed choice, with no picker to show it")
+        prompt(game, session, player_uid, ai_uid, battle_state, continuation["ability_guid"],
+               int(continuation["source_uid"]), int(continuation["owner_uid"]),
+               list(pause.candidates), [int(uid) for uid in (battle_state.get("revealed_cards") or [])],
+               optional=bool(pause.optional), continuation=native_shape)
+    else:
+        prompt = getattr(handler, "_prompt_deck_search", None)
+        if not callable(prompt):
+            raise RuntimeError("the interpreter paused for a deck choice, with no deck-search picker to show it")
+        prompt(game, session, player_uid, ai_uid, battle_state, continuation["ability_guid"],
+               int(continuation["source_uid"]), int(continuation["owner_uid"]),
+               list(pause.candidates), kind="search", continuation=native_shape)
+    battle_state["resolution_paused"] = True
+    return "waiting"
+
+
+def trigger_event_fields(pending):
+    """The event fields a chain descriptor for a chosen trigger carries, from the pending trigger that kept the event
+    the dispatch raised. The interpreter reads them when it resolves the ability, so every descriptor for a chosen
+    trigger must include them; an empty set means the pending trigger kept no event."""
+    event = (pending or {}).get("trigger_event") or {}
+    return {
+        "trigger_event_type": event.get("event_type"),
+        "trigger_event_data": dict(event.get("data") or {}),
+        "trigger_source_uid": event.get("source_card_id"),
+        "trigger_source_player_uid": event.get("source_player_id"),
+        "trigger_target_player_uid": event.get("target_player_id"),
+    }
+
+
+def run_interpreted_trigger(handler, game, session, db, player_uid, ai_uid, battle_state, guid,
+                            source_uid, owner_uid, event_name, trigger_source_uid, event_data, answers=None,
+                            target_player_uid=None, source_player_uid=None, instance_id=None,
+                            target_card_uid=None):
+    """Resolve a trigger's ability with the interpreter (rules_port/ir_exec.py) on the live battle state.
+
+    Its effects go through the live primitives, so the outcome is the native resolver's. Returns the
+    marker ``"interpreter"`` in place of the native resolver's state.
+
+    ``instance_id`` is the chain item's activation id, which the native resolver publishes as
+    ``resolving_ability_instance_id``; a shared leaf keys per-activation state on it (a granted random power is
+    picked once per activation), so the interpreter publishes the same one.
+
+    An ability the interpreter refuses at run time before it has sent any client event (a name or subtype it cannot
+    read for a champion, say) returns None, and the caller resolves it on the native path. A refusal after an event
+    was sent is re-raised: the effects have started, so they cannot be replayed."""
+    from . import ir_exec
+    from .context import EffectContext
+    started = len(game.events)
+    try:
+        ir_exec.run_ability(
+            guid, event_name,
+            context=EffectContext.from_rules_port(
+                game, session, db, handler, player_uid, ai_uid, battle_state, ""),
+            source_uid=int(source_uid), owner_uid=int(owner_uid),
+            event=ir_exec.live_event(event_name, int(owner_uid), event_data, trigger_source_uid,
+                                     target_player_uid, source_player_uid, target_card_uid=target_card_uid),
+            answers=answers,
+            instance_id=None if instance_id is None else int(instance_id))
+    except NotImplementedError:
+        if len(game.events) != started:
+            raise
+        return None
+    except ir_exec.NeedsChoice as pause:
+        return prompt_interpreted_reveal(handler, game, session, db, player_uid, ai_uid, battle_state, pause)
+    except ir_exec.NeedsConversation:
+        # The leaf queued the conversation and saved the pause; the client's answer resumes the interpreter.
+        return "interpreter"
+    return "interpreter"
 
 
 def resolve_port_trigger(handler, game, session, db, player_uid, ai_uid,
@@ -1660,10 +2333,13 @@ def resolve_port_trigger(handler, game, session, db, player_uid, ai_uid,
     target_map = (dict(activation_data.get("target_map") or {})
                   if isinstance(activation_data, dict) else {})
     if not target_map and selected_target is not None:
+        from .targeting import is_chosen_secondary_target
         for index, spec in enumerate(graph.targets):
-            if spec.requires_input:
+            # A "one of them" target is chosen at resolution; the item's own target is not its answer.
+            if spec.requires_input and not is_chosen_secondary_target(spec):
                 target_map[index] = int(selected_target)
                 break
+    answers = _answers_from_target_map(target_map)
     old_source = battle_state.get("resolving_source_uid")
     old_owner = battle_state.get("resolving_owner_id")
     old_target = battle_state.get("resolving_target_uid")
@@ -1700,10 +2376,28 @@ def resolve_port_trigger(handler, game, session, db, player_uid, ai_uid,
     battle_state["resolving_trigger_event_data"] = (
         dict(event_data) if isinstance(event_data, dict) else {})
     try:
-        state = resolve_port_ability(
-            handler, game, session, db, player_uid, ai_uid, battle_state,
-            guid, source_uid, owner_id, target_map=target_map,
-            instance_id=int(item.get("instance_id", 1)))
+        from . import ir_exec
+        event_name = str(item.get("trigger_event_type") or "").rsplit(".", 1)[-1]
+        interpreted = None
+        if ir_exec.engine_runs(guid, source_uid, owner_id, answers=answers):
+            interpreted = run_interpreted_trigger(
+                handler, game, session, db, player_uid, ai_uid, battle_state,
+                guid, source_uid, owner_id, event_name,
+                item.get("trigger_source_uid"),
+                event_data if isinstance(event_data, dict) else {}, answers=answers,
+                target_player_uid=item.get("trigger_target_player_uid"),
+                source_player_uid=item.get("trigger_source_player_uid"),
+                instance_id=item.get("instance_id"),
+                target_card_uid=item.get("trigger_target_uid"))
+        if interpreted is not None:
+            state = interpreted
+        else:
+            state = resolve_port_ability(
+                handler, game, session, db, player_uid, ai_uid, battle_state,
+                guid, source_uid, owner_id, target_map=target_map,
+                event_tac=(event_data.get("event_tac")
+                           if isinstance(event_data, dict) else None),
+                instance_id=int(item.get("instance_id", 1)))
         if not battle_state.get("resolution_paused"):
             # A queued trigger resolves here (mulligan/setup drains, the port's
             # chain resolver, and the PvP projections).  Consume an authored

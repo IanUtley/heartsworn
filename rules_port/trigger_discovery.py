@@ -170,7 +170,13 @@ class RecordsTriggerDiscovery:
                 configured = (getattr(self.handler, "_ai_champ_ability_guids", [])
                               if owner == 0 else
                               getattr(self.handler, "_player_champ_abilities", []))
-            abilities = []
+            # Session.AddGameRulesAbilitiesToCardTemplate appends the
+            # BuiltInResources keyword abilities (Burning, Dazed/Vulnerable
+            # removal, SoulCursed) to every champion card template.
+            from .builtin_rules import champion_trigger_abilities
+            abilities = champion_trigger_abilities(
+                self.db, self.session.session_id, self.battle_state,
+                owner, champion_uid, event_type)
             if guid:
                 abilities.extend(str(row[0]).lower() for row in
                                  db_champion_trigger_ability_guids(
@@ -193,6 +199,12 @@ class RecordsTriggerDiscovery:
                 if graph is None:
                     continue
                 if graph.trigger_event_type:
+                    if str(graph.trigger_event_type).endswith("GameStartedEvent"):
+                        from .effect_lifetimes import gamestart_grant_resolved
+                        if gamestart_grant_resolved(
+                                self.battle_state, int(champion_uid), key):
+                            # Already resolved when it was granted during setup.
+                            continue
                     abilities.append(key)
                     continue
                 # A granted permanent CardModifier is a continuous aura, not
@@ -229,15 +241,22 @@ class RecordsTriggerDiscovery:
         source_uid = _uid_int(source_uid)
         extra_target = _uid_int(extra_target)
         candidates: dict[int, list[str]] = {}
+        own: set[int] = set()
         if source_uid is not None:
             uid = int(source_uid)
-            candidates.setdefault(uid, []).extend(card_abilities(uid))
+            self._add_card(candidates, own, uid, card_abilities(uid))
         # CardCreatedEvent is the synchronous client call to
         # ActivateCardCreationAbilities(newCard). It is scoped to that new
         # card's own trigger collection; unlike OtherCardCreatedEvent it is
         # not broadcast to every registered trigger listener.
         if event_type == "CardCreatedEvent":
             return self._freeze(candidates)
+        # RegisterTriggerAbilityEffectTemplate stores a session-level handler
+        # (C# Session.RegisterTriggerEventHandler) that is not part of the
+        # card's printed or granted list; offer it as a candidate here.
+        for key, values in (self.battle_state.get(
+                "registered_triggers") or {}).items():
+            self._add_registered(candidates, int(key), values)
         # CardCastEvent's target is the card being cast, not another
         # registered trigger source. A troop that only gained Warzone trigger
         # registration as this cast resolved cannot hear its own earlier cast
@@ -246,7 +265,7 @@ class RecordsTriggerDiscovery:
                 int(extra_target) != int(source_uid or 0) and
                 event_type != "CardCastEvent"):
             uid = int(extra_target)
-            candidates.setdefault(uid, []).extend(card_abilities(uid))
+            self._add_card(candidates, own, uid, card_abilities(uid))
 
         owner_id = source_owner_uid
         if owner_id is None and source_uid is not None:
@@ -258,72 +277,65 @@ class RecordsTriggerDiscovery:
         if owner_id is None:
             return self._freeze(candidates)
 
+        # C# keeps event-type registrations for cards as they move between
+        # collections (Session.EventMaps.Current/Previous). The event's
+        # ``zones`` payload describes the card involved in that event; it does
+        # not describe where listener cards are registered. Scan every current
+        # listener collection on both sides, then let the native dispatcher
+        # apply each ability's TriggerCollectionFlags and authored conditions.
+        # This includes triggers held in Void or Hand for start-turn, cast,
+        # damage, and other events, and preserves the client behavior where an
+        # opposing champion can observe an unrestricted event.
+        other = self._opposing_owner(owner_id)
         sides = [int(owner_id)]
-        zone_sets: list[tuple[str, ...]] = [
-            tuple(zones or ("warzone",))]
-        if zones is None and event_type in ("TurnStartedEvent", "TurnEndedEvent"):
-            zone_sets = [("warzone", "hand", "deck", "discard", "underground")]
-            # A turn boundary is broadcast to every trigger listener in the
-            # session, not just the active champion's cards.  "At the start of
-            # each champion's turn" (Cerebral Fulmination) and "at the end of
-            # each champion's turn" are owned by cards on either side, so an
-            # AI-owned copy must fire on the human's turn too.  The authored
-            # conditions (TriggerPlayerIsActivePlayer and friends) still decide
-            # which side a particular trigger actually belongs to.
-            other = self._opposing_owner(owner_id)
-            if other is not None and other not in sides:
-                sides.append(other)
-        if event_type == "CardDrawnEvent":
-            other = self._opposing_owner(owner_id)
-            if other is not None:
-                sides.append(other)
-                zone_sets.append(("hand",))
-        elif event_type == "CardCastEvent":
-            # CardCastEvent listeners can react to a card cast by either
-            # champion. Their authored trigger conditions distinguish
-            # "you" from opponent casts, so discover both sides here.
-            other = self._opposing_owner(owner_id)
-            if other is not None:
-                sides.append(other)
-        elif event_type == "CardEnteredZoneEvent":
-            zone_sets.append(("underground",))
-            other = self._opposing_owner(owner_id)
-            if other is not None:
-                sides.append(other)
-        elif event_type == "CombatEndedEvent":
-            other = self._opposing_owner(owner_id)
-            if other is not None:
-                sides.append(other)
-        elif event_type == "CardDealtDamageEvent":
-            for uid, abilities in zone_holders(owner_id, ("hand",)).items():
-                if int(uid) != int(source_uid or 0):
-                    candidates.setdefault(int(uid), []).extend(abilities)
+        if other is not None and int(other) not in sides:
+            sides.append(int(other))
+        zone_sets: list[tuple[str, ...]] = [(
+            "warzone", "hand", "deck", "discard", "void",
+            "underground", "CastSpells", "PlayedResources", "choosing",
+            "mod", "simulacrum")]
 
-        # Each side has a corresponding zone-set.  Additional event-specific
-        # zones are appended above; zip would silently drop a side, so retain
-        # the legacy scanner's Cartesian product deliberately.
-        # A champion's authored trigger can observe the other side's cards
-        # ("When a troop enters play, there is a 25% chance it gets Speed and
-        # +1[ATK]" has no m_Your/m_Opposing restriction).  Champions have no
-        # ``game_cards`` row, so scan each considered side's champion rather
-        # than only the event owner's; the authored trigger conditions still
-        # decide which entries actually fire.
+        # Champions have no ``game_cards`` row, so scan both champion sources;
+        # authored conditions decide which side actually responds.
         for side in sides:
             for uid, abilities in champion_holders(side).items():
-                candidates.setdefault(int(uid), []).extend(abilities)
+                self._add_card(candidates, own, int(uid), abilities)
             for zone_group in zone_sets:
                 for uid, abilities in zone_holders(side, zone_group).items():
                     if (event_type == "CardEnteredZoneEvent" or
                             (int(uid) != int(source_uid or 0) and
                              int(uid) != int(extra_target or 0))):
-                        candidates.setdefault(int(uid), []).extend(abilities)
+                        self._add_card(candidates, own, int(uid), abilities)
         return self._freeze(candidates)
 
     @staticmethod
     def _freeze(candidates: dict[int, list[str]]):
+        # Repeat scans of a card are dropped as they are added (_add_card); a
+        # card's own stacked copies of an ability are kept, so each can fire.
         return tuple(
             TriggerCandidate(int(uid), tuple(str(g).lower() for g in abilities))
             for uid, abilities in candidates.items() if abilities)
+
+    @staticmethod
+    def _add_card(candidates, own, uid, abilities):
+        """A card's own ability list, once per card: a scan that reports the
+        card again adds nothing. Its repeated grants (two copies of one
+        ability) stay repeated, so each copy can fire."""
+        uid = int(uid)
+        abilities = [str(g).lower() for g in abilities]
+        if uid in own or not abilities:
+            return
+        own.add(uid)
+        candidates.setdefault(uid, []).extend(abilities)
+
+    @staticmethod
+    def _add_registered(candidates, uid, values):
+        """Session-registered triggers add only what the card does not have."""
+        held = candidates.setdefault(int(uid), [])
+        for value in values:
+            key = str(value).lower()
+            if key not in held:
+                held.append(key)
 
 
 __all__ = ["RecordsTriggerDiscovery", "TriggerCandidate"]

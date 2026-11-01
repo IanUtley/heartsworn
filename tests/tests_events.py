@@ -80,7 +80,10 @@ def test_encounter_mod_dialog_event_uses_client_class_55_wire_order():
         "11111111-2222-3333-4444-555555555555")
     raw = ev.to_byte_array()
     assert int.from_bytes(raw[:4], "little", signed=True) == 55
-    assert len(raw) == 4 + 8 + 8 + 4 + 16
+    # The client writes the 40-byte payload into a 256-byte buffer; the rest
+    # is zero padding (tests/goldens/session_encounter_mod_dialog_55.golden).
+    assert len(raw) == 256
+    assert raw[4 + 8 + 8 + 4 + 16:] == bytes(256 - (4 + 8 + 8 + 4 + 16))
 
 
 def test_game_spell_events_are_cast_then_played():

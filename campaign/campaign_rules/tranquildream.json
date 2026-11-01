@@ -1,0 +1,200 @@
+{
+ "schema_version": 1,
+ "campaign": "The Tranquil Dream",
+ "description": "Score the authored one, two, and three point answers.",
+ "start": {
+  "node": "NodeA",
+  "node_completed": false,
+  "counters": {
+   "answer_score": 0,
+   "lives": 3,
+   "run_streak": 0
+  }
+ },
+ "map": {
+  "paths": [
+   {
+    "id": "Path_NodeA_NodeG",
+    "from": "NodeA",
+    "to": "NodeG"
+   },
+   {
+    "id": "Path_NodeB_NodeG",
+    "from": "NodeB",
+    "to": "NodeG"
+   },
+   {
+    "id": "Path_NodeC_NodeG",
+    "from": "NodeC",
+    "to": "NodeG"
+   },
+   {
+    "id": "Path_NodeD_NodeG",
+    "from": "NodeD",
+    "to": "NodeG"
+   },
+   {
+    "id": "Path_NodeE_NodeG",
+    "from": "NodeE",
+    "to": "NodeG"
+   },
+   {
+    "id": "Path_NodeF_NodeG",
+    "from": "NodeF",
+    "to": "NodeG"
+   }
+  ]
+ },
+ "hooks": [
+  {
+   "id": "answer_score:one_point_answer",
+   "on": {
+    "event": "script_event",
+    "name": "one_point_answer"
+   },
+   "do": [
+    {
+     "increment_counter": {
+      "name": "answer_score",
+      "amount": 1
+     }
+    }
+   ]
+  },
+  {
+   "id": "answer_score:two_point_answer",
+   "on": {
+    "event": "script_event",
+    "name": "two_point_answer"
+   },
+   "do": [
+    {
+     "increment_counter": {
+      "name": "answer_score",
+      "amount": 2
+     }
+    }
+   ]
+  },
+  {
+   "id": "answer_score:three_point_answer",
+   "on": {
+    "event": "script_event",
+    "name": "three_point_answer"
+   },
+   "do": [
+    {
+     "increment_counter": {
+      "name": "answer_score",
+      "amount": 3
+     }
+    }
+   ]
+  }
+ ],
+ "runtime": "rules",
+ "nodes": {
+  "NodeA": {
+   "completed": [
+    "talkedAt(NodeA)"
+   ]
+  },
+  "NodeG": {
+   "completed": [
+    "completedQuest(q_tranquil_dream,1)"
+   ]
+  },
+  "NodeB": {
+   "visible": []
+  },
+  "NodeC": {
+   "visible": []
+  },
+  "NodeD": {
+   "visible": []
+  },
+  "NodeE": {
+   "visible": []
+  },
+  "NodeF": {
+   "visible": []
+  }
+ },
+ "edited_states": {
+  "NodeG": [
+   "completed",
+   "retryable"
+  ],
+  "NodeB": [
+   "completed"
+  ],
+  "NodeA": [
+   "completed"
+  ],
+  "NodeF": [
+   "completed"
+  ],
+  "NodeE": [
+   "completed"
+  ],
+  "NodeD": [
+   "completed"
+  ],
+  "NodeC": [
+   "completed"
+  ]
+ },
+ "offer_exclude": {
+  "NodeG": [
+   "tagged:109ddb5a:31894e83",
+   "tagged:109ddb5a:46a27ef6",
+   "tagged:109ddb5a:a5f847dd",
+   "tagged:109ddb5a:31673a21",
+   "tagged:109ddb5a:43750f88"
+  ]
+ },
+ "offer_order": {
+  "NodeC": [
+   "conv:1dc95e26",
+   "tagged:436dd820",
+   "tagged:8dfb849f"
+  ],
+  "NodeB": [
+   "conv:821dc89d",
+   "tagged:94c100f9",
+   "tagged:36d06127"
+  ],
+  "NodeF": [
+   "conv:f1a869ec",
+   "tagged:4137dff0",
+   "tagged:81f022ec"
+  ],
+  "NodeE": [
+   "conv:3bb41839",
+   "tagged:61b69da5",
+   "tagged:7ecd37a7"
+  ],
+  "NodeD": [
+   "conv:59e000f2",
+   "tagged:586f35af",
+   "tagged:6865d2c4"
+  ],
+  "NodeG": [
+   "tagged:d98d0933:31894e83",
+   "tagged:d98d0933:46a27ef6",
+   "tagged:d98d0933:a5f847dd",
+   "tagged:d98d0933:31673a21",
+   "tagged:d98d0933:43750f88",
+   "conv:d14cc045",
+   "tagged:109ddb5a",
+   "tagged:d98d0933"
+  ]
+ },
+ "conversation_actions": {
+  "1aa34077-f97a-4cdd-8bb7-3644befd8954": {
+   "*": [
+    "clear_counter(answer_score)"
+   ]
+  }
+ }
+}

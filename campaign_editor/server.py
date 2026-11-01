@@ -1,0 +1,849 @@
+#!/usr/bin/env python3
+"""Campaign editor and character-state simulator.
+
+    python3 campaign_editor/server.py [--port 8765] [--db hconnect.db]
+    python3 campaign_editor/server.py --host 0.0.0.0 --cert cert.pem --key key.pem
+
+Serves the editor page and JSON built from ``hex-private/Records/`` plus a view of the
+server database, behind a log-in with the game's accounts (``auth.py``).
+Admins edit the shared campaign (``campaign/campaign_data/`` and
+``campaign/campaign_rules/``, see ``editing.py``). Other accounts
+can inspect and simulate that campaign, load their own characters' saved
+states, and save simulator progress back to those characters. It binds to
+127.0.0.1 unless ``--host``.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import mimetypes
+import re
+import sqlite3
+import ssl
+import threading
+import traceback
+from contextlib import closing
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+from urllib.parse import parse_qs, unquote, urlparse
+
+import ability_dsl
+import ability_ir_semantic
+import auth
+import card_abilities as abilities
+import cards
+import catalog
+import editing
+import effect_reference
+import gamedata.ir_surface_write as ir_surface_write
+import incdata
+import set_icons
+import store_listing
+from campaign_runtime import catalog_data, overlay
+
+HERE = Path(__file__).resolve().parent
+STATIC = HERE / "static"
+
+
+SHARED_ROOT = catalog.REPO / "web_client" / "static"
+SHARED_FILE = re.compile(r"(hex_assets|cache|card_face)\.js|unity/[a-z_]+\.js")
+PUBLIC_API = {"/api/me", "/api/login", "/api/logout"}
+LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1"}
+
+
+class EditorHandler(BaseHTTPRequestHandler):
+    db_path: Path = catalog.REPO / "hconnect.db"
+    session: dict | None = None
+    secure_cookies: bool = False      # set when the editor serves HTTPS
+
+    def log_message(self, fmt, *args):  # keep the terminal quiet
+        pass
+
+    def _send(self, status: int, body: bytes, content_type: str, headers: dict | None = None):
+        self.send_response(status)
+        self.send_header("Content-Type", content_type)
+        for name, value in (headers or {}).items():
+            self.send_header(name, value)
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        try:
+            self.wfile.write(body)
+        except (BrokenPipeError, ConnectionResetError):
+            # The browser may cancel a request while navigating or refreshing.
+            # Its socket is already gone, so just close this request quietly.
+            self.close_connection = True
+
+    def _json(self, value, status: int = 200):
+        self._send(status, json.dumps(value).encode("utf-8"),
+                   "application/json; charset=utf-8")
+
+    def _file(self, root: Path, relative: str):
+        target = (root / relative).resolve()
+        if root.resolve() not in target.parents or not target.is_file():
+            self._json({"error": "not found"}, 404)
+            return
+        content_type = (mimetypes.guess_type(target.name)[0] or
+                        "application/octet-stream")
+        self._send(200, target.read_bytes(), content_type)
+
+    def _db(self):
+        if not self.db_path.exists():
+            return None
+        return catalog.connect(self.db_path)
+
+    def _with_db(self, fn):
+        db = self._db()
+        try:
+            return fn(db)
+        finally:
+            if db is not None:
+                db.close()
+
+    def _writable(self):
+        """A writable connection for authentication or character progress."""
+        return sqlite3.connect(self.db_path, timeout=10)
+
+    def _gate(self, path: str) -> bool:
+        """Authenticate; False (after a 401) when the request may not go on."""
+        self.session = auth.session_for(self.headers)
+        if path.startswith("/api/") and path not in PUBLIC_API and not self.session:
+            self._json({"error": "log in first", "login": True}, 401)
+            return False
+        return True
+
+    def _owners(self) -> dict[int, tuple[int, str]]:
+        """``{campaign id: (user id, account name)}``."""
+        with closing(self._writable()) as db:
+            return {int(cid): (int(uid or 0), name or "")
+                    for cid, uid, name in db.execute(
+                        "SELECT c.id, COALESCE(ch.user_id, c.user_id), u.name "
+                        "FROM campaigns c LEFT JOIN champions ch ON ch.id = c.champion_id "
+                        "LEFT JOIN users u ON u.id = COALESCE(ch.user_id, c.user_id)")}
+
+    def _may_see(self, campaign_id: int) -> bool:
+        if self.session and self.session["admin"]:
+            return True
+        owner = self._owners().get(int(campaign_id))
+        return bool(owner and self.session and owner[0] == self.session["user_id"])
+
+    def _champion_progress(self, db, campaign_id: int, zone_id: str):
+        """``(champion id, campaign part, {zone: part})`` of a campaign row's
+        champion when the server runs ``zone_id`` from the rules and that
+        champion has rules progress; None otherwise."""
+        from campaign_runtime import locate, rules_loader
+        row = db.execute("SELECT c.champion_id, c.campaign_type, c.template_name, "
+                         "c.state_json, ch.race FROM campaigns c LEFT JOIN champions ch "
+                         "ON ch.id = c.champion_id WHERE c.id=?", (int(campaign_id),)).fetchone()
+        if not row or not rules_loader.runtime_enabled(zone_id):
+            return None
+        champ_id, ctype, template, raw, race = row
+        try:
+            state = json.loads(raw or "{}")
+        except ValueError:
+            state = {}
+        if locate.zone_for_row(ctype, template, state, race) != zone_id:
+            return None
+        rows = dict(db.execute("SELECT zone, state_json FROM campaign_progress "
+                               "WHERE champion_id=?", (champ_id,)).fetchall())
+        if "*" not in rows:
+            return None
+        zones = {z: json.loads(v or "{}") for z, v in rows.items() if z != "*"}
+        return champ_id, json.loads(rows["*"] or "{}"), zones
+
+    def _save_to_champion(self, body, loaded):
+        """Write an edited simulator state back as the champion's progress."""
+        engine = catalog._rules_module()
+        zone_id = str(body.get("zone") or "")
+        state = body.get("state")
+        if not isinstance(state, dict) or not isinstance(state.get("flags"), list):
+            raise ValueError("not a simulator state")
+        with closing(self._writable()) as db:
+            found = self._champion_progress(db, int(body["campaign"]), zone_id)
+            if not found:
+                raise LookupError("this champion's zone is not run from the rules on "
+                                  "the server yet, or they have not played it since "
+                                  "it was switched on")
+            champ_id = found[0]
+            from campaign_runtime import progress, runtime
+            with progress.champion_lock(champ_id):
+                # Recheck the target after acquiring the same lock used by
+                # live campaign requests, then replace progress atomically.
+                found = self._champion_progress(db, int(body["campaign"]), zone_id)
+                if not found or found[0] != champ_id:
+                    raise LookupError("this character no longer has saved progress "
+                                      "in this zone")
+                campaign_part, zone_part = engine.split_progress(state)
+                zone_part["_runtime"] = {}  # no half-finished location or battle
+                db.executemany(
+                    "INSERT INTO campaign_progress (champion_id, zone, state_json, updated_at) "
+                    "VALUES (?, ?, ?, datetime('now')) ON CONFLICT(champion_id, zone) DO UPDATE "
+                    "SET state_json=excluded.state_json, updated_at=excluded.updated_at",
+                    [(champ_id, "*", json.dumps(campaign_part, sort_keys=True)),
+                     (champ_id, zone_id, json.dumps(zone_part, sort_keys=True))])
+                # The campaign row and last-campaign pointer follow so the
+                # client opens in this zone when the character next loads.
+                runtime.activate_zone(db, champ_id, zone_id)
+                # The QUEST rows are not part of the zone row: bring them level
+                # with the imported quests so the journal matches the engine.
+                from campaign_runtime import quests
+                journal = quests.reproject(db, champ_id, campaign_part.get("quests") or {})
+                db.commit()
+        return {"saved": True, "champion": champ_id, "zone": zone_id, "journal": journal}
+
+    def _me(self):
+        if not self.session:
+            return {"logged_in": False}
+        return {"logged_in": True, "name": self.session["name"],
+                "admin": self.session["admin"],
+                "can_edit_campaign": bool(self.session["admin"]),
+                "can_save_character_state": True}
+
+    def _export(self):
+        """Export the shared campaign documents (admins only)."""
+        docs = {}
+        for directory in ("campaign_data", "campaign_rules"):
+            for path in sorted((catalog.CAMPAIGN_ROOT / directory).glob("*.json")):
+                rel = path.relative_to(catalog.CAMPAIGN_ROOT).as_posix()
+                if overlay.is_editable(rel):
+                    docs[rel] = json.loads(path.read_text(encoding="utf-8"))
+        body = json.dumps({"hex_campaign_export": 1, "kind": "shared",
+                           "account": self.session["name"], "docs": docs},
+                          indent=1).encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Disposition",
+                         'attachment; filename="hex-campaign-shared.json"')
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _import(self, body):
+        """Replace shared campaign documents (admins only)."""
+        docs = body.get("docs") if isinstance(body.get("docs"), dict) else None
+        if docs is None:
+            raise ValueError("not a campaign export file (no docs)")
+        for rel, doc in docs.items():
+            if not overlay.is_editable(rel) or not isinstance(doc, dict):
+                raise ValueError(f"{rel}: not an editable campaign document")
+        engine = catalog._rules_module()
+        campaign_data = editing._campaign_data()
+        for rel, doc in docs.items():
+            if rel.startswith("campaign_data/"):
+                problems = campaign_data.validate(doc)
+            elif rel.endswith("/quests.json"):
+                problems = [] if isinstance(doc.get("quests"), dict) else ["no quests"]
+            else:
+                problems = [f"{p['where']}: {p['text']}" for p in engine.validate(doc)
+                            if p["level"] == "error"]
+            if problems:
+                raise ValueError(f"{rel}: {'; '.join(map(str, problems[:3]))}")
+        with editing._WRITE_LOCK:
+            for rel, doc in docs.items():
+                editing._write_json(catalog.CAMPAIGN_ROOT / rel, doc)
+        return {"imported": len(docs), "into": "shared campaign"}
+
+    def do_GET(self):
+        url = urlparse(self.path)
+        path = unquote(url.path)
+        if not self._gate(path):
+            return
+        self._get(url, path)
+
+    def _get(self, url, path):
+        query = parse_qs(url.query)
+        zone_id = query.get("zone", [catalog.AREA_TEMPLATE])[0]
+        try:
+            if path == "/api/me":
+                self._json(self._me())
+            elif path == "/api/export":
+                if not self.session["admin"]:
+                    self._json({"error": "campaign export is admin-only"}, 403)
+                    return
+                self._export()
+            elif path in ("/", "/index.html"):
+                self._file(STATIC, "index.html")
+            elif path in ("/cards", "/cards.html"):
+                self._file(STATIC, "cards.html")
+            elif path in ("/ir", "/ir.html"):
+                # The IR editor: the IR as surface text, with completions from /api/ability-surface-names (static/ir.js).
+                self._file(STATIC, "ir.html")
+            elif path in ("/ability", "/ability.html"):
+                # The ability editor: sentences beside the IR form (static/ability.js).
+                self._file(STATIC, "ability.html")
+            elif path.startswith("/static/"):
+                self._file(STATIC, path[len("/static/"):])
+            elif path.startswith("/generated/"):
+                relative = path[len("/generated/"):]
+                card = re.fullmatch(r"cards/(a\d{7})\.jpg", relative)
+                if card and not (catalog.GENERATED / relative).is_file():
+                    # Decoded from the client the first time it is shown.
+                    catalog.card_art_on_demand(card.group(1))
+                self._file(catalog.GENERATED, relative)
+            elif path.startswith("/shared/"):
+                # The web client's own modules (hex_assets.js and its unity/ readers, card_face.js):
+                # the editor draws card frames with the same code the battle board uses.
+                relative = path[len("/shared/"):]
+                if SHARED_FILE.fullmatch(relative):
+                    self._file(SHARED_ROOT, relative)
+                else:
+                    self._json({"error": "not found"}, 404)
+            elif path.startswith("/custom/"):
+                # Custom card art from custom_sets/ (see cards._custom_art_url).
+                self._file(cards.CUSTOM_DIR, path[len("/custom/"):])
+            elif path == "/api/zones":
+                self._json(catalog.zones())
+            elif path == "/api/zone-issues":
+                # Read-only: each zone's Rules-check warnings and errors, for the zone list.
+                self._json(self._with_db(catalog.zone_issues))
+            elif path == "/api/area":
+                self._json(self._with_db(
+                    lambda db: dict(catalog.area_payload(db, zone_id),
+                                    player_options=catalog_data.player_options(db))))
+            elif path == "/api/campaigns":
+                rows = self._with_db(
+                    lambda db: catalog.area_campaigns(db, zone_id) if db else [])
+                owners = self._owners()
+                mine = [dict(r, owner=owners.get(int(r["id"]), (0, ""))[1]) for r in rows
+                        if self.session["admin"] or
+                        owners.get(int(r["id"]), (0, ""))[0] == self.session["user_id"]]
+                self._json(mine)
+            elif path == "/api/state":
+                campaign_id = int(query.get("id", ["0"])[0])
+                if not self._may_see(campaign_id):
+                    self._json({"error": "not your character state"}, 403)
+                    return
+                state = self._with_db(
+                    lambda db: catalog.campaign_state(db, campaign_id) if db else None)
+                self._json(state or {"error": "no such campaign"},
+                           200 if state else 404)
+            elif path == "/api/play/status":
+                import campaign_playtest
+                self._json(campaign_playtest.status(self.session["user_id"]))
+            elif path == "/api/rewards-catalog":
+                self._json(self._with_db(lambda db: catalog.rewards_catalog(db)))
+            elif path == "/api/encounter-abilities":
+                scene = query.get("scene", [""])[0]
+                try:
+                    self._json(self._with_db(lambda db: catalog.encounter_champion_abilities(db, scene)))
+                except LookupError as exc:
+                    self._json({"error": str(exc)}, status=404)
+            elif path == "/api/encounter-deck":
+                scene = query.get("scene", [""])[0]
+                try:
+                    self._json(self._with_db(lambda db: catalog.encounter_deck(db, scene)))
+                except LookupError as exc:
+                    self._json({"error": str(exc)}, status=404)
+            elif path == "/api/cards":
+                text = query.get("q", [""])[0]
+                set_guid = query.get("set", [""])[0]
+                limit = min(max(int(query.get("limit", ["200"])[0]), 1), 2000)
+                self._json(self._with_db(lambda db: cards.list_cards(db, text, limit, set_guid)))
+            elif path == "/api/set-icon":
+                self._json(set_icons.set_icon(query.get("set", [""])[0]))
+            elif path == "/api/pack-art-reference":
+                self._json({"icons": store_listing.art_reference()})
+            elif path == "/api/effect-reference":
+                self._json({"effects": effect_reference.summary()})
+            elif path == "/api/store-listing":
+                set_guid = query.get("set", [""])[0]
+                self._json(store_listing.store_listing(set_guid))
+            elif path == "/api/card":
+                guid = query.get("guid", [""])[0]
+                self._json(self._with_db(lambda db: cards.get_card(db, guid)))
+            elif path == "/api/card-incdata":
+                # Read-only: the set's finished cards and their abilities as a client
+                # .incdata download; the summary rides in a header.
+                built = self._with_db(lambda db: incdata.build(db, query.get("set", [""])[0]))
+                self._send(200, built["data"], "application/gzip", {
+                    "Content-Disposition": f'attachment; filename="{built["filename"]}"',
+                    "X-Incdata-Summary": json.dumps(built["summary"])})
+            elif path == "/api/abilities":
+                self._json({"results": abilities.search(
+                    query.get("section", ["AbilityTemplate"])[0], query.get("q", [""])[0],
+                    min(max(int(query.get("limit", ["40"])[0]), 1), 200))})
+            elif path == "/api/ability":
+                self._json(abilities.get_ability(query.get("guid", [""])[0]))
+            elif path == "/api/ability-record":
+                self._json(abilities.get_record(query.get("section", [""])[0],
+                                                query.get("guid", [""])[0]))
+            elif path == "/api/ability-new":
+                # A blank record to fill in; nothing is stored until it is saved.
+                self._json(abilities.new_record(query.get("section", [""])[0],
+                                                query.get("type", [""])[0]))
+            elif path == "/api/ability-options":
+                self._json(abilities.options())
+            elif path == "/api/ability-dsl-options":
+                # The sentence form's dropdowns (ability_dsl.py).
+                self._json(ability_dsl.options())
+            elif path == "/api/ability-dsl-builder":
+                # The guided builder's steps and templates, each checked to read back.
+                self._json(ability_dsl.builder())
+            elif path == "/api/ability-dsl-targets":
+                # The targets one effect shape reads back with, its Records favourites first.
+                self._json({"targets": ability_dsl.builder_targets(query.get("shape", [""])[0])})
+            elif path == "/api/ability-dsl-names":
+                # Card, counter or ability names for a builder slot.
+                self._json({"names": ability_dsl.builder_names(
+                    query.get("kind", [""])[0], query.get("q", [""])[0])})
+            elif path == "/api/ability-ir-vocab":
+                self._json(ability_ir_semantic.vocab())
+            elif path == "/api/ability-surface-code":
+                # An ability as surface text (gamedata/ir_surface_write.py), read by GUID.
+                try:
+                    self._json({"text": ir_surface_write.ability_text(query.get("guid", [""])[0])})
+                except KeyError as error:
+                    self._json({"error": str(error)}, 404)
+            elif path == "/api/ability-surface-names":
+                # Every name surface text uses, for completion (gamedata/ir_surface_write.py).
+                self._json({"names": ir_surface_write.surface_names()})
+            elif path == "/api/ability-ir":
+                # The semantic form of an ability (ability_ir_semantic.py), or why it has none.
+                self._json(ability_ir_semantic.read(query.get("guid", [""])[0]))
+            elif path == "/api/ability-dsl":
+                # An ability as sentences, and whether they compile back to it exactly.
+                self._json(ability_dsl.decompile(query.get("guid", [""])[0]))
+            elif path == "/api/rules":
+                loaded, problems = self._with_db(
+                    lambda db: catalog.rules(db, zone_id))
+                self._json({"rules": loaded, "problems": problems})
+            elif path.startswith("/api/conversation/"):
+                found = catalog.conversation(path.rsplit("/", 1)[-1])
+                self._json(found or {"error": "unknown conversation"},
+                           200 if found else 404)
+            else:
+                self._json({"error": "not found"}, 404)
+        except LookupError as exc:
+            self._json({"error": str(exc)}, 404)
+        except FileNotFoundError as exc:
+            self._json({"error": str(exc)}, 503)
+        except Exception as exc:  # report, keep serving
+            traceback.print_exc()
+            self._json({"error": f"{type(exc).__name__}: {exc}"}, 500)
+
+    MAX_BODY = 1 << 20
+
+    def do_POST(self):
+        url = urlparse(self.path)
+        if not self._gate(url.path):
+            return
+        self._post(url)
+
+    def _post(self, url):
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+            if length > self.MAX_BODY:
+                self._json({"error": "request too large"}, 413)
+                return
+            body = json.loads(self.rfile.read(length) or b"{}")
+            zone_id = str(body.get("zone") or catalog.AREA_TEMPLATE)
+            if url.path == "/api/login":
+                with closing(self._writable()) as db:
+                    session = auth.login(db, body.get("name"), body.get("password"))
+                if not session:
+                    self._json({"error": "unknown account or wrong password"}, 401)
+                    return
+                payload = json.dumps({"logged_in": True, "name": session["name"],
+                                      "admin": session["admin"]}).encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self.send_header("Set-Cookie", auth.set_cookie(
+                    session["token"], secure=self.secure_cookies))
+                self.send_header("Content-Length", str(len(payload)))
+                self.end_headers()
+                self.wfile.write(payload)
+                return
+            if url.path == "/api/logout":
+                if self.session:
+                    auth.logout(self.session["token"])
+                self.send_response(200)
+                self.send_header("Set-Cookie", auth.set_cookie(
+                    "", clear=True, secure=self.secure_cookies))
+                self.send_header("Content-Length", "2")
+                self.end_headers()
+                self.wfile.write(b"{}")
+                return
+            if url.path == "/api/reset":
+                self._json({"error": "personal campaign resets are no longer supported"}, 410)
+                return
+            if (url.path == "/api/import" or url.path.startswith("/api/edit/")) and \
+                    not self.session["admin"]:
+                self._json({"error": "campaign editing is admin-only"}, 403)
+                return
+            if url.path == "/api/import":
+                self._json(self._import(body))
+                return
+            if body.get("campaign") and not self._may_see(int(body["campaign"])):
+                self._json({"error": "not your character state"}, 403)
+                return
+            if url.path == "/api/sim/save" and not self.session["admin"]:
+                # Writing a simulated state into a champion's real progress is
+                # an authoring act: non-admin viewers are read-only.
+                self._json({"error": "saving to a champion is admin-only"}, 403)
+                return
+            if url.path == "/api/edit/conversation-tags":
+                trigger = self._with_db(lambda db: editing.save_conversation_tags(
+                    db, str(body["template"]), str(body["conversation"]),
+                    body.get("tags") or []))
+                self._json({"trigger": trigger})
+                return
+            if url.path == "/api/edit/quest-tags":
+                conditions = self._with_db(lambda db: editing.save_quest_tags(
+                    db, str(body["template"]), str(body["quest"]),
+                    str(body["conversation"]), body.get("tags") or []))
+                self._json({"conditions": conditions})
+                return
+            if url.path == "/api/edit/conversation-actions":
+                trigger = self._with_db(lambda db: editing.save_conversation_actions(
+                    db, str(body["template"]), str(body["conversation"]),
+                    str(body.get("ending") or "*"), body.get("actions") or []))
+                self._json({"trigger": trigger})
+                return
+            if url.path == "/api/edit/quest-actions":
+                conditions = self._with_db(lambda db: editing.save_quest_actions(
+                    db, str(body["template"]), str(body["quest"]),
+                    str(body["conversation"]), str(body.get("ending") or "*"),
+                    body.get("actions") or []))
+                self._json({"conditions": conditions})
+                return
+            if url.path == "/api/edit/scene-rewards":
+                rewards = self._with_db(lambda db: editing.save_scene_rewards(
+                    db, str(body["scene"]), body.get("rewards") or {}))
+                self._json({"rewards": rewards})
+                return
+            if url.path == "/api/edit/scene-actions":
+                actions = self._with_db(lambda db: editing.save_scene_actions(
+                    db, str(body["scene"]), body.get("actions") or {}))
+                self._json({"actions": actions})
+                return
+            if url.path == "/api/edit/scene-tags":
+                tags = self._with_db(lambda db: editing.save_scene_tags(
+                    db, str(body["scene"]), body.get("tags") or []))
+                self._json({"tags": tags})
+                return
+            if url.path == "/api/edit/scene-personality":
+                personality = self._with_db(lambda db: editing.save_scene_personality(
+                    db, str(body["scene"]), body.get("personality") or None))
+                self._json({"personality": personality})
+                return
+            if url.path == "/api/edit/scene-player":
+                # These saves UPDATE the database row too, so they need the
+                # writable connection (the request connection is read-only).
+                with closing(self._writable()) as db:
+                    chosen = editing.save_scene_player(
+                        db, str(body["scene"]), body.get("champion") or None,
+                        body.get("deck") or None)
+                self._json(chosen)
+                return
+            if url.path == "/api/card-text":
+                self._json(self._with_db(lambda db: cards.preview_text(
+                    db, str(body.get("guid") or ""), body.get("fields") or {})))
+                return
+            if url.path == "/api/card-frame":
+                self._json(cards.preview_frame(body.get("fields"), body.get("faction") or "None",
+                                               bool(body.get("pve"))))
+                return
+            if url.path == "/api/edit/card":
+                saved = self._with_db(lambda db: cards.save_card(
+                    db, body.get("guid") or "", body.get("fields")))
+                self._json(saved)
+                return
+            if url.path == "/api/ability-check":
+                # Read-only: the problems a save of these records would report.
+                self._json({"problems": abilities.validate(body.get("records"))})
+                return
+            if url.path == "/api/ability-dsl-compile":
+                # Read-only: the records sentences compile to, with the checks' problems.
+                self._json(ability_dsl.preview(body.get("text") or "", body.get("guid") or ""))
+                return
+            if url.path == "/api/ability-dsl-read":
+                # Read-only: free text as the builder's parts, or the parse error and the
+                # parts read before it.
+                self._json(ability_dsl.read_text(body.get("text") or ""))
+                return
+            if url.path == "/api/ability-ir-text":
+                # The sentences for a semantic form.
+                self._json({"text": ability_ir_semantic.text(body.get("ir") or {})})
+                return
+            if url.path == "/api/ability-ir-from-text":
+                # The semantic form for sentence text.
+                self._json(ability_ir_semantic.from_text(body.get("text") or ""))
+                return
+            if url.path == "/api/ability-surface-parse":
+                # The Records ability that surface text binds, or why the text is not valid.
+                try:
+                    self._json({"records": [ir_surface_write.record_for(body.get("text") or "")]})
+                except (ValueError, KeyError, SyntaxError, TypeError) as error:
+                    self._json({"error": f"{type(error).__name__}: {error}"}, 400)
+                return
+            if url.path == "/api/ability-ir-check":
+                # Read-only: what the DSL would refuse in this semantic form.
+                self._json({"problems": ability_ir_semantic.check(body.get("ir") or {})})
+                return
+            if url.path == "/api/edit/ability-ir":
+                try:
+                    self._json(ability_ir_semantic.save(body.get("ir") or {}, body.get("guid") or ""))
+                except (abilities.Invalid, ability_dsl.Unsupported) as exc:
+                    problems = getattr(exc, "problems", None) or getattr(exc, "reasons", [])
+                    self._json({"error": f"not saved: {exc}", "problems": problems}, 400)
+                return
+            if url.path == "/api/edit/ability-dsl":
+                try:
+                    self._json(ability_dsl.save_text(body.get("text") or "", body.get("guid") or ""))
+                except abilities.Invalid as exc:
+                    self._json({"error": f"not saved: {exc}", "problems": exc.problems}, 400)
+                return
+            if url.path == "/api/edit/ability":
+                try:
+                    self._json(abilities.save_records(body.get("records")))
+                except abilities.Invalid as exc:
+                    self._json({"error": f"not saved: {exc}", "problems": exc.problems}, 400)
+                return
+            if url.path == "/api/edit/ability-revert":
+                self._json(abilities.revert_record(body.get("section"), body.get("guid")))
+                return
+            if url.path == "/api/edit/card-revert":
+                self._json(self._with_db(lambda db: cards.revert_card(db, body.get("guid") or "")))
+                return
+            if url.path == "/api/edit/publish-incdata":
+                self._json(self._with_db(lambda db: incdata.publish(db, str(body.get("set_guid") or ""))))
+                return
+            if url.path == "/api/edit/set-icon":
+                self._json(set_icons.save_set_icon(body.get("set_guid"), body.get("image")))
+                return
+            if url.path == "/api/edit/pack-art":
+                self._json(store_listing.save_custom_art(body.get("pack_guid"), body.get("kind"),
+                                                         body.get("image")))
+                return
+            if url.path == "/api/edit/store-pack":
+                self._json(store_listing.create_custom_pack(body.get("set_guid"), body.get("pack_type")))
+                return
+            if url.path == "/api/edit/store-listing":
+                self._json(store_listing.save_store_listing(body.get("set_guid"), body.get("packs")))
+                return
+            if url.path == "/api/edit/card-set":
+                self._json(self._with_db(lambda db: cards.assign_to_set(
+                    db, body.get("guids"), body.get("set_guid"))))
+                return
+            if url.path == "/api/edit/issue-accept":
+                # Accept a Rules-check problem as known (or un-accept it): it stops being listed.
+                import check_names
+                self._json(check_names.set_accepted(
+                    str(body.get("zone") or ""), str(body.get("where") or ""),
+                    str(body.get("text") or ""), bool(body.get("accept", True))))
+                return
+            if url.path == "/api/edit/card-map":
+                chosen = self._with_db(lambda db: editing.save_card_map(
+                    db, body.get("missing"), body.get("card")))
+                self._json(chosen)
+                return
+            if url.path == "/api/edit/scene-gameboard":
+                with closing(self._writable()) as db:
+                    gameboard = editing.save_scene_gameboard(
+                        db, str(body["scene"]), body.get("gameboard"))
+                self._json({"gameboard": gameboard})
+                return
+            if url.path == "/api/edit/scene-mods":
+                with closing(self._writable()) as db:
+                    mods = editing.save_scene_mods(
+                        db, str(body["scene"]), body.get("mods") or [])
+                self._json({"mods": mods})
+                return
+            if url.path == "/api/edit/quest-rewards":
+                rewards = self._with_db(lambda db: editing.save_quest_rewards(
+                    db, str(body["quest"]), body.get("rewards") or {}))
+                self._json({"rewards": rewards})
+                return
+            if url.path == "/api/edit/conversation-override":
+                actions = editing.save_conversation_override(
+                    zone_id, str(body["conversation"]), str(body.get("ending") or "*"),
+                    body.get("actions") or [])
+                self._json({"actions": actions})
+                return
+            if url.path == "/api/edit/offer-order":
+                order = editing.save_offer_order(
+                    zone_id, str(body["node"]), body.get("order") or [])
+                self._json({"order": order})
+                return
+            if url.path == "/api/edit/node-state":
+                tags = editing.save_node_state(
+                    zone_id, str(body["node"]), str(body["state"]),
+                    body.get("tags"))
+                self._json({"tags": tags})
+                return
+            if url.path == "/api/play":
+                # Play: any logged-in account, as itself; writes no campaign
+                # data (a playtest battle, see campaign_playtest).
+                self._json(self._with_db(lambda db: _create_play(
+                    db, self.session, body)))
+                return
+            if url.path == "/api/sim/auto":
+                # Simulate all: the next step of an auto-play run. Read-only:
+                # the page applies the step through /api/sim/apply or load.
+                import autoplay
+                self._json(self._with_db(lambda db: autoplay.api_step(db, body)))
+                return
+            engine = catalog._rules_module()
+            loaded, _problems = self._with_db(lambda db: catalog.rules(db, zone_id))
+            if loaded is None:
+                self._json({"error": f"no rules file for zone {zone_id}"}, 404)
+                return
+            if url.path == "/api/sim/start":
+                if body.get("carry"):
+                    # A teleport: keep champion, flags and quests; arrive at
+                    # the node (or the zone's start).
+                    carry = body["carry"]
+                    state = engine.initial_state(
+                        loaded, race=carry.get("race", ""),
+                        faction=carry.get("faction", ""))
+                    state["flags"] = sorted(set(state["flags"]) |
+                                            set(carry.get("flags") or ()))
+                    state["quests"] = dict(carry.get("quests") or {})
+                    state["keywords"] = engine._keyword_names(
+                        engine._keyword_names(state.get("keywords")) +
+                        engine._keyword_names(carry.get("keywords")))
+                    node = str(body.get("node") or "")
+                    if node and node != state["current"]:
+                        start = loaded.get("start") or {}
+                        state["current"] = node
+                        state["nodes"] = {node: {
+                            "visits": 1, "failed": False, "retryable": False,
+                            # Arriving at the start node finishes it as a
+                            # new game would; elsewhere its content waits.
+                            "completed": node == start.get("node") and
+                            bool(start.get("node_completed", True))}}
+                elif body.get("campaign"):
+                    # A zone the server runs from the rules: the champion's
+                    # real progress (it can be saved back); else a
+                    # reconstruction from the legacy map state.
+                    with closing(self._writable()) as wdb:
+                        found = self._champion_progress(wdb, int(body["campaign"]), zone_id)
+                    if found:
+                        _champ, campaign_part, zones = found
+                        state = engine.zone_view(loaded, campaign_part, zones.get(zone_id))
+                        self._json({"state": state,
+                                    "layout": _sim_layout(engine, loaded, state),
+                                    "saveable": True})
+                        return
+                    state = self._with_db(lambda db: catalog.sim_state_from_campaign(
+                        db, int(body["campaign"]), zone_id))
+                else:
+                    race = body.get("race", "")
+                    state = engine.initial_state(
+                        loaded, race=race,
+                        faction=catalog.FACTION_OF_RACE.get(race, ""))
+                self._json({"state": state, "layout": _sim_layout(engine, loaded, state)})
+            elif url.path == "/api/sim/load":
+                # An exported state file: take it as given, recompute the layout.
+                state = body.get("state")
+                if not isinstance(state, dict) or not isinstance(
+                        state.get("flags"), list):
+                    raise ValueError("not a simulator state file")
+                self._json({"state": state, "layout": _sim_layout(engine, loaded, state)})
+            elif url.path == "/api/sim/save":
+                if not body.get("campaign"):
+                    raise ValueError("no champion campaign to save to")
+                self._json(self._save_to_champion(body, loaded))
+            elif url.path == "/api/sim/apply":
+                state, log = engine.apply(loaded, body["state"], body["action"])
+                self._json({"state": state, "log": log,
+                            "layout": _sim_layout(engine, loaded, state)})
+            else:
+                self._json({"error": "not found"}, 404)
+        except (LookupError, ValueError, KeyError) as exc:
+            self._json({"error": f"{type(exc).__name__}: {exc}"}, 400)
+        except Exception as exc:
+            traceback.print_exc()
+            self._json({"error": f"{type(exc).__name__}: {exc}"}, 500)
+
+
+class TLSServer(ThreadingHTTPServer):
+    """Serves HTTPS. The handshake runs in each request's own thread, so a
+    slow or stalled client cannot hold up the accept loop."""
+    ssl_context: ssl.SSLContext
+
+    def get_request(self):
+        sock, addr = super().get_request()
+        return self.ssl_context.wrap_socket(sock, server_side=True,
+                                            do_handshake_on_connect=False), addr
+
+
+def _create_play(db, session, body):
+    """Store an editor Play request of ``body["scene"]`` for the logged-in
+    account and return the chat command that starts it in the game client
+    (``!playtest <token>``); the simulator state (if any) feeds the reward
+    ``when`` tags."""
+    import campaign_playtest
+    scene = str(body.get("scene") or "").strip().lower()
+    import campaign_source
+    campaign_source.ensure_campaign_path()
+    import campaign_content
+    row = campaign_content.scene(scene) if scene else None
+    if not row:
+        raise LookupError(f"unknown encounter scene {scene or '(none)'}")
+    if not row.get("ai_deck_guid"):
+        raise ValueError(f"{row.get('title') or row.get('name') or scene} has no AI deck: not a battle")
+    state = body.get("state")
+    created = campaign_playtest.create_request(session["user_id"], {
+        "scene": scene, "account": session["name"],
+        "zone": str(body.get("zone") or ""), "node": str(body.get("node") or ""),
+        "sim_state": state if isinstance(state, dict) else None})
+    return {"token": created["token"], "command": created["command"],
+            "expires_in": campaign_playtest.REQUEST_TTL_SECONDS,
+            "scene": scene, "title": row.get("title") or row.get("name"), "account": session["name"]}
+
+
+def _sim_layout(engine, loaded, state):
+    """The derived layout plus, per node, each offer entry's ``blocked_by``:
+    the tags of its ``when`` that do not hold now (empty while it holds)."""
+    layout = engine.layout(loaded, state)
+    for node_id, info in layout["nodes"].items():
+        info["entries"] = engine.explain_entries(loaded, state, node_id)
+    return layout
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--port", type=int, default=8765)
+    parser.add_argument("--db", type=Path, default=catalog.REPO / "hconnect.db")
+    parser.add_argument("--host", default="127.0.0.1",
+                        help="address to listen on (default: this machine only)")
+    parser.add_argument("--cert", type=Path,
+                        help="TLS certificate (PEM); with --key, the editor serves HTTPS")
+    parser.add_argument("--key", type=Path, help="TLS private key (PEM) for --cert")
+    args = parser.parse_args()
+    if bool(args.cert) != bool(args.key):
+        parser.error("--cert and --key must be given together")
+    if not args.cert and args.host not in LOOPBACK_HOSTS:
+        # Passwords go over the wire at log-in: never serve them in clear text
+        # to another machine.
+        parser.error(f"--host {args.host} needs --cert and --key (HTTPS) for log-in")
+    EditorHandler.db_path = args.db.resolve()
+    # Parse the conversation catalogue in the background; the first request
+    # that needs it waits on the same lock instead of reparsing.
+    threading.Thread(target=catalog.warm_caches, args=(args.db.resolve(),),
+                     daemon=True).start()
+    # The ability form's facts (Records references, client field types) likewise,
+    # then the sentence catalogue (it reads the same Records files).
+    threading.Thread(target=lambda: (abilities.warm_caches(), ability_dsl.warm()), daemon=True).start()
+    if args.cert:
+        context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        context.minimum_version = ssl.TLSVersion.TLSv1_2
+        context.load_cert_chain(args.cert, args.key)
+        server = TLSServer((args.host, args.port), EditorHandler)
+        server.ssl_context = context
+        EditorHandler.secure_cookies = True
+        scheme = "https"
+    else:
+        server = ThreadingHTTPServer((args.host, args.port), EditorHandler)
+        scheme = "http"
+    print(f"Campaign editor: {scheme}://{args.host}:{args.port}/  (db: {args.db})")
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        pass
+
+
+if __name__ == "__main__":
+    main()

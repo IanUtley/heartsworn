@@ -4,15 +4,10 @@ name: Browser demo (GitHub Pages)
 # player's own Hex folder supplies the gamedata, and the database is built in
 # their browser. Nothing from the game is built into the site.
 
-# Lives on main so it appears in the Actions tab; it builds the branch named in
-# the ref input (the demo source is on experimental/0.4.3, not main).
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
-    inputs:
-      ref:
-        description: Branch to build
-        required: true
-        default: experimental/0.4.3
 
 permissions:
   contents: read
@@ -28,8 +23,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: ${{ inputs.ref }}
 
       - uses: actions/setup-node@v4
         with:

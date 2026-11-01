@@ -41,6 +41,7 @@ import pvp_db as db_layer
 # UID type codes (must match hconnect_server.py)
 UID_TYPE = {
     "ServicePlayer": 244,
+    "ServiceAI": 248,
     "ServiceMail": 252,
     "ServiceProfile": 245,
     "ServiceGameSession": 246,
@@ -111,7 +112,22 @@ def _db():
     # Session state is written from HConnect while the separate tournament
     # scheduler may be updating the same WAL database.  Use the same wait
     # policy as db.py so a transient writer collision does not abort a turn.
+    if _DB_PATH == ":memory:":
+        # A new ":memory:" connection is an empty database; use the shared connection that holds the schema.
+        # Callers close what they open, so the shared connection is handed out with close() disabled.
+        return _SharedMemoryConnection(connection_db._db)
     return connection_db.connect(_DB_PATH)
+
+
+class _SharedMemoryConnection:
+    def __init__(self, conn):
+        self._conn = conn
+
+    def __getattr__(self, name):
+        return getattr(self._conn, name)
+
+    def close(self):
+        pass
 
 
 def _next_instance(conn=None):
@@ -147,17 +163,19 @@ def create_encounter_session(session_name, encounter_data, player_uid, conn=None
 
 
 def _save(session, conn=None):
-    owns_connection = conn is None
-    conn = conn or _db()
-    try:
-        # session_id/server_id/owner_uid are unsigned 64-bit UIDs which can
-        # exceed SQLite's signed 64-bit INTEGER range, so store them as TEXT.
-        db_layer.db_save_session(session, conn=conn)
-        if owns_connection:
-            conn.commit()
-    finally:
-        if owns_connection:
-            conn.close()
+    # Inside a battle dispatch the row is written once when the batch ends.
+    if db_layer.queue_session_save(session):
+        return
+    # Saves run after nearly every transaction, so reuse the server's shared
+    # connection (as persistence.save_state does) rather than opening one per
+    # save.  Without a caller connection this commits the shared connection.
+    owns_commit = conn is None
+    conn = connection_db._db if conn is None else conn
+    # session_id/server_id/owner_uid are unsigned 64-bit UIDs which can
+    # exceed SQLite's signed 64-bit INTEGER range, so store them as TEXT.
+    db_layer.db_save_session(session, conn=conn)
+    if owns_commit:
+        conn.commit()
 
 
 def _load(row):

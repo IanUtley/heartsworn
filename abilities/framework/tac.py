@@ -165,12 +165,6 @@ def decode_tac(data_b64):
                 return v
             shift += 7
 
-    def _rstr():
-        nonlocal i
-        ln = _r7()
-        s = b[i:i + ln].decode("utf-8", "replace")
-        i += ln
-        return s
 
     def _rawstr(ln):
         nonlocal i

@@ -1,4 +1,4 @@
-"""Parity checks for the first direct ``HexClient/Game.Shared`` Python port."""
+"""Parity checks for the first direct ``hex-private/HexClient/Game.Shared`` Python port."""
 
 import os
 import sys
@@ -32,7 +32,7 @@ from rules_port import (AbilityRegistry, Chain, GameAction, GameActionResult, Ga
                         PlayerIsNotEliminatedRequirement, XCostRequirement,
                         AbilityFactory, SQLiteRulesSnapshot, ParityCapture,
                         compare_captures, event_record, replay_transactions,
-                        MetadataResolutionAdapter, enable_rules_port)
+                        enable_rules_port)
 from rules_port import (plan_ability_cost, apply_ability_cost_plan,
                         card_cost_targets)
 from rules_port import play_resource
@@ -50,7 +50,7 @@ from rules_port.runtime_adapter import (PvpRuntimeFacts, RuntimeCard,
                                          SQLiteCardMutationAdapter)
 from rules_port.actions import (AbilityResolutionState, PushOntoChainAction,
                                 ResolveTopOfChainAction)
-from rules_port.triggers import MetadataTriggerAdapter, TriggerEvent
+from rules_port.triggers import TriggerEvent
 from rules_port.targets import MetadataTargetAdapter, TargetSelection
 from rules_port.async_bridge import (AsyncActivationPublisher,
                                      AsyncEventPublisher,
@@ -1788,6 +1788,9 @@ def test_triggered_activation_has_native_chain_lifecycle_without_adapter():
         responsible_player_id = "p"
         paid = False
 
+        def needs_activation_data(self):
+            return ()
+
         def bind_activation(self, value):
             self.activation = value
             return True
@@ -1807,6 +1810,65 @@ def test_triggered_activation_has_native_chain_lifecycle_without_adapter():
     assert session.submit_transaction(tx)
     assert session.handle_transaction()
     assert session.chain.contains_ability(4)
+
+
+def test_triggered_activation_waits_for_nested_picker_before_payment_and_push():
+    class TriggeredAbility:
+        instance_id = 14
+        responsible_player_id = 1001
+        parent_instance_id = 7
+        paid = False
+
+        def needs_activation_data(self):
+            activation = getattr(self, "activation", {})
+            return (() if activation.get("option_map", {}).get("1") is not None
+                    else ({"kind": "option", "index": 1},))
+
+        def bind_activation(self, value):
+            self.activation = dict(value)
+            return True
+
+        def continuation(self):
+            return {"ability_instance_id": self.instance_id,
+                    "parent_instance_id": self.parent_instance_id}
+
+    session = AuthoritativeSession(95, (1001,), seed_z=1, seed_w=2)
+    session.set_runtime_facts(type("Facts", (), {
+        "is_at_triggered_ability_queue_front": lambda self, player: player == 1001,
+        "validate_triggered_abilities": lambda self, player, values: True,
+        "validate_x_cost": lambda self, player, value: True,
+    })())
+    payments = []
+    session.set_ability_cost_payer(
+        lambda ability: payments.append(ability.instance_id) or True)
+    ability = TriggeredAbility()
+    session.ability_manager.add_chain(ability.instance_id, ability)
+
+    triggered = RulesTransaction.activate_triggered_abilities(
+        1001, ({"ability_instance_id": 14,
+               "target_map": {"2": [202]}},))
+    assert session.submit_transaction(triggered)
+    assert session.handle_transaction()
+    assert not ability.paid
+    assert not session.chain.contains_ability(14)
+
+    # The selected triggered instance now enters the same prompt-before-push
+    # action used by C# PushAbilityOnChain. Its missing option is a separate
+    # class-23 continuation; the original target slot and parent stay intact.
+    assert not session.action_stack.update()
+    assert session.pending_activation["ability_instance_id"] == 14
+    assert session.pending_activation["continuation"]["parent_instance_id"] == 7
+    assert payments == []
+    reply = RulesTransaction.set_ability_activation_data(
+        1001, 14, {"target_map": {"2": [202]}, "option_map": {"1": 0}})
+    assert session.submit_transaction(reply)
+    assert session.handle_transaction()
+    assert session.action_stack.update()
+
+    assert session.chain.peek_ability() is ability
+    assert ability.activation["target_map"] == {"2": [202]}
+    assert ability.parent_instance_id == 7
+    assert payments == [14]
 
 
 def test_additional_csharp_requirement_predicates_use_session_facts():
@@ -2667,6 +2729,102 @@ def test_end_of_turn_damage_heal_skips_cant_heal_at_end_of_turn():
         db._db.commit()
 
 
+def test_printed_cant_heal_at_end_of_turn_keeps_template_damage():
+    import db
+    import pvp_db
+    from rules_port.lifecycle import clear_combat_damage
+    from tests.tests_combat import TPL_GLADIATOR
+
+    decaying_giant = "1d47a6a1-52ea-4e01-ba73-5f78483bac49"
+    session_id = 987654327
+    giant_uid, healed_uid = 987650151, 987650152
+    try:
+        pvp_db.db_insert_generated_card(
+            session_id, 5, giant_uid, decaying_giant, "warzone", "Troop",
+            "[]", 0, giant_uid, conn=db._db)
+        pvp_db.db_insert_generated_card(
+            session_id, 5, healed_uid, TPL_GLADIATOR, "warzone", "Troop",
+            "[]", 0, healed_uid, conn=db._db)
+        db._db.execute(
+            "UPDATE game_cards SET card_damage=6 WHERE session_id=?",
+            (session_id,))
+        db._db.commit()
+        clear_combat_damage(db._db, session_id)
+        rows = dict(db._db.execute(
+            "SELECT card_uid, card_damage FROM game_cards WHERE session_id=?",
+            (session_id,)).fetchall())
+        assert rows[giant_uid] == 6
+        assert rows[healed_uid] == 0
+    finally:
+        db._db.execute("DELETE FROM game_cards WHERE session_id=?",
+                       (session_id,))
+        db._db.commit()
+
+
+def test_opposing_troops_dont_heal_at_end_of_turn_blocks_only_opponent():
+    import db
+    import pvp_db
+    from rules_port.lifecycle import clear_combat_damage
+    from tests.tests_combat import TPL_GLADIATOR
+
+    angel = "7a870f1a-689b-476d-ac94-f64d7bcdc355"
+    session_id = 987654329
+    angel_uid, own_uid, opponent_uid = 987650171, 987650172, 987650173
+    try:
+        pvp_db.db_insert_generated_card(
+            session_id, 5, angel_uid, angel, "warzone", "Troop",
+            "[]", 0, angel_uid, conn=db._db)
+        pvp_db.db_insert_generated_card(
+            session_id, 5, own_uid, TPL_GLADIATOR, "warzone", "Troop",
+            "[]", 0, own_uid, conn=db._db)
+        pvp_db.db_insert_generated_card(
+            session_id, 6, opponent_uid, TPL_GLADIATOR, "warzone", "Troop",
+            "[]", 0, opponent_uid, conn=db._db)
+        db._db.execute(
+            "UPDATE game_cards SET card_damage=3 WHERE session_id=? "
+            "AND card_uid IN (?, ?)", (session_id, own_uid, opponent_uid))
+        db._db.commit()
+        clear_combat_damage(db._db, session_id)
+        rows = dict(db._db.execute(
+            "SELECT card_uid, card_damage FROM game_cards WHERE session_id=?",
+            (session_id,)).fetchall())
+        assert rows[own_uid] == 0
+        assert rows[opponent_uid] == 3
+    finally:
+        db._db.execute("DELETE FROM game_cards WHERE session_id=?",
+                       (session_id,))
+        db._db.commit()
+
+
+def test_ready_step_keeps_cant_heal_at_end_of_turn_damage():
+    import db
+    import pvp_db
+    import game_engine
+    from rules_port.lifecycle import ready_card
+
+    decaying_giant = "1d47a6a1-52ea-4e01-ba73-5f78483bac49"
+    session_id = 987654328
+    giant_uid = 987650161
+    try:
+        pvp_db.db_insert_generated_card(
+            session_id, 5, giant_uid, decaying_giant, "warzone", "Troop",
+            "[]", 0, giant_uid, conn=db._db)
+        db._db.execute(
+            "UPDATE game_cards SET card_damage=6 WHERE session_id=?",
+            (session_id,))
+        db._db.commit()
+        ready_card(db._db, session_id, giant_uid,
+                   int(game_engine.ECardStates.Tapped), 0)
+        damage = db._db.execute(
+            "SELECT card_damage FROM game_cards WHERE session_id=? "
+            "AND card_uid=?", (session_id, giant_uid)).fetchone()[0]
+        assert damage == 6
+    finally:
+        db._db.execute("DELETE FROM game_cards WHERE session_id=?",
+                       (session_id,))
+        db._db.commit()
+
+
 def test_charge_point_cost_modifier_applies_to_the_plan():
     import db
     import pvp_db
@@ -2687,26 +2845,83 @@ def test_charge_point_cost_modifier_applies_to_the_plan():
 
     session_id = 987654327
     source_uid = 987650151
+    champion_uid = 987650152
     try:
         pvp_db.db_insert_generated_card(
             session_id, 5, source_uid, TPL_GLADIATOR, "warzone", "Troop",
             "[]", 0, source_uid, conn=db._db)
+        pvp_db.db_insert_generated_card(
+            session_id, 5, champion_uid, TPL_GLADIATOR, "warzone", "Troop",
+            "[]", 0, champion_uid, conn=db._db)
         pvp_db.db_set_card_mutation_field(
             session_id, source_uid, "permanent_buffs",
             json.dumps({"int_attrs": {"ChargePointCostModifier": -2}}),
             conn=db._db)
         db._db.commit()
-        assert charge_point_cost_modifier(
-            db._db, session_id, {}, 5, source_uid) == -2
-        champion_state = {"champ_map": {5: 777},
-                          "champion_int_attrs": {"777": {
+        champion_state = {"champ_map": {5: champion_uid},
+                          "champion_int_attrs": {str(champion_uid): {
                               "ChargePointCostModifier": -1}}}
-        assert charge_point_cost_modifier(
-            db._db, session_id, champion_state, 5, None) == -1
+        pvp_champion_state = dict(
+            champion_state, pvp=True, pids=[5, 6])
+        for state in (champion_state, pvp_champion_state):
+            assert charge_point_cost_modifier(
+                db._db, session_id, state, 5, source_uid) == -2
+            assert charge_point_cost_modifier(
+                db._db, session_id, state, 5, champion_uid) == -1
+            assert charge_point_cost_modifier(
+                db._db, session_id, state, 5, None) == 0
+
+            troop_plan = plan_ability_cost(
+                Costs(), None, current_resource=0, charges=1,
+                spell_points=0, health=20,
+                charge_modifier=charge_point_cost_modifier(
+                    db._db, session_id, state, 5, source_uid))
+            champion_plan = plan_ability_cost(
+                Costs(), None, current_resource=0, charges=2,
+                spell_points=0, health=20,
+                charge_modifier=charge_point_cost_modifier(
+                    db._db, session_id, state, 5, champion_uid))
+            assert troop_plan is not None and troop_plan.charge_points == 1
+            assert champion_plan is not None and champion_plan.charge_points == 2
     finally:
         db._db.execute("DELETE FROM game_cards WHERE session_id=?",
                        (session_id,))
         db._db.commit()
+
+
+def test_rules_port_chain_dispatch_skips_legacy_trigger_hook():
+    from types import SimpleNamespace
+    from unittest import mock
+
+    import hconnect_server as hcs
+    from rules_port.chain_items import dispatch
+
+    calls = []
+
+    def legacy_hook(*_args, **_kwargs):
+        calls.append("legacy")
+        raise AssertionError("RulesPort called the retired trigger hook")
+
+    host = SimpleNamespace(_db=object(), _dispatch_game_trigger=legacy_hook)
+    hcp_host = object.__new__(hcs.HCPHandler)
+    assert not hasattr(hcp_host, "_dispatch_game_trigger")
+    session, game, state = object(), object(), {}
+    with mock.patch("rules_port.triggers.dispatch_native_trigger",
+                    return_value="native") as native_dispatch:
+        result = dispatch(
+            host, session, game, state, "player", "ai", "CardCastEvent",
+            901, 5, target_card_id=902)
+        hcp_result = hcp_host.chain_dispatch(
+            session, game, state, "player", "ai", "CardCastEvent", 901, 5,
+            target_card_id=902)
+
+    assert result == "native"
+    assert hcp_result == "native"
+    assert calls == []
+    assert native_dispatch.call_count == 2
+    assert native_dispatch.call_args_list[0].kwargs["db"] is host._db
+    assert native_dispatch.call_args_list[0].kwargs["target_card_id"] == 902
+    assert native_dispatch.call_args_list[1].kwargs["handler"] is hcp_host
 
 
 def test_lifebound_returns_marked_discard_cards():
@@ -2800,6 +3015,16 @@ def test_verdict_creates_pool_tokens_and_activates_choose():
             "AND owner_user_id=0 AND location='choosing'",
             (session_id,)).fetchone()[0]
         assert chosen == 2, chosen
+        generated_updates = {
+            event[1] for event in pushed
+            if (isinstance(event, tuple) and len(event) == 2 and
+                event[0] == "updated")}
+        generated_moves = [
+            event for event in pushed
+            if (isinstance(event, tuple) and len(event) == 2 and
+                event[0] == "moved")]
+        assert len(generated_updates) == chosen, generated_updates
+        assert not generated_moves, generated_moves
     finally:
         db._db.execute("DELETE FROM game_cards WHERE session_id=?",
                        (session_id,))
@@ -2832,7 +3057,7 @@ def test_resource_cast_activates_momentum_and_expires_at_owner_start_turn():
         db._db.commit()
         pushed = []
         host = SimpleNamespace(
-            _dispatch_game_trigger=lambda *a, **k: None,
+            chain_dispatch=lambda *a, **k: None,
             _card_full_data=lambda game, scid, tpl=None:
                 (tpl, 1, "T", 1, 2, 2, 0))
         game = SimpleNamespace(push_card_updated=lambda *a, **k: pushed.append(a))
@@ -2860,6 +3085,269 @@ def test_resource_cast_activates_momentum_and_expires_at_owner_start_turn():
         db._db.execute("DELETE FROM game_cards WHERE session_id=?",
                        (session_id,))
         db._db.commit()
+
+
+def test_while_in_play_stat_expires_when_the_source_loses_the_ability():
+    """A linked WhileCardInPlay effect dies with the source ability, not just with the source card.
+
+    C# keys these effect instances on the ability instance that created them and removes them
+    (``AbilityManager.RemoveAbilities(card, WhileCardInPlay)``) before a transform, revert or champion talent change
+    rebuilds the card's ability list.  A source that is still in play but no longer carries the ability must therefore
+    drop the effect.
+    """
+    import db
+    import pvp_db
+    from rules_port.effect_lifetimes import (expire_temporary_stats,
+                                             record_temporary_stat)
+    from tests.tests_combat import TPL_GLADIATOR
+
+    session_id = 987654340
+    source_uid, target_uid = 987650201, 987650202
+    ability = "aa11bb22-cc33-dd44-ee55-ff6677889900"
+    try:
+        pvp_db.db_insert_generated_card(
+            session_id, 5, source_uid, TPL_GLADIATOR, "warzone", "Troop",
+            json.dumps([ability]), 0, source_uid, conn=db._db)
+        pvp_db.db_insert_generated_card(
+            session_id, 5, target_uid, TPL_GLADIATOR, "warzone", "Troop",
+            "[]", 0, target_uid, conn=db._db)
+        pvp_db.db_set_card_mutation_field(
+            session_id, target_uid, "permanent_buffs",
+            json.dumps({"atk": -4}), conn=db._db)
+        db._db.commit()
+        state = {"champ_map": {"5": 777}, "resolving_ability": ability}
+        record_temporary_stat(state, target_uid, -4, 0,
+                              duration="WhileCardInPlay", owner_id=5,
+                              source_uid=source_uid)
+        # In play and still carrying the ability: the effect stands.
+        assert expire_temporary_stats(db._db, session_id, state) == []
+        # A transform (or revert, or talent change) replaces the ability list,
+        # while the card stays in the warzone.
+        pvp_db.db_set_card_abilities(session_id, source_uid, "[]",
+                                     conn=db._db)
+        db._db.commit()
+        assert expire_temporary_stats(db._db, session_id, state) == [target_uid]
+        assert not state.get("temporary_card_stats")
+        buffs = json.loads(db._db.execute(
+            "SELECT permanent_buffs FROM game_cards WHERE card_uid=?",
+            (target_uid,)).fetchone()[0])
+        assert not buffs.get("atk"), buffs
+    finally:
+        db._db.execute("DELETE FROM game_cards WHERE session_id=?",
+                       (session_id,))
+        db._db.commit()
+
+
+def test_while_in_play_clause_is_projected_not_executed():
+    """A triggerless WhileCardInPlay clause is the scan's to project; a triggered one is a linked effect the
+    interpreter applies and records."""
+    from rules_port import continuous_statics
+    from rules_port.ir_exec import (LINKED_STAT_DURATIONS, STAT_DURATIONS,
+                                    _guid, _stored, coverage)
+
+    # Depleted Mecha T-Hex: "While there are no energy counters on this, this can't block" -- an authored static whose
+    # int-attribute leaf the scan spells out.
+    projected = "676436fb-b449-fb5d-5319-1ed93cccbeda"
+    _cls, raw = _stored("AbilityTemplate", projected)
+    clause = next(item for item in raw["m_AbilityEffectList"]
+                  if str(item.get("m_EffectDuration")) == "WhileCardInPlay")
+    effect_type, effect = _stored(
+        "AbilityEffectTemplate", _guid(clause.get("m_EffectTemplateId")))
+    assert "CardModifierAbilityEffectTemplate" in effect_type
+    assert coverage(projected) == []
+    assert continuous_statics.covered_as_static(
+        "WhileCardInPlay", "", effect["m_Modifier"], raw,
+        ability_guid=projected,
+        effect_guid=_guid(clause.get("m_EffectTemplateId")))
+
+    # Sea Sorceress: "Deploy - Target troop gets -4 ATK until this leaves play" -- the same duration on a triggered
+    # ability. It is not the scan's to project (the scan only projects authored statics); it is a linked effect the
+    # interpreter applies to its target at resolution, which the while-in-play duration is opened for.
+    linked = "65570bf0-cd92-65cd-3cff-1d191fc3f0fd"
+    _cls, linked_raw = _stored("AbilityTemplate", linked)
+    assert coverage(linked) == []
+    assert "WhileCardInPlay" in LINKED_STAT_DURATIONS
+    assert "WhileCardInPlay" not in STAT_DURATIONS
+    linked_clause = next(item for item in linked_raw["m_AbilityEffectList"]
+                         if str(item.get("m_EffectDuration")) == "WhileCardInPlay")
+    _type, linked_effect = _stored(
+        "AbilityEffectTemplate", _guid(linked_clause.get("m_EffectTemplateId")))
+    assert not continuous_statics.covered_as_static(
+        "WhileCardInPlay", "CardEnteredZoneEvent", linked_effect["m_Modifier"],
+        linked_raw, ability_guid=linked,
+        effect_guid=_guid(linked_clause.get("m_EffectTemplateId")))
+
+
+def test_while_in_play_grant_is_recorded_and_expires_with_its_source():
+    """A linked while-in-play stat or keyword is applied, recorded against its source, and dropped when the source
+    leaves play.
+
+    The recording half is what was missing: the expiry sweep could already see such an entry, but nothing created one,
+    so a triggered or invoked clause could not be run. ``apply_stat_mod`` and ``apply_attribute_grant`` now record the
+    grant (stat in the linked ledger, keyword in the card's temporary payload with a while-in-play rule), and
+    ``expire_while_in_play`` is the sweep that reads them back.
+    """
+    import db
+    import pvp_db
+    from types import SimpleNamespace
+    from rules_port.attribute_effects import apply_attribute_grant
+    from rules_port.effect_lifetimes import expire_while_in_play
+    from rules_port.stat_effects import apply_stat_mod
+    from tests.tests_combat import TPL_GLADIATOR
+
+    session_id = 987654350
+    source_uid, target_uid = 987650211, 987650212
+    ability = "aa11bb22-cc33-dd44-ee55-ff6677889911"
+
+    class Game:
+        card_defs: dict = {}
+
+        def push_card_updated(self, *args, **kwargs):
+            pass
+
+    class Handler:
+        def _card_full_data(self, game, scid, template):
+            return (template, "Troop", "Card", 1, 1, 1, 0)
+
+    try:
+        pvp_db.db_insert_generated_card(
+            session_id, 5, source_uid, TPL_GLADIATOR, "warzone", "Troop",
+            json.dumps([ability]), 0, source_uid, conn=db._db)
+        pvp_db.db_insert_generated_card(
+            session_id, 5, target_uid, TPL_GLADIATOR, "warzone", "Troop",
+            "[]", 0, target_uid, conn=db._db)
+        db._db.commit()
+        state = {"champ_map": {"5": 777}, "resolving_ability": ability,
+                 "resolving_root_ability": ability,
+                 "resolving_source_uid": source_uid,
+                 "resolving_owner_id": 5}
+        context = SimpleNamespace(
+            session=SimpleNamespace(session_id=session_id), db=db._db,
+            bstate=state, handler=Handler(), game=Game(), player_uid=5,
+            ai_uid=0)
+        apply_stat_mod(context, target_uid, -4, 0,
+                       duration="WhileCardInPlay")
+        (entry,) = state["temporary_card_stats"]
+        assert entry["source_uid"] == source_uid
+        assert entry["source_ability"] == ability
+        assert entry["duration"] == "WhileCardInPlay"
+        bits = apply_attribute_grant(context, target_uid, {
+            "attribute_flags": "Defensive", "operation": "Add",
+            "duration": "WhileCardInPlay", "text": ""})
+        assert bits
+        attrs, payload = db._db.execute(
+            "SELECT temporary_attributes, temporary_buffs FROM game_cards "
+            "WHERE session_id=? AND card_uid=?",
+            (session_id, target_uid)).fetchone()
+        assert attrs & bits, (attrs, bits)
+        rule = json.loads(payload)["__attribute_expirations"][str(bits)]
+        assert rule["boundary"] == "while_in_play"
+        assert rule["source"] == source_uid and rule["ability"] == ability
+        # The source is in play and still carries the ability: both grants stand.
+        assert expire_while_in_play(db._db, session_id, state) == []
+        # It leaves play: the grants go with it, on the same sweep.
+        pvp_db.db_set_card_location(session_id, source_uid, "hand",
+                                    conn=db._db)
+        db._db.commit()
+        assert expire_while_in_play(db._db, session_id, state) == [target_uid]
+        attrs, payload, buffs = db._db.execute(
+            "SELECT temporary_attributes, temporary_buffs, permanent_buffs "
+            "FROM game_cards WHERE session_id=? AND card_uid=?",
+            (session_id, target_uid)).fetchone()
+        assert not attrs & bits, attrs
+        assert "__attribute_expirations" not in json.loads(payload)
+        assert not json.loads(buffs).get("atk"), buffs
+        assert not state.get("temporary_card_stats")
+        assert not state.get("while_in_play_attribute_cards")
+    finally:
+        db._db.execute("DELETE FROM game_cards WHERE session_id=?",
+                       (session_id,))
+        db._db.commit()
+
+
+def test_trigger_event_player_is_the_events_own_source_player():
+    """An event's ``player`` is its own ``SourcePlayerId``, and an exit event carries both collections.
+
+    C# sets every trigger event's ``SourcePlayerId`` from whoever the event is about -- the healed champion's
+    controller for ``ChampionHealedEvent``, and for ``CardExitedZoneEvent`` the controller the card had *before* the
+    move -- and the trigger conditions read that field. The interpreter passed the resolving ability's owner instead,
+    so a "when you gain health" also fired for the opponent's heal and every "when an opposing ..." (109 abilities,
+    already covered) could never be true. ``CardExitedZoneEvent`` is an ``IZoneChange``, so its two collections are
+    part of what "leaves play" reads, and the condition compares them as flag masks (a destination of "anywhere").
+    """
+    import json
+    from rules_port import ir_exec
+    from tests.tests_builtin_counter_rules import _context, _setup
+    from tests.tests_combat import TPL_GLADIATOR, add_card, make_db
+
+    heal_trigger = "8a06bd0d-b743-08ae-5397-9ae295df3f18"  # "When you gain health, this gets +1[ATK]/+1[DEF]."
+    opposed_exit = "eaeefdfb-8e00-3a31-5f64-038f9147acef"  # "When an opposing troop leaves play, gain 1 health."
+    db = make_db()
+    pl_t, ai_t, game, handler, bstate, player_champ, ai_champ = _setup(db)
+    add_card(db, 900, 5, TPL_GLADIATOR, loc="warzone")
+    db.execute("UPDATE game_cards SET card_abilities=? WHERE card_uid=900",
+               (json.dumps([heal_trigger, opposed_exit]),))
+    # A card that has already left the warzone for the crypt, controlled by the opponent.
+    add_card(db, 901, 0, TPL_GLADIATOR, loc="discard")
+    db.commit()
+    context = _context(db, handler, game, pl_t, ai_t, bstate)
+
+    def holds(ability, event):
+        root = ir_exec._load("AbilityTemplate", ability)
+        scope = ir_exec.Scope(context=context, source_uid=900, owner_uid=5, event=event)
+        return ir_exec._condition_holds(root.m_TriggerCondition, scope)
+
+    ours = ir_exec.live_event("ChampionHealedEvent", 5, {}, player_champ, None, 5)
+    assert ours["player"] == 5 and ours["card"] == player_champ
+    assert holds(heal_trigger, ours) is True
+    # The champion that gained the health is the opponent's: this is not "when you gain health".
+    theirs = ir_exec.live_event("ChampionHealedEvent", 5, {}, ai_champ, None, 0)
+    assert theirs["player"] == 0
+    assert holds(heal_trigger, theirs) is False
+
+    # The exit names the move it made, so "leaves play" is judged from the collections rather than from wherever the
+    # card happens to sit when the trigger resolves.
+    left = ir_exec.live_event("CardExitedZoneEvent", 0, {
+        "event_source_collection": "warzone",
+        "event_destination_collection": "discard"}, 901, None, 0)
+    assert (left["from"], left["to"]) == ("warzone", "discard")
+    assert holds(opposed_exit, left) is True
+    # The ability's own player's troop leaving is not an opposing troop leaving.
+    assert holds(opposed_exit, {**left, "player": 5}) is False
+    # A card that left a different collection did not leave play.
+    assert holds(opposed_exit, {**left, "from": "hand"}) is False
+
+
+def test_death_exit_event_carries_both_collections_before_the_entry():
+    """The death path publishes warzone->discard on the exit, and publishes it before the enter event.
+
+    C# ``Session.FinishMovingCard`` enqueues ``CardExitedZoneEvent`` (an ``IZoneChange``) only when the collection
+    actually changes, and before ``CardEnteredZoneEvent``. The death path sent neither collection, so every "when
+    this leaves play" condition could only work through the condition's fallback to the card's current zone.
+    """
+    from rules_port.death_effects import kill_troop
+    from tests.tests_builtin_counter_rules import _context, _setup
+    from tests.tests_combat import TPL_GLADIATOR, add_card, make_db
+
+    db = make_db()
+    pl_t, ai_t, game, handler, bstate, _player_champ, _ai_champ = _setup(db)
+    add_card(db, 902, 5, TPL_GLADIATOR, loc="warzone")
+    db.commit()
+    context = _context(db, handler, game, pl_t, ai_t, bstate)
+    dispatched = []
+
+    def recording(event_type, source_card_id, source_owner_id=None, **_data):
+        dispatched.append((str(event_type).rsplit(".", 1)[-1], int(source_card_id),
+                           source_owner_id, _data.get("event_source_collection"),
+                           _data.get("event_destination_collection")))
+        return None
+
+    context._emit_trigger = recording
+    assert kill_troop(context, 902).startswith("killed")
+    names = [entry[0] for entry in dispatched]
+    exit_event = next(entry for entry in dispatched if entry[0] == "CardExitedZoneEvent")
+    assert exit_event == ("CardExitedZoneEvent", 902, 5, "warzone", "discard"), dispatched
+    assert names.index("CardExitedZoneEvent") < names.index("CardEnteredZoneEvent"), names
 
 
 def test_replica_projection_carries_artifact_type_and_subtype():
@@ -3110,6 +3598,53 @@ def test_defense_commit_can_drive_past_native_declaration_window():
     assert session.current_turn_phase == game_engine.ETurnPhases.DeclareDefensePriorityWindow
 
 
+def test_empty_defense_commit_consumes_native_declaration_window_once():
+    """An empty blocker set is still a defense declaration in C#.
+
+    The AI uses this transaction when the defending player has no legal
+    blockers.  It must mark each combat's defense as declared and advance from
+    DeclareDefense exactly once, rather than leaving the native cursor on the
+    phase and re-opening the blocker prompt.
+    """
+    from rules_port.combat import CombatFlags
+
+    player = game_engine.UID.make(244, 84)
+    ai = game_engine.UID.make(3, 1000)
+    attacker = SimpleNamespace(session_card_id=9202)
+    session = AuthoritativeSession(184, (player, ai), seed_z=1, seed_w=2)
+    session.runtime_facts = SimpleNamespace(
+        get_card=lambda card_id: attacker if int(card_id) == 9202 else None,
+        validate_blocks=lambda _session, declarations, owner: (
+            owner == player and declarations == ((9202, ()),)))
+    session.active_player_id = ai
+    session.current_turn_phase = game_engine.ETurnPhases.DeclareDefense
+    combat = session.combat_manager.create_attack(
+        CombatId(ai, 1), ai, 9201)
+    combat.declare_attacker(attacker)
+    assert session.materialize_current_phase()
+    assert session.action_stack.priority_player_id == player
+
+    phase_updates = []
+    session.event_sink = SimpleNamespace(
+        turn_phase_updated=lambda phase, *_: phase_updates.append(phase),
+        green_light=lambda *_: None)
+    transaction = RulesTransaction.commit_troops_to_defense(
+        player, game_engine.ETurnPhases.DeclareDefense, ((9202, ()),))
+    assert session.submit_transaction(transaction)
+    assert session.handle_transaction()
+    assert combat.flags & CombatFlags.BLOCKERS_DECLARED
+    assert not combat.flags & CombatFlags.ATTACK_BLOCKED
+    assert combat.blockers == []
+
+    assert session.drive_until_input(max_steps=8)
+    assert session.current_turn_phase == (
+        game_engine.ETurnPhases.DeclareDefensePriorityWindow)
+    next_phase = game_engine.ETurnPhases.DeclareDefensePriorityWindow
+    assert phase_updates.count(next_phase) == 1, phase_updates
+    session.drive_until_input(max_steps=2)
+    assert phase_updates.count(next_phase) == 1, phase_updates
+
+
 def test_checkpoint_resync_does_not_reopen_answered_defense_window():
     """A mid-transaction checkpoint re-sync must not refill a passed window.
 
@@ -3354,7 +3889,7 @@ def test_pvp_state_save_keeps_native_snapshot_on_same_state_root():
     new = {"pvp": True, "phase": game_engine.ETurnPhases.FirstMainPhase,
            "turn_pid": 2}
     session = SimpleNamespace(
-        _rules_port_battle_state=old, turn_order=old,
+        session_id=1, _rules_port_battle_state=old, turn_order=old,
         _persist=lambda **_kwargs: None)
     tournament_game.pvp_save_state(session, new)
     assert session._rules_port_battle_state is new
@@ -3669,6 +4204,10 @@ def test_manual_ability_finish_projects_chain_entry_and_green_light():
         "4ba9e978-53fd-a3ed-88ca-d57632f186cb")
     assert len(green_lights) == 1
     assert green_lights[0].player_id == player
+    assert green_lights[0].context == (
+        game_engine.EPriorityContext.ResolveTopOfChain)
+    assert game.events.index(chain_events[0]) < game.events.index(
+        green_lights[0])
 
 
 def test_practice_manual_ability_response_window_auto_passes_ai():
@@ -3879,19 +4418,6 @@ def test_activation_reply_uses_client_ability_and_responsibility_requirements():
         player, 10, {"target_map": {}}))
 
 
-def test_metadata_resolution_adapter_reuses_existing_activation_data_shape():
-    metadata = MetadataAbilityInstance.from_runtime("ability", [], 0,
-                                                     source_uid=3, owner_id=7)
-    ability = AbilityFactory().create(metadata, activating_player_id=7)
-    calls, state = [], {}
-    adapter = MetadataResolutionAdapter(
-        None, None, type("Session", (), {"session_id": 5})(), None, 7, 0,
-        state, resolver=lambda *args, **kwargs: calls.append((args, kwargs)))
-    assert adapter(ability) is AbilityResolutionState.COMPLETED
-    assert calls[0][0][7:10] == ("ability", 3, 7)
-    assert calls[0][1]["activation_data"] == ability.activation.as_dict()
-
-
 def test_ability_instance_serialization_preserves_csharp_lifecycle_fields():
     metadata = MetadataAbilityInstance.from_runtime("ability", [], 0,
                                                      source_uid=3, owner_id=7)
@@ -3914,19 +4440,6 @@ def test_ability_instance_serialization_is_json_safe_for_trigger_events():
     encoded = json.dumps(ability.as_dict(), sort_keys=True)
     assert "CardMovedEvent" in encoded
     assert "destination_zone" in encoded
-
-
-def test_metadata_trigger_adapter_preserves_csharp_event_source_target_envelope():
-    calls = []
-    adapter = MetadataTriggerAdapter(
-        None, None, type("Session", (), {"session_id": 5})(), None, 7, 0, {},
-        resolver=lambda *args, **kwargs: calls.append((args, kwargs)) or "ok")
-    event = TriggerEvent("CardDealtDamageEvent", 11, 7, 22, 0,
-                         {"CombatDamage": 1})
-    assert adapter(event) == "ok"
-    assert calls[0][0][7:9] == ("CardDealtDamageEvent", 11)
-    assert calls[0][1]["source_owner_uid"] == 7
-    assert calls[0][1]["extra_target"] == 22
 
 
 def test_metadata_target_adapter_uses_one_predicate_for_options_and_validation():
@@ -4085,7 +4598,7 @@ def test_native_effect_backend_reuses_one_auto_target_mapping():
 
     target = SimpleNamespace(
         guid="random-deck-card", target_kind="AbilityTargetTemplate",
-        is_auto=True, is_random=True, player_filter="self",
+        is_auto=True, is_random=True, player_filter="self", requires_input=False,
         resolved_maximum=lambda _variables: 1)
     effects = tuple(SimpleNamespace(
         guid=f"effect-{index}", concrete_type="CapturedEffect",
@@ -4207,7 +4720,7 @@ def test_completed_chain_instance_skips_bom_on_the_finishing_pass():
         calls = []
         handler = SimpleNamespace(
             _card_full_data=HandlerStub(db)._card_full_data,
-            _dispatch_game_trigger=lambda *args, **kwargs:
+            chain_dispatch=lambda *args, **kwargs:
                 calls.append(("trigger", args[5])))
 
         def fake_played_spell(*_args, **_kwargs):
@@ -4418,6 +4931,42 @@ def test_projected_chain_resolves_ignores_chain_ability_without_a_window():
     # An ordinary chain ability still opens a response window.
     assert not projected_ability_ignores_chain({"ability_guid": ""})
     assert not projected_ability_ignores_chain(None)
+
+
+def test_combat_damage_trigger_keeps_chain_across_host_phase_advance():
+    """A trigger raised by combat damage must not run the next turns.
+
+    The Practice AssignDamage host resolves damage then advances the phase
+    itself.  It used to clear the whole action stack, orphaning an AI-owned
+    ignores-chain trigger ("when you gain health, gain a charge"); every later
+    phase window then completed at once and one request ran the AI's turn and
+    the player's next turn (readying the player's attackers).
+    """
+    player = game_engine.UID.make(PLAYER_UID_TYPE, 44)
+    ai = game_engine.UID.make(AI_UID_TYPE, 1000)
+    session = AuthoritativeSession(144, (player, ai), seed_z=1, seed_w=2)
+    session.current_turn_phase = game_engine.ETurnPhases.AssignDamage
+    session.active_player_id = player
+    window = PriorityWindowAction(TurnPhasePlayers.ACTIVE)
+    window._rules_port_phase = "AssignDamage"
+    session.push_game_action(window)
+    resolved = []
+    session.set_ability_resolver(
+        lambda item: resolved.append(item.instance_id) or
+        AbilityResolutionState.COMPLETED)
+    session.queue_projected_chain(
+        {"kind": "trigger", "source_uid": 513, "instance_id": 32,
+         "ability_guid": "", "ignores_chain": True}, ai)
+
+    session.discard_phase_priority_windows()
+    session.advance_turn_phase()
+    session.drive_until_input(max_steps=64)
+
+    assert resolved == [32]
+    assert session.chain.is_empty
+    assert session.current_turn_phase == game_engine.ETurnPhases.SecondMainPhase
+    assert session.active_player_id == player
+    assert session.action_stack.priority_player_id == player
 
 
 def test_projected_chain_keeps_rehydrated_response_window_by_instance_id():
@@ -5130,6 +5679,211 @@ def test_native_scheduler_rotates_active_player_at_end_turn():
     session.action_stack.clear()
     assert session.advance_turn_phase() == game_engine.ETurnPhases.StartTurn
     assert session.active_player_id == opponent
+
+
+def test_combat_second_card_reads_effect_instance_zero():
+    """A fight's second card is effect instance 0 when the ability names it: 0 is a real instance, not "none".
+
+    ``m_SecondaryTargetIndex`` names an earlier ``m_EffectInstanceId``, and Records author those from 0 upward
+    ("[One-Shot] Target troop you control battles target opposing troop": instance 0 is the troop that fights,
+    instance 1 the battle clause). The interpreter read the field by truthiness, so 0 became -1 and 80 fight
+    abilities were refused as "fight or block without a second card" even though their partner clause was there.
+    """
+    from rules_port import ir_exec_combat
+
+    fighter = {"m_EffectInstanceId": 0, "m_TargetTemplateIndex": 0, "m_SecondaryTargetIndex": -1}
+    fight = {"m_EffectInstanceId": 1, "m_TargetTemplateIndex": 1, "m_SecondaryTargetIndex": 0}
+    clauses = [fighter, fight]
+
+    assert ir_exec_combat._second_clause(clauses, fight) is fighter
+    assert ir_exec_combat._second_clause(clauses, fighter) is None
+    assert ir_exec_combat.coverage_missing(
+        "Battle2CardsAbilityEffectTemplate", fight, clauses) == []
+    # The fighter clause names no instance, so it is the one without a second card.
+    assert ir_exec_combat.coverage_missing(
+        "Battle2CardsAbilityEffectTemplate", fighter, clauses) == [
+            "fight or block without a second card"]
+
+
+def test_fight_and_block_use_the_referenced_instances_first_card():
+    """The referenced instance's first card fights (or blocks), and the clause's own targets are each faced.
+
+    The native leaves read the second card from the activation's target map and the first card taken from it
+    (``battle_effects._first_target``), and the native resolver runs a card effect once per resolved target. The
+    interpreter now does the same instead of refusing a side with more than one card.
+    """
+    from rules_port import battle_effects, combat_effects, ir_exec_combat
+    from types import SimpleNamespace
+
+    fighter = {"m_EffectInstanceId": 0, "m_TargetTemplateIndex": 0, "m_SecondaryTargetIndex": -1}
+    fight = {"m_EffectInstanceId": 1, "m_TargetTemplateIndex": 1, "m_SecondaryTargetIndex": 0, "m_FightBack": 1}
+    root = SimpleNamespace(m_AbilityEffectList=[fighter, fight])
+    bstate = {}
+    scope = SimpleNamespace(context=SimpleNamespace(bstate=bstate),
+                            resolved_by_instance={0: [601, 602]}, chosen={})
+
+    fought, blocked = [], []
+    original_fight = battle_effects.fight_cards
+    original_block = combat_effects.block
+    battle_effects.fight_cards = lambda context, attacker, defender: fought.append(
+        (int(attacker), int(defender)))
+    combat_effects.block = lambda context: blocked.append(
+        (context.bstate.get("player_spell_target"),
+         context.bstate.get("resolving_secondary_target_uid")))
+    try:
+        ir_exec_combat._fight(root, fight, scope, [701, 702])
+        ir_exec_combat._block(root, fight, scope, [701, 702])
+    finally:
+        battle_effects.fight_cards = original_fight
+        combat_effects.block = original_block
+
+    # The first card of the referenced instance fights, once per card the clause itself resolved.
+    assert fought == [(601, 701), (601, 702)]
+    assert blocked == [(701, 601), (702, 601)]
+    # The aliases the live leaves read are restored, so the next effect sees no stale target.
+    assert not bstate
+
+
+def test_every_granted_power_source_is_covered():
+    """A grant that takes its abilities from sockets, payments, remembered powers or a random pick now runs.
+
+    ``rules_port.effects.grant_ability`` (the leaf the interpreter calls) already resolves every one of those
+    sources from the battle: a card's socketed gems, its manual powers, the powers the resolving ability remembered,
+    and the Inspire / champion-charge pools for a random pick. The interpreter refused all of them as constructs it
+    did not model, which kept 62 abilities ("gets all socketed powers of this" and friends) from ever running.
+    """
+    from rules_port import granted_abilities
+
+    zero = {"m_Guid": granted_abilities.ZERO_GUID}
+    for flag in granted_abilities.POWER_SOURCE_FLAGS:
+        effect = {"m_GrantedAbilityTemplateId": zero, flag: True}
+        assert granted_abilities.gaps(
+            "GrantAbilityEffectTemplate", effect, "Permanent") == [], flag
+    # A typed grant is unchanged.
+    assert granted_abilities.gaps(
+        "GrantAbilityEffectTemplate",
+        {"m_GrantedAbilityTemplateId": {"m_Guid": "11111111-2222-3333-4444-555555555555"}},
+        "Permanent") == []
+    # A grant that names neither a template nor a source is still refused: its abilities would come from whatever
+    # the resolving ability happened to remember, which the effect alone does not name.
+    assert granted_abilities.gaps(
+        "GrantAbilityEffectTemplate",
+        {"m_GrantedAbilityTemplateId": zero}, "Permanent") == ["grant without a typed ability"]
+
+
+def test_grant_grants_the_sources_socketed_powers_to_its_targets():
+    """The interpreter's grant of socketed powers applies through the live leaf, to the clause's own targets.
+
+    "Troops in your hand get all socketed powers of this": the source is socketed with a gem that grants an
+    ability, and the hand troop gains exactly that ability.
+    """
+    import json
+    import pvp_db
+    from rules_port import ir_exec
+    from tests.tests_builtin_counter_rules import _context, _setup
+    from tests.tests_combat import TPL_GLADIATOR, add_card, make_db
+
+    socketed_powers = "10e6e52f-2270-079d-5e7e-715792978c05"
+    gem_ability = "ddb205d9-03e0-0a63-adee-d52035ab5b0c"   # what gem type 5 grants (gem_templates)
+    hand_troop = 700
+
+    db = make_db()
+    pl_t, ai_t, game, handler, bstate, _player_champ, _ai_champ = _setup(db)
+    add_card(db, 900, 5, TPL_GLADIATOR, loc="warzone")
+    add_card(db, hand_troop, 5, TPL_GLADIATOR, loc="hand")
+    db.execute("UPDATE game_cards SET gems=? WHERE card_uid=?",
+               (pvp_db.EMPTY_SOCKET_GEMS | 5, 900))
+    db.commit()
+    assert gem_ability in pvp_db.db_card_gem_ability_guids(1, 900, conn=db)
+    context = _context(db, handler, game, pl_t, ai_t, bstate)
+
+    assert ir_exec.run_ability(socketed_powers, None, context=context,
+                               source_uid=900, owner_uid=5) is True
+    abilities = json.loads(db.execute(
+        "SELECT card_abilities FROM game_cards WHERE card_uid=?", (hand_troop,)).fetchone()[0])
+    assert gem_ability in abilities, abilities
+    # The source kept its own list: this grant's destination is the target, not the source.
+    source = json.loads(db.execute(
+        "SELECT card_abilities FROM game_cards WHERE card_uid=?", (900,)).fetchone()[0])
+    assert gem_ability not in source, source
+
+
+def test_granted_random_power_is_picked_once_per_activation():
+    """A random granted power is picked once per activation, as C# caches it on the ability instance.
+
+    The live leaf keys its pick on ``resolving_ability_instance_id`` (``ability_runtime_state[<id>]``). The
+    interpreter did not publish that id, so every activation shared the ``"0"`` entry and a second activation
+    reused the first one's random power instead of drawing its own. The chain item's instance id is now bridged
+    through ``run_interpreted_trigger`` and restored afterwards, and the entry is dropped when the activation
+    finishes (the native resolver pops it on the way out, so it must not outlive the run either).
+    """
+    import copy
+    import json
+    import pvp_db
+    from rules_port import effects, ir_exec
+    from tests.tests_builtin_counter_rules import _context, _setup
+    from tests.tests_combat import TPL_GLADIATOR, add_card, make_db
+
+    random_inspire = "26835ad2-b3c9-ec79-4986-ac52bed50d58"
+    deploy = {"player": 5, "card": 900, "from": "hand", "to": "warzone"}
+
+    db = make_db()
+    pl_t, ai_t, game, handler, bstate, _player_champ, _ai_champ = _setup(db)
+    add_card(db, 900, 5, TPL_GLADIATOR, loc="warzone")
+    db.commit()
+    context = _context(db, handler, game, pl_t, ai_t, bstate)
+
+    # The activation's runtime state only exists while the ability resolves (the leaf reads and writes it, and the
+    # finished run drops it), so it is captured from inside the leaf.
+    seen = []
+    original = effects.grant_ability
+
+    def spy(leaf_context):
+        result = original(leaf_context)
+        seen.append((int(leaf_context.bstate.get("resolving_ability_instance_id") or 0),
+                     copy.deepcopy(leaf_context.bstate.get("ability_runtime_state") or {})))
+        return result
+
+    def activate(instance_id):
+        effects.grant_ability = spy
+        try:
+            assert ir_exec.run_ability(random_inspire, "CardEnteredZoneEvent", context=context,
+                                       source_uid=900, owner_uid=5, event=dict(deploy),
+                                       instance_id=instance_id) is True
+        finally:
+            effects.grant_ability = original
+
+    def granted_abilities():
+        return json.loads(db.execute(
+            "SELECT card_abilities FROM game_cards WHERE card_uid=900").fetchone()[0])
+
+    activate(7)
+    published, runtime = seen[-1]
+    # The leaf saw this activation's instance, not the shared "0" a run without an id publishes.
+    assert published == 7, published
+    first = runtime["7"]["RandomPowerTemplate"]
+    assert first in pvp_db.db_inspire_ability_guids(conn=db)
+    # The pick reached the card.
+    assert first in granted_abilities(), (first, granted_abilities())
+    # The finished activation left nothing behind: no runtime entry and no published instance id.
+    assert "ability_runtime_state" not in bstate, bstate.get("ability_runtime_state")
+    assert "resolving_ability_instance_id" not in bstate
+
+    activate(8)
+    published, runtime = seen[-1]
+    assert published == 8, published
+    # A new activation draws for itself; the previous activation's entry is gone, so it cannot reuse that pick.
+    assert "8" in runtime and "7" not in runtime, runtime
+    assert runtime["8"]["RandomPowerTemplate"]
+
+    # Within one activation the pick is cached: an activation that already picked reuses that power instead of
+    # drawing a second one.
+    known = pvp_db.db_inspire_ability_guids(conn=db)[0]
+    bstate["ability_runtime_state"] = {"9": {"RandomPowerTemplate": known}}
+    activate(9)
+    assert seen[-1][1]["9"]["RandomPowerTemplate"] == known
+    assert known in granted_abilities(), (known, granted_abilities())
+    assert "ability_runtime_state" not in bstate
 
 
 if __name__ == "__main__":

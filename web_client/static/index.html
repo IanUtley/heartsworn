@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Heartsworn Battle</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div id="app">
+  <section id="lobby" class="screen">
+    <div class="lobby-panel">
+      <h1>Heartsworn</h1>
+      <p class="subtitle">Hex: Shards of Fate, in the browser</p>
+      <div class="client-folder">
+        <p>Point to your <b>HEX SHARDS OF FATE</b> folder. Card art, card sounds and
+          battleboards are read from it in this page and never uploaded.</p>
+        <button id="pick-folder" class="secondary">Choose Hex folder&hellip;</button>
+        <button id="change-folder" class="secondary" hidden>Choose a different folder&hellip;</button>
+        <input type="file" id="folder-input" webkitdirectory hidden>
+        <p id="folder-status" class="status"></p>
+      </div>
+      <label>Your name <input id="player-name" maxlength="32" value="You"></label>
+      <div class="deck-pickers">
+        <label>Your deck
+          <select id="deck-mine"></select>
+        </label>
+        <label>Opponent (server AI)
+          <select id="deck-theirs"></select>
+        </label>
+      </div>
+      <div class="cosmetics">
+        <label>Card sleeve <select id="sleeve-choice"></select></label>
+        <label>Gameboard <select id="board-choice"></select></label>
+        <label>Sound volume <input type="range" id="volume-choice" min="0" max="100" step="5"> <span id="volume-value"></span></label>
+      </div>
+      <button id="start-match" class="primary">Battle</button>
+      <p id="lobby-status" class="status"></p>
+    </div>
+  </section>
+
+  <section id="battle" class="screen hidden">
+    <div id="board">
+      <div id="board3d"></div>
+      <div id="table">
+        <div class="plane">
+          <div class="zone-row warzone" id="opp-warzone"></div>
+          <div id="centre">
+            <div class="firebar left"></div><div class="firebar right"></div>
+            <div id="medallion"><div class="plate"></div><div class="coin" id="medallion-glyph"></div></div>
+            <div class="chain-label">Chain</div>
+            <div class="chain-items" id="chain"></div>
+          </div>
+          <div class="zone-row warzone" id="my-warzone"></div>
+        </div>
+      </div>
+
+      <div class="hand-row" id="opp-hand"></div>
+      <div class="hand-row" id="my-hand"></div>
+      <div class="champion-slot opp">
+        <div id="opp-champion"></div>
+        <div class="zone-row resources" id="opp-resources"></div>
+      </div>
+      <div class="champion-slot me">
+        <div class="zone-row resources" id="my-resources"></div>
+        <div id="my-champion"></div>
+      </div>
+      <div class="piles opp" id="opp-piles"></div>
+      <div class="piles me" id="my-piles"></div>
+      <div id="phase-dial"><div id="phase-track"></div><div id="phase-label"></div></div>
+
+      <div id="action-panel">
+        <div id="prompt-text"></div>
+        <div id="action-buttons"></div>
+      </div>
+      <div id="preview"></div>
+      <div id="log"></div>
+      <button id="menu-button" title="Menu">&#9881;</button>
+    </div>
+  </section>
+
+  <div id="modal" class="hidden"><div class="modal-card" id="modal-body"></div></div>
+</div>
+<script type="module" src="/static/hex_assets.js"></script>
+<script type="module" src="/static/board3d.js"></script>
+<script src="/static/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,268 @@
+{
+ "schema_version": 1,
+ "sections": {
+  "AbilityTemplate": [
+   {
+    "_t": "Reckoning.Game.AbilityTemplate",
+    "m_AbilityTemplateId": {
+     "m_Guid": "059df492-ff9d-4920-baf6-187ab1555078"
+    },
+    "m_Name": "AtTheStartOfEachChampionSDrawPhaseYouMayDrawACard",
+    "m_AbilityCondition": null,
+    "m_TriggerEventType": {
+     "m_InternalType": "Game.Shared.Mechanics.TurnPhaseEvent"
+    },
+    "m_TriggerCondition": {
+     "_t": "Game.Shared.Mechanics.Triggers.Conditions.TurnPhaseCondition",
+     "m_TurnPhase": "Draw"
+    },
+    "m_ActivationCost": 0,
+    "m_ExhaustsCardOnUse": 0,
+    "m_ChargePointCost": 0,
+    "m_IgnoresChain": 0,
+    "m_AbilityEffectList": [
+     {
+      "m_EffectTemplateId": {
+       "m_Guid": "3a099fff-dbc9-06c9-65bc-8ae87bbfcb0f"
+      },
+      "m_TargetTemplateIndex": 0,
+      "m_EffectInstanceId": 0,
+      "m_EffectDuration": "Instant",
+      "m_OutputVariables": {},
+      "m_ContingentEffectInstanceId": -1,
+      "m_IsOptional": 0,
+      "m_ConditionId": {
+       "m_Guid": "00000000-0000-0000-0000-000000000000"
+      },
+      "m_EffectGroupId": 1,
+      "m_VfxProjectileType": "None",
+      "m_VfxEventType": "None",
+      "m_VfxTargetSelectionType": "Targetable",
+      "m_RecalculateTargets": "True",
+      "m_Layer": 0,
+      "m_SecondaryTargetIndex": -1
+     },
+     {
+      "m_EffectTemplateId": {
+       "m_Guid": "4d5acf22-b1ea-adc9-9f92-6c7367185019"
+      },
+      "m_TargetTemplateIndex": 1,
+      "m_EffectInstanceId": 1,
+      "m_EffectDuration": "EndOfTurn",
+      "m_OutputVariables": {},
+      "m_ContingentEffectInstanceId": 0,
+      "m_IsOptional": 0,
+      "m_ConditionId": {
+       "m_Guid": "00000000-0000-0000-0000-000000000000"
+      },
+      "m_EffectGroupId": 2,
+      "m_VfxProjectileType": "None",
+      "m_VfxEventType": "None",
+      "m_VfxTargetSelectionType": "Targetable",
+      "m_RecalculateTargets": "True",
+      "m_Layer": 0,
+      "m_SecondaryTargetIndex": -1
+     }
+    ],
+    "m_AbilityTargetTemplateIds": [
+     {
+      "m_Guid": "eb7e48cd-1c85-813f-6635-d43f50cf7809"
+     },
+     {
+      "m_Guid": "d78b93c1-4f69-f3cd-3c6f-c36e3343c2e1"
+     }
+    ],
+    "m_VariableActivationCost": 0,
+    "m_RecalculateAutoTargets": 0,
+    "m_AbilityOptions": [],
+    "m_Threshold": [],
+    "m_SacrificeTarget": {
+     "m_Guid": "00000000-0000-0000-0000-000000000000"
+    },
+    "m_LifeCost": 0,
+    "m_Optional": 1,
+    "m_Manual": 0,
+    "m_ExhaustTarget": {
+     "m_Guid": "00000000-0000-0000-0000-000000000000"
+    },
+    "m_Variables": [
+     {
+      "_t": "Game.Shared.Mechanics.Abilities.AbilityConstant",
+      "m_DefaultValue": 1,
+      "m_Name": "A"
+     },
+     {
+      "_t": "Game.Shared.Mechanics.Abilities.AbilityConstant",
+      "m_DefaultValue": 2,
+      "m_Name": "M1"
+     }
+    ],
+    "m_GameText": "At the start of each champion's draw phase, you may draw a card. If you do, your actions in all zones cost 2 more this turn.",
+    "m_TriggerCollectionFlags": "Champions|Warzone",
+    "m_AICustomAbilityEvaluator": [],
+    "m_CastingBehavior": "QuickAction",
+    "m_DiscardTarget": {
+     "m_Guid": "00000000-0000-0000-0000-000000000000"
+    },
+    "m_VoidTarget": {
+     "m_Guid": "00000000-0000-0000-0000-000000000000"
+    },
+    "m_ActivationGameText": "",
+    "m_ShuffleIntoDeckTarget": {
+     "m_Guid": "00000000-0000-0000-0000-000000000000"
+    },
+    "m_UsesPreviousState": 0,
+    "m_SerializedTAC": null,
+    "m_AIHints": "",
+    "m_PutIntoDeckTarget": {
+     "m_Guid": "00000000-0000-0000-0000-000000000000"
+    },
+    "m_PutIntoDeckTarget2": {
+     "m_Guid": "00000000-0000-0000-0000-000000000000"
+    },
+    "m_RevealTarget": {
+     "m_Guid": "00000000-0000-0000-0000-000000000000"
+    },
+    "m_PutIntoHandTarget": {
+     "m_Guid": "00000000-0000-0000-0000-000000000000"
+    },
+    "m_SpellPointCost": 0,
+    "m_DiscountMatchCardFilter": null,
+    "m_DiscardTargets": [],
+    "m_VariableActivationCostMinimum": 0,
+    "m_UsesPerTurn": 0,
+    "m_UsesPerGame": 0,
+    "m_ExhaustTargets": [],
+    "m_CounterCosts": [],
+    "m_Cooldown": 0,
+    "m_IsChargePower": 0,
+    "m_IsSpellPower": 0,
+    "m_AbilityFreeCondition": null,
+    "m_AbilityIndex": -1
+   },
+   {
+    "_t": "Reckoning.Game.AbilityTemplate",
+    "m_AbilityTemplateId": {
+     "m_Guid": "47ea992d-4af0-0e67-7e82-018b0e29a636"
+    },
+    "m_Name": "TargetOpposingTroopGetsM3AtkThisTurn",
+    "m_AbilityCondition": null,
+    "m_TriggerEventType": null,
+    "m_TriggerCondition": null,
+    "m_ActivationCost": 0,
+    "m_ExhaustsCardOnUse": 0,
+    "m_ChargePointCost": 0,
+    "m_IgnoresChain": 0,
+    "m_AbilityEffectList": [
+     {
+      "m_EffectTemplateId": {
+       "m_Guid": "0919b94a-befe-8fca-689b-4b1cea303b41"
+      },
+      "m_TargetTemplateIndex": 0,
+      "m_EffectInstanceId": 0,
+      "m_EffectDuration": "EndOfTurn",
+      "m_OutputVariables": {},
+      "m_ContingentEffectInstanceId": -1,
+      "m_IsOptional": 0,
+      "m_ConditionId": {
+       "m_Guid": "00000000-0000-0000-0000-000000000000"
+      },
+      "m_EffectGroupId": 1,
+      "m_VfxProjectileType": "None",
+      "m_VfxEventType": "None",
+      "m_VfxTargetSelectionType": "Targetable",
+      "m_RecalculateTargets": "UseDefault",
+      "m_Layer": 0,
+      "m_SecondaryTargetIndex": -1
+     }
+    ],
+    "m_AbilityTargetTemplateIds": [
+     {
+      "m_Guid": "5df3be98-0c67-9c28-7a63-293f2745e10b"
+     }
+    ],
+    "m_VariableActivationCost": 0,
+    "m_RecalculateAutoTargets": 0,
+    "m_AbilityOptions": [],
+    "m_Threshold": null,
+    "m_SacrificeTarget": {
+     "m_Guid": "00000000-0000-0000-0000-000000000000"
+    },
+    "m_LifeCost": 0,
+    "m_Optional": 0,
+    "m_Manual": 0,
+    "m_ExhaustTarget": {
+     "m_Guid": "00000000-0000-0000-0000-000000000000"
+    },
+    "m_Variables": [
+     {
+      "_t": "Game.Shared.Mechanics.Abilities.AbilityConstant",
+      "m_Name": "M3",
+      "m_DefaultValue": -3
+     }
+    ],
+    "m_GameText": "Target opposing troops gets -3[ATK] this turn.",
+    "m_TriggerCollectionFlags": "Champions|Warzone",
+    "m_AICustomAbilityEvaluator": [],
+    "m_CastingBehavior": "QuickAction",
+    "m_DiscardTarget": {
+     "m_Guid": "00000000-0000-0000-0000-000000000000"
+    },
+    "m_VoidTarget": {
+     "m_Guid": "00000000-0000-0000-0000-000000000000"
+    },
+    "m_ActivationGameText": "",
+    "m_ShuffleIntoDeckTarget": {
+     "m_Guid": "00000000-0000-0000-0000-000000000000"
+    },
+    "m_UsesPreviousState": 0,
+    "m_SerializedTAC": {
+     "data": "AgAAAAAA"
+    },
+    "m_AIHints": "",
+    "m_PutIntoDeckTarget": {
+     "m_Guid": "00000000-0000-0000-0000-000000000000"
+    },
+    "m_PutIntoDeckTarget2": {
+     "m_Guid": "00000000-0000-0000-0000-000000000000"
+    },
+    "m_RevealTarget": {
+     "m_Guid": "00000000-0000-0000-0000-000000000000"
+    },
+    "m_PutIntoHandTarget": {
+     "m_Guid": "00000000-0000-0000-0000-000000000000"
+    },
+    "m_SpellPointCost": 0,
+    "m_DiscountMatchCardFilter": null,
+    "m_DiscardTargets": [],
+    "m_VariableActivationCostMinimum": 0,
+    "m_UsesPerTurn": 0,
+    "m_UsesPerGame": 0,
+    "m_ExhaustTargets": [],
+    "m_CounterCosts": [],
+    "m_Cooldown": 0,
+    "m_IsChargePower": 0,
+    "m_IsSpellPower": 0,
+    "m_AbilityFreeCondition": null,
+    "m_AbilityIndex": -1,
+    "_v": [
+     {
+      "AbilityTemplate": 42
+     },
+     {
+      "AbilityEffectTargetMapping": 15
+     },
+     {
+      "AbilityConstant": 1
+     },
+     {
+      "AbilityField": 1
+     },
+     {
+      "SerializableTAC": 1
+     }
+    ]
+   }
+  ]
+ }
+}

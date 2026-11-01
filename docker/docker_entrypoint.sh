@@ -22,10 +22,24 @@ mkdir -p /tmp
 : > /tmp/proxy_log.txt
 : > /tmp/tournament_log.txt
 : > /tmp/replay_log.txt
+: > /tmp/campaign_editor_log.txt
+
+# The campaign editor is published as a container service. Local restart.sh
+# keeps the same program bound to loopback by default.
+export HEX_CAMPAIGN_EDITOR_HOST="${HEX_CAMPAIGN_EDITOR_HOST:-0.0.0.0}"
+export HEX_CAMPAIGN_EDITOR_PORT="${HEX_CAMPAIGN_EDITOR_PORT:-8765}"
+# The editor takes log-in passwords, so it serves HTTPS. The launcher makes a
+# self-signed certificate at first start unless HEX_CAMPAIGN_EDITOR_CERT and
+# HEX_CAMPAIGN_EDITOR_KEY name one.
+export HEX_CAMPAIGN_EDITOR_TLS="${HEX_CAMPAIGN_EDITOR_TLS:-1}"
+
+# The IR interpreter engine is on by default. Set HEX_IR_ENGINE=0 to run the native resolver.
+export HEX_IR_ENGINE="${HEX_IR_ENGINE:-1}"
 
 # Validate the gamedata mount and create a persistent database when this is a
-# first deployment. Both services open SQLite only after this has completed.
+# first deployment. Services open SQLite only after this has completed.
 python3 /hex/docker/docker_bootstrap.py
+export HEX_DB_BOOTSTRAPPED=1
 
 echo "[docker] starting Supervisor-managed Hex services"
 exec supervisord -n -c /hex/supervisord.conf

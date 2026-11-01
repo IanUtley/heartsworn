@@ -2,15 +2,15 @@
 # ---------------------------------------------------------------------------
 # Hex TCG private server restart script.
 #
-# Reliably stops any previously running HConnect, auth proxy, tournament and
-# replay worker processes.
-# processes, validates all Python sources, starts the services fresh, and
-# verifies each port is actually listening before exiting.
+# Reliably stops any previously running HConnect, auth proxy, campaign editor,
+# tournament and replay worker processes, validates Python sources, starts the
+# services fresh, and verifies each HTTP/TCP port before exiting.
 #
 # Only to be used in development
 #
 #   server  : hconnect_server.py  ->  TCP 9933  (HConnect game protocol)
 #   proxy   : proxy.py 8081        ->  TCP 8081  (Steam auth / collection HTTP)
+#   editor  : campaign editor      ->  HTTP 8765 (loopback only)
 #
 # Usage:
 #   bash restart.sh       # stop and start all services
@@ -18,47 +18,33 @@
 # ---------------------------------------------------------------------------
 set -euo pipefail
 
-BASE_DIR="/home/ianutley/Hex"
+BASE_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 LOG_DIR="/tmp"
 SERVER_PORT=9933
 PROXY_PORT=8081
+CAMPAIGN_EDITOR_PORT=8765
+CAMPAIGN_EDITOR_SCRIPT="$BASE_DIR/campaign_editor/server.py"
 
 echo ------------------------------------------------------------------------
 echo For development purposes only. Please use Docker version for deployment.
 echo ------------------------------------------------------------------------
 
-# Python files that must compile cleanly before we start anything.
-SOURCES=(
-    "$BASE_DIR/hconnect_server.py"
-    "$BASE_DIR/proxy.py"
-    "$BASE_DIR/campaign.py"
-    "$BASE_DIR/commands.py"
-    "$BASE_DIR/db.py"
-    "$BASE_DIR/encoder.py"
-    "$BASE_DIR/game_engine.py"
-    "$BASE_DIR/game_session.py"
-    "$BASE_DIR/objfmt_builder.py"
-    "$BASE_DIR/static.py"
-    "$BASE_DIR/ability.py"
-    "$BASE_DIR/ai.py"
-    "$BASE_DIR/debug_runtime.py"
-    "$BASE_DIR/battle_engine.py"
-    "$BASE_DIR/ai_deck_strategy.py"
-    "$BASE_DIR/AssetExtraction/generate_starter_decks.py"
-    "$BASE_DIR/AssetExtraction/evaluate_fra_deck_personalities.py"
-    "$BASE_DIR/campaign_chains/__init__.py"
-    "$BASE_DIR/gamemodes/__init__.py"
-    "$BASE_DIR/gamemodes/tournament_server.py"
-    "$BASE_DIR/services/__init__.py"
-    "$BASE_DIR/services/social.py"
-    "$BASE_DIR/replay.py"
-    "$BASE_DIR/replay_server.py"
-)
-# Also validate every .py file under these packages compiles.
-PACKAGES=("domain" "abilities")
-
 log()  { echo "[restart] $*"; }
 die()  { echo "[restart] ERROR: $*" >&2; exit 1; }
+
+compile_python_sources() {
+    local source
+    while IFS= read -r -d '' source; do
+        python3 -m py_compile "$source" || die \
+            "syntax error in ${source#"$BASE_DIR/"}"
+    done < <(
+        find "$BASE_DIR" \
+            \( -path "$BASE_DIR/.git" \
+               -o -name '.venv' \
+               -o -name '.venv-*' \) -prune \
+            -o -type f -name '*.py' -print0
+    )
+}
 
 ACTION="${1:-restart}"
 case "$ACTION" in
@@ -66,8 +52,20 @@ case "$ACTION" in
     *) die "unknown action '$ACTION' (use 'restart' or 'stop')" ;;
 esac
 
+# The editor lives at the project root, and so does the campaign it edits
+# (campaign/, or HEX_CAMPAIGN_ROOT).
+CAMPAIGN_EDITOR_DATA="${HEX_CAMPAIGN_ROOT:-$BASE_DIR/campaign}"
+CAMPAIGN_EDITOR_AVAILABLE=0
+if [[ -f "$CAMPAIGN_EDITOR_SCRIPT" && -d "$CAMPAIGN_EDITOR_DATA/campaign_runtime" ]]; then
+    CAMPAIGN_EDITOR_AVAILABLE=1
+fi
+export HEX_CAMPAIGN_EDITOR_HOST="${HEX_CAMPAIGN_EDITOR_HOST:-127.0.0.1}"
+export HEX_CAMPAIGN_EDITOR_PORT="$CAMPAIGN_EDITOR_PORT"
+# The IR interpreter engine is on by default. Set HEX_IR_ENGINE=0 to run the native resolver.
+export HEX_IR_ENGINE="${HEX_IR_ENGINE:-1}"
+
 stop_services() {
-    log "Stopping previous processes (hconnect_server, proxy, tournament, replay)..."
+    log "Stopping previous processes (hconnect_server, proxy, campaign editor, tournament, replay)..."
     if [[ -f /tmp/hex-supervisord.pid ]]; then
         supervisor_pid="$(< /tmp/hex-supervisord.pid)"
         if [[ "$supervisor_pid" =~ ^[0-9]+$ ]]; then
@@ -76,11 +74,13 @@ stop_services() {
     fi
     pkill -9 -f "$BASE_DIR/hconnect_server.py" 2>/dev/null || true
     pkill -9 -f "$BASE_DIR/proxy.py" 2>/dev/null || true
+    pkill -9 -f "$CAMPAIGN_EDITOR_SCRIPT" 2>/dev/null || true
     pkill -9 -f "$BASE_DIR/gamemodes/tournament_server.py" 2>/dev/null || true
     pkill -9 -f "$BASE_DIR/replay_server.py" 2>/dev/null || true
     # Also catch plain command-line forms (e.g. launched from another CWD).
     pkill -9 -f "hconnect_server.py" 2>/dev/null || true
     pkill -9 -f "proxy.py 8081" 2>/dev/null || true
+    pkill -9 -f "campaign_editor/server.py" 2>/dev/null || true
     pkill -9 -f "tournament_server.py" 2>/dev/null || true
     pkill -9 -f "replay_server.py" 2>/dev/null || true
 
@@ -106,7 +106,7 @@ fi
 sleep 2
 
 # ---------------------------------------------------------------------------
-# 2. Database — apply pending migrations, or create a fresh database.
+# 2. Database — apply pending migrations and run the shared bootstrap.
 # ---------------------------------------------------------------------------
 log "Checking database ..."
 # Migrations: run migration.py if present, then remove it.
@@ -116,56 +116,33 @@ if [[ -f "$BASE_DIR/migration.py" ]]; then
     rm -f "$BASE_DIR/migration.py"
     log "Migration applied."
 fi
-# Fresh database: created from static.py if it doesn't exist yet.
-if [[ ! -f "$BASE_DIR/hconnect.db" ]]; then
-    log "Creating fresh database from static.py ..."
-    python3 -c "
-import sqlite3, static
-db = sqlite3.connect('$BASE_DIR/hconnect.db')
-static.ensure_schema(db)
-db.close()
-" || die "fresh database creation failed"
-    log "Database created."
-fi
+# Keep local startup behavior aligned with the Docker entrypoint. This applies
+# schema upgrades and server-owned seeds to existing databases, materializes
+# Records when gamedata is configured, repairs missing FRA catalogues, and
+# validates the complete reference projection before any service opens SQLite.
+# Local restart historically did not run the Docker bootstrap test suite; keep
+# that behavior unless the caller explicitly invokes the bootstrap itself with
+# HEX_RUN_TESTS_ON_BOOT enabled.
+log "Running database bootstrap ..."
+HEX_RUN_TESTS_ON_BOOT=0 \
+    python3 "$BASE_DIR/docker/docker_bootstrap.py" \
+    || die "database bootstrap failed"
+# The bootstrap owns schema initialization and seed refresh for this startup.
+# Service processes inherit this marker and open the prepared database without
+# running static.ensure_schema again.
+export HEX_DB_BOOTSTRAPPED=1
 
 # ---------------------------------------------------------------------------
 # 3. Validate all sources before starting.
 # ---------------------------------------------------------------------------
 log "Compiling sources..."
-for src in "${SOURCES[@]}"; do
-    if [[ -f "$src" ]]; then
-        python3 -m py_compile "$src" || die "syntax error in $src"
-    fi
-done
-for pkg in "${PACKAGES[@]}"; do
-    if [[ -d "$BASE_DIR/$pkg" ]]; then
-        while IFS= read -r -d '' f; do
-            python3 -m py_compile "$f" || die "syntax error in $f"
-        done < <(find "$BASE_DIR/$pkg" -name '*.py' -print0)
-    fi
-done
+compile_python_sources
 log "All sources compile OK."
-
-# Starter decks are derived from the client data rather than checked into the
-# server repository. Keep a local deployment's generated copy in sync when a
-# gamedata file or Records snapshot is available.
-STARTER_DECK_GENERATOR="$BASE_DIR/AssetExtraction/generate_starter_decks.py"
-if [[ -n "${HEX_GAMEDATA:-}" ]]; then
-    [[ -f "$HEX_GAMEDATA" ]] || die "HEX_GAMEDATA does not exist: $HEX_GAMEDATA"
-    log "Generating starter decks from HEX_GAMEDATA ..."
-    python3 "$STARTER_DECK_GENERATOR" --gamedata "$HEX_GAMEDATA" \
-        --output "$BASE_DIR/generated/starter_decks.json" || die "starter-deck generation failed"
-elif [[ -d "${HEX_RECORDS:-$BASE_DIR/Records}" ]]; then
-    log "Generating starter decks from Records ..."
-    python3 "$STARTER_DECK_GENERATOR" --records-dir "${HEX_RECORDS:-$BASE_DIR/Records}" \
-        --output "$BASE_DIR/generated/starter_decks.json" || die "starter-deck generation failed"
-else
-    log "No gamedata or Records source; keeping any existing generated starter decks."
-fi
 
 # ---------------------------------------------------------------------------
 # 4. Reset logs (keep last 1000 lines) and start detached.
-for logfile in "$LOG_DIR/hconnect_log.txt" "$LOG_DIR/proxy_log.txt" "$LOG_DIR/hconnect_requests.log"; do
+for logfile in "$LOG_DIR/hconnect_log.txt" "$LOG_DIR/proxy_log.txt" \
+              "$LOG_DIR/campaign_editor_log.txt" "$LOG_DIR/hconnect_requests.log"; do
     if [[ -f "$logfile" ]]; then
         tail -1000 "$logfile" > "$logfile.tmp" && mv "$logfile.tmp" "$logfile"
     else
@@ -184,6 +161,11 @@ if [[ "${HEX_USE_SUPERVISOR:-1}" == "1" ]]; then
     SERVER_PID=$SUPERVISOR_PID
     PROXY_PID=$SUPERVISOR_PID
     REPLAY_PID=$SUPERVISOR_PID
+    if [[ "$CAMPAIGN_EDITOR_AVAILABLE" == "1" ]]; then
+        log "Campaign editor found; Supervisor will start it."
+    else
+        log "Campaign editor not found; skipping it."
+    fi
 else
 log "Starting HConnect server on :$SERVER_PORT ..."
 # The migrated RulesPort is the only transaction path for live client
@@ -205,15 +187,24 @@ log "Starting replay server ..."
 setsid nohup python3 -u "$BASE_DIR/replay_server.py" \
     >> "$LOG_DIR/hconnect_log.txt" 2>&1 < /dev/null &
 REPLAY_PID=$!
+
+if [[ "$CAMPAIGN_EDITOR_AVAILABLE" == "1" ]]; then
+    log "Starting campaign editor on $HEX_CAMPAIGN_EDITOR_HOST:$CAMPAIGN_EDITOR_PORT ..."
+    setsid nohup /bin/sh "$BASE_DIR/docker/campaign_editor_launcher.sh" \
+        >> "$LOG_DIR/campaign_editor_log.txt" 2>&1 < /dev/null &
+    CAMPAIGN_EDITOR_PID=$!
+else
+    log "Campaign editor not found; skipping it."
+fi
 fi
 
 # ---------------------------------------------------------------------------
-# 5. Wait until both processes are alive and their ports accept connections.
+# 5. Wait until the required services are alive and their ports accept connections.
 # ---------------------------------------------------------------------------
 wait_for_port() {
     local port="$1"
-    # HConnect imports and seeds the Records-derived metadata before binding;
-    # a cold start can legitimately take well over the old 7.5 second window.
+    # Give HConnect ample time to bind after database bootstrap and process
+    # startup; a cold start can take longer than the old 7.5 second window.
     local tries="${2:-120}"
     local i
     for ((i = 1; i <= tries; i++)); do
@@ -235,6 +226,16 @@ if ! wait_for_port "$PROXY_PORT"; then
     die "Proxy failed to bind :$PROXY_PORT (see $LOG_DIR/proxy_log.txt)"
 fi
 
+if [[ "$CAMPAIGN_EDITOR_AVAILABLE" == "1" ]]; then
+    if [[ "${HEX_USE_SUPERVISOR:-1}" == "1" ]]; then
+        CAMPAIGN_EDITOR_PID=$SUPERVISOR_PID
+    fi
+    log "Waiting for campaign editor on $HEX_CAMPAIGN_EDITOR_HOST:$CAMPAIGN_EDITOR_PORT ..."
+    if ! wait_for_port "$CAMPAIGN_EDITOR_PORT"; then
+        die "Campaign editor failed to bind :$CAMPAIGN_EDITOR_PORT (see $LOG_DIR/campaign_editor_log.txt)"
+    fi
+fi
+
 # Confirm the PIDs we spawned are still alive (i.e. didn't crash post-bind).
 if ! kill -0 "$SERVER_PID" 2>/dev/null; then
     die "HConnect server (PID $SERVER_PID) exited — see $LOG_DIR/hconnect_log.txt"
@@ -245,6 +246,9 @@ fi
 if ! kill -0 "$REPLAY_PID" 2>/dev/null; then
     die "Replay server (PID $REPLAY_PID) exited — see $LOG_DIR/hconnect_log.txt"
 fi
+if [[ "$CAMPAIGN_EDITOR_AVAILABLE" == "1" ]] && ! kill -0 "$CAMPAIGN_EDITOR_PID" 2>/dev/null; then
+    die "Campaign editor (PID $CAMPAIGN_EDITOR_PID) exited — see $LOG_DIR/campaign_editor_log.txt"
+fi
 
 # The tournament server runs in-process: hconnect_server.main() calls
 # tournament_server.start() (pool seeding + refill scheduler). Verify the
@@ -253,4 +257,8 @@ T_POOL=$(sqlite3 "$BASE_DIR/hconnect.db" \
     "SELECT COUNT(*) FROM tournaments WHERE status='waiting'" 2>/dev/null || echo 0)
 log "Tournament scheduler: $T_POOL waiting room(s) ready"
 
-log "OK: server PID $SERVER_PID (:9933), proxy PID $PROXY_PID (:8081), replay PID $REPLAY_PID"
+if [[ "$CAMPAIGN_EDITOR_AVAILABLE" == "1" ]]; then
+    log "OK: server PID $SERVER_PID (:$SERVER_PORT), proxy PID $PROXY_PID (:$PROXY_PORT), campaign editor ($HEX_CAMPAIGN_EDITOR_HOST:$CAMPAIGN_EDITOR_PORT), replay PID $REPLAY_PID"
+else
+    log "OK: server PID $SERVER_PID (:$SERVER_PORT), proxy PID $PROXY_PID (:$PROXY_PORT), replay PID $REPLAY_PID"
+fi

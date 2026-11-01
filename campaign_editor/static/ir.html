@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>IR Editor</title>
+<style>
+  :root { --bg: #11161b; --panel: #182028; --panel-2: #1f2a34; --text: #e7edf1; --muted: #93a4b0;
+    --line: #2c3a46; --accent: #5cc8ff; --bad: #ff6b6b; --ok: #4fd18b; color-scheme: dark; }
+  @media (prefers-color-scheme: light) {
+    :root:not([data-theme="dark"]) { --bg: #eef2f5; --panel: #ffffff; --panel-2: #f3f6f8; --text: #17212a;
+      --muted: #5d6b76; --line: #d6dee4; --accent: #0b6fa4; --bad: #b3261e; --ok: #1e7a45; color-scheme: light; }
+  }
+  :root[data-theme="light"] { --bg: #eef2f5; --panel: #ffffff; --panel-2: #f3f6f8; --text: #17212a;
+    --muted: #5d6b76; --line: #d6dee4; --accent: #0b6fa4; --bad: #b3261e; --ok: #1e7a45; color-scheme: light; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.45 system-ui, sans-serif; }
+  button, input { font: inherit; color: var(--text); background: var(--panel-2); border: 1px solid var(--line); border-radius: 5px; }
+  input { padding: 3px 7px; min-width: 300px; font-family: ui-monospace, monospace; font-size: 12px; }
+  button { padding: 3px 9px; cursor: pointer; }
+  header { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 8px 12px; background: var(--panel); border-bottom: 1px solid var(--line); }
+  header h1 { font-size: 15px; margin: 0 6px 0 0; }
+  #status { flex: 1 1 100%; color: var(--muted); font-size: 12px; }
+  #status.bad { color: var(--bad); }
+  #status.ok { color: var(--ok); }
+  main { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 12px; padding: 12px; }
+  @media (max-width: 760px) { main { grid-template-columns: 1fr; } }
+  .editor { position: relative; }
+  textarea { width: 100%; min-height: 60vh; resize: vertical; padding: 8px; font: 13px/1.4 ui-monospace, Consolas, monospace;
+    background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 8px; white-space: pre-wrap; overflow-wrap: anywhere; }
+  textarea:focus { outline: 1px solid var(--accent); }
+  #menu { position: absolute; display: none; max-height: 260px; overflow: auto; min-width: 320px; background: var(--panel-2);
+    border: 1px solid var(--accent); border-radius: 6px; box-shadow: 0 4px 16px rgba(0,0,0,.35); z-index: 5; }
+  #menu div { padding: 3px 8px; cursor: pointer; font: 12px ui-monospace, monospace; display: flex; justify-content: space-between; gap: 10px; }
+  #menu div.active, #menu div:hover { background: var(--line); }
+  #menu span.type { color: var(--muted); }
+  h2 { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 10px 0 6px; }
+  h2:first-child { margin-top: 0; }
+  html.embedded h1 { display: none; }
+  .name { display: flex; justify-content: space-between; align-items: center; gap: 6px; font: 12px ui-monospace, monospace; }
+  .name span { min-width: 0; overflow-wrap: anywhere; }
+  main > * { min-width: 0; }
+  .name button { font-size: 11px; padding: 0 6px; }
+  .fields { margin: 2px 0 8px 12px; color: var(--muted); font: 11px ui-monospace, monospace; }
+  .fields span { display: inline-block; margin: 1px 6px 1px 0; }
+  .note { color: var(--muted); font-size: 12px; }
+  #compiled { margin-top: 12px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 8px;
+    font: 12px/1.4 ui-monospace, monospace; white-space: pre-wrap; max-height: 40vh; overflow: auto; }
+</style>
+</head>
+<body>
+<header>
+  <h1>IR Editor</h1>
+  <input id="guid" type="text" placeholder="ability GUID" aria-label="Ability GUID">
+  <button id="load" type="button">Load</button>
+  <button id="check" type="button">Check code</button>
+  <span id="status">Loading the names…</span>
+</header>
+<main>
+  <section class="editor">
+    <textarea id="text" spellcheck="false" aria-label="IR as code" placeholder="root.ability_template(&#10;  name=&quot;…&quot;,&#10;)"></textarea>
+    <div id="menu" role="listbox" aria-label="Completions"></div>
+    <pre id="compiled" aria-label="Records this compiles to">Check the code to see the Records it compiles to.</pre>
+    <p class="note">Type a name to complete it. Up and Down move, Tab or Enter inserts, Escape closes.</p>
+  </section>
+  <aside>
+    <h2>Names</h2>
+    <div id="layers"></div>
+  </aside>
+</main>
+<script src="/static/ir.js"></script>
+</body>
+</html>

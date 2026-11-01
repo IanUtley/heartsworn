@@ -1,8 +1,16 @@
 """Profile/reward output projection mixin for HConnect connections."""
 
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from profile_db import db_get_unopened_chests
+from profile_db import db_get_unopened_chests, db_get_inventory_items
+
+# Card incdata the server sends at login (written by the card editor's publish button).
+PUBLISHED_INCDATA_DIR = Path(__file__).resolve().parent.parent / "campaign" / "incdata" / "published"
+# ProfileMainData.Type: TemplateManager.DataTypes.PC. The enum's serialized name is the client's
+# nested type; not yet confirmed on the wire, so check it before relying on publish.
+INCDATA_PC = 0
+INCDATA_DATA_TYPE = "Reckoning.Game.TemplateManager+DataTypes"
 
 if TYPE_CHECKING:
     # HConnect still binds these legacy protocol and DB names into this
@@ -30,6 +38,15 @@ class ProfileStreamMixin:
     def push_profile_stream(self):
         p = self.user_profile
         username = display_name_from_identity(p["name"])
+        # Give every account the current chat-commands mail once; an older
+        # version the user received is superseded by sending the new text.
+        try:
+            from profile_db import db_ensure_chat_commands_mail
+            if db_ensure_chat_commands_mail(p["id"], conn=_db):
+                _db.commit()
+                log_req("    Sent chat-commands mail")
+        except Exception as exc:
+            log_req(f"    WARN: chat-commands mail failed: {exc}")
         gold = p["gold"]
         platinum = p["platinum"]
         
@@ -86,29 +103,29 @@ class ProfileStreamMixin:
         # The client collects List<chest_bits> from the profile stream and
         # feeds them to CreateLocalTreasureCache (PlayerProfile.cs).
         self._push_chests_stream(p)
+        # Saved deck templates and mercenary parties.
+        self._push_mercenary_stream(p)
+        # The mercenary party cap follows the mercenaries the account owns, so
+        # it is current before the flags are sent.
+        if p:
+            from services import mercenaries
+            mercenaries.sync_party_cap(_db, p["id"])
+        # The single List<FlagData>: Reckoning account flags, including the
+        # mercenary party cap (CAMP_PARTYCAP).
         self._push_reckoning_flags_stream(p)
 
         now_str = time.strftime("%m/%d/%Y %H:%M:%S", time.gmtime())
         
-        # Build inventory items from DB (only purchased items, no stardust/chests)
+        # Build persisted inventory items; chests are added separately below.
         inv_items = []
         
-        # Add purchased items from DB
-        purchased = db_get_inventory(p["id"])
-        for tguid, qty in purchased:
-            # The client replaces an inventory row when its UID and template
-            # match.  Keep the UID stable across profile pushes and purchase
-            # responses so ItemQuantity remains an authoritative total.
-            row = db_inventory_item(p["id"], tguid, conn=_db)
-            client_uid = row[2] if row and row[2] else None
-            if not client_uid:
-                client_uid = db_next_inventory_client_uid(p["id"], conn=_db)
-                db_set_inventory_client_uid(
-                    p["id"], tguid, client_uid, conn=_db)
+        # Add every account inventory row from DB.
+        purchased = db_get_inventory_items(p["id"])
+        for _row_id, tguid, qty, client_uid in purchased:
+            # Stardust is counted by the client as inventory instances. Keep
+            # one serialized inventory_bits item per persisted row, each with
+            # its own stable client UID, even when templates match.
             inv_items.append((tguid, client_uid, qty))
-        # Persist any newly allocated client UIDs before later service calls
-        # use them for quantity updates.
-        _db.commit()
 
         # Add unopened chests as inventory items. The client expects the chest
         # to be BOTH a chest_bits entry (m_InventoryChests, via the chest
@@ -149,7 +166,13 @@ class ProfileStreamMixin:
                 except:
                     card_ids = []
                 card_guids = []  # CardsInDeck kept empty in profile push
-                deck_data.append((deck_uid64, dname, deck_uid, champ_id, dk.get("cards", "[]"), card_guids))
+                try:
+                    deck_equipment = _json.loads(dk.get("equipment") or "[]")
+                except (TypeError, ValueError):
+                    deck_equipment = []
+                from services.equipment import equipment_slots
+                deck_data.append((deck_uid64, dname, deck_uid, champ_id, dk.get("cards", "[]"), card_guids,
+                                  equipment_slots(deck_equipment)))
         deck_count = len(deck_data)
         log(f">>> Profile push: {deck_count} decks from DB")
         
@@ -191,8 +214,12 @@ class ProfileStreamMixin:
         if self.user_profile:
             card_rows = db_profile_card_instances(
                 self.user_profile["id"], conn=_db)
+            # Every copy in the login push is now known to the client; a later
+            # CardsAdded push must only announce copies granted after this.
+            self._announced_card_ids = {int(r[5]) for r in card_rows}
             profile_cards = [
-                (r[0], r[1] or "", r[5], r[2] or 0, r[3] or 0, r[4] or 0)
+                (r[0], r[1] or "", r[5], r[2] or 0, r[3] or 0,
+                 r[4] or 0, bool(r[6]))
                 for r in card_rows
             ]
         log(f">>> Profile push: {len(profile_cards)} card instances from DB")
@@ -344,6 +371,7 @@ class ProfileStreamMixin:
             "reqid": 0, "c": 0, "conh": 0, "sid": self.sid,
         }, dw3)
         log_req(f">>> PUSH LoginStreamDone (dt=2211) dw_sz={len(dw3)}")
+        self.push_published_incdata()
 
         # The client normally requests 60007 during login, but older service
         # initialization can drop that request.  Push the event as well so the
@@ -386,6 +414,44 @@ class ProfileStreamMixin:
         log_req(f">>> PUSH Iconoclast BannedCardList (dt=2214) "
                  f"{len(banned)} cards, dw_sz={len(packet)}")
 
+    def _push_profile_stream_object(self, inner, label):
+        """Send one standalone object in the login profile stream (dt=2210)."""
+        profile_args = encode_objfmt_response(
+            ["Game.Shared.Network.Profile.ProfileStreamEventArgs",
+             "System.Byte[]", "System.Boolean"],
+            [("Data", "bytes", inner),
+             ("done", "bool", False)]
+        )
+        dw = encode_datawrapper(0, 2210, compress_gzip(profile_args), 1,
+                                "00000000-0000-0000-0000-000000000000")
+        issuer = f"0.0.0.0.ServiceProfile.{SERVICE_PROFILE_UID}.ServicePlayer.{self.client_uid}.{self.scnt}"
+        self.scnt += 1
+        self.send({
+            "issuer": issuer, "target": "ServiceProfile", "instance": "Shared",
+            "reqid": 0, "c": 0, "conh": 0, "sid": self.sid,
+        }, dw)
+        log_req(f">>> PUSH {label} (dt=2210) dw_sz={len(dw)}")
+
+    def _push_mercenary_stream(self, profile):
+        """Push saved deck templates and List<ChampionParty>.
+
+        Flags (CAMP_PARTYCAP) travel in the shared Reckoning flag stream; a
+        second List<FlagData> could replace the first in the client.
+        """
+        from services import deck_templates, mercenaries
+        if not profile:
+            return
+        templates = deck_templates.list_templates(_db, profile["id"])
+        if templates:
+            self._push_profile_stream_object(
+                deck_templates.encode_saved_template_list(templates),
+                f"SavedProfileDeckTemplate list ({len(templates)} templates)")
+        parties = mercenaries.get_parties(_db, profile["id"])
+        if parties:
+            self._push_profile_stream_object(
+                mercenaries.encode_party_list(parties),
+                f"ChampionParty list ({len(parties)} parties)")
+
     def _push_chests_stream(self, profile):
         """Push unopened treasure chests in the login profile stream.
 
@@ -406,7 +472,11 @@ class ProfileStreamMixin:
             return
         chest_map = {"Common": 0, "Uncommon": 1, "Rare": 2,
                      "Legendary": 3, "Primal": 4, "Promo": 5}
-        chests = [(chest_map.get(r[2], 0), 0, r[1], 9000 + r[0]) for r in rows]
+        from services.wheel_of_fate import client_spin_status
+        chests = [(chest_map.get(r[2], 0),
+                   client_spin_status(int(r[5] or 0), int(r[4] or 0)),
+                   r[1], 9000 + r[0])
+                  for r in rows]
         inner = encode_chest_list(chests)
         profile_args = encode_objfmt_response(
             ["Game.Shared.Network.Profile.ProfileStreamEventArgs",
@@ -495,11 +565,20 @@ class ProfileStreamMixin:
                 f"{len(flags)} flags, dw_sz={len(dw)}")
 
     def push_cards_to_client(self):
-        """Push card instances from DB to the client via CardsAdded event (2205), chunked."""
+        """Announce copies the client does not have yet (CardsAdded, 2205), chunked.
+
+        A CardsAdded event for a copy already in a deck makes the client
+        re-template that deck card, which drops its gems, so copies announced
+        by the login push (or an earlier grant) are never sent again.
+        """
         if not self.user_profile:
             return
         p = self.user_profile
         rows = db_profile_card_instances(p["id"], conn=_db)
+        announced = getattr(self, "_announced_card_ids", None)
+        if announced is not None:
+            rows = [r for r in rows if int(r[5]) not in announced]
+            announced.update(int(r[5]) for r in rows)
         if not rows:
             return
         all_cards = [(r[0], r[1], r[2], r[3], r[4], r[5], r[6]) for r in rows]
@@ -520,7 +599,7 @@ class ProfileStreamMixin:
         list_idx, _ = b.begin_list("Cards",
             "System.Collections.Generic.List`1#Game.Shared.Domain.card_instance_bits", len(cards))
         for i, (guid, name, cost, atk, def_, cid, is_ext) in enumerate(cards):
-            b.begin_element(i, "Game.Shared.Domain.card_instance_bits", 6)
+            b.begin_element(i, "Game.Shared.Domain.card_instance_bits", b.CARD_PROPS)
             b.card_fields(guid, cid, is_ext)
         batch_bytes = b.finish(1)
 
@@ -734,6 +813,64 @@ class ProfileStreamMixin:
             db_set_inventory_client_uid(
                 self.user_profile["id"], template_guid, item_id, conn=_db)
             _db.commit()
+
+    def push_published_incdata(self):
+        """Send each published card .incdata (campaign/incdata/published) to the client, as
+        ProfileMainData through ProfileGenericUpdate. The client loads each one with its
+        TemplateManager.IncrementalLoad, replacing the cards it already has by GUID."""
+        for path in sorted(PUBLISHED_INCDATA_DIR.glob("*.incdata")):
+            self.push_incdata(path.read_bytes(), name=path.name)
+
+    def push_incdata(self, gzipped, *, name="", data_type=INCDATA_PC, continues=False):
+        """One incdata file (gzip of its sections) as ProfileMainData in a ProfileGenericUpdate."""
+        from objfmt_builder import ObjFmtBuilder
+        b = ObjFmtBuilder("Game.Shared.ProfileMainData")
+        b.field_enum("Type", INCDATA_DATA_TYPE, data_type)
+        b.field_bytes("GZippedData", gzipped)
+        b.field_bool("Continues", continues)
+        inner = b.finish(3)
+        args = encode_objfmt_response(
+            ["Game.Shared.Network.Profile.ProfileGenericUpdateEventArgs",
+             "Game.Shared.ProfileGenericMessage", "System.Byte[]"],
+            [("Message", "struct", ("Game.Shared.ProfileGenericMessage", [("Data", "bytes", inner)]))]
+        )
+        dw = encode_datawrapper(0, 2211, compress_gzip(args), 1, "00000000-0000-0000-0000-000000000000")
+        issuer = f"0.0.0.0.ServiceProfile.{SERVICE_PROFILE_UID}.ServicePlayer.{self.client_uid}.99"
+        self.scnt += 1
+        self.send({
+            "issuer": issuer, "target": "ServiceProfile", "instance": "Shared",
+            "reqid": 0, "c": 0, "conh": 0, "sid": self.sid,
+        }, dw)
+        log_req(f">>> PUSH incdata {name or '(unnamed)'} ({len(gzipped)} bytes, dt=2211)")
+
+    def push_balance_to_client(self):
+        """Push the player's gold and platinum (BalanceUpdate, dt=2209).
+
+        The client only refreshes PlayerProfile.Gold from this event or at
+        login; the pack screen resets its gold display from it after a
+        Wheels of Fate spin.
+        """
+        from objfmt_builder import ObjFmtBuilder
+        from profile_db import db_get_user_currency
+        if not self.user_profile:
+            return
+        user_id = self.user_profile["id"]
+        gold = db_get_user_currency(user_id, "gold", conn=_db)
+        platinum = db_get_user_currency(user_id, "platinum", conn=_db)
+        b = ObjFmtBuilder("Game.Shared.Network.Profile.BalanceUpdateEventArgs")
+        b.field_int("GoldBalance", int(gold))
+        b.field_int("PlatinumBalance", int(platinum))
+        dw = encode_datawrapper(0, 2209, compress_gzip(b.finish(2)), 1,
+                                "00000000-0000-0000-0000-000000000000")
+        issuer = (
+            f"0.0.0.0.ServiceProfile.{SERVICE_PROFILE_UID}."
+            f"ServicePlayer.{self.client_uid}.{self.scnt}")
+        self.scnt += 1
+        self.send({
+            "issuer": issuer, "target": "ServiceProfile", "instance": "Shared",
+            "reqid": 0, "c": 0, "conh": 0, "sid": self.sid,
+        }, dw)
+        log_req(f">>> PUSH BalanceUpdate (dt=2209) gold={gold} platinum={platinum}")
 
     def push_currency_to_client(self, gold_delta=0, platinum_delta=0):
         """Push an atomic profile currency delta through the generic stream."""

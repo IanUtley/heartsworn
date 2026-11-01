@@ -415,16 +415,36 @@ def card_ready_blocked(db, session_id, card_uid):
     return False
 
 
-def ready_cards_for_turn(db, session_id, owner_id):
+_READY_CLEAR_MASK = (game_engine.ECardStates.Tapped |
+                     game_engine.ECardStates.Attacking |
+                     game_engine.ECardStates.HasAttacked |
+                     game_engine.ECardStates.Blocking |
+                     game_engine.ECardStates.HasBlocked)
+
+
+def ready_card(db, session_id, card_uid, previous, attrs):
+    """C# Session.ReadyCard for one warzone card: clear its ready-step bits.
+
+    A card that CantReadyAutomatically, or that ``card_ready_blocked`` holds,
+    keeps Tapped. The row is written here and the new state bits returned; the
+    caller raises CardReadiedEvent when Tapped was cleared, so every untap
+    raises the same event whichever path readies the card.
+    """
+    from pvp_db import db_reset_warzone_troop
+    mask = _READY_CLEAR_MASK
+    blocked = bool(
+        attrs and int(attrs) &
+        game_engine.ECardAttributes.CantReadyAutomatically)
+    if blocked or card_ready_blocked(db, session_id, card_uid):
+        mask &= ~game_engine.ECardStates.Tapped
+    db_reset_warzone_troop(session_id, int(card_uid), mask, conn=db)
+    return int(previous) & ~mask
+
+
+def ready_cards_for_turn(db, session_id, owner_id, battle_state=None):
     """Apply the port-owned Prep readiness transition for one controller."""
     from pvp_db import (db_warzone_cards_with_state,
-                        db_warzone_card_state_attributes,
-                        db_reset_warzone_troop)
-    clear_mask = (game_engine.ECardStates.Tapped |
-                  game_engine.ECardStates.Attacking |
-                  game_engine.ECardStates.HasAttacked |
-                  game_engine.ECardStates.Blocking |
-                  game_engine.ECardStates.HasBlocked)
+                        db_warzone_card_state_attributes)
     changed = []
     for card_uid, template_guid, card_owner, card_state in \
             db_warzone_cards_with_state(session_id, conn=db):
@@ -434,14 +454,7 @@ def ready_cards_for_turn(db, session_id, owner_id):
         attrs_row = db_warzone_card_state_attributes(
             session_id, int(card_uid), conn=db)
         attrs = attrs_row[1] if attrs_row else 0
-        mask = clear_mask
-        blocked = bool(
-            attrs and int(attrs) &
-            game_engine.ECardAttributes.CantReadyAutomatically)
-        if blocked or card_ready_blocked(db, session_id, card_uid):
-            mask &= ~game_engine.ECardStates.Tapped
-        db_reset_warzone_troop(session_id, int(card_uid), mask, conn=db)
-        new_state = previous & ~mask
+        new_state = ready_card(db, session_id, card_uid, previous, attrs)
         if new_state != previous:
             changed.append((int(card_uid), template_guid, int(card_owner or 0),
                             previous, new_state))
@@ -449,41 +462,108 @@ def ready_cards_for_turn(db, session_id, owner_id):
     return changed
 
 
-def decrement_ability_cooldowns(db, session_id, owner_id, battle_state=None):
-    """Apply C# ReadyState's active-player cooldown tick.
+_READIED_FOR = "_readied_for"
 
-    Ordinary card counts stay with their game_cards rows; synthetic champion
-    counts stay in the shared battle checkpoint. The caller projects updates
-    for the returned card UIDs and any non-empty champion ability GUID list.
+
+def readied_this_turn(battle_state, side):
+    """True once ``side`` has had this turn's ready step."""
+    if not isinstance(battle_state, dict):
+        return False
+    marker = battle_state.get(_READIED_FOR)
+    if not isinstance(marker, dict):
+        return False
+    turn = int(battle_state.get("turn_number", 1) or 1)
+    try:
+        return int(marker.get(str(side), -1)) == turn
+    except (TypeError, ValueError):
+        return False
+
+
+def ready_step_for_turn(db, session_id, owner_id, battle_state, side,
+                        handler=None):
+    """C# StartTurn expiry + ReadyState readiness for the active controller.
+
+    StartTurnState removes BeginningOfOwnersTurn effects and enqueues
+    TurnStartedEvent; ReadyState.OnEntry then readies the active player's
+    cards (except CantReady/CantReadyAutomatically) and resets armor before
+    the Ready priority window drains TurnStarted.  Callers run this before
+    dispatching TurnStartedEvent, so a start-of-turn trigger that exhausts its
+    own card leaves it exhausted.  Runs once per side per turn: returns None
+    when ``side`` was already readied this turn (Prep then skips it), else the
+    ``ready_cards_for_turn`` change list.
     """
-    from pvp_db import db_decrement_card_cooldowns_for_owner
-    cards = db_decrement_card_cooldowns_for_owner(
-        session_id, owner_id, conn=db)
-    champions = {}
-    if isinstance(battle_state, dict):
-        from .cooldowns import decrement_champion_cooldowns
-        champions = decrement_champion_cooldowns(
-            battle_state, owner_id)
-    return cards, champions
+    if not isinstance(battle_state, dict) or readied_this_turn(
+            battle_state, side):
+        return None
+    clear_expired_temporary_attributes(
+        db, session_id, owner_id, "start_turn", clear_stat_buffs=True,
+        battle_state=battle_state, handler=handler)
+    reset_armor(db, session_id, battle_state)
+    changes = ready_cards_for_turn(db, session_id, owner_id,
+                                   battle_state=battle_state)
+    marker = battle_state.get(_READIED_FOR)
+    marker = dict(marker) if isinstance(marker, dict) else {}
+    marker[str(side)] = int(battle_state.get("turn_number", 1) or 1)
+    battle_state[_READIED_FOR] = marker
+    return changes
+
+
+_CANT_HEAL_AT_END_OF_TURN = "CantHealAtEndOfTurn".lower()
+_OPPOSING_TROOPS_DONT_HEAL = "OpposingTroopsDontHealAtEndOfTurn".lower()
+
+
+def _end_of_turn_heal_flags(template, raw_permanent, raw_temporary):
+    """Lowercase heal-gating IntAttr names a card carries, printed or buffed.
+
+    C# reads these through ``Card.GetCardContext().GetBool``, so an instance
+    buff counts the same as the printed TAC.
+    """
+    flags = set()
+    if template is not None:
+        if template.cant_heal_at_end_of_turn:
+            flags.add(_CANT_HEAL_AT_END_OF_TURN)
+        if template.opposing_troops_dont_heal_at_end_of_turn:
+            flags.add(_OPPOSING_TROOPS_DONT_HEAL)
+    for raw in (raw_permanent, raw_temporary):
+        try:
+            buffs = json.loads(raw or "{}")
+        except (TypeError, ValueError, json.JSONDecodeError):
+            continue
+        attrs = buffs.get("int_attrs") if isinstance(buffs, dict) else None
+        if isinstance(attrs, dict):
+            flags.update(str(name).lower() for name, value in attrs.items()
+                         if int(value or 0) > 0)
+    return flags
 
 
 def clear_combat_damage(db, session_id):
+    """C# Session.ResetCardDamage for the end-of-turn heal.
+
+    A troop is not healed when it carries ``CantHealAtEndOfTurn`` (it keeps
+    its marked damage), or when another player's warzone card carries
+    ``OpposingTroopsDontHealAtEndOfTurn``. The card's own controller still heals
+    unless their opponent has such a card too, in which case both are blocked.
+    """
     from pvp_db import (db_clear_warzone_damage_except,
-                        db_warzone_troop_state_rows)
+                        db_warzone_card_heal_rows)
+    from gamedata import DEFAULT_RECORD_STORE
+    rows = db_warzone_card_heal_rows(session_id, conn=db)
+    flags = {}
+    for row in rows:
+        template = DEFAULT_RECORD_STORE.get(
+            "CardTemplate", str(row[2] or "").lower())
+        flags[int(row[0])] = _end_of_turn_heal_flags(
+            template, row[4], row[5])
+    opposing_owners = {int(row[1]) for row in rows
+                       if _OPPOSING_TROOPS_DONT_HEAL in flags[int(row[0])]}
     exempt = []
-    for row in db_warzone_troop_state_rows(session_id, conn=db):
-        for raw in (row[5], row[6]):
-            try:
-                buffs = json.loads(raw or "{}")
-            except (TypeError, ValueError, json.JSONDecodeError):
-                continue
-            attrs = buffs.get("int_attrs") if isinstance(buffs, dict) else None
-            if isinstance(attrs, dict) and any(
-                    str(name).lower() == "canthealatendofturn"
-                    and int(value or 0) > 0
-                    for name, value in attrs.items()):
-                exempt.append(int(row[0]))
-                break
+    for row in rows:
+        if "troop" not in str(row[3] or "").lower():
+            continue
+        uid, owner = int(row[0]), int(row[1])
+        if (_CANT_HEAL_AT_END_OF_TURN in flags[uid]
+                or opposing_owners - {owner}):
+            exempt.append(uid)
     db_clear_warzone_damage_except(session_id, exempt, conn=db)
     db.commit()
 
@@ -498,16 +578,22 @@ def clear_expired_temporary_attributes(db, session_id, owner_id, boundary,
     if isinstance(battle_state, dict):
         from .effect_lifetimes import (expire_grants,
                                        expire_temporary_intattrs,
-                                       expire_temporary_stats)
+                                       expire_temporary_stats,
+                                       expire_while_in_play)
         expire_temporary_intattrs(
             db, session_id, battle_state, boundary=boundary,
-            boundary_owner=owner_id)
+            boundary_owner=owner_id, handler=handler)
         expire_grants(
             db, session_id, battle_state, boundary=boundary,
             boundary_owner=owner_id, handler=handler)
         stat_changes = list(expire_temporary_stats(
             db, session_id, battle_state, boundary=boundary,
-            boundary_owner=owner_id))
+            boundary_owner=owner_id, handler=handler))
+        # A while-in-play grant ends with its source, not at a turn step, so the boundary pass reconciles it too (the
+        # event sweep only sees events; a source that left play during a step that emits none would linger).
+        stat_changes = list(dict.fromkeys(
+            stat_changes + expire_while_in_play(
+                db, session_id, battle_state, handler=handler)))
     changed = list(stat_changes)
     for card_uid, target_owner, attrs, raw_buffs in db_temporary_attribute_rows(
             session_id, conn=db):
@@ -525,9 +611,14 @@ def clear_expired_temporary_attributes(db, session_id, owner_id, boundary,
                 bit = int(bit_text)
             except (TypeError, ValueError):
                 continue
+            # "This turn" (EndOfTurn) ends at the end of whichever turn it was
+            # cast in, even when the caster's opponent's turn is the one ending
+            # (C# AbilityManager.RemoveEndOfTurnAbilities), so the end_turn
+            # boundary does not need the caster to be the ending player.
             if (isinstance(rule, dict) and
-                    int(rule.get("owner", -1)) == int(owner_id) and
-                    rule.get("boundary") == boundary):
+                    rule.get("boundary") == boundary and
+                    (boundary == "end_turn" or
+                     int(rule.get("owner", -1)) == int(owner_id))):
                 expired_bits |= bit
             else:
                 remaining[bit_text] = rule

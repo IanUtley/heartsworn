@@ -32,7 +32,7 @@ except ImportError:  # pragma: no cover - Records parsing still works for JSON
 
 
 DEFAULT_GAMEDATA = "/mnt/d/SteamLibrary/steamapps/common/HEX SHARDS OF FATE/Data/gamedata"
-DEFAULT_RECORDS = Path(__file__).resolve().parents[1] / "Records"
+DEFAULT_RECORDS = Path(__file__).resolve().parents[1] / "hex-private" / "Records"
 ZERO_GUID = "00000000-0000-0000-0000-000000000000"
 
 # These AZ1 payouts are not present in SceneData/RewardTemplate records. They
@@ -69,6 +69,7 @@ RECORD_SECTIONS = (
     "DeckTemplate",
     "EncounterDeck",
     "InventoryItemData",
+    "MercenaryTemplate",
     "QuestTemplate",
     "SceneData",
     "ConversationTemplate",
@@ -126,7 +127,7 @@ def load_records_text(path: str | Path | None = None) -> str:
             if not line:
                 continue
             try:
-                value = json.loads(line)
+                value = json.loads(line, strict=False)
             except json.JSONDecodeError:
                 continue
             records.append(value if isinstance(value, str) else line)
@@ -161,7 +162,9 @@ def parse_record(raw: str) -> dict[str, Any] | None:
     """Parse a record, tolerating the export's trailing commas."""
     cleaned = re.sub(r",\s*([}\]])", r"\1", raw)
     try:
-        value = json.loads(cleaned)
+        # strict=False: the client export puts raw control characters (for
+        # example line breaks in m_GameText) inside string values.
+        value = json.loads(cleaned, strict=False)
     except (TypeError, json.JSONDecodeError):
         # ConversationTemplate records use relaxed JSON with integer object
         # keys (``0 : {...}``).  PyYAML is also what campaign.py uses for the
@@ -175,7 +178,7 @@ def parse_record(raw: str) -> dict[str, Any] | None:
             return None
     if isinstance(value, str):
         try:
-            value = json.loads(re.sub(r",\s*([}\]])", r"\1", value))
+            value = json.loads(re.sub(r",\s*([}\]])", r"\1", value), strict=False)
         except (TypeError, json.JSONDecodeError):
             if yaml is None:
                 return None
@@ -396,7 +399,9 @@ def _extract_targets(data: str) -> list[tuple[Any, ...]]:
             record.get("m_PlayerFilter") or "",
             record.get("m_CollectionFlags") or "",
             _target_count(record.get("m_MinTargetCount"), 0),
-            _target_count(record.get("m_MaxTargetCount"), 1),
+            # An unset maximum is C#'s int.MaxValue ("each ..." and every
+            # auto-target leave it unset), not a single target.
+            _target_count(record.get("m_MaxTargetCount"), 2147483647),
             json_text(record.get("m_CardFilter"), {}),
             str(record.get("_t") or "").split(".")[-1],
         )
@@ -593,7 +598,8 @@ def _extract_gems(data: str) -> tuple[list[tuple[Any, ...]], list[tuple[Any, ...
     return sorted(gem_rows), sorted(meta_rows), gem_bom
 
 
-def _extract_champions(data: str) -> dict[str, list[tuple[Any, ...]]]:
+def _extract_champions(data: str, sections=("ChampionTemplate", "MercenaryTemplate")
+                       ) -> dict[str, list[tuple[Any, ...]]]:
     helpers = _card_helpers()
     ability_records = {}
     for _, record in records(data, "AbilityTemplate")[0]:
@@ -603,7 +609,9 @@ def _extract_champions(data: str) -> dict[str, list[tuple[Any, ...]]]:
     extended_rows = []
     ability_rows = []
     ability_guids: set[str] = set()
-    for _, record in records(data, "ChampionTemplate")[0]:
+    champion_records = [record for section in sections
+                        for _, record in records(data, section)[0]]
+    for record in champion_records:
         champion_guid = nested_guid(record, "m_Id")
         if not champion_guid:
             continue
@@ -619,7 +627,9 @@ def _extract_champions(data: str) -> dict[str, list[tuple[Any, ...]]]:
                     1,
                 )
             )
-        if champion_type != "PvPChampion":
+        # Mercenaries are fixed-stat champions like PvP champions: a starting
+        # health, champion abilities, and no talents.
+        if champion_type not in ("PvPChampion", "Mercenary"):
             continue
         extended_rows.append(
             (
@@ -636,6 +646,10 @@ def _extract_champions(data: str) -> dict[str, list[tuple[Any, ...]]]:
         for entry in record.get("m_ChampionAbilities") or []:
             ability_guid = guid(entry.get("m_CardAbilityId")) if isinstance(entry, dict) else ""
             if not ability_guid:
+                continue
+            # Some unreleased mercenaries (e.g. Andres the Supremo) reference
+            # abilities that are absent from the client's AbilityTemplates.
+            if champion_type == "Mercenary" and ability_guid not in ability_records:
                 continue
             ability_guids.add(ability_guid)
             ability = ability_records.get(ability_guid) or {}
@@ -739,15 +753,14 @@ def _extract_encounters(data: str) -> tuple[list[tuple[Any, ...]], list[tuple[An
         if not str(record.get("_t") or "").endswith("EncounterScene"):
             continue
         name = record.get("m_Name") or ""
-        # Keep the AZ0 training scenes and the race-specific Crayburn tutorial
-        # scenes used by campaign/FRA.  The latter carry the real encounter
+        # The AZ0 training scenes and the race-specific Crayburn tutorial
+        # scenes are used by campaign/FRA.  The latter carry the real encounter
         # deck-template mapping (for example Orc -> Vilefang), so omitting
         # them silently causes the battle setup to use placeholder cards.
-        if not (name.startswith("AZ0_") or
-                name.startswith("AZ 1") or name.startswith("AZ 2") or
-                " Tutorial Castle Gatehouse" in name or
-                " Tutorial Tower Gatehouse" in name or
-                " Tutorial Tower of Penworth" in name):
+        # Dungeon and other authored encounter scenes are kept as well so the
+        # campaign editor can author their rewards, actions and AI personality
+        # (the server only *plays* AZ1/AZ2/Crayburn today).
+        if not name:
             continue
         ai_deck = ""
         for player in record.get("m_EncounterPlayers") or []:
@@ -1036,13 +1049,9 @@ _QUEST_FACTIONS = {
 _QUEST_OWNER_FACTIONS = {
     "belarius": "Ardent", "takumi": "Underworld",
 }
-_QUEST_START_HOOKS = {
-    "az01_tamed": "az1_tamed_start",
-    "az01_q_cross_the_river": "az1_cross_the_river_start",
-    "q_seawitch": "az1_find_horwich_sea_start",
-    "az01_uw_find_cave_in": "az1_find_cave_in_start",
-    "az01_ar_find_ambling_mesa": "az1_find_ambling_mesa_start",
-}
+# Quest-start map changes (node visibility) are campaign editor data
+# (campaign/campaign_rules/AZ1.json); no quest is seeded with a start hook.
+_QUEST_START_HOOKS: dict[str, str] = {}
 
 
 def _normalise_quest_label(value: str) -> str:
@@ -1091,11 +1100,12 @@ def _conversation_role(label: str) -> str:
         return "complete"
     if "quest start" in lower:
         return "start"
-    # A number of authored records use ``<Quest> Quest`` without the words
-    # ``Quest Start``.  Treat that generic conversation as another start
-    # variant; the per-champion quest row makes the operation idempotent.
+    # A generic ``<Quest> Quest`` record (Takumi's "Tamed Quest" at the
+    # Cave-In: "have you tried taming any beasts like I told you?") is the
+    # quest-giver's in-progress check-in, not a start: the quest is granted
+    # by the welcome conversation.
     if re.search(r"\bquest\b", lower):
-        return "start"
+        return "not_complete"
     return ""
 
 
@@ -1202,6 +1212,15 @@ def extract_quest_conversations(path: str | None = None) -> list[tuple[Any, ...]
     return _extract_quest_conversations(load_records_text(configured_records_path()))
 
 
+def extract_mercenary_champions(path: str | None = None) -> dict[str, list[tuple[Any, ...]]]:
+    """Extract champion tables for MercenaryTemplate records only."""
+    if path or configured_path():
+        data = load_text(path)
+    else:
+        data = load_records_text(configured_records_path())
+    return _extract_champions(data, sections=("MercenaryTemplate",))
+
+
 def _extract_chests(data: str) -> list[tuple[Any, ...]]:
     rows = []
     for _, record in records(data, "InventoryItemData")[0]:
@@ -1220,6 +1239,62 @@ def _extract_chests(data: str) -> list[tuple[Any, ...]]:
     return sorted(set(row for row in rows if row[0]))
 
 
+# Inventory item types kept in ``inventory_item_templates``: the cosmetic
+# items a saved deck template refers to (ProfileDeckTemplate.Sleeve and its
+# "gboard" extended data).  ``item_type`` is the record's ``m_Type``.
+INVENTORY_ITEM_TEMPLATE_TYPES = ("DeckSleeve", "Gameboard")
+
+
+def _extract_inventory_item_templates(data: str) -> list[tuple[Any, ...]]:
+    """Rows ``(guid, name, description, item_type)`` for sleeves and gameboards.
+
+    ``m_Name`` and ``m_Description`` are plain English text in the Records
+    (not localisation keys), stored as-is.
+    """
+    rows = []
+    for _, record in records(data, "InventoryItemData")[0]:
+        item_type = str(record.get("m_Type") or "")
+        if item_type not in INVENTORY_ITEM_TEMPLATE_TYPES:
+            continue
+        rows.append((nested_guid(record, "m_Id"), str(record.get("m_Name") or ""),
+                     str(record.get("m_Description") or ""), item_type))
+    return sorted(set(row for row in rows if row[0]))
+
+
+def extract_inventory_item_templates(path: str | None = None) -> list[tuple[Any, ...]]:
+    """Sleeve and gameboard rows without parsing the whole snapshot."""
+    if path or configured_path():
+        data = load_text(path)
+    else:
+        data = load_records_text(configured_records_path())
+    return _extract_inventory_item_templates(data)
+
+
+def _extract_card_packs(data: str) -> list[dict[str, str]]:
+    """Every ``InventoryCardPack`` record: its GUID, name, set and ``m_CardPackType``
+    (BoosterPack, FullSet, PrimalPack, ...). A pack with no set has a zero set GUID."""
+    packs = []
+    for _, record in records(data, "InventoryItemData")[0]:
+        if not str(record.get("_t") or "").endswith("InventoryCardPack"):
+            continue
+        pack_guid = nested_guid(record, "m_Id")
+        if not pack_guid:
+            continue
+        packs.append({"pack_guid": pack_guid, "name": str(record.get("m_Name") or ""),
+                      "set_guid": nested_guid(record, "m_SetId") or ZERO_GUID,
+                      "pack_type": str(record.get("m_CardPackType") or "")})
+    return sorted(packs, key=lambda pack: pack["pack_guid"])
+
+
+def extract_card_packs(path: str | None = None) -> list[dict[str, str]]:
+    """Card pack records of the Records snapshot (see ``_extract_card_packs``)."""
+    if path or configured_path():
+        data = load_text(path)
+    else:
+        data = load_records_text(configured_records_path())
+    return _extract_card_packs(data)
+
+
 def _extract_pack_map(data: str) -> list[tuple[Any, ...]]:
     rows = []
     for _, record in records(data, "InventoryItemData")[0]:
@@ -1235,7 +1310,11 @@ def _extract_pack_map(data: str) -> list[tuple[Any, ...]]:
 
 
 _EXTRACT_CACHE: dict[str, dict[str, Any]] = {}
-_EXTRACT_CACHE_VERSION = 3
+_EXTRACT_CACHE_VERSION = 11  # 11: Rage fallback ignores the Deploy "at random" choice
+# 10: ConversationAbilityEffect stores its conversation
+# 9: unset target max is int.MaxValue, not 1
+# 8: strict=False Records parsing (control chars)
+# 7: inventory_item_templates
 
 
 def _extract_cache_file(cache_key: str) -> str:
@@ -1339,6 +1418,7 @@ def extract(path: str | None = None) -> dict[str, Any]:
             "quest_templates": quest_templates,
             "quest_conversations": quest_conversations,
             "chest_templates": _extract_chests(data),
+            "inventory_item_templates": _extract_inventory_item_templates(data),
             "pack_set_map": _extract_pack_map(data),
         },
     }
@@ -1380,8 +1460,16 @@ TABLE_COLUMNS = {
     "quest_templates": ("script_name", "name", "title", "objectives_json", "campaign_group", "start_hook", "enabled"),
     "quest_conversations": ("quest_script", "conversation_guid", "campaign_template", "node_id", "npc", "role", "faction", "conversation_name", "start_hook", "conditions_json", "priority", "enabled"),
     "chest_templates": ("guid", "name", "set_guid", "chest_type", "spin_type", "promotional_id"),
+    "inventory_item_templates": ("guid", "name", "description", "item_type"),
     "pack_set_map": ("pack_guid", "set_guid", "is_full_set", "is_primal"),
 }
+
+
+# Seed rows that are read from Records instead of stored in the database.
+NOT_STORED_TABLES = frozenset({
+    "encounter_deck_cards", "encounter_scenes", "campaign_node_conversations",
+    "quest_conversations", "quest_templates",
+})
 
 
 def seed_database(db: sqlite3.Connection, seed: dict[str, Any], *, include_pack_map: bool = False) -> dict[str, int]:
@@ -1394,6 +1482,8 @@ def seed_database(db: sqlite3.Connection, seed: dict[str, Any], *, include_pack_
     tables = seed["tables"]
     if not include_pack_map:
         tables = {name: rows for name, rows in tables.items() if name != "pack_set_map"}
+    # Served from Records by campaign_content; the table is not created.
+    tables = {name: rows for name, rows in tables.items() if name not in NOT_STORED_TABLES}
     inserted: dict[str, int] = {}
     for table, rows in tables.items():
         columns = TABLE_COLUMNS[table]

@@ -16,7 +16,7 @@ def _deck_templates():
     if _DECK_TEMPLATES is not None:
         return _DECK_TEMPLATES
     result = {}
-    path = pathlib.Path(__file__).resolve().parents[1] / "Records" / "DeckTemplate.jsonl"
+    path = pathlib.Path(__file__).resolve().parents[1] / "hex-private" / "Records" / "DeckTemplate.jsonl"
     if path.exists():
         try:
             for line in path.open(encoding="utf-8", errors="replace"):
@@ -52,7 +52,10 @@ def load_player_deck(context):
     deck = _deck_templates().get(str(guid).lower())
     if not deck:
         return "load player deck: template not found"
-    owner = int(context.bstate.get("resolving_owner_id", 0) or 0)
+    # C# uses targetCard.m_ControllingPlayer: the deck belongs to the resolved
+    # target's controller, not necessarily the ability's resolving owner.
+    owner = int(context.target_owner(
+        default=context.bstate.get("resolving_owner_id", 0)) or 0)
     position = db_deck_next_position(context.session.session_id, owner, conn=context.db)
     created = 0
     for entry in deck.get("m_DeckResources") or ():
@@ -78,6 +81,12 @@ def load_player_deck(context):
                 owner_user_id=owner, original_template_guid=card_guid)
             position += 1
             created += 1
+    if created:
+        # C# LoadPlayerDeck ends with m_Deck.Shuffle(session RNG, 0 ordered).
+        from pvp_db import db_game_shuffle_deck
+        db_game_shuffle_deck(
+            context.session.session_id, owner, conn=context.db,
+            rng=context.bstate.get("_rules_rng"))
     context.db.commit()
     return f"loaded {created} card(s) into player deck"
 
@@ -101,13 +110,12 @@ def move_deck_card_to_hand(context, card_uid, owner_id):
     _tpl, card_type, _name, cost, attack, defense, gems = \
         context.handler._card_full_data(
             context.game, scid, details[0], details[1])
-    context.game.push_card_moved(
-        scid, recipient, game_engine.ECardCollections.Hand,
-        game_engine.ECardLocations.Top, 1)
-    context.game.push_card_drawn(scid, recipient, 1)
     context.game.push_card_updated(
         scid, recipient, game_engine.ECardCollections.Hand, card_type,
         template_id=details[0], cost=cost, attack=attack,
         defense=defense, gems=gems,
         nulling=raw_uid(recipient) != raw_uid(context.player_uid))
+    # ClientStateCache.Update emits the matching client-side CardMoved when
+    # this CardUpdated changes the card's collection, as in the C# client.
+    context.game.push_card_drawn(scid, recipient, 1)
     return f"searched deck card {hex(int(card_uid))} to hand"

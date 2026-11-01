@@ -111,7 +111,10 @@ def test_search_covers_every_kind():
     assert {"champion", "encounter", "card"} <= kinds
     assert any(row["name"] == "Savage Lord" and row["kind"] == "champion"
                for row in results["results"])
-    assert hex_mcp.hex_search("savage", kind="encounter")["count"] == 1
+    # Newer campaign data adds other "savage" encounters; the Savage Lord node
+    # must be among them.
+    encounters = hex_mcp.hex_search("savage", kind="encounter")["results"]
+    assert any(row["name"] == "AZ 1 - NODE 14 - SAVAGE LORD" for row in encounters), encounters
     try:
         hex_mcp.hex_search("savage", kind="deck")
     except ValueError:

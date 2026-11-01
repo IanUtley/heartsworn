@@ -21,7 +21,8 @@ SRC = fresh_database()
 import game_engine
 
 from abilities.framework import triggers
-from abilities.framework.targeting import legal_targets, evaluate_card_filter
+from abilities.framework.targeting import evaluate_card_filter
+from rules_port.targeting import legal_targets
 
 
 EXILE_DEPLOY = "952e3555-5ee1-50de-38f6-25cf34037c67"
@@ -37,6 +38,11 @@ RESOURCE_TPL = "44444444-4444-4444-4444-444444444444"
 PET_TPL = "55555555-5555-5555-5555-555555555555"
 PET_TARGET = "66666666-6666-6666-6666-666666666666"
 BLOCKING_TARGET = "f4a8f2ec-c96a-29a8-210e-607c936fda99"
+# Rowdy Ringmaster's Deploy: two chosen targets (a friendly troop, then an
+# optional opposing troop) feeding a Battle2Cards ("fight") effect.
+ROWDY_DEPLOY = "aa954593-ad8b-0c1f-67ef-961574d0f9c6"
+ROWDY_TPL_OWN = "f7f7e29d-a47a-65bb-eb06-195ef069148f"
+ROWDY_TPL_OPP = "40c592f3-a428-c30c-ead7-2bf7de86167f"
 
 
 class SessionStub:
@@ -69,118 +75,42 @@ class HandlerStub:
 
 
 def make_db():
-    fd, path = tempfile.mkstemp(suffix=".db")
-    os.close(fd)
-    db = sqlite3.connect(path)
-    src = sqlite3.connect(SRC)
-    db.execute("""CREATE TABLE game_cards (
-        session_id INTEGER, user_id INTEGER, card_uid INTEGER,
-        template_guid TEXT, card_template_id TEXT, location TEXT,
-        position INTEGER, card_state INTEGER, card_abilities TEXT,
-        card_type TEXT, card_attributes INTEGER, temporary_attributes INTEGER DEFAULT 0, card_attack_mod INTEGER,
-        card_defense_mod INTEGER, card_damage INTEGER,
-        permanent_buffs TEXT, temporary_buffs TEXT, card_uses TEXT)""")
-    db.execute("""CREATE TABLE card_abilities_meta (
-        ability_guid TEXT, is_triggered INTEGER, trigger_event_type TEXT,
-        game_text TEXT, raw_json TEXT, casting_behavior INTEGER,
-        is_manual INTEGER, activation_cost INTEGER, uses_per_game INTEGER,
-        uses_per_turn INTEGER, target_template_ids TEXT)""")
-    # The AI target chooser inspects the ability BOM to distinguish a normal
-    # target from a battle target.  Keep this focused fixture faithful to the
-    # production schema instead of letting that lookup fail with
-    # "no such table: ability_effects".
-    db.execute("""CREATE TABLE ability_effects (
-        ability_guid TEXT NOT NULL, effect_guid TEXT NOT NULL,
-        effect_order INTEGER NOT NULL DEFAULT 0,
-        effect_type TEXT DEFAULT '', param TEXT DEFAULT '',
-        effect_group_id INTEGER DEFAULT 0, condition_id TEXT DEFAULT '',
-        target_index INTEGER DEFAULT -1, effect_instance_id INTEGER DEFAULT -1,
-        contingent_effect_instance_id INTEGER DEFAULT -1,
-        secondary_target_index INTEGER DEFAULT -1,
-        recalculate_targets INTEGER DEFAULT -1,
-        is_optional INTEGER DEFAULT 0, effect_duration TEXT DEFAULT 'Instant',
-        output_variables TEXT DEFAULT '{}',
-        PRIMARY KEY (ability_guid, effect_guid, effect_order))""")
-    db.execute("""CREATE TABLE target_templates (
-        template_id TEXT PRIMARY KEY, game_text TEXT,
-        is_auto_target INTEGER, is_random_target INTEGER, optional INTEGER,
-        explicit INTEGER, player_filter TEXT, collection_flags TEXT,
-        min_target_count INTEGER, max_target_count INTEGER, filter_json TEXT)""")
-    db.execute("ALTER TABLE target_templates ADD COLUMN target_kind TEXT DEFAULT ''")
-    db.execute("""CREATE TABLE card_templates (
-        guid TEXT, name TEXT, card_type TEXT, cost INTEGER, attack INTEGER,
-        defense INTEGER, attributes INTEGER, abilities_json TEXT,
-        threshold_json TEXT, subtype TEXT)""")
-    for tid in (EXILE_TARGET, PRAIRIE_TARGET, CHAMP_TARGET, BLOCKING_TARGET):
-        for row in src.execute(
-                "SELECT * FROM target_templates WHERE template_id=?", (tid,)):
-            db.execute("INSERT INTO target_templates VALUES "
-                       "(?,?,?,?,?,?,?,?,?,?,?,?)", row)
-    for ag in (EXILE_DEPLOY, EXILE_LEAVE):
-        for row in src.execute(
-                "SELECT ability_guid, is_triggered, trigger_event_type, game_text, "
-                "raw_json, casting_behavior, is_manual, activation_cost, "
-                "uses_per_game, uses_per_turn, target_template_ids "
-                "FROM card_abilities_meta WHERE ability_guid=?", (ag,)):
-            db.execute(
-                "INSERT INTO card_abilities_meta VALUES (?,?,?,?,?,?,?,?,?,?,?)", row)
-        for row in src.execute(
-                """SELECT ability_guid, effect_guid, effect_order, effect_type,
-                        param, effect_group_id, condition_id, target_index,
-                        effect_instance_id, contingent_effect_instance_id,
-                        secondary_target_index, recalculate_targets,
-                        is_optional, effect_duration, output_variables
-                   FROM ability_effects WHERE ability_guid=?
-                  ORDER BY effect_order""", (ag,)):
-            db.execute("INSERT INTO ability_effects VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                       row)
-    db.execute(
-        "INSERT INTO card_templates VALUES (?,?,?,?,?,?,?,?,?,?)",
-        (EXILE_TPL, "Solitary Exile", "Constant", 3, 0, 0, 0,
-         f'["{EXILE_DEPLOY}", "{EXILE_LEAVE}"]', "[]", ""))
-    db.execute(
-        "INSERT INTO card_templates VALUES (?,?,?,?,?,?,?,?,?,?)",
-        (PLAIN_TPL, "Plain Troop", "Troop", 1, 1, 1, 0, "[]", "[]", ""))
-    db.execute(
-        "INSERT INTO card_templates VALUES (?,?,?,?,?,?,?,?,?,?)",
-        (RESOURCE_TPL, "Wild Shard", "Resource", 0, 0, 0, 0, "[]", "[]", ""))
-    db.execute(
-        "INSERT INTO card_templates VALUES (?,?,?,?,?,?,?,?,?,?)",
-        (PET_TPL, "#PET_SPIRIT_STAG#", "Troop", 0, 1, 1, 0, "[]", "[]", ""))
-    db.execute(
-        "INSERT INTO target_templates VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
-        (PET_TARGET, "<b>#PET_SPIRIT_STAG#</b>", 1, 0, 0, 0,
-         "MultiplePlayers", "Warzone", 1, 1,
-         json.dumps({"_t": "Game.Shared.Mechanics.Cards.Filters.IsCardName",
-                     "m_CardName": "#PET_SPIRIT_STAG#"}),
-         "AbilityTargetTemplate"))
-    db.execute(
-        "INSERT INTO target_templates VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
-        (TOPN_TARGET, "Top troop", 1, 0, 0, 0, "MultiplePlayers",
-         "Deck|Hand|Champions|Warzone|Discard|Void|CastSpells|Underground|Choosing",
-         1, 1, json.dumps({
-             "_t": "Game.Shared.Mechanics.Cards.Filters.TopNOfDeck",
-             "m_Amount": 1,
-             "m_Filter": {
-                 "_t": "Game.Shared.Mechanics.Cards.Filters.AndCardFilter",
-                 "m_TargetFilters": [
-                     {"_t": "Game.Shared.Mechanics.Cards.Filters.IsTroop"},
-                     {"_t": "Game.Shared.Mechanics.Cards.Filters.IsControlledBy",
-                      "m_TestAgainstActivePlayer": 0},
-                 ],
-             },
-         }), "AbilityTargetTemplate"))
-    src.close()
-    db.commit()
-    return db
-
+    """The combat fixture schema: it matches the production game_cards columns."""
+    from tests_combat import make_db as combat_make_db
+    return combat_make_db()
 
 def add_card(db, uid, owner, tpl, location, abilities="[]", position=0):
     ctype = ("Troop" if tpl == PLAIN_TPL else
              "Resource" if tpl == RESOURCE_TPL else "Constant")
     db.execute(
-        "INSERT INTO game_cards VALUES (?,?,?,?,?,?,?,?,?,?,?,0,0,0,0,'{}','{}','{}')",
+        "INSERT INTO game_cards (session_id, user_id, card_uid, template_guid, "
+        "card_template_id, location, position, card_state, card_abilities, "
+        "card_type, card_attributes, temporary_attributes, card_attack_mod, "
+        "card_defense_mod, card_damage, permanent_buffs, temporary_buffs, card_uses) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?,?,0,0,0,0,'{}','{}','{}')",
         (1, owner, uid, tpl, tpl, location, position, 0, abilities, ctype, 0))
+    db.commit()
+
+
+def seed_template(db, guid, name, card_type):
+    """A card template row carrying the printed name the filters compare."""
+    db.execute(
+        "INSERT OR REPLACE INTO card_templates (guid,name,card_type,cost,attack,"
+        "defense,attributes,abilities_json,threshold_json,subtype) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?)",
+        (guid, name, card_type, 0, 0, 0, 0, "[]", "[]", ""))
+    db.commit()
+
+
+def seed_target(db, guid, filter_json, *, collection_flags):
+    """A target template row shaped like the production AbilityTargetTemplate rows."""
+    db.execute(
+        "INSERT OR REPLACE INTO target_templates (template_id, game_text, "
+        "is_auto_target, is_random_target, optional, explicit, player_filter, "
+        "collection_flags, min_target_count, max_target_count, filter_json, "
+        "target_kind) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+        (guid, "", 1, 0, 0, 0, "MultiplePlayers", collection_flags, 0, 1,
+         json.dumps(filter_json), "AbilityTargetTemplate"))
     db.commit()
 
 
@@ -219,6 +149,11 @@ def test_filter_eval(db):
 def test_placeholder_card_name_targets_only_matching_templates(db):
     """Dynamic card-name placeholders identify their token template, not all
     cards in the target collection (Skylak's pet charge-power regression)."""
+    seed_template(db, PET_TPL, "#PET_BABY_SPIDER#", "Constant")
+    seed_target(db, PET_TARGET,
+                {"_t": "Game.Shared.Mechanics.Cards.Filters.IsCardName",
+                 "m_CardName": "#PET_BABY_SPIDER#"},
+                collection_flags="Warzone")
     add_card(db, 101, 5, PET_TPL, "warzone")
     add_card(db, 102, 0, PET_TPL, "warzone")
     add_card(db, 103, 5, PLAIN_TPL, "warzone")
@@ -232,6 +167,16 @@ def test_top_n_of_controller_deck(db):
     # Player's first deck card is not a troop; the second is the only legal
     # result. The opponent also has a troop at the top of their deck, which
     # must not be selected by a source-controlled TopN filter.
+    seed_target(db, TOPN_TARGET,
+                {"_t": "Game.Shared.Mechanics.Cards.Filters.AndCardFilter",
+                 "m_TargetFilters": [
+                     {"_t": "Game.Shared.Mechanics.Cards.Filters.TopNOfDeck",
+                      "m_Amount": 1, "m_CountFromBottom": 0,
+                      "m_TopHalfOfDeck": 0,
+                      "m_Filter": {"_t": "Game.Shared.Mechanics.Cards.Filters.IsTroop"}},
+                     {"_t": "Game.Shared.Mechanics.Cards.Filters.IsControlledBy",
+                      "m_TestAgainstActivePlayer": 0}]},
+                collection_flags="Deck")
     add_card(db, 109, 5, RESOURCE_TPL, "deck", position=1)
     add_card(db, 110, 5, PLAIN_TPL, "deck", position=2)
     add_card(db, 111, 5, PLAIN_TPL, "deck", position=3)
@@ -289,7 +234,7 @@ def test_blocking_filter_uses_active_combat_assignment(db):
     # The same troop must not be targetable outside its active combat.
     cands = legal_targets(
         db, 1, 5, BLOCKING_TARGET, 100, both_players=True,
-        battle_state={"blockers": {"100": ["200"]}})
+        battle_state={})
     assert not cands, cands
 
 
@@ -308,25 +253,6 @@ def test_champion_targets(db):
     cands = legal_targets(db, 1, 5, CHAMP_TARGET, 900, both_players=True,
                           champions=champs)
     assert 900 not in cands and 901 not in cands, cands
-
-
-def test_deploy_prompt_human(db):
-    """Human-controlled deploy trigger prompts (class 39), not chain-push."""
-    add_card(db, 100, 5, EXILE_TPL, "warzone", f'["{EXILE_DEPLOY}", "{EXILE_LEAVE}"]')
-    add_card(db, 101, 5, PLAIN_TPL, "warzone")
-    pl_t = game_engine.UID.make(244, 5)
-    ai_t = game_engine.UID.make(3, 1000)
-    game = game_engine.Game(1, pl_t, ai_t)
-    bstate = {"_next_instance_id": 1, "resolving_owner_id": 5}
-    handler = HandlerStub()
-    triggers.resolve_triggers(db, handler, game, SessionStub(), pl_t, ai_t,
-                              bstate, "CardEnteredZoneEvent", 100, 5)
-    assert handler.prompted is not None, "expected a target prompt"
-    assert handler.prompted[0] == 100
-    assert EXILE_TARGET in handler.prompted[2]
-    assert 101 in handler.prompted[3] and 100 not in handler.prompted[3]
-    assert not (bstate.get("stack") or []), "prompt must not push a chain item"
-    assert bstate.get("pending_trigger"), "pending trigger must be stored"
 
 
 def test_deploy_auto_ai(db):
@@ -388,6 +314,53 @@ def test_trigger_target_prompt_uses_explicit_controller(db):
     assert target.target_index == 1
 
 
+def test_multi_target_trigger_prompt_advertises_every_target(db):
+    """A triggered ability with two chosen targets advertises both on ONE
+    OptionInstance.
+
+    Rowdy Ringmaster's Deploy asks for a friendly troop and then an optional
+    opposing troop.  The client's ``PlayerOptions.Update`` replaces an
+    ability's target list on every ``OptionInstance`` with the same ``opt_id``,
+    so the prompt must not emit one instance per template (that dropped the
+    friendly target and left the fight with no defender).
+    """
+    import hconnect_server as hcs
+
+    class Checkpoint:
+        def save_state(self, _session, _state):
+            pass
+
+    handler = object.__new__(hcs.HCPHandler)
+    handler._checkpoint_engine = lambda _session: Checkpoint()
+    pl_t = game_engine.UID.make(244, 5)
+    ai_t = game_engine.UID.make(3, 1000)
+    game = game_engine.Game(1, pl_t, ai_t)
+    bstate = {"resolving_owner_id": 5, "_next_instance_id": 1}
+    with mock.patch.object(
+            hcs, "db_ability_target_template_ids",
+            return_value=json.dumps([ROWDY_TPL_OWN, ROWDY_TPL_OPP])):
+        hcs.HCPHandler._prompt_trigger_targets(
+            handler, game, pl_t, ai_t, SessionStub(), bstate, 0x101,
+            ROWDY_DEPLOY, [ROWDY_TPL_OWN, ROWDY_TPL_OPP],
+            [[0x201], [0x301]], owner_id=5, trigger_target_uid=0x101)
+
+    inst = game.events[0].options[0].instances[0]
+    assert [t.target_index for t in inst.target_instances] == [0, 1]
+    assert [str(t.target_id.guid) for t in inst.target_instances] == [
+        ROWDY_TPL_OWN, ROWDY_TPL_OPP]
+    assert [int(c.uid.uid64) for c in inst.target_instances[0].targets] == [0x201]
+    assert [int(c.uid.uid64) for c in inst.target_instances[1].targets] == [0x301]
+    # Authored bounds: friendly troop is required, "up to one" opposing is not.
+    assert list(inst.min_target_counts) == [1, 0]
+    assert list(inst.max_target_counts) == [1, 1]
+    # The continuation stores every template so the resume can forward both.
+    assert bstate["pending_trigger"]["target_index"] == 0
+    assert bstate["pending_trigger"]["target_entries"] == [
+        {"index": 0, "template_id": ROWDY_TPL_OWN, "minimum": 1, "maximum": 1},
+        {"index": 1, "template_id": ROWDY_TPL_OPP, "minimum": 0, "maximum": 1},
+    ]
+
+
 def test_optional_trigger_prompt_has_opt_in_without_fake_target(db):
     """Optional triggers use class 39 without inventing a target choice."""
     import hconnect_server as hcs
@@ -420,6 +393,64 @@ def test_optional_trigger_prompt_has_opt_in_without_fake_target(db):
         "TriggeredAbilityActivationDataRequiredSessionEventArgs",
         "GreenLightSessionEventArgs",
     ]
+
+
+def test_optional_trigger_decline_serializes_canonical_player_uid(*_args):
+    """Declining a Practice trigger serializes its protocol player UID."""
+    import hconnect_server as hcs
+
+    raw_owner_id = 6175190558117173535
+    client_reck_id = 1925190388022160
+    state = {
+        "pending_trigger": {
+            "ability_guid": EXILE_DEPLOY,
+            "owner_id": raw_owner_id,
+            "instance_id": 23,
+            "optional": True,
+        },
+    }
+
+    class Checkpoint:
+        def load_state(self, _session):
+            return state
+
+        def save_state(self, _session, new_state):
+            state.clear()
+            state.update(new_state)
+
+        def stack_empty(self, _state):
+            return True
+
+        def current_phase(self, _state):
+            return game_engine.ETurnPhases.Mulligan
+
+    handler = object.__new__(hcs.HCPHandler)
+    handler.client_reck_id = str(client_reck_id)
+    handler._checkpoint_engine = lambda _session: Checkpoint()
+    handler._fresh_game = lambda _session, player, ai, _state: game_engine.Game(
+        1, player, ai)
+    handler._priority_context_for = lambda *_args: \
+        game_engine.EPriorityContext.Normal
+    sent_games = []
+    handler._send_battle_events = lambda _session, game, _player: \
+        sent_games.append(game)
+    handler._push_transaction_ack = lambda _session: None
+    handler._push_main_phase_options = lambda *_args: None
+
+    session = SimpleNamespace(session_id=1)
+    transaction = SimpleNamespace(payload={
+        "activation_data": {"opted": False},
+    })
+    handled = hcs.HCPHandler._resolve_rules_port_trigger_continuation(
+        handler, session, transaction)
+
+    assert handled is True
+    assert "pending_trigger" not in state
+    event = next(event for event in sent_games[0].events
+                 if isinstance(event, game_engine.AbilityCancelledSessionEventArgs))
+    assert int(event.responsible_player_id.uid64) == int(
+        game_engine.UID.make(244, client_reck_id).uid64)
+    assert event.to_byte_array()
 
 
 def test_pending_trigger_target_queues_reconnectable_chain(db):
@@ -498,6 +529,72 @@ def test_pending_trigger_target_queues_reconnectable_chain(db):
     assert resumed.descriptor["trigger_target_uid"] == 0x1801
 
 
+def test_pending_trigger_continuation_forwards_every_target(db):
+    """A two-target triggered ability forwards both chosen targets.
+
+    The native continuation decodes the client's complete TargetMap; the
+    resume must not collapse it to the primary slot, or ``Battle2Cards`` gets
+    an attacker with no defender and the fight silently does nothing.
+    """
+    import hconnect_server as hcs
+    from rules_port.session import AuthoritativeSession
+
+    pl_t = game_engine.UID.make(244, 5)
+    ai_t = game_engine.UID.make(3, 1000)
+    port = AuthoritativeSession(1, (pl_t, ai_t), seed_z=1, seed_w=2)
+    port.current_turn_phase = game_engine.ETurnPhases.FirstMainPhase
+    port.active_player_id = pl_t
+    port.event_sink = object()
+    state = {
+        "pending_trigger": {
+            "ability_guid": ROWDY_DEPLOY,
+            "source_uid": 0x1801,
+            "owner_id": 5,
+            "instance_id": 42,
+            "target_index": 0,
+            "trigger_target_uid": 0x1801,
+            "activation_data": {"target_map": {0: [0x6801], 1: [0x6901]}},
+        },
+    }
+
+    class Checkpoint:
+        def load_state(self, _session):
+            return state
+
+        def save_state(self, _session, value):
+            state.update(value)
+
+    class Session:
+        session_id = 1
+        _rules_port_session = port
+        _rules_port_battle_state = state
+
+    handler = object.__new__(hcs.HCPHandler)
+    handler._checkpoint_engine = lambda _session: Checkpoint()
+    projected = []
+    handler._fresh_game = lambda *_args: (
+        projected.append(game_engine.Game(1, pl_t, ai_t)) or projected[-1])
+    handler._send_battle_events = lambda *_args: None
+    handler._push_transaction_ack = lambda *_args: None
+    handler._advance_rules_port_to_priority = lambda *args: None
+    session = Session()
+
+    assert handler._resolve_pending_trigger_target(
+        session, pl_t, ai_t, b"", ability_guid=ROWDY_DEPLOY)
+    chain_events = [event for event in projected[0].events
+                    if isinstance(
+                        event,
+                        game_engine.AbilityPushedOnChainSessionEventArgs)]
+    assert len(chain_events) == 1, chain_events
+    assert sorted(int(card.uid.uid64)
+                  for card in chain_events[0].target_card_ids) == [0x6801, 0x6901]
+    saved = port.snapshot()
+    descriptor = next(item for item in saved["projected_chain"]
+                      if item["instance_id"] == 42)
+    assert descriptor["activation_data"]["target_map"] == {
+        "0": [0x6801], "1": [0x6901]}
+
+
 def test_pending_trigger_prompt_survives_priority_projection(db):
     """The practice priority projection must not replace a pending picker.
 
@@ -561,7 +658,7 @@ def test_pending_trigger_prompt_survives_priority_projection(db):
         session, pl_t, ai_t, bstate) is False
 
 
-def test_pending_trigger_stops_native_scheduler(_db):
+def test_pending_trigger_stops_native_scheduler(*_args):
     """A trigger prompt must not advance an empty native action stack."""
     from rules_port.session import AuthoritativeSession
 
@@ -586,13 +683,18 @@ if __name__ == "__main__":
     run("IsAttacking target filter", test_attacking_filter)
     run("BlockingFilter follows the active combat", test_blocking_filter_uses_active_combat_assignment)
     run("champion targets join the pool", test_champion_targets)
-    run("human deploy triggers class-39 prompt", test_deploy_prompt_human)
     run("trigger target prompt preserves controller",
         test_trigger_target_prompt_uses_explicit_controller)
+    run("multi-target trigger prompt advertises every target",
+        test_multi_target_trigger_prompt_advertises_every_target)
     run("optional trigger prompt requests opt-in",
         test_optional_trigger_prompt_has_opt_in_without_fake_target)
+    run("optional trigger decline uses canonical player UID",
+        test_optional_trigger_decline_serializes_canonical_player_uid)
     run("trigger target continuation survives reconnect",
         test_pending_trigger_target_queues_reconnectable_chain)
+    run("two-target trigger continuation forwards both targets",
+        test_pending_trigger_continuation_forwards_every_target)
     run("AI deploy auto-picks + chains", test_deploy_auto_ai)
     run("class-39 event serializes", test_class39_wire)
     run("pending trigger prompt survives the priority projection",

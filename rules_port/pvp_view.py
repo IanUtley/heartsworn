@@ -13,6 +13,11 @@ def _thresholds(state, player_id):
     return result
 
 
+# effect_lifetimes ledgers: lists of duration-bound grants and writes.
+_LIFETIME_LIST_KEYS = ("temporary_ability_grants", "temporary_card_int_attrs",
+                       "temporary_champion_int_attrs", "temporary_card_stats")
+
+
 def to_effect_view(state, player_id, opponent_id):
     """Return a side-oriented view while aliasing mutable stack state."""
     if not isinstance(state, dict):
@@ -28,6 +33,9 @@ def to_effect_view(state, player_id, opponent_id):
         "player_max_health": int(state.get(f"hp_{player_id}", 20)),
         "ai_max_health": int(state.get(f"hp_{opponent_id}", 20)),
         "turn_number": int(state.get("turn_number", 1)),
+        # Read-only: conditions such as "if it's your turn" compare the raw
+        # active participant; the view's player/ai sides are per-resolution.
+        "turn_pid": state.get("turn_pid"),
         "damaged_opponent_this_turn": list(
             state.get("damaged_opponent_this_turn") or []),
         "damaged_opponent_turn": int(
@@ -54,7 +62,28 @@ def to_effect_view(state, player_id, opponent_id):
         "stack_player_passed": state.get("stack_player_passed", False),
         "stack_ai_passed": state.get("stack_ai_passed", False),
         "_next_instance_id": state.get("_next_instance_id", 1),
+        # Opt-in resolver traces must survive the PvP side-oriented view and
+        # a later choice/deck continuation. Without these aliases the first
+        # half of a choice was traceable while the resumed effect silently
+        # disappeared from the audit projection.
+        "trace_ability_resolution": bool(
+            state.get("trace_ability_resolution", False)),
+        "ability_trace": state.setdefault("ability_trace", []),
     }
+    # A StartTurn current-resource grant is applied in this side-oriented
+    # view, then consumed by the following Prep refill. Preserve its marker
+    # across the view round-trip so Prep does not erase the grant.
+    for participant in (player_id, opponent_id):
+        try:
+            pid = int(participant)
+        except (TypeError, ValueError):
+            continue
+        bonus_key = f"start_turn_resource_bonus_{pid}"
+        if bonus_key in state:
+            try:
+                view[bonus_key] = int(state.get(bonus_key, 0) or 0)
+            except (TypeError, ValueError):
+                view[bonus_key] = 0
     # Records abilities read and update these shared TAC/list values while
     # they resolve through the FRA-shaped PvP adapter. Keep the nested roots
     # aliased so a paused continuation and its later resume see one instance.
@@ -64,9 +93,18 @@ def to_effect_view(state, player_id, opponent_id):
                 "stored_targets", "champion_int_attrs",
                 "stored_targets_by_card",
                 "stored_targets_by_card_this_turn",
-                "temporary_champion_int_attrs",
                 "talent_guids_by_owner", "escalation_counts_by_card"):
         view[key] = state.setdefault(key, {})
+    # Duration ledgers (effect_lifetimes) are lists. Alias them too so a
+    # "this turn"/"until your next turn" grant recorded while resolving in
+    # the view reaches the checkpoint the turn boundary later expires from.
+    for key in _LIFETIME_LIST_KEYS:
+        value = state.get(key)
+        if not isinstance(value, list):
+            value = state[key] = []
+        view[key] = value
+    view["card_counter_cost_paid"] = state.setdefault(
+        "card_counter_cost_paid", {})
     return view
 
 
@@ -87,6 +125,18 @@ def apply_effect_view(state, view, player_id, opponent_id):
             (f"sp_{opponent_id}", "ai_spell_points")):
         if view_key in view:
             state[key] = int(view.get(view_key, state.get(key, 0)) or 0)
+    for participant in (player_id, opponent_id):
+        try:
+            pid = int(participant)
+        except (TypeError, ValueError):
+            continue
+        bonus_key = f"start_turn_resource_bonus_{pid}"
+        if bonus_key not in view:
+            continue
+        try:
+            state[bonus_key] = int(view.get(bonus_key, 0) or 0)
+        except (TypeError, ValueError):
+            state[bonus_key] = 0
     if "player_threshold" in view:
         state[f"thresh_{player_id}"] = dict(
             view.get("player_threshold") or {})
@@ -108,12 +158,20 @@ def apply_effect_view(state, view, player_id, opponent_id):
                 "stored_targets", "champion_int_attrs",
                 "stored_targets_by_card",
                 "stored_targets_by_card_this_turn",
-                "temporary_champion_int_attrs",
                 "talent_guids_by_owner", "escalation_counts_by_card"):
         if key in view:
             state[key] = dict(view.get(key) or {})
+    for key in _LIFETIME_LIST_KEYS:
+        if key in view:
+            value = view.get(key)
+            state[key] = value if isinstance(value, list) else []
     if "stack" in view:
         state["stack"] = view["stack"]
     if "_next_instance_id" in view:
         state["_next_instance_id"] = int(view["_next_instance_id"] or 1)
+    if "trace_ability_resolution" in view:
+        state["trace_ability_resolution"] = bool(
+            view.get("trace_ability_resolution", False))
+    if "ability_trace" in view:
+        state["ability_trace"] = view["ability_trace"]
     return state

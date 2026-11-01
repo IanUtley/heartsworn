@@ -441,10 +441,41 @@ def _assign_deck(handler, target, instance, reqid, comp, session_id, conh,
                           conh, service_uid, log_prefix="refresh")
 
 
+def _grant_arena_chests(handler, user_id, chest_count):
+    """Roll each earned Frost Ring Arena chest and grant its contents directly.
+
+    Each chest is one PvE card (added to the collection) and one equipment
+    item (pushed to the client like a pack's equipment slot).
+    """
+    if chest_count <= 0:
+        return
+    import hconnect_server as _hc
+    from gamedata import DEFAULT_RECORD_STORE
+    from az1_pack import generate_arena_chest
+    from services.chests import _grant_pack_inventory_rewards, _grant_reward_cards
+    card_templates = _hc._load_card_templates()
+    cards = []
+    equipment = []
+    for _ in range(chest_count):
+        reward = generate_arena_chest(card_templates, DEFAULT_RECORD_STORE, random)
+        cards.append(reward.card)
+        equipment.append((reward.equipment_guid, "equipment"))
+    _grant_reward_cards(user_id, cards)
+    updates = _grant_pack_inventory_rewards(handler, equipment)
+    _hc._db.commit()
+    for guid, client_uid, quantity in updates:
+        handler.push_inventory_to_client(
+            qty=quantity, template_guid=guid, item_id=client_uid)
+    _log_req(f"    Arena chests granted: {chest_count} "
+             f"(cards={len(cards)}, equipment={len(equipment)})")
+
+
 def _cash_out(handler, target, instance, reqid, comp, session_id, conh,
               service_uid):
     user_id = handler.user_profile["id"]
     result = db_claim_arena_rewards(user_id)
+    if result.get("success"):
+        _grant_arena_chests(handler, user_id, int(result.get("chests", 0) or 0))
     gold = int(result.get("gold", 0) or 0)
     _log_req(f">>> DoArenaCashOut (dt=10011): gold={gold}, "
              f"loot={len(result.get('loot', []))}, "
@@ -583,6 +614,41 @@ def _refresh_info(handler, target, instance, reqid, comp, session_id, conh,
          ("ErrorMessage", "string", "")])
     _send_response(handler, 10013, resp_inner, comp, session_id, reqid,
                    target, instance, conh, service_uid)
+
+
+def _override_next_challenger(handler, target, instance, reqid, comp,
+                              session_id, conh, inner_obj, SERVICE_MAIL_UID):
+    """Client ``arena.setChallenger <id>`` (CampaignService.OverrideNextChallenger, dt 10031): make the roster
+    challenger with that id the next fight, then answer with that fight and challenger."""
+    user_id = handler.user_profile["id"]
+    new_id = 0
+    if isinstance(inner_obj, dict):
+        try:
+            new_id = int(inner_obj.get("NewChallengerID", 0) or 0)
+        except (TypeError, ValueError):
+            new_id = 0
+    roster = db_get_fra_challengers(user_id)
+    if 1 <= new_id <= len(roster):
+        db_update_arena_state(user_id, challenger_index=new_id - 1)
+        _log_req(f">>> OverrideNextChallenger (dt=10031): next challenger set to id {new_id}")
+    else:
+        _log_req(f">>> OverrideNextChallenger (dt=10031): id {new_id} not on the roster; unchanged")
+    _arena, _challengers, challenger, fight, _history = _arena_payload(user_id)
+    resp_inner = encode_objfmt_response(
+        ["Game.Client.Network.Campaign.OverrideNextChallengerResponse",
+         "Reckoning.Campaign.Messages.Arena.ArenaFight", "Game.Shared.ResourceId",
+         "System.Guid", "Reckoning.Campaign.Messages.Arena.ArenaChallenger",
+         "System.Int32", "System.UInt64", "System.String",
+         "Game.Shared.Mechanics.ECampaignDifficulty", "System.Boolean",
+         "System.Collections.Generic.List`1#Game.Shared.ResourceId"],
+        [("EncounterData", "struct", (
+            "Reckoning.Campaign.Messages.Arena.ArenaFight", _arena_fight_fields(fight))),
+         ("ChallengerData", "struct", (
+             "Reckoning.Campaign.Messages.Arena.ArenaChallenger",
+             _arena_challenger_fields(challenger)))])
+    size = _send_response(handler, 10031, resp_inner, comp, session_id,
+                          reqid, target, instance, conh, SERVICE_MAIL_UID)
+    _log_req(f"    Sent OverrideNextChallenger response ({size}b)")
 
 
 def _pick_next(handler, target, instance, reqid, comp, session_id, conh,
@@ -990,6 +1056,9 @@ def handle_request(handler, target, instance, reqid, comp, session_id, conh,
     elif data_type == 10005:
         _pick_next(handler, target, instance, reqid, comp, session_id, conh,
                    SERVICE_MAIL_UID)
+    elif data_type == 10031:
+        _override_next_challenger(handler, target, instance, reqid, comp,
+                                  session_id, conh, inner_obj, SERVICE_MAIL_UID)
     elif data_type == 10007:
         _challenger_list(handler, target, instance, reqid, comp, session_id,
                          conh, SERVICE_MAIL_UID)

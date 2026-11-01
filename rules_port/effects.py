@@ -13,10 +13,10 @@ from typing import Any, cast
 import game_engine
 
 
-# Effect templates that read their *whole* resolved target set from Records
-# instead of acting on a single target.  C# applies these once per
-# AbilityEffectInstance (``AbilityEffectTemplate.Apply``), so the resolver's
-# per-target loop must not invoke them once per member card.
+
+# Effect templates whose C# Apply(AbilityEffectInstance) runs once for the
+# mapping and handles any target set itself.  The resolver's per-target loop
+# must not invoke them once per member card.
 SELF_TARGETED_EFFECTS = frozenset({
     # "Look at the top five cards of your deck": re-running the reveal for
     # each of the five resolved cards revealed the same five cards five times
@@ -26,6 +26,12 @@ SELF_TARGETED_EFFECTS = frozenset({
     # to the whole target instance once. Calling it once per target multiplies
     # the authored loop count by the target count.
     "RepeatingAbilityEffectTemplate",
+    # RandomizeVariableEffectTemplate overrides CardAbilityEffectTemplate's
+    # per-card Apply and writes one ability-instance variable. Re-running it
+    # for every target made later AbilityVariableCondition branches use only
+    # the final target's roll instead of the single authored roll.
+    "RandomizeVariableEffectTemplate",
+    "RandomizeVariableAbilityEffectTemplate",
 })
 
 
@@ -193,11 +199,14 @@ def grant_ability(context):
     from gamedata import DEFAULT_RECORD_STORE, ability_graph
     from pvp_db import (db_ability_metadata_exists, db_card_grant_info,
                         db_set_card_abilities)
+    from .granted_abilities import is_zero_guid
     try:
         granted = str(context.param or "").lower()
     except Exception:
         granted = ""
-    if not granted or granted == "0" * 36:
+    if is_zero_guid(granted):
+        # No typed template: the abilities come from what the resolving ability remembered, or from one of the
+        # effect's power-source flags below (sockets, payments, remembered powers, a random pick).
         remembered = (context.bstate.get("remembered_powers") or {})
         values = remembered.get(context.bstate.get("resolving_ability"), [])
         granted_values = [str(value).lower() for value in values]
@@ -206,7 +215,7 @@ def grant_ability(context):
     if not granted_values:
         typed = str(context.template_value(
             "m_GrantedAbilityTemplateId", "") or "").lower()
-        if typed and typed != "0" * 36:
+        if not is_zero_guid(typed):
             granted_values = [typed]
     target = context.bstate.get("grant_target")
     if target is None:
@@ -235,7 +244,14 @@ def grant_ability(context):
         "m_AllPaymentPowersOfTarget", False))
     all_remembered = bool(context.template_value("m_AllRememberedPowers", False))
     if (random_inspire or random_charge) and not granted_values:
-        picked = context.bstate.get("random_power_template")
+        # Keyed by the resolving activation's instance (as C# stores it on the
+        # ability instance): it survives a pause/continuation of this
+        # activation and is dropped when the activation finishes.
+        instance_values = context.bstate.setdefault(
+            "ability_runtime_state", {}).setdefault(
+                str(int(context.bstate.get("resolving_ability_instance_id")
+                        or 0)), {})
+        picked = instance_values.get("RandomPowerTemplate")
         if not picked:
             from pvp_db import (db_champion_charge_power_guids,
                                 db_inspire_ability_guids)
@@ -248,7 +264,7 @@ def grant_ability(context):
                 else:
                     import random as _random
                     picked = pool[_random.randrange(len(pool))]
-                context.bstate["random_power_template"] = picked
+                instance_values["RandomPowerTemplate"] = picked
         if picked:
             granted_values = [str(picked).lower()]
     if (all_socket_source or all_socket_target or all_socket_master or
@@ -364,6 +380,9 @@ def grant_ability(context):
                     (str(graph.trigger_event_type or "").rsplit(
                         ".", 1)[-1] == "GameStartedEvent" or
                      continuous_card_modifier)):
+                    from .effect_lifetimes import mark_gamestart_grant
+                    if not mark_gamestart_grant(context.bstate, champion_uid, guid):
+                        continue
                     resolve_port_ability(
                         context.handler, context.game, context.session,
                         context.db, context.player_uid, context.ai_uid,
@@ -482,9 +501,6 @@ def create_and_cast_spell(context):
         player = context.player_uid if owner else context.ai_uid
         _tpl, card_type, _name, cost, attack, defense, gems = \
             context.handler._card_full_data(context.game, scid, template_guid)
-        context.game.push_card_moved(
-            scid, player, game_engine.ECardCollections.CastSpells,
-            game_engine.ECardLocations.Top, 0)
         context.game.push_card_updated(
             scid, player, game_engine.ECardCollections.CastSpells, card_type,
             template_id=template_guid, cost=cost, attack=attack,
@@ -576,12 +592,27 @@ def _resource_modifier(context, effect):
                              "chargepoints", "threshold"}:
         return None
     amount = int(param.get("amount") or 0)
-    if amount == 0:
+    # A set (CurrentResourceModifier/TotalResourceModifier with Set) makes the pool the value, not a change of it.
+    is_set = bool(param.get("set")) and property_name in {"currentresource", "totalresource"}
+    if amount == 0 and not is_set:
         amount = context.modifier_value(param, {}, property_name)
     target = context.resolved_target()
     owner = context.target_owner(target, default=None)
     if owner is None:
         owner = int(context.bstate.get("resolving_owner_id", 0) or 0)
+    if property_name == "chargepoints" and target is not None:
+        # Session.AddChargePoints treats a non-champion Card target as a
+        # counter change on that card. Only champion targets modify the
+        # player's charge pool and emit GainChargeEvent. Routing every target
+        # through the player pool made cards such as Eternal Drifter trigger
+        # their own "when you gain a charge" ability indefinitely.
+        from abilities.framework.effects.counters import is_champion_target
+        if not is_champion_target(context.handler, context.bstate, target):
+            old, new = context.counter(
+                int(target), "charge",
+                counter_guid=param.get("counter_template_guid"),
+                amount=amount, operation="add")
+            return f"card charge counter {old}->{new}"
     # Practice uses ``0`` for the AI owner, while PvP uses raw participant
     # IDs for both players.  Truthiness therefore cannot identify the side in
     # a PvP effect view; map the resolved owner against the view's ordered
@@ -633,6 +664,9 @@ def _resource_modifier(context, effect):
             color = int(game_engine.SHARD_TO_FLAG.get(shard, 0))
         if not color:
             return None
+    if is_set:
+        pool_key = f"{side}_resources" if property_name == "currentresource" else f"{side}_total_resources"
+        amount = int(amount) - int(context.bstate.get(pool_key, 0) or 0)
     from .resources import project_resource_change
     change = project_resource_change(
         context.game, context.session, context.bstate,
@@ -674,8 +708,10 @@ def _resource_modifier(context, effect):
     # TurnStarted triggers resolve before the following Prep refill. Preserve
     # positive temporary current-resource gains so Prep restores the normal
     # total and then reapplies the authored bonus (for example Lithe
-    # Lyricist's +1 current resource).
-    if property_name == "currentresource" and amount > 0:
+    # Lyricist's +1 current resource).  A current gain that came with a total
+    # gain in the same StartTurn (Chained Goliath's [L1][R1]) is not a bonus:
+    # the refill to total already grants it, so the two are netted here.
+    if property_name in ("currentresource", "totalresource") and amount > 0:
         import game_engine
         phase = context.bstate.get("phase")
         if phase == game_engine.ETurnPhases.StartTurn:
@@ -686,8 +722,10 @@ def _resource_modifier(context, effect):
                 bonus_key = ("start_turn_resource_bonus_player"
                              if owner_id else
                              "start_turn_resource_bonus_ai")
-            context.bstate[bonus_key] = int(
-                context.bstate.get(bonus_key, 0) or 0) + int(amount)
+            from .resources import record_start_turn_resource_gain
+            record_start_turn_resource_gain(
+                context.bstate, bonus_key, property_name, int(amount),
+                int(context.bstate.get("turn_number", 1) or 1))
     label = {"currentresource": "resources",
              "totalresource": "total",
              "chargepoints": "charges",
@@ -870,6 +908,27 @@ def _card_cost(context, target, param):
     else:
         db_add_card_cost_modifier(
             context.session.session_id, int(target), amount, conn=context.db)
+        if duration in ("BeginningOfOwnersTurn", "AfterCardsReadyOnPlayersTurn",
+                        "WhileCardInPlay", "EndOfTurn"):
+            # "Cost [(1)] until the start of your next turn" (Thk'tatcha) is
+            # reversed at the owner's boundary instead of staying forever; a
+            # while-in-play change is reversed when its source is gone; "this
+            # turn" is reversed at the end of the turn (C# disables the
+            # effect instance in RemoveEndOfTurnAbilities).
+            from .effect_lifetimes import record_temporary_stat
+            resolving_owner = int(
+                context.bstate.get("resolving_owner_id", 0) or 0)
+            expiration_owner = (
+                resolving_owner if duration == "BeginningOfOwnersTurn"
+                else int(context.target_owner(
+                    int(target), default=resolving_owner) or 0))
+            from pvp_db import db_card_location
+            record_temporary_stat(
+                context.bstate, int(target), 0, 0, duration=duration,
+                owner_id=expiration_owner, cost=int(amount),
+                location=db_card_location(
+                    context.session.session_id, int(target), conn=context.db),
+                source_uid=context.bstate.get("resolving_source_uid"))
     context.db.commit()
     row = db_card_zone_details(
         context.session.session_id, int(target), conn=context.db)
@@ -912,6 +971,9 @@ def _int_attribute(context, target, param):
         "EndOfTurn", "EndOfNextTurn", "BeginningOfOwnersTurn",
         "BeginningOfOpponentsTurn", "AfterCardsReadyOnPlayersTurn",
         "UntilDamaged", "UntilItLeavesYourHand",
+        # A while-in-play write is a recorded grant: it lives in the temporary payload and the linked ledger
+        # expires it with the source (the sweep at each event and turn boundary).
+        "WhileCardInPlay",
     }
     resolving_owner = int(context.bstate.get("resolving_owner_id", 0) or 0)
     if duration == "BeginningOfOwnersTurn":
@@ -953,7 +1015,9 @@ def _int_attribute(context, target, param):
                 target_owner_id=champion_owner,
                 source_uid=context.bstate.get("resolving_source_uid"),
                 expiration_owner_id=expiration_owner)
-        context._push_champion_intattrs(champion_owner, int(target))
+        context._push_champion_intattrs(
+            champion_owner, int(target),
+            cleared=() if value else (attr,))
         context.emit_int_attribute_gained(target, attr, previous, value)
         return f"intattr {attr}={value} champion={hex(int(target))}"
 
@@ -962,7 +1026,7 @@ def _int_attribute(context, target, param):
         "EndOfTurn", "EndOfNextTurn", "BeginningOfOwnersTurn",
         "BeginningOfOpponentsTurn",
         "AfterCardsReadyOnPlayersTurn", "UntilDamaged",
-        "UntilItLeavesYourHand"}
+        "UntilItLeavesYourHand", "WhileCardInPlay"}
     column = "temporary_buffs" if temporary else "permanent_buffs"
     raw = db_card_mutation_field(
         context.session.session_id, int(target), column, conn=context.db)
@@ -972,17 +1036,39 @@ def _int_attribute(context, target, param):
         buffs = {}
     attrs = buffs.setdefault("int_attrs", {})
     old = int(attrs.get(attr, 0) or 0)
+    # A persisted Tunneling IntAttr is the card's current absolute value
+    # (rules_port.tunneling.tunneling_value), so a modifier on a card that
+    # has none yet applies to the printed CardTemplate value: Tectonic
+    # Megahulk's "Tunneling -1 for each Robot" is 15 -> 14, not 0 -> -1.
+    # Keep an explicit 0 as well, or the threshold would revert to print.
+    keep_zero = False
+    if attr.lower() == "tunneling" and not temporary:
+        from pvp_db import db_card_basic
+        from .tunneling import tunneling_value
+        basic = db_card_basic(
+            context.session.session_id, int(target), conn=context.db)
+        printed = tunneling_value(context.db, basic[0], {}) if basic else 0
+        if attr not in attrs:
+            old = printed
+        keep_zero = printed > 0 and operation not in (
+            "remove", "removeall", "clear")
     value = apply_operation(old)
     if value is None:
         return f"intattr: unsupported operation {operation} on {attr}"
-    if value:
+    if value or keep_zero:
         attrs[attr] = value
     else:
         attrs.pop(attr, None)
+    tamed = attr.lower() == "tamed" and value > 0
+    if tamed:
+        # Tamed and Untamed are mutually exclusive.
+        attrs.pop("Untamed", None)
     db_set_card_mutation_field(
         context.session.session_id, int(target), column,
         json.dumps(buffs), conn=context.db)
     context.db.commit()
+    if tamed and _capture_tamed_card(context, int(target), buffs):
+        return f"intattr {attr}={value} target={hex(int(target))} (captured)"
     if duration in temporary_durations:
         from .effect_lifetimes import record_temporary_intattr
         record_temporary_intattr(
@@ -1056,6 +1142,42 @@ def _card_tag(context, target, param):
     return f"tag {key}={int(tags.get(key, 0) or 0)} target={hex(int(target))}"
 
 
+def _capture_tamed_card(context, target, buffs):
+    """A successful tame voids the troop (Taming Sphere capture).
+
+    Ported from the legacy IntAttrModifier path, which RulesPort battles no
+    longer use: without it a tamed Dire Toad stayed in play and the Tamed
+    quest never saw a tamed troop in the void.  Keyed on the typed Tamed
+    marker, so the 2-cost chance branch and the 5-cost branch behave alike.
+    """
+    import game_engine
+    from pvp_db import db_card_modifier_state, db_tame_card
+    from rules_port.runtime_helpers import owner_uid
+    from rules_port.zone_effects import state_after_zone_exit
+    row = db_card_modifier_state(
+        context.session.session_id, target, conn=context.db)
+    if not row or str(row[2] or "").lower() == "void":
+        return False
+    state = state_after_zone_exit(row[3])
+    db_tame_card(context.session.session_id, target, json.dumps(buffs),
+                 state, conn=context.db)
+    context.db.commit()
+    scid = game_engine.SessionCardId(game_engine.UID(target))
+    _tpl, ct, _name, cost, attack, defense, gems = \
+        context.handler._card_full_data(context.game, scid, row[0])
+    owner = owner_uid(row[1], context.player_uid, context.ai_uid,
+                      context.bstate)
+    context.game.push_card_updated(
+        scid, owner, game_engine.ECardCollections.Void, ct,
+        template_id=row[0], cost=cost, attack=attack, defense=defense,
+        state=state, gems=gems)
+    context._emit_trigger(
+        "CardExitedZoneEvent", target, int(row[1] or 0),
+        event_source_collection=str(row[2] or "").lower(),
+        event_destination_collection="void")
+    return True
+
+
 def _targets(context):
     target = context.resolved_target()
     if target is not None:
@@ -1066,9 +1188,43 @@ def _targets(context):
     return None
 
 
-def _untap(context):
+def _each_untap_targets(context):
+    """The cards an untap-each effect readies, read as the interpreter reads them: the automatic targets of the
+    resolving ability's untap clauses, which are every card the clause's filter passes (none when no card passes).
+    None when the resolving ability has no untap clause that targets automatically (a chosen or single card)."""
+    from rules_port import ir_exec
+    bstate = context.bstate or {}
+    guid = bstate.get("resolving_ability")
+    source = bstate.get("resolving_source_uid")
+    owner = bstate.get("resolving_owner_id")
+    if not guid or source is None or owner is None:
+        return None
+    try:
+        root = ir_exec._load("AbilityTemplate", str(guid).lower())
+    except KeyError:
+        return None
+    scope = ir_exec.Scope(context=context, source_uid=int(source), owner_uid=int(owner),
+                          table=root.version_table)
+    untap_targets: list[int] = []
+    found = False
+    for clause in root.m_AbilityEffectList:
+        effect_type, _raw = ir_exec._stored("AbilityEffectTemplate", ir_exec._guid(ir_exec._field(clause, "m_EffectTemplateId")))
+        if ir_exec._short(effect_type) != "UntapCardAbilityEffectTemplate":
+            continue
+        index = int(ir_exec._field(clause, "m_TargetTemplateIndex") or 0)
+        template = ir_exec._load("AbilityTargetTemplate", ir_exec._guid(root.m_AbilityTargetTemplateIds[index]))
+        if ir_exec._short(template.type_name) != "AbilityTargetTemplate" or not template.m_IsAutoTarget:
+            return None
+        found = True
+        untap_targets.extend(ir_exec._targets(root, index, scope))
+    return list(dict.fromkeys(untap_targets)) if found else None
+
+
+def _untap(context, targets=None):
     import game_engine
-    targets = _targets(context)
+    if targets is None:
+        targets = _each_untap_targets(context)
+    targets = _targets(context) if targets is None else list(targets)
     if targets is None:
         return None
     for target in targets:
@@ -1078,9 +1234,9 @@ def _untap(context):
     return f"readied {len(targets)}"
 
 
-def _tap(context):
+def _tap(context, targets=None):
     import game_engine
-    targets = _targets(context)
+    targets = _targets(context) if targets is None else list(targets)
     if targets is None:
         return None
     from pvp_db import db_card_owner_id
@@ -1091,7 +1247,8 @@ def _tap(context):
         # C# TapCardAbilityEffectTemplate: CantBeExhaustedByOpponent blocks an
         # opponent-authored exhaust.
         if card_int_attr(context.db, context.session.session_id, int(target),
-                         "CantBeExhaustedByOpponent") > 0:
+                         "CantBeExhaustedByOpponent",
+                         battle_state=context.bstate) > 0:
             owner = db_card_owner_id(
                 context.session.session_id, int(target), conn=context.db)
             if owner is not None and int(owner) != resolving:

@@ -13,21 +13,31 @@ from tests.test_db import fresh_database
 fresh_database()
 import game_engine
 from rules_port.damage_effects import (
-    DamageOutcome, deal_damage, card_damage_multiplier)
+    DamageOutcome, deal_damage, card_damage_multiplier, _additive_adjustment)
 from rules_port.combat_damage import resolve
 from rules_port import static_rules
 
 
+from tests.test_db import fresh_database
+
+SRC = fresh_database()
+
+
 class DamageRules(unittest.TestCase):
     def setUp(self):
+        # An in-memory copy of the production schema (the metadata baseline).
         self.db = sqlite3.connect(':memory:')
         self.addCleanup(self.db.close)
-        self.db.execute('CREATE TABLE game_cards (session_id INTEGER, card_uid INTEGER, '
-                        'user_id INTEGER, template_guid TEXT, card_type TEXT, location TEXT, '
-                        'permanent_buffs TEXT, temporary_buffs TEXT, card_damage INTEGER)')
+        src = sqlite3.connect(SRC)
+        src.backup(self.db)
+        src.close()
+        self.db.execute('DELETE FROM game_cards')
         for uid, owner in ((769, 5), (1025, 0), (1281, 0)):
-            self.db.execute('INSERT INTO game_cards VALUES (1, ?, ?, ?, ?, ?, ?, ?, 0)',
-                            (uid, owner, 'fixture', 'Troop', 'warzone', '{}', '{}'))
+            self.db.execute(
+                'INSERT INTO game_cards (session_id, card_uid, user_id, template_guid, '
+                'card_template_id, card_type, location, permanent_buffs, temporary_buffs, '
+                'card_damage) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, 0)',
+                (uid, owner, 'fixture', 'fixture', 'Troop', 'warzone', '{}', '{}'))
         self.state = {'resolving_source_uid': 769, 'player_health': 20, 'ai_health': 20}
         self.events = []
         self.health = {769: 20, 1025: 20, 1281: 20}
@@ -88,6 +98,52 @@ class DamageRules(unittest.TestCase):
         self.assertEqual(self.events[0][2]['event_tac']['DamagePrevented'], 3)
         self.assertEqual(self.events[1][2]['event_tac']['damage'], 5)
         self.assertEqual(self.events[3], ('heal', 5, 5))
+
+    def test_card_dealt_damage_carries_damaged_cards_controller(self):
+        # Champion "When you are dealt damage" abilities match through
+        # TriggerPlayerControlsTarget, which reads the event's TargetPlayerId.
+        deal_damage(self.ctx, 1025, 2)
+        dealt = [event for event in self.events if event[0] == 'CardDealtDamageEvent']
+        self.assertEqual(dealt[0][2]['target_player_id'], 0)
+
+    def test_damage_shield_add_order_spans_duration_stores(self):
+        from rules_port.context import EffectContext
+        effect_context = EffectContext.from_rules_port(
+            self.ctx.game, self.ctx.session, self.db, self.handler,
+            self.ctx.player_uid, self.ctx.ai_uid, self.state, "fixture")
+        effect_context._push_modifier_card = lambda *_args, **_kwargs: None
+
+        # C# walks shields in AddDamageShield order, even when their durations
+        # differ. A legacy temporary shield predates the order field; adding
+        # an indefinite shield must sequence it first before appending the new
+        # shield. The one-shot shield must absorb this hit first.
+        self.buffs(1025, {"damage_shields": [
+            {"amount": 3, "one_shot": True,
+             "lasts_indefinitely": False}]}, "temporary_buffs")
+        effect_context.damage_shield(
+            1025, 5, {"lastsindefinitely": True})
+        temporary = json.loads(self.db.execute(
+            'SELECT temporary_buffs FROM game_cards WHERE card_uid=1025'
+        ).fetchone()[0])
+        permanent = json.loads(self.db.execute(
+            'SELECT permanent_buffs FROM game_cards WHERE card_uid=1025'
+        ).fetchone()[0])
+        self.assertEqual(
+            temporary['damage_shields'][0]['rules_port_order'], 0)
+        self.assertEqual(
+            permanent['damage_shields'][0]['rules_port_order'], 1)
+
+        outcome = DamageOutcome()
+        deal_damage(self.ctx, 1025, 1, outcome=outcome)
+        temporary = json.loads(self.db.execute(
+            'SELECT temporary_buffs FROM game_cards WHERE card_uid=1025'
+        ).fetchone()[0])
+        permanent = json.loads(self.db.execute(
+            'SELECT permanent_buffs FROM game_cards WHERE card_uid=1025'
+        ).fetchone()[0])
+        self.assertEqual((outcome.dealt, outcome.absorbed), (0, 1))
+        self.assertEqual(temporary['damage_shields'], [])
+        self.assertEqual(permanent['damage_shields'][0]['amount'], 5)
 
     def test_immunity_preserves_shields_and_replacement_sees_reduced_damage(self):
         self.buffs(1025, {'damage_shields': [{'amount': 3}]})
@@ -268,6 +324,48 @@ class DamageRules(unittest.TestCase):
         self.assertEqual(deal_damage(self.ctx, 1025, 3),
                          'damage: source prevention')
         self.flags.clear()
+
+    def test_authored_champion_damage_modifiers_project_through_metadata(self):
+        """Blackheart's authored champion targets affect both sides of damage."""
+        source = sqlite3.connect(fresh_database())
+        db = sqlite3.connect(':memory:')
+        self.addCleanup(source.close)
+        self.addCleanup(db.close)
+        source.backup(db)
+        blackheart = 'df818ff9-db9e-4ddf-ad10-8ef988421e22'
+        abilities = [
+            '3861715b-de57-0545-e273-c4b9926a6d85',
+            'd70ad7c7-1dea-e644-7ed5-4fb4dbadbaa8',
+        ]
+        db.execute(
+            'INSERT INTO game_cards '
+            '(user_id, session_id, card_uid, card_template_id, location, '
+            'card_type, template_guid, card_abilities, owner_user_id) '
+            'VALUES (?,?,?,?,?,?,?,?,?)',
+            (5, 1, 769, 0, 'warzone', 'Troop', blackheart,
+             json.dumps(abilities), 5))
+        db.commit()
+        state = {
+            'pvp': True,
+            'pids': [5, 0],
+            'champ_map': {'5': 257, '0': 513},
+            'resolving_source_uid': 769,
+        }
+        own = static_rules.player_int_attributes(
+            db, 1, state, 5, target_uid=257, include_runtime=False)
+        opposing = static_rules.player_int_attributes(
+            db, 1, state, 0, target_uid=513, include_runtime=False)
+        self.assertEqual(own.get('DamageReceivedModifier'), -1)
+        self.assertEqual(opposing.get('DamageReceivedModifier'), 1)
+
+        context = SimpleNamespace(
+            db=db, session=SimpleNamespace(session_id=1), bstate=state,
+            target_owner=lambda uid, default=None: {
+                257: 5, 513: 0, 769: 5}.get(uid, default))
+        self.assertEqual(_additive_adjustment(context, 257, 769, True, True), -1)
+        self.assertEqual(_additive_adjustment(context, 513, 769, True, True), 1)
+        self.assertEqual(_additive_adjustment(context, 257, None, False, True), -1)
+        self.assertEqual(_additive_adjustment(context, 513, None, False, True), 1)
 
     def test_continuous_rules_respect_authored_targets(self):
         rule = {'property': 'damagemultiplier', 'amount': 3}

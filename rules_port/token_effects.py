@@ -2,11 +2,18 @@
 
 from __future__ import annotations
 
-import random
 import json
 from collections.abc import Iterable
 from typing import Any
 import game_engine
+from .runtime_helpers import rng_choice
+
+
+def _truthy(value):
+    """Records booleans arrive as bool, 0/1, or "True"/"1" strings."""
+    if isinstance(value, str):
+        return value.strip().lower() in ("1", "true")
+    return bool(value)
 
 
 def _publish_created_card(context, card_uid, owner_id, card_type):
@@ -35,6 +42,83 @@ def _tac_flag(context, name):
         return False
     from .tac import tac_int
     return bool(tac_int(str(raw), name, 0))
+
+
+# C# Extensions.IsCombatPhase.
+_COMBAT_PHASE_NAMES = frozenset({
+    "DeclareCombatPriorityWindow", "DeclareAttack",
+    "DeclareAttackPriorityWindow", "DeclareDefense",
+    "DeclareDefensePriorityWindow", "AssignFirstStrikeDamage",
+    "FirstStrikePriorityWindow", "AssignDamage"})
+
+
+def _in_combat_phase(context):
+    """Return True when the battle is in one of the client's combat phases."""
+    from domain.enums import ETurnPhases
+    phase = context.bstate.get("phase")
+    if phase is None:
+        from .persistence import current_phase
+        phase = current_phase(context.bstate)
+    if isinstance(phase, str) and phase.lstrip("-").isdigit():
+        phase = int(phase)
+    if isinstance(phase, int):
+        return any(getattr(ETurnPhases, name, None) == phase
+                   for name in _COMBAT_PHASE_NAMES)
+    return str(phase or "").rsplit(".", 1)[-1] in _COMBAT_PHASE_NAMES
+
+
+def _copy_boons_and_revocations(context, copy_uid, source_uid):
+    """Port the boon and revoked-ability parts of C# ``Card.CopyFrom``.
+
+    Boons are the boon attribute bits plus the boon IntAttrs; a revoked base
+    ability is one the source no longer lists among its abilities.
+    """
+    import json
+    from pvp_db import (db_card_abilities_state, db_card_attribute_value,
+                        db_card_mutation_field, db_set_card_abilities_and_attributes,
+                        db_set_card_mutation_field)
+    from .attribute_effects import _BOON_FLAGS, _BOON_INT_ATTRIBUTES
+    session_id = context.session.session_id
+    boon_mask = 0
+    for flag in _BOON_FLAGS:
+        boon_mask |= int(flag)
+    source_attrs = int(db_card_attribute_value(
+        session_id, source_uid, "card_attributes", conn=context.db) or 0)
+    copy_attrs = int(db_card_attribute_value(
+        session_id, copy_uid, "card_attributes", conn=context.db) or 0)
+    attrs = (copy_attrs & ~boon_mask) | (source_attrs & boon_mask)
+    source_row = db_card_abilities_state(session_id, source_uid, conn=context.db)
+    copy_row = db_card_abilities_state(session_id, copy_uid, conn=context.db)
+    try:
+        source_abilities = {str(guid).lower() for guid in
+                            json.loads((source_row[0] if source_row else None) or "[]")}
+        copy_abilities = json.loads((copy_row[0] if copy_row else None) or "[]")
+    except (TypeError, ValueError, json.JSONDecodeError):
+        source_abilities, copy_abilities = set(), []
+    kept = [guid for guid in copy_abilities
+            if str(guid).lower() in source_abilities]
+    db_set_card_abilities_and_attributes(
+        session_id, copy_uid, json.dumps(kept), attrs, conn=context.db)
+    try:
+        source_buffs = json.loads(db_card_mutation_field(
+            session_id, source_uid, "permanent_buffs", conn=context.db) or "{}")
+        copy_buffs = json.loads(db_card_mutation_field(
+            session_id, copy_uid, "permanent_buffs", conn=context.db) or "{}")
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return
+    source_ints = source_buffs.get("int_attrs") if isinstance(source_buffs, dict) else None
+    boons = {name: value for name, value in (source_ints or {}).items()
+             if name in _BOON_INT_ATTRIBUTES.values()}
+    if boons and isinstance(copy_buffs, dict):
+        copy_ints = copy_buffs.get("int_attrs")
+        if not isinstance(copy_ints, dict):
+            copy_ints = {}
+        copy_ints.update(boons)
+        copy_buffs["int_attrs"] = copy_ints
+        db_set_card_mutation_field(
+            session_id, copy_uid, "permanent_buffs",
+            json.dumps(copy_buffs, separators=(",", ":"), sort_keys=True),
+            conn=context.db)
 
 
 def create_matching_target(context, target, count, collection,
@@ -86,7 +170,7 @@ def create_matching_target(context, target, count, collection,
                           context.bstate)
     made = []
     for _ in range(max(0, int(count))):
-        template_guid = str(random.choice(pool)).lower()
+        template_guid = str(rng_choice(context.bstate, pool)).lower()
         if not db_template_exists(template_guid, conn=context.db):
             continue
         payload = db_copy_template_payload(template_guid, conn=context.db)
@@ -113,18 +197,17 @@ def create_matching_target(context, target, count, collection,
     if (location == "deck" and made and
             str(deck_location or "").lower() in ("", "unknown", "random")):
         from pvp_db import db_randomly_insert_deck_cards
+        # The session RNG draws the slots, so a run replays the same deck order (the stdlib RNG made it differ).
         db_randomly_insert_deck_cards(
             context.session.session_id, owner_id,
-            [uid for uid, _guid, _card_type in made], connection=context.db)
+            [uid for uid, _guid, _card_type in made], connection=context.db,
+            rng=context.bstate.get("_rules_rng"))
     context.db.commit()
     for uid, template_guid, card_type_name in made:
         scid = game_engine.SessionCardId(game_engine.UID(uid))
         _tpl, card_type, _name, cost, attack, defense, gems = \
             context.handler._card_full_data(context.game, scid, template_guid)
         collection_value = card_collection_for_location(location)
-        context.game.push_card_moved(
-            scid, recipient, collection_value,
-            game_engine.ECardLocations.Top, 0)
         context.game.push_card_updated(
             scid, recipient, collection_value, card_type,
             template_id=template_guid, cost=cost, attack=attack,
@@ -195,6 +278,28 @@ def _authored_banned_guids(context):
     return set()
 
 
+def _template_faction(guid):
+    """The faction a card template's Records entry names (m_Faction), or None for an unknown template."""
+    from rules_port.filters import _template_of
+    template = _template_of({"template_guid": guid})
+    if template is None:
+        return None
+    faction = template.field("m_Faction")
+    return str(faction) if faction not in (None, "", "None") else None
+
+
+def _conscript_faction(context, payload):
+    """The faction a conscript draws from: the named one, else the conscripting card's own faction."""
+    named = payload.get("conscript_faction")
+    if named and str(named) != "None":
+        return str(named)
+    from pvp_db import db_card_zone_details
+    source_uid = context.bstate.get("resolving_source_uid")
+    source = db_card_zone_details(
+        context.session.session_id, int(source_uid or 0), conn=context.db) if source_uid is not None else None
+    return _template_faction(source[0]) if source else None
+
+
 def _matching_template_candidates(context, card_filter, banned_guids=(),
                                   source_uid=None, player=None):
     """Return the typed templates matching one Records ``CardFilter``.
@@ -213,8 +318,14 @@ def _matching_template_candidates(context, card_filter, banned_guids=(),
     candidates = []
     owner = (int(player) if player is not None else
              int(context.bstate.get("resolving_owner_id", 0) or 0))
-    active_thresholds = (context.bstate.get(f"thresh_{owner}")
-                         or context.bstate.get("player_threshold") or {})
+    # Raw per-participant thresholds (PvP checkpoint/view, resource
+    # transitions) win; otherwise the owner's own side.  Falling back to
+    # player_threshold handed the AI the human's thresholds.
+    active_thresholds = context.bstate.get(f"thresh_{owner}")
+    if not isinstance(active_thresholds, dict):
+        from .runtime_helpers import participant_side
+        side = participant_side(context.bstate, owner) or "player"
+        active_thresholds = context.bstate.get(f"{side}_threshold") or {}
     if source_uid is None:
         source_uid = context.bstate.get("resolving_source_uid")
     source_row = db_card_zone_details(
@@ -268,7 +379,14 @@ def _matching_template_candidates(context, card_filter, banned_guids=(),
                                       or threshold_data.get("values") or [])],
                      "thresholds": candidate_thresholds,
                      "subtype": row[6] or "",
-                     "attributes": int(row[7] or 0), "user_id": owner}
+                     # IsSocketable reads the template's socket count (row[8]); without it a socket filter never matches.
+                     "socket_count": int(row[8] or 0) if len(row) > 8 else 0,
+                     "attributes": int(row[7] or 0), "user_id": owner,
+                     # Printed stats for HasAttackValue/HasDefenseValue
+                     # pools (Tashi One-Horn's random 1/1 troop).
+                     "attack": int(row[9] or 0) if len(row) > 9 else 0,
+                     "defense": int(row[10] or 0) if len(row) > 10 else 0,
+                     "_card_template_candidate": True}
         if records_filter_matches(candidate, card_filter,
                                   source=source, context=context,
                                   player={"resource_thresholds":
@@ -354,12 +472,9 @@ def _combined_cost_choices(context, candidates, count, total):
             if int(cost_by_guid.get(guid, 0) or 0) > 0]
     if not pool:
         return []
-    rng = context.bstate.get("_rules_rng")
 
     def pick():
-        if rng is not None and hasattr(rng, "next"):
-            return pool[int(rng.next(len(pool))) % len(pool)]
-        return random.choice(pool)
+        return rng_choice(context.bstate, pool)
 
     remaining = int(total)
     chosen = []
@@ -523,7 +638,7 @@ def _creation_replacement_guid(context, token_guid):
                     context, substitute_filter,
                     _authored_banned_guids(context))
                 if candidates:
-                    return random.choice(candidates)
+                    return rng_choice(context.bstate, candidates)
                 continue
             substitute = replacement_substitute(
                 attribute, linked_templates, token_guid)
@@ -532,8 +647,9 @@ def _creation_replacement_guid(context, token_guid):
     return None
 
 
-def summon_token(context, payload=None):
-    """Create typed token cards and dispatch their authored entry events."""
+def summon_token(context, payload=None, *, target=None, owner=None):
+    """Create typed token cards and dispatch their authored entry events. ``target`` and ``owner`` name the card and
+    the caster explicitly (the interpreter's); without them they are the resolver's target and owner."""
     from pvp_db import (db_copy_template_payload, db_insert_generated_card,
                         db_next_game_card_row_id, db_template_exists)
     payload = payload if isinstance(payload, dict) else {}
@@ -558,12 +674,18 @@ def summon_token(context, payload=None):
         count = max(0, int(count or 0))
     except (TypeError, ValueError):
         count = 0
-    collection = str(context.template_value(
-        "m_CardCollection", payload.get("collection", "Warzone")) or
-        "Warzone").rsplit(".", 1)[-1].lower()
-    location = {"deck": "deck", "hand": "hand", "choosing": "choosing",
-                "discard": "discard", "underground": "underground",
-                "void": "void"}.get(collection, "warzone")
+    collection_value = context.template_value(
+        "m_CardCollection", payload.get("collection", "Warzone"))
+    collection = str(collection_value or "Warzone").rsplit(".", 1)[-1].lower()
+    # C# CreateNTokensFromResource keeps an ECardCollections.None token in
+    # the owner's None collection. A later authored MoveCardToZone effect may
+    # then put that exact CreatedCards entry into play. Treating None as
+    # Warzone enters it early and makes the later move a no-op, changing both
+    # zone-trigger order and the persisted effect trace.
+    location = ("none" if collection in {"none", "unknown"} else
+                {"deck": "deck", "hand": "hand", "choosing": "choosing",
+                 "discard": "discard", "underground": "underground",
+                 "void": "void"}.get(collection, "warzone"))
     deck_location = str(context.template_value(
         "m_CardLocation", "") or "").rsplit(".", 1)[-1].lower()
     card_filter = payload.get("card_filter")
@@ -586,26 +708,31 @@ def summon_token(context, payload=None):
         else:
             candidates = _matching_template_candidates(
                 context, card_filter, banned_guids)
+            if payload.get("conscript_event"):
+                # Conscript draws from one faction: the one the payload names, else the conscripting card's own.
+                faction = _conscript_faction(context, payload)
+                if faction:
+                    candidates = [guid for guid in candidates
+                                  if _template_faction(guid) == faction]
         if candidates:
             if combined_cost > 0:
                 selected_guids = _combined_cost_choices(
                     context, candidates, count, combined_cost)
             elif terminus:
                 # C# draws one random fused card per amount, with replacement.
-                selected_guids = [random.choice(candidates)
+                selected_guids = [rng_choice(context.bstate, candidates)
                                   for _ in range(max(0, count))]
             elif payload.get("random_with_replacement"):
                 # Conscript calls CreateNTokensFromResource(1, randomCard)
                 # once per requested card. The same authored candidate may
                 # therefore be selected more than once.
-                selected_guids = [random.choice(candidates)
+                selected_guids = [rng_choice(context.bstate, candidates)
                                   for _ in range(max(0, count))]
             else:
-                # Choice-zone effects such as the champion charge power present
-                # separate options.  Select without replacement so one
-                # activation cannot show the same card three times.
-                selected_guids = random.sample(
-                    candidates, min(count, len(candidates)))
+                # C# SummonTokenTroop draws each card from the session RNG with
+                # replacement, so one activation may repeat a candidate.
+                selected_guids = [rng_choice(context.bstate, candidates)
+                                  for _ in range(max(0, count))]
             guid = selected_guids[0] if selected_guids else ""
         candidate_count = len(candidates)
     if not guid or not db_template_exists(guid, conn=context.db):
@@ -619,8 +746,10 @@ def summon_token(context, payload=None):
             # must happen before the talent-modified lookup and the payload
             # copy: the substitute's own type/abilities/stats are created.
             guid = str(replacement).lower()
-    owner = int(context.bstate.get("resolving_owner_id", 0) or 0)
-    target = context.resolved_target()
+    if owner is None:
+        owner = int(context.bstate.get("resolving_owner_id", 0) or 0)
+    if target is None:
+        target = context.resolved_target()
     target_owner = context.target_owner(target, default=owner)
     # Some token effects target a champion other than the ability's
     # controller ("a random opposing champion summons ..."), so the resolved
@@ -722,10 +851,24 @@ def summon_token(context, payload=None):
             position = 0
         token_state = 0
         if location == "warzone":
-            from .static_rules import opposing_enters_play_exhausted
-            if opposing_enters_play_exhausted(
-                    context.bstate, owner, create_guid):
+            from .static_rules import card_enters_play_exhausted
+            # SummonTokenTroop.m_EntersPlayExhausted ("summon an exhausted
+            # Abomination") taps the token like the printed attribute does.
+            if (_truthy(context.template_value(
+                    "m_EntersPlayExhausted",
+                    payload.get("exhausted", False))) or
+                    card_enters_play_exhausted(
+                        context.db, context.session.session_id,
+                        context.bstate, 0, owner, create_guid)):
                 token_state = int(game_engine.ECardStates.Tapped)
+            # C# Session.MoveCard declares the entering troop as an attacker
+            # when the ability sets EntersPlayAttacking during a combat phase.
+            if (_truthy(context.template_value(
+                    "m_EntersPlayAttacking",
+                    payload.get("attacking", False))) and
+                    _in_combat_phase(context)):
+                token_state |= (int(game_engine.ECardStates.Attacking) |
+                                int(game_engine.ECardStates.HasAttacked))
         db_insert_generated_card(
             context.session.session_id, owner, uid, create_guid, location,
             create_template[0], create_template[1], create_template[2],
@@ -780,23 +923,38 @@ def summon_token(context, payload=None):
         from pvp_db import db_randomly_insert_deck_cards
         db_randomly_insert_deck_cards(
             context.session.session_id, owner,
-            [uid for uid, _create_guid, _card_type in made], connection=context.db)
+            [uid for uid, _create_guid, _card_type in made], connection=context.db,
+            rng=context.bstate.get("_rules_rng"))
     for uid, created_guid, created_card_type in made:
+        _publish_created_card(context, uid, owner, created_card_type)
+        if location == "none":
+            # C# creates the card instance and its CreatedCards entry, but
+            # MoveCard(None) has no client collection projection or entered-
+            # zone event. The following typed zone effect owns that boundary.
+            continue
         scid = game_engine.SessionCardId(game_engine.UID(uid))
         _tpl, card_type, name, cost, attack, defense, gems = \
             context.handler._card_full_data(context.game, scid, created_guid)
         collection_value = card_collection_for_location(location)
-        context.game.push_card_moved(scid, recipient, collection_value,
-                                     game_engine.ECardLocations.Top, 0)
+        from pvp_db import db_card_state_value
+        extra = {}
+        if location == "choosing":
+            # Art-less Choice templates borrow RelatedCards[0]'s art.
+            from .choice_effects import choice_art_related_cards
+            extra["related_cards"] = choice_art_related_cards(
+                context.bstate.get("resolving_source_uid"), uid)
         context.game.push_card_updated(
             scid, recipient, collection_value, card_type,
             template_id=created_guid, card_name=name, cost=cost, attack=attack,
-            defense=defense, gems=gems, nulling=location == "deck")
+            defense=defense, gems=gems, nulling=location == "deck", **extra,
+            # An exhausted summon must render tapped (CardUpdated defaults
+            # to state None).
+            state=int(db_card_state_value(
+                context.session.session_id, uid, conn=context.db) or 0))
         if conscript_thresholds is not None:
             context._push_modifier_card(
                 int(uid), thresholds=[int(value)
                                      for value in conscript_thresholds])
-        _publish_created_card(context, uid, owner, created_card_type)
         dispatch_trigger(context, "CardEnteredZoneEvent", uid, owner,
                          data={"event_destination_collection": location})
         for attribute, previous, current in conscript_gained_attributes.get(
@@ -818,9 +976,26 @@ def summon_token(context, payload=None):
     return f"summoned {len(made)} token(s)"
 
 
-def create_token_copy(context):
-    """Create authored replicas from the resolved target."""
-    target = context.resolved_target()
+def flush_random_deck_placement(context):
+    """Place the copies waiting for a random deck slot, one batch per owner. Each placement call rewrites the deck's
+    positions, so a batch costs one rewrite however many copies it places."""
+    pending = context.bstate.pop("_deferred_random_deck", None) or []
+    from pvp_db import db_randomly_insert_deck_cards
+    by_owner = {}
+    for owner_id, uid in pending:
+        by_owner.setdefault(owner_id, []).append(uid)
+    for owner_id, uids in by_owner.items():
+        db_randomly_insert_deck_cards(
+            context.session.session_id, owner_id, uids,
+            conn=context.db, rng=context.bstate.get("_rules_rng"))
+
+
+def create_token_copy(context, count=None, target=None):
+    """Create authored replicas from the target. ``target`` is the card the interpreter runs the effect on; without it
+    the resolved target is read. ``count`` is the interpreter's bound amount; without it the count is read from the
+    effect template."""
+    if target is None:
+        target = context.resolved_target()
     if target is None:
         return "copy: no target"
     from pvp_db import (db_card_zone_details, db_copy_template_payload,
@@ -833,7 +1008,8 @@ def create_token_copy(context):
     # Count and destination are typed effect semantics. Never infer either
     # from display text: that would make native RulesPort behavior depend on a
     # second, legacy card-text rules source.
-    count = context.template_value("m_Count", None)
+    if count is None:
+        count = context.template_value("m_Count", None)
     if count is None:
         count = context.template_value("m_NumberOfCards", None)
     if count is None:
@@ -849,18 +1025,32 @@ def create_token_copy(context):
         # CreateTokenCopy contract defaults it to one.
         count = 1
     try:
-        count = max(1, int(count))
+        count = int(count)
     except (TypeError, ValueError):
         raise RuntimeError(
             "RulesPort CreateTokenCopy effect has invalid typed count")
+    # AuthoritativeSessionBase.CreateTokenCopies returns immediately for a
+    # zero or negative amount. Do not coerce a typed zero to one: callers use
+    # zero for variables such as ActionsCastThisTurn, and creating a copy in
+    # that case can recursively retrigger the copied card's enter-play ability.
+    if count <= 0:
+        return "copy: zero copies"
     # C# CreateTokenCopies adds GetCreationBonuses once for the copied
     # template before creating the batch.
-    count += _creation_count_bonus(context, row[0])
+    base_count = count
+    bonus = _creation_count_bonus(context, row[0])
+    count += bonus
+    import db as db_layer
+    db_layer.log_req(
+        f"    CopyEffect: source={hex(int(context.bstate.get('resolving_source_uid') or 0))} "
+        f"target={hex(int(target))} copy_of={row[0]} base={base_count} bonus={bonus} "
+        f"copies={count} into={context.bstate.get('resolving_owner_id')}")
     destination = str(context.template_value(
         "m_CardCollection", "") or "").rsplit(".", 1)[-1].lower()
     if not destination:
         raise RuntimeError(
             "RulesPort CreateTokenCopy effect is missing typed destination metadata")
+    authored_destination = destination
     if context.bstate.get("choice_copy_to_hand"):
         destination = "hand"
     # C# CreateTokenCopies creates the copy directly into m_CardCollection.
@@ -873,7 +1063,14 @@ def create_token_copy(context):
     payload = db_copy_template_payload(row[0], conn=context.db)
     if not payload:
         return "copy: target template payload missing"
+    # C# CreateTokenCopyAbilityEffectTemplate: a token may only be copied into
+    # the warzone.
+    from domain.enums import CARD_TYPE_BY_DB, ECardTypes
+    if (CARD_TYPE_BY_DB.get(str(payload[0] or ""), 0) & ECardTypes.Token and
+            authored_destination != "warzone"):
+        return "copy: token can only be copied into the warzone"
     owner_id = int(context.bstate.get("resolving_owner_id", 0) or 0)
+    responsible_id = owner_id
     # C# places the copies under the responsible player unless the authored
     # m_SameOwner asks for the target card's controller.
     if context.template_value("m_SameOwner", False):
@@ -884,6 +1081,15 @@ def create_token_copy(context):
     import game_engine
     created = []
     is_replica = bool(context.template_value("m_IsReplica", False))
+    if is_replica:
+        # C#: a replica is refused when the responsible champion forbids it.
+        from .static_rules import _champion_int_attrs
+        champion_attrs = {str(name).lower(): value for name, value in
+                          _champion_int_attrs(
+                              context.bstate, responsible_id).items()}
+        if any(int(champion_attrs.get(name.lower(), 0) or 0)
+               for name in ("CantCreateReplicas", "CantCreateCopies")):
+            return "copy: responsible champion cannot create replicas"
     from pvp_db import db_card_gem_type
     source_gem = db_card_gem_type(
         context.session.session_id, int(target), conn=context.db)
@@ -893,6 +1099,8 @@ def create_token_copy(context):
         source_gem = 0
     if not source_gem:
         source_gem = None
+    import time
+    started = time.monotonic()
     for _ in range(count):
         uid = next_game_card_uid(context.db, context.session.session_id)
         db_insert_generated_card(
@@ -900,6 +1108,31 @@ def create_token_copy(context):
             payload[0], payload[1], payload[2],
             db_next_game_card_row_id(context.session.session_id, conn=context.db),
             conn=context.db, gems=source_gem)
+        # C# checks a card that would enter a zone before it enters: a "would enter ... instead" replacement (such as
+        # the opposing-deck void) handles the copy, and it does not enter.
+        if context._emit_trigger(
+                "CardWouldEnterZoneEvent", uid, owner_id,
+                event_source_collection="None",
+                event_destination_collection=location):
+            context.db.execute(
+                "DELETE FROM game_cards WHERE session_id=? AND card_uid=?",
+                (context.session.session_id, uid))
+            continue
+        if location == "deck":
+            # The copy's place in the deck follows the authored m_CardLocation, as a move's does: Top or Bottom is
+            # the end, and Unknown is a random slot (C# FinishMovingCard).
+            from pvp_db import db_insert_deck_card_at, db_randomly_insert_deck_cards
+            card_location = str(context.template_value(
+                "m_CardLocation", "") or "").rsplit(".", 1)[-1].lower()
+            if card_location in ("top", "bottom"):
+                db_insert_deck_card_at(
+                    context.session.session_id, owner_id, uid, 0,
+                    from_bottom=card_location == "bottom", conn=context.db)
+            else:
+                # A runner that places several copies defers the random placement to one batch at its end.
+                context.bstate.setdefault("_deferred_random_deck", []).append((int(owner_id), int(uid)))
+                if not context.bstate.get("_defer_deck_placement"):
+                    flush_random_deck_placement(context)
         replica_type = None
         replica_subtype = ""
         if is_replica:
@@ -907,13 +1140,20 @@ def create_token_copy(context):
             apply_replica_mods(context, uid, row[0])
             replica_type, replica_subtype = replica_projection(
                 context.db, context.session.session_id, uid)
+        else:
+            # C# Card.CopyFrom (non-replica) clones the source's per-game,
+            # per-turn and cooldown usage, so a spent ONE-SHOT stays spent.
+            # Damage, uses/cooldowns, counters, shields and gems.
+            from pvp_db import db_copy_transform_instance_state
+            db_copy_transform_instance_state(
+                context.session.session_id, uid, int(target),
+                is_replica=False, conn=context.db)
+            _copy_boons_and_revocations(context, uid, int(target))
         scid = game_engine.SessionCardId(game_engine.UID(uid))
         _tpl, card_type, _name, cost, attack, defense, _gems = \
             context.handler._card_full_data(context.game, scid, row[0])
         from .runtime_helpers import card_collection_for_location
         collection = card_collection_for_location(location)
-        context.game.push_card_moved(scid, recipient, collection,
-                                     game_engine.ECardLocations.Top, 1)
         context.game.push_card_updated(
             scid, recipient, collection, replica_type or card_type,
             template_id=row[0], cost=cost, attack=attack, defense=defense,
@@ -921,9 +1161,20 @@ def create_token_copy(context):
             **({"sub_type": replica_subtype} if replica_subtype else {}))
         created.append(uid)
     context.db.commit()
+    import db as db_layer
+    placed = time.monotonic()
+    publish_time = trigger_time = 0.0
+    from .triggers import dispatch_trigger
     for uid in created:
+        t0 = time.monotonic()
         _publish_created_card(context, uid, owner_id, payload[0])
-        from .triggers import dispatch_trigger
+        t1 = time.monotonic()
         dispatch_trigger(context, "CardEnteredZoneEvent", uid, owner_id,
                          data={"event_destination_collection": location})
+        trigger_time += time.monotonic() - t1
+        publish_time += t1 - t0
+    db_layer.log_req(
+        f"    CopyEffect timing: {len(created)} copies: create+place {placed - started:.2f}s, "
+        f"publish {publish_time:.2f}s, trigger dispatch {trigger_time:.2f}s, "
+        f"total {time.monotonic() - started:.2f}s")
     return f"copied {len(created)}x {row[0][:8]} to {location}"

@@ -986,33 +986,6 @@ def _ability_text(db, bstate):
     return ""
 
 
-def _linked_template_guids_from_metadata(db, bstate):
-    """Return card ResourceIds linked by the serialized ability metadata.
-
-    Some older ability records do not expose transform choices as a dedicated
-    field; they only retain the linked card ResourceIds in the serialized
-    record.  Extract the IDs and resolve them through card_templates.  This
-    deliberately does not interpret names, percentages, or display wording.
-    """
-    import re as _re
-    ag = (bstate or {}).get("resolving_ability", "")
-    from pvp_db import db_ability_raw_json
-    raw = db_ability_raw_json(ag, conn=db) or ""
-    if not raw:
-        return []
-    links = _re.findall(
-        r"data=([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
-        r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12})", raw)
-    out = []
-    for guid in links:
-        guid = guid.lower()
-        from pvp_db import db_template_exists
-        if db_template_exists(guid, conn=db):
-            if guid not in out:
-                out.append(guid)
-    return out
-
-
 def _resolve_leaf_target(bstate):
     """The resolved target for a BOM leaf (spell target, ability target,
     trigger target, or the source card itself)."""
@@ -1077,12 +1050,6 @@ def _push_card_state(game, session, db, handler, pl_t, ai_t, uid, new_state,
                            nulling=(trow[2] == "deck"))
 
 
-def _state_of(db, session, uid):
-    from pvp_db import db_card_state_value
-    value = db_card_state_value(session.session_id, int(uid), conn=db)
-    return int(value) if value is not None else 0
-
-
 def _controller_id_for_target(db, session, handler, bstate, target_uid):
     """Return the DB player id that controls a card or champion target."""
     from pvp_db import db_card_owner_id
@@ -1140,7 +1107,6 @@ def _leaf_load_player_deck(effect):
 def _leaf_activate_triggered(effect):
     """Activate a typed keyword trigger through the context boundary."""
     return effect.activate_triggered()
-
 
 
 def _move_card_to_zone_legacy(game, session, db, handler, pl_t, ai_t, bstate,
@@ -1696,12 +1662,13 @@ def _reveal_cards_legacy(game, session, db, handler, pl_t, ai_t, bstate,
             reveal_targets = "Everyone"
         private = False
         if (bstate or {}).get("pvp") and reveal_targets.lower() in (
-                "self", "you", "controller"):
+                "self", "you", "controller", "opponents"):
             private_sender = getattr(handler, "_push_private_revealed_cards",
                                      None)
             if callable(private_sender):
                 private = bool(private_sender(
-                    session, bstate, owner, rows, pl_t, ai_t))
+                    session, bstate, owner, rows, pl_t, ai_t,
+                    to_opponent=reveal_targets.lower() == "opponents"))
         if not private:
             for row in rows:
                 scid = game_engine.SessionCardId(game_engine.UID(int(row[0])))
@@ -1712,6 +1679,14 @@ def _reveal_cards_legacy(game, session, db, handler, pl_t, ai_t, bstate,
                     scid, card_owner, reveal_collection, ct,
                     state=int(row[4] or 0), template_id=row[2], cost=cost,
                     attack=atk, defense=defense, nulling=False)
+                if not (bstate or {}).get("pvp"):
+                    # Deck cards are face down to their controller unless a
+                    # viewer-scoped reveal says otherwise. In PvE the human is
+                    # the only viewer, so tag the full update for them (as
+                    # reveal_effects does); otherwise the coverflow and picker
+                    # show card backs instead of the revealed cards.
+                    game.events[-1]._hand_reveal_viewer_uid = pl_t
+                    game.events[-1]._temporary_reveal = True
             ev = game_engine.CardsRevealedSessionEventArgs()
             ev.player_id = owner_uid(owner, pl_t, ai_t, bstate)
             ev.session_card_ids = [game_engine.SessionCardId(game_engine.UID(u))
@@ -1778,8 +1753,6 @@ def _deal_damage(game, session, db, handler, pl_t, ai_t, bstate, uid, amount):
     """Compatibility entry point for the focused damage effect module."""
     return deal_damage(game, session, db, handler, pl_t, ai_t, bstate, uid,
                        amount)
-
-
 
 
 @effect("RevertPermanentModificationsAbilityEffectTemplate")
@@ -2214,12 +2187,6 @@ def _leaf_transform(effect):
     return effect.transform_card()
 
 
-def _verdict_legacy(game, session, db, handler, pl_t, ai_t, bstate,
-                    effect_guid, param):
-    """Apply a verdict effect."""
-    return "verdict effect"
-
-
 @effect("VerdictAbilityEffectTemplate")
 def _leaf_verdict(effect):
     """Apply a verdict through the named orchestration boundary."""
@@ -2295,11 +2262,13 @@ def _grant_ability_legacy(game, session, db, handler, pl_t, ai_t, bstate,
             if added and (bstate or {}).get("event_type") == "GameStartedEvent":
                 from .fields import ability_record
                 from .triggers import _resolve_ability_bom
+                from rules_port.effect_lifetimes import mark_gamestart_grant
                 for granted_guid in added:
                     child = ability_record(db, granted_guid)
                     child_event = str((child.get("m_TriggerEventType") or {}).get(
                         "m_InternalType") or "")
-                    if child_event.endswith("GameStartedEvent"):
+                    if (child_event.endswith("GameStartedEvent") and
+                            mark_gamestart_grant(bstate, int(target_uid), granted_guid)):
                         _resolve_ability_bom(
                             db, handler, game, session, pl_t, ai_t, bstate,
                             granted_guid, int(target_uid), "", target_uid=None,
@@ -2821,12 +2790,6 @@ def _leaf_play_card(effect):
     return effect.play_card()
 
 
-def _fire_event_legacy(game, session, db, handler, pl_t, ai_t, bstate,
-                       effect_guid, param):
-    """Fire a game event."""
-    return "fire event"
-
-
 @effect("FireEventEffectTemplate")
 def _leaf_fire_event(effect):
     """Fire an event through the named orchestration boundary."""
@@ -2852,17 +2815,6 @@ def _tac_legacy(game, session, db, handler, pl_t, ai_t, bstate, effect_guid,
 def _leaf_tac(effect):
     """Run a TAC operation through the named orchestration boundary."""
     return effect.tac()
-
-
-def _shift_power(game, session, db, handler, pl_t, ai_t, bstate, ability_guid):
-    source_uid = (bstate or {}).get("player_shift_source")
-    target_uid = (bstate or {}).get("player_shift_target")
-    if not source_uid or not target_uid:
-        return f"shift: missing source/target (source={source_uid} target={target_uid})"
-    handler._shift_ability_between(
-        session, pl_t, ai_t, int(source_uid), int(target_uid), ability_guid,
-        game, bstate=bstate)
-    return f"shift {ability_guid[:8]} {hex(int(source_uid))} -> {hex(int(target_uid))}"
 
 
 # ---------------------------------------------------------------------------

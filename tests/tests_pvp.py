@@ -22,14 +22,22 @@ import db as dbmod
 import services.tournament_game as tournament_game
 
 
+@__import__("pytest").fixture(autouse=True)
+def _restore_db_bindings():
+    """These tests rebind ``ai._db``, ``db._db`` and ``tournament_game._db`` to
+    their own in-memory databases and never restore them, so a later file in
+    the same process would read this file's database.  Restore after each."""
+    previous = (ai._db, dbmod._db, tournament_game._db)
+    yield
+    ai._db, dbmod._db, tournament_game._db = previous
+
+
 TPL_ATT = "11111111-1111-1111-1111-111111111111"
 TPL_BLK = "22222222-2222-2222-2222-222222222222"
 
 
 def make_db(att_owner, blk_owner):
-    fd, path = tempfile.mkstemp(suffix=".db")
-    os.close(fd)
-    db = sqlite3.connect(path)
+    db = sqlite3.connect(":memory:")
     db.execute("""CREATE TABLE game_cards (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         session_id INTEGER, user_id INTEGER, card_uid INTEGER,
@@ -42,11 +50,11 @@ def make_db(att_owner, blk_owner):
         permanent_buffs TEXT DEFAULT '{}', temporary_buffs TEXT DEFAULT '{}',
         card_uses TEXT DEFAULT '{}', resolved_at INTEGER DEFAULT 0,
         original_template_guid TEXT DEFAULT '')""")
-    db.execute("""CREATE TABLE card_templates (
+    db.execute("""CREATE TABLE IF NOT EXISTS card_templates (
         guid TEXT, name TEXT, card_type TEXT, cost INTEGER, attack INTEGER,
         defense INTEGER, attributes INTEGER, abilities_json TEXT,
         threshold_json TEXT, subtype TEXT)""")
-    db.execute("""CREATE TABLE card_abilities_meta (
+    db.execute("""CREATE TABLE IF NOT EXISTS card_abilities_meta (
         ability_guid TEXT, is_triggered INTEGER, trigger_event_type TEXT,
         game_text TEXT, raw_json TEXT, casting_behavior INTEGER,
         is_manual INTEGER, activation_cost INTEGER, uses_per_game INTEGER,
@@ -55,11 +63,11 @@ def make_db(att_owner, blk_owner):
     db.execute("""CREATE TABLE card_counter_templates (
         template_id TEXT PRIMARY KEY, name TEXT, description TEXT)""")
     db.execute(
-        "INSERT INTO card_templates VALUES (?,?,?,?,?,?,?,?,?,?)",
+        "INSERT OR REPLACE INTO card_templates VALUES (?,?,?,?,?,?,?,?,?,?)",
         (TPL_ATT, "Lifestealer", "Troop", 3, 3, 3,
          int(game_engine.ECardAttributes.SpiritDrain), "[]", "[]", ""))
     db.execute(
-        "INSERT INTO card_templates VALUES (?,?,?,?,?,?,?,?,?,?)",
+        "INSERT OR REPLACE INTO card_templates VALUES (?,?,?,?,?,?,?,?,?,?)",
         (TPL_BLK, "Wall Troop", "Troop", 3, 3, 3, 0, "[]", "[]", ""))
     for uid, owner, tpl in ((101, att_owner, TPL_ATT),
                             (102, blk_owner, TPL_BLK)):
@@ -105,12 +113,12 @@ class HandlerStub:
             "FROM card_templates WHERE guid=?",
             (template_guid,)).fetchone()
         if not row:
-            return (template_guid, "Troop", "Card", 0, 0, 0, 0)
+            return (template_guid, game_engine.ECardTypes.Troop, "Card", 0, 0, 0, 0)
         ct = game_engine.card_type_from_db(row[0])
         game.card_defs[scid] = game_engine.CardDef(
             row[1], ct, row[2] or 0, row[3] or 0, row[4] or 0, [], [],
             attributes=row[5] or 0)
-        return (template_guid, row[0], row[1], row[2] or 0,
+        return (template_guid, ct, row[1], row[2] or 0,
                 row[3] or 0, row[4] or 0, 0)
 
     def _resolve_stack_item(self, *a, **k):
@@ -313,7 +321,7 @@ def test_pvp_main_options_offer_resource_until_turn_played():
     resource_tpl = "33333333-3333-3333-3333-333333333333"
     artifact_tpl = "44444444-4444-4444-4444-444444444444"
     db.executemany(
-        "INSERT INTO card_templates VALUES (?,?,?,?,?,?,?,?,?,?)",
+        "INSERT OR REPLACE INTO card_templates VALUES (?,?,?,?,?,?,?,?,?,?)",
         [(resource_tpl, "Sapphire Shard", "Resource", 0, 0, 0, 0,
           "[]", "[]", ""),
          (artifact_tpl, "Zero Artifact", "Artifact", 0, 0, 0, 0,
@@ -461,14 +469,14 @@ def test_pvp_champion_options_exclude_triggers_and_basic_on_chain():
         "CREATE TABLE champion_templates (guid TEXT PRIMARY KEY)"
     )
     db.execute(
-        "CREATE TABLE champion_abilities ("
+        "CREATE TABLE IF NOT EXISTS champion_abilities ("
         "champion_guid TEXT, champion_name TEXT, ability_guid TEXT, "
         "ability_name TEXT, charge_cost INTEGER, spell_cost INTEGER, "
         "threshold_colors TEXT, game_text TEXT, casting_behavior INTEGER, "
         "thresholds_json TEXT, target_template_ids TEXT)"
     )
     db.execute(
-        "INSERT INTO card_templates VALUES (?,?,?,?,?,?,?,?,?,?)",
+        "INSERT OR REPLACE INTO card_templates VALUES (?,?,?,?,?,?,?,?,?,?)",
         (champion_tpl, "Wind Whisperer", "Troop", 0, 0, 0, 0,
          "[]", "[]", "")
     )
@@ -478,7 +486,7 @@ def test_pvp_champion_options_exclude_triggers_and_basic_on_chain():
          "Diamond")
     )
     db.executemany(
-        "INSERT INTO champion_abilities VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+        "INSERT OR REPLACE INTO champion_abilities VALUES (?,?,?,?,?,?,?,?,?,?,?)",
         [(champion_tpl, "Wind Whisperer", triggered, "Channelling", 0, 0,
           "", "When a troop deals damage, gain a charge.", 64, "[]", "[]"),
          (champion_tpl, "Wind Whisperer", manual, "Exhaust target troop", 1,
@@ -561,13 +569,13 @@ def test_pvp_activation_summoning_sickness_only_applies_to_troops():
     artifact_tpl = "55555555-5555-5555-5555-555555555555"
     troop_tpl = "66666666-6666-6666-6666-666666666666"
     db.executemany(
-        "INSERT INTO card_templates VALUES (?,?,?,?,?,?,?,?,?,?)",
+        "INSERT OR REPLACE INTO card_templates VALUES (?,?,?,?,?,?,?,?,?,?)",
         [(artifact_tpl, "Test Engine", "Artifact", 4, 0, 0, 0,
           json.dumps([ability]), "[]", "Engine"),
          (troop_tpl, "Test Troop", "Troop", 4, 2, 2, 0,
           json.dumps([ability]), "[]", "")])
     db.execute(
-        "INSERT INTO card_abilities_meta VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+        "INSERT OR REPLACE INTO card_abilities_meta VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
         (ability, 0, None, "[ACT] Gain 2.", "{}", 64, 1, 0, 0, 0,
          "[]", 1))
     for uid, template, card_type in ((301, artifact_tpl, "Artifact"),
@@ -621,7 +629,7 @@ def test_pvp_hand_refresh_pushes_current_dynamic_cost():
     ptero_tpl = "55555555-5555-5555-5555-555555555555"
     robot_tpl = "66666666-6666-6666-6666-666666666666"
     db.executemany(
-        "INSERT INTO card_templates VALUES (?,?,?,?,?,?,?,?,?,?)",
+        "INSERT OR REPLACE INTO card_templates VALUES (?,?,?,?,?,?,?,?,?,?)",
         [(ptero_tpl, "Pterobot", "Troop", 7, 4, 4, 0, "[]", "[]", "Robot Dinosaur"),
          (robot_tpl, "Worker Bot", "Troop|Artifact", 1, 1, 1, 0, "[]", "[]", "Robot")])
     db.execute(
@@ -918,7 +926,7 @@ def test_constant_is_not_offered_as_pvp_attacker():
     """PvP attack options must contain troops only, not Constants."""
     db = make_db(1001, 1002)
     db.execute(
-        "INSERT INTO card_templates VALUES (?,?,?,?,?,?,?,?,?,?)",
+        "INSERT OR REPLACE INTO card_templates VALUES (?,?,?,?,?,?,?,?,?,?)",
         ("33333333-3333-3333-3333-333333333333", "Incantation", "Constant",
          2, 0, 0, 0, "[]", "[]", ""))
     db.execute(
@@ -1174,12 +1182,12 @@ def test_pvp_choice_zone_target_resolves_child_then_parent():
             "target_index": 0,
         },
         "parent": {
-            "ability_guid": "286f1891-parent",
+            "ability_guid": "286f1891-4404-585e-4fb6-bd9f783f222b",
             "source_uid": 9001,
             "owner_id": 1001,
             "target_map": {},
             "variables": {},
-            "resume_effect_order": 3,
+            "resume_effect_order": 2,
         },
     }
     session = Session()
@@ -1230,10 +1238,10 @@ def test_pvp_choice_zone_target_resolves_child_then_parent():
         tournament_game._pvp_gain_charge_trigger_game = previous["charge"]
     assert handled
     assert [call[0] for call in calls] == [
-        "d5b56bd5-child", "286f1891-parent"], calls
+        "d5b56bd5-child", "286f1891-4404-585e-4fb6-bd9f783f222b"], calls
     # The selected token is bound to the authored child target index.
     assert calls[0][3] == {0: 202}, calls
-    assert calls[1][4] == 3, calls
+    assert calls[1][4] == 2, calls
     assert state.get("pending_choice") is None
     print("PASS PvP choice-zone target resolves child then parent")
 
@@ -1272,12 +1280,12 @@ def test_pvp_choice_reads_native_payload_when_raw_envelope_is_empty():
             "target_index": 0,
         },
         "parent": {
-            "ability_guid": "286f1891-parent",
+            "ability_guid": "286f1891-4404-585e-4fb6-bd9f783f222b",
             "source_uid": 9001,
             "owner_id": 1001,
             "target_map": {},
             "variables": {},
-            "resume_effect_order": 3,
+            "resume_effect_order": 2,
         },
     }
     session = Session()
@@ -1326,7 +1334,7 @@ def test_pvp_choice_reads_native_payload_when_raw_envelope_is_empty():
         tournament_game._pvp_gain_charge_trigger_game = previous["charge"]
     assert handled
     assert [call[0] for call in calls] == [
-        "d5b56bd5-child", "286f1891-parent"], calls
+        "d5b56bd5-child", "286f1891-4404-585e-4fb6-bd9f783f222b"], calls
     assert calls[0][3] == {0: 0x271301}, calls
     assert state.get("pending_choice") is None
     print("PASS PvP choice reads native payload when raw envelope is empty")

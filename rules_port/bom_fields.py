@@ -231,14 +231,21 @@ def counter_template_name(counter_guid):
 
 
 def modifier_metadata(effect_guid) -> dict[str, Any]:
-    """Return rule fields from a CardModifier's typed child template.
+    """Return rule fields from a CardModifier's typed child template."""
+    modifier = (effect_template(effect_guid) or {}).get("m_Modifier")
+    if not isinstance(modifier, dict):
+        return {}
+    return modifier_leaf_fields(modifier)
+
+
+def modifier_leaf_fields(modifier: dict) -> dict[str, Any]:
+    """Return the projector's leaf fields for one typed CardModifier record.
 
     The normalized BOM ``param`` is intentionally compact for compatibility,
     but the extracted effect record contains the authoritative modifier class
     and fields such as attribute flags, counter GUID, operation, and dynamic
     input value.  This adapter keeps leaves independent of localized text.
     """
-    modifier = (effect_template(effect_guid) or {}).get("m_Modifier")
     if not isinstance(modifier, dict):
         return {}
     kind = _last_type(modifier.get("_t"))
@@ -273,7 +280,7 @@ def modifier_metadata(effect_guid) -> dict[str, Any]:
     }
     out: dict[str, Any] = {"property": properties.get(kind, "")}
     for key in ("m_AttributeFlags", "m_Attribute", "m_Operation",
-                "m_Value", "m_ThresholdColor", "m_Shard", "m_Subtype",
+                "m_Value", "m_Double", "m_ThresholdColor", "m_Shard", "m_Subtype",
                 "m_CardFilter", "m_CopySourceCard", "m_SetThresholds",
                 "m_RemoveAllCounters", "m_RemoveHalfRoundedUp",
                 "m_ReplaceExistingValue", "m_IsCombatDamage",

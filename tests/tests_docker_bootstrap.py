@@ -24,23 +24,16 @@ def _create_fra_catalog(path: Path, *, complete: bool) -> None:
                 max_rank INTEGER,
                 is_elite INTEGER
             );
-            CREATE TABLE encounter_deck_cards (
-                deck_guid TEXT,
-                card_guid TEXT
-            );
             CREATE TABLE fra_challenges (
                 enabled INTEGER
             );
             """
         )
         if complete:
+            # A real Arena deck: its cards come from Records (campaign_content).
             connection.execute(
                 "INSERT INTO fra_encounters VALUES (?, ?, ?, ?)",
-                ("deck", 1, 4, 0),
-            )
-            connection.execute(
-                "INSERT INTO encounter_deck_cards VALUES (?, ?)",
-                ("deck", "card"),
+                ("bbfd8f29-e549-4eda-9e21-735620d3b5ff", 1, 4, 0),
             )
             connection.execute("INSERT INTO fra_challenges VALUES (1)")
         connection.commit()

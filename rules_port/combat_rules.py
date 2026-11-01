@@ -4,20 +4,20 @@ from __future__ import annotations
 
 import json
 import game_engine
-from domain.constants import AI_UID_TYPE
+from domain.constants import LEGACY_AI_PLAYER_UID_TYPE, SERVICE_AI_UID_TYPE
 
 
 def _card_owner_ids(player_id):
     """Return persisted owner ids for a native participant.
 
-    Practice/FRA uses the typed native AI participant (type 3, instance
-    1000), while the legacy ``game_cards`` rows retain owner ``0``.  Keep
+    Practice/FRA uses a typed AI participant (legacy type 3 or ServiceAI type
+    248), while the legacy ``game_cards`` rows retain owner ``0``. Keep
     that compatibility mapping at the combat boundary so phase construction
     and attack selection see the same cards without changing PvP identities.
     """
     value = int(getattr(player_id, "uid64", player_id))
     ids = [value]
-    if value & 0xFF == AI_UID_TYPE:
+    if value & 0xFF in (LEGACY_AI_PLAYER_UID_TYPE, SERVICE_AI_UID_TYPE):
         ids.append(0)
     return ids
 
@@ -46,8 +46,7 @@ def player_has_eligible_attackers(db, session_id, battle_state, player_id):
                  int(template_attrs or 0))
         attrs |= int(effective_attributes(
             db, session_id, battle_state or {}, int(uid)) or 0)
-        if attrs & int(game_engine.ECardAttributes.CantAttack |
-                       game_engine.ECardAttributes.Defensive):
+        if not can_attack_card(db, session_id, battle_state, uid, attrs):
             continue
         if (card_state & int(game_engine.ECardStates.StartedATurnOnYourSide)
                 or attrs & int(game_engine.ECardAttributes.Speed)):
@@ -56,11 +55,13 @@ def player_has_eligible_attackers(db, session_id, battle_state, player_id):
 
 
 def _combat_card(db, session_id, battle_state, uid):
-    from pvp_db import db_card_location, db_card_mutation_info
+    from pvp_db import (db_card_location, db_card_mutation_info,
+                        db_card_template_field)
     info = db_card_mutation_info(session_id, int(uid), conn=db)
     if not info:
         return None, 0, 0
     from .static_rules import effective_stats
+    from .targeting import shards_from_threshold
     attack, defense, attrs, flags, damage = effective_stats(
         db, session_id, battle_state or {}, int(uid))
     # ``db_card_mutation_info`` returns (template_guid, owner, card_type).
@@ -69,10 +70,17 @@ def _combat_card(db, session_id, battle_state, uid):
     # ``ValueError`` out of the filter player operand and dropped the
     # connection mid-turn.
     owner = int(info[1] or 0)
+    # Records filters such as Wailing Banshee's block exception evaluate
+    # IsColor against the runtime card projection.  Without the current
+    # template's authored threshold shards, a Blood troop is treated as
+    # colorless and the native phase graph skips DeclareDefense entirely.
+    shards = shards_from_threshold(db_card_template_field(
+        info[0], "threshold_json", conn=db))
     return {"card_uid": int(uid), "card_type": info[2] or "",
             "location": db_card_location(session_id, int(uid), conn=db)
             or "warzone",
             "user_id": owner, "owner_id": owner, "controller_id": owner,
+            "template_guid": info[0], "shards": shards,
             "attack": attack, "defense": defense,
             "attributes": attrs, "rule_flags": flags}, attrs, int(damage or 0)
 
@@ -95,8 +103,11 @@ def _rules(db, session_id, battle_state, uid):
     return values
 
 
-def card_int_attr(db, session_id, uid, name):
-    """Sum a dynamic int-attribute across a card's permanent/temporary buffs."""
+def card_int_attr(db, session_id, uid, name, battle_state=None):
+    """Read a card-context IntAttr including Records-backed static auras."""
+    if db is None:
+        import db as db_layer
+        db = db_layer._db
     from pvp_db import db_card_mutation_field
     total = 0
     for column in ("permanent_buffs", "temporary_buffs"):
@@ -109,7 +120,25 @@ def card_int_attr(db, session_id, uid, name):
             attrs = data.get("int_attrs")
             if isinstance(attrs, dict):
                 total += int(attrs.get(name, attrs.get(name.lower(), 0)) or 0)
-    return total
+    from .static_rules import effective_card_int_attr
+    return effective_card_int_attr(
+        db, session_id, battle_state or {}, int(uid), name, total)
+
+
+def can_attack_card(db, session_id, battle_state, uid, attrs):
+    """C# Card.CombatantStatus attack gate, shared by every attack path.
+
+    CantAttack always stops a troop. Defensive stops it unless its
+    IgnoresDefensive int-attribute is set (Talonkeep Watcher, while another
+    Watcher or a Talonkeep Hunter is in play). Summoning sickness, tapping and
+    the attack phase are checked by the callers.
+    """
+    if attrs & int(game_engine.ECardAttributes.CantAttack):
+        return False
+    if attrs & int(game_engine.ECardAttributes.Defensive):
+        return card_int_attr(db, session_id, int(uid), "IgnoresDefensive",
+                             battle_state=battle_state) > 0
+    return True
 
 
 def can_block(db, session_id, battle_state, attacker_uid, blocker_uid):

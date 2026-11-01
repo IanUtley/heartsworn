@@ -46,7 +46,8 @@ from .transactions import (AbilityExistsRequirement, AllDamageAssignedRequiremen
                            NotRequirement,
                            TurnPhaseRequirement, XCostRequirement)
 from .turn_states import default_phase_states
-from .actions import AbilityResolutionState, ResolveTopOfChainAction
+from .actions import (AbilityResolutionState, PushOntoChainAction,
+                      ResolveTopOfChainAction)
 from .combat import CombatFlags, CombatId, CombatManager, CombatPhase
 from .projections import TransactionProjection
 
@@ -408,7 +409,7 @@ def projected_ability_ignores_chain(descriptor) -> bool:
         graph = ability_graph(DEFAULT_RECORD_STORE, guid)
     except Exception:
         return False
-    return bool(graph and getattr(graph, "ignores_chain", False))
+    return bool(graph and getattr(graph, "client_ignores_chain", False))
 
 
 @dataclass
@@ -739,6 +740,7 @@ class AuthoritativeSession:
         self._setup_transaction_resolver: Optional[Callable[[RulesTransaction], bool]] = None
         self._priority_transaction_resolver: Optional[Callable[[RulesTransaction], bool]] = None
         self._discard_transaction_resolver: Optional[Callable[[RulesTransaction], bool]] = None
+        self._hand_limit_checker: Optional[Callable[[object], bool]] = None
         self._discard_continuation_resolver: Optional[Callable[[RulesTransaction], bool]] = None
         self._ready_card_transaction_resolver: Optional[Callable[[RulesTransaction], bool]] = None
         self._triggered_ability_transaction_resolver: Optional[Callable[[RulesTransaction], bool]] = None
@@ -1328,6 +1330,22 @@ class AuthoritativeSession:
         checker = getattr(self.runtime_facts, "can_play_card", None)
         return bool(checker(card, player_id, playing_for_free)) if callable(checker) else False
 
+    def can_play_card_reason(self, card, player_id, playing_for_free=False) -> str:
+        """Why ``can_play_card`` refuses the card ('' when the play is legal).
+
+        Diagnostics only: the requirement path still calls ``can_play_card``.
+        """
+        checker = getattr(self.runtime_facts, "play_card_rejection_reason",
+                          None)
+        if callable(checker):
+            try:
+                return str(checker(card, player_id,
+                                   bool(playing_for_free)) or "")
+            except Exception as exc:
+                return f"play-reason-error({exc!r})"
+        return ("" if self.can_play_card(card, player_id, playing_for_free)
+                else "rejected")
+
     def can_activate_ability(self, card, player_id, ability_template_id) -> bool:
         checker = getattr(self.runtime_facts, "can_activate_ability", None)
         return bool(checker(card, player_id, ability_template_id)) if callable(checker) else False
@@ -1410,10 +1428,12 @@ class AuthoritativeSession:
         # freshly re-entered PriorityWindowAction still rejects that pass.
         self.reconcile_projected_chain_priority()
         if self.terminated or transaction.player_id not in self.player_ids:
+            self._log_rejection(transaction, "terminated/unknown-player")
             return False
         if ((transaction.phase is not None and
              phase_name(transaction.phase) != phase_name(self.current_turn_phase))
                 or not transaction.validate(self)):
+            self._log_rejection(transaction, self.explain_rejection(transaction))
             return False
         self._transactions.append(transaction)
         self._transaction_history.append({
@@ -1424,6 +1444,85 @@ class AuthoritativeSession:
             "payload": _json_value(transaction.payload),
         })
         return True
+
+    def explain_rejection(self, transaction) -> str:
+        """Name the phase or requirement that refused a transaction ('' = valid).
+
+        Diagnostics only; evaluated on the rejection path after
+        ``transaction.validate`` already failed, so normal play computes
+        nothing extra.
+        """
+        if transaction is None:
+            return "unclassified"
+        if transaction.phase is not None:
+            intent = phase_name(transaction.phase)
+            current = phase_name(self.current_turn_phase)
+            if intent != current:
+                return f"phase detail=intent={intent} current={current}"
+        failures = []
+        for requirement in getattr(transaction, "requirements", ()):
+            try:
+                if requirement.is_valid(self, transaction.player_id):
+                    continue
+            except Exception as exc:
+                failures.append(f"{type(requirement).__name__}"
+                                f" detail=raised {exc!r}")
+                continue
+            detail = self._requirement_detail(transaction, requirement)
+            failures.append(f"{type(requirement).__name__}"
+                            + (f" detail={detail}" if detail else ""))
+        return "; ".join(failures) or "no-failing-requirement"
+
+    def _requirement_detail(self, transaction, requirement) -> str:
+        describe = getattr(requirement, "failure_detail", None)
+        if callable(describe):
+            try:
+                detail = describe(self, transaction.player_id)
+            except Exception as exc:
+                return f"detail-error({exc!r})"
+            if detail:
+                return str(detail)
+        fields = getattr(type(requirement), "__dataclass_fields__", None)
+        if not fields:
+            return ""
+        parts = []
+        for name in fields:
+            value = getattr(requirement, name, None)
+            if value is None or value == "" or value == () or value == []:
+                continue
+            if name.endswith("card_id") or name in {
+                    "source_card_id", "attacker", "blocker"}:
+                parts.append(f"{name}={self._card_ref(value)}")
+            else:
+                parts.append(f"{name}={value!r}")
+            if len(parts) >= 4:
+                break
+        return " ".join(parts)
+
+    def _card_ref(self, value) -> str:
+        label = getattr(self.runtime_facts, "card_label", None)
+        if callable(label):
+            try:
+                return str(label(value))
+            except Exception:
+                pass
+        try:
+            return hex(int(getattr(value, "uid64", value)))
+        except (TypeError, ValueError):
+            return str(value)
+
+    def _log_rejection(self, transaction, reason) -> None:
+        """One INFO line per refused transaction (no work on the accept path)."""
+        try:
+            from db import log_req
+            from .wire import describe_transaction
+            log_req(f"    RulesPort reject: "
+                    f"{describe_transaction(transaction, self)} "
+                    f"req={reason or 'unknown'} "
+                    f"phase={phase_name(self.current_turn_phase)} "
+                    f"player={_serial_id(transaction.player_id)}")
+        except Exception:
+            pass
 
     def reconcile_projected_chain_priority(self) -> bool:
         """Align a live chain response queue with its durable priority.
@@ -1825,12 +1924,27 @@ class AuthoritativeSession:
                 return False
             if not bind_activation(activation):
                 return False
-            if not self.pay_ability_cost(ability):
-                return False
             staged.append(ability)
         for ability in staged:
-            if not self.finish_ability_on_chain(ability):
-                return False
+            # C# ActivateTriggeredAbility updates the selected instance, then
+            # calls PushAbilityOnChain. That path schedules PushOntoChainAction
+            # when any target/option/cost data is still missing; payment and
+            # chain insertion happen only after that same instance is complete.
+            # Do not finish directly here or a class-39 choice that needs a
+            # follow-up class-23 picker skips the picker and pays too early.
+            needs_data = getattr(ability, "needs_activation_data", None)
+            prompts = tuple(needs_data()) if callable(needs_data) else ()
+            metadata = getattr(ability, "metadata", None)
+            graph = getattr(metadata, "graph", None)
+            optional = bool(getattr(
+                graph, "optional", getattr(ability, "optional", False)))
+            if prompts and not optional:
+                self.push_game_action(PushOntoChainAction(ability))
+            else:
+                # C# does not open PushOntoChainAction for optional abilities;
+                # their opt-in/disable choice is handled by the class-39
+                # configuration state itself.
+                self.finish_ability_on_chain(ability)
         return True
 
     def _resolve_quit_game(self, transaction: RulesTransaction) -> bool:
@@ -2032,7 +2146,7 @@ class AuthoritativeSession:
             if self.action_stack.priority_player_id is not None:
                 self.event_sink.green_light(
                     self.action_stack.priority_player_id,
-                    game_engine.EPriorityContext.Normal)
+                    game_engine.EPriorityContext.ResolveTopOfChain)
         return True
 
     def resolve_top_of_chain(self, ability_instance_id: int) -> AbilityResolutionState:
@@ -2157,9 +2271,13 @@ class AuthoritativeSession:
     def can_player_pass_priority(self, player_id) -> bool:
         return player_id in self.player_ids and not self.terminated
 
+    def set_hand_limit_checker(self, checker: Callable[[object], bool]) -> None:
+        """Attach the host's maximum-hand-size check (card zones live outside the port)."""
+        self._hand_limit_checker = checker
+
     def hand_larger_than_maximum(self, player_id) -> bool:
-        # Card-zone policy belongs in the future Player/Card port.
-        return False
+        checker = self._hand_limit_checker
+        return bool(checker(player_id)) if checker is not None else False
 
     def send_turn_phase_update(self) -> None:
         if self.event_sink is not None:
@@ -2198,6 +2316,29 @@ class AuthoritativeSession:
             self.persist()
         finally:
             self._phase_transition_depth -= 1
+
+    def discard_phase_priority_windows(self) -> None:
+        """Drop consumed phase priority windows, keeping chain actions.
+
+        A host that resolves a phase's transaction itself (combat damage)
+        then advances the phase directly.  Triggers raised while it resolved
+        (a "when you gain health" from Lifedrain) already own chain actions on
+        top of that phase window.  Clearing the whole stack orphaned those
+        chain items: with an ignores-chain item on top, every later phase
+        window completed at once, so drive_until_input ran whole turns for
+        both players in one request.  Keep the chain actions so the next
+        phase's window is pushed behind them and the chain resolves first.
+        """
+        stack = self.action_stack
+        stack._stack[:] = [
+            action for action in stack._stack
+            if not (isinstance(action, PriorityWindowAction) and
+                    getattr(action, "ability_responding_to", None) is None)]
+        stack.current_action = None
+        top = stack.peek()
+        stack.priority_player_id = (
+            top.priority_player_id if isinstance(top, PriorityWindowAction)
+            else None)
 
     def advance_turn_phase(self):
         """Use the current C# phase-state object to choose the next phase.
@@ -2573,6 +2714,9 @@ class AuthoritativeSession:
         """
         steps = 0
         while steps < int(max_steps):
+            # A trigger choice is open: the turn waits for the player's answer.
+            if getattr(self, "trigger_prompt_open", False):
+                break
             steps += 1
             progressed = self.tick()
             if not progressed:
@@ -2610,6 +2754,7 @@ class AuthoritativeSession:
             "active_player_id": _serial_id(self.active_player_id),
             "priority_player_id": (None if self.action_stack.priority_player_id is None
                                    else _serial_id(self.action_stack.priority_player_id)),
+            "combat_next_serial": int(self.combat_manager._next_serial),
             "seed_z": z,
             "seed_w": w,
             "total_turns_taken": self.total_turns_taken,
@@ -2631,6 +2776,8 @@ class AuthoritativeSession:
             "combats": [
                 {"attacker_id": _serial_combatant_id(combat.attacker),
                  "defender_id": _serial_combatant_id(combat.defender),
+                 "combat_id_attacker_id": _serial_id(
+                     combat.combat_id.attacker_id),
                  "combat_serial": int(combat.combat_id.serial_number),
                  "blocker_ids": [
                      _serial_combatant_id(blocker)
@@ -2658,7 +2805,7 @@ class AuthoritativeSession:
         Reconnects must resume from the last transaction boundary.  We restore
         only values owned by this port; action/ability objects are deliberately
         not fabricated from JSON, so a caller can hydrate those through its
-        normal Records/metadata factory before resuming a waiting action.
+        normal hex-private/Records/metadata factory before resuming a waiting action.
         """
         if not isinstance(saved, Mapping):
             return False
@@ -2704,6 +2851,12 @@ class AuthoritativeSession:
         except (TypeError, ValueError):
             pass
         self.terminated = bool(saved.get("terminated", False))
+        try:
+            self.combat_manager._next_serial = max(
+                int(self.combat_manager._next_serial),
+                int(saved.get("combat_next_serial", 0) or 0))
+        except (TypeError, ValueError):
+            pass
         eliminated = saved.get("eliminated_player_ids", ())
         if isinstance(eliminated, (list, tuple)):
             self.eliminated_player_ids = {
@@ -2832,9 +2985,20 @@ class AuthoritativeSession:
                     return False
                 defender = get_card(defender_id) or defender_id
                 serial = int(descriptor.get("combat_serial", attacker_id & 0xFFFF))
+                # The client keys CombatManager by CombatId(attacking
+                # player UID, serial), while this descriptor's attacker_id
+                # is the attacking card UID used to restore the card itself.
+                # Older snapshots lack the separate CombatId owner; the
+                # active player is the attacker for the current combat phase.
+                combat_id_attacker = descriptor.get(
+                    "combat_id_attacker_id")
+                if combat_id_attacker is None:
+                    combat_id_attacker = self.active_player_id
                 combat = self.combat_manager.create_attack(
-                    CombatId(attacker_id, serial), self.active_player_id,
-                    defender)
+                    CombatId(as_int(combat_id_attacker), serial),
+                    self.active_player_id, defender)
+                self.combat_manager._next_serial = max(
+                    int(self.combat_manager._next_serial), serial)
                 combat.declare_attacker(attacker)
                 blockers = []
                 for blocker_id in descriptor.get("blocker_ids", ()):

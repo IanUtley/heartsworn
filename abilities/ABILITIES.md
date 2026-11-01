@@ -1,8 +1,8 @@
 # ABILITIES — Gamedata Ability Fields Reference
 
 This document explains every field in the four `Ability*` record families under
-`Records/`, how those fields map onto the C# classes under
-`HexClient/Assembly-CSharp-firstpass/`, and how the Python ability code under
+`hex-private/Records/`, how those fields map onto the C# classes under
+`hex-private/HexClient/Assembly-CSharp-firstpass/`, and how the Python ability code under
 `abilities/` should read a JSONL entry and implement an ability — its costs,
 its duration, its targets, its conditions — **without hardcoding per-card
 logic**.
@@ -15,7 +15,7 @@ C# file is the authority; this document is a translation aid.
 
 ## 1. File format
 
-Each `Records/Ability*.jsonl` file is a **JSON Lines** file where every record
+Each `hex-private/Records/Ability*.jsonl` file is a **JSON Lines** file where every record
 spans **two physical lines**:
 
 ```
@@ -598,13 +598,13 @@ which the server must reproduce to stay authoritative (§13, §14):
 
 Bootstrap still materializes the extracted data into `hconnect.db` for fast
 runtime indexes and persisted state, but the ability interpreter reads the
-current `Records/` snapshot through `gamedata.RecordStore` at runtime. There is
+current `hex-private/Records/` snapshot through `gamedata.RecordStore` at runtime. There is
 one supported card-data version: Records. The SQLite rows are not a second
 rules implementation. Synthetic fixture abilities are adapted in the tests;
 production resolution rejects an ability absent from Records.
 
 1. **`AssetExtraction/gamedata_seed.py`** reads the client gamedata or
-   `Records/*.jsonl` and inserts the extracted seed rows into a fresh SQLite
+   `hex-private/Records/*.jsonl` and inserts the extracted seed rows into a fresh SQLite
    database. The generated client data is deliberately not copied into
    `static.py`.
 2. **`static.ensure_schema(db)`** seeds the tables when empty:
@@ -695,9 +695,13 @@ conversations, and triggered-ability responses are checkpoints. When one is
 needed, the port persists the ability instance ID, source card, target map,
 variables, and resume effect order. The next matching typed response resumes
 that instance; it must not create a duplicate trigger or restart earlier effect
-groups. A completed mutation updates the card row and emits the corresponding
-`CardMoved`/`CardUpdated` (and `CardDiscarded` for removal) before the client
-receives rebuilt options and priority.
+groups. A completed mutation updates the card row and emits a destination
+`CardUpdated` before the client receives rebuilt options and priority. When
+collection or controller changes, Unity derives the UI `CardMoved` from that
+update. The inspected client cache does not derive class 50 for position-only
+changes, and `UIBattle.OnCardUpdated` still moves the view home; require a
+concrete C# path before emitting a separate class-50 event. `CardDiscarded`
+remains a separate lifecycle event when the C# path publishes it.
 
 Player-level visibility modifiers follow the same projection contract. The
 `CanSeeOpponentsHand` flag is persisted by the RulesPort host, and each fresh
@@ -774,7 +778,7 @@ auto-target in the extracted record.
 
 #### Typed-field audit
 
-`AssetExtraction/audit_effect_leaves.py` is the field-level counterpart to the
+`tools/ir_coverage/audit_effect_leaves.py` is the field-level counterpart to the
 registration inventory above. It reads the C# `m_*` field declarations, the
 Records field unions, and the Python leaf call closures, then reports every
 meaningful Records field a leaf never reads, leaves with no typed reads, and

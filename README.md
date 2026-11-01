@@ -66,7 +66,7 @@ compatibility, while keeping the actual game state and decisions on the server.
 
 ## Current release
 
-This repository is being prepared as version **0.4.2**. It is an early,
+This repository is being prepared as version **0.4.3**. It is an early,
 compatibility-focused private-server release: the feature checklist records
 what has been tested and the remaining parity gaps. See
 [CHANGELOG.md](CHANGELOG.md) for the release summary and
@@ -89,8 +89,8 @@ You must have HEX: Shards of Fate installed because the server uses the game's
 
 The Docker setup:
 
-  - Runs the game server and web proxy together.
-  - Makes the server available on ports 9933 and 8081.
+  - Runs the game server, web proxy, and campaign editor together.
+  - Makes the server available on ports 9933, 8081, and 8765.
   - Keeps your database and player data in a separate folder so they survive container updates.
   - Allows the server to run on Windows, Linux, or macOS through Docker Desktop.
 
@@ -99,39 +99,48 @@ to use equivalent paths and shell commands for their systems.
 
 ## Starting the server
 Once Docker Desktop is installed, open PowerShell and run the following
-commands. Update `$ClientData` if the game is installed somewhere else.
+commands. Update `$ClientRoot` if the game is installed somewhere else. It
+should point to the Hex install folder that contains `Data` and `Hex_Data`.
 
 ```powershell
 $HexState = Join-Path $HOME 'HexServer'
-$ClientData = 'C:\Program Files (x86)\Steam\steamapps\common\HEX SHARDS OF FATE\Data'
+$ClientRoot = 'C:\Program Files (x86)\Steam\steamapps\common\HEX SHARDS OF FATE'
 New-Item -ItemType Directory -Force $HexState | Out-Null
 docker run --rm `
-  -p 9933:9933 -p 8081:8081 `
+  -p 9933:9933 -p 8081:8081 -p 8765:8765 `
   --user 1001:1001 `
   -v "${HexState}:/hex/state" `
-  -v "${ClientData}:/client-data:ro" `
+  -v "${ClientRoot}:/client-data:ro" `
   -e HEX_DB_PATH='/hex/state/hconnect.db' `
-  -e HEX_GAMEDATA='/client-data/gamedata' `
-  ghcr.io/ianutley/hex-server:0.4.2
+  -e HEX_CLIENT_ROOT='/client-data' `
+  -e HEX_GAMEDATA='/client-data/Data/gamedata' `
+  -e HEX_CAMPAIGN_EDITOR_PORT='8765' `
+  ghcr.io/ianutley/hex-server:0.4.3
 ```
 
 ```bash
 HEX_STATE=$HOME/HexServer
-CLIENT_DATA='location of Hex Client Data directory'
+CLIENT_ROOT='location of Hex install root (contains Data and Hex_Data)'
 
 mkdir -p $HEX_STATE
 # The container runs as UID 1001 and must be able to traverse and write here.
 chmod 777 -- "$HEX_STATE"
 
 docker run --rm \
-  -p 9933:9933 -p 8081:8081 \
+  -p 9933:9933 -p 8081:8081 -p 8765:8765 \
   --user 1001:1001 \
   -v "${HEX_STATE}:/hex/state" \
-  -v "${CLIENT_DATA}:/client-data:ro" \
+  -v "${CLIENT_ROOT}:/client-data:ro" \
   -e HEX_DB_PATH='/hex/state/hconnect.db' \
-  -e HEX_GAMEDATA='/client-data/gamedata' \
-  ghcr.io/ianutley/hex-server:0.4.2
+  -e HEX_CLIENT_ROOT='/client-data' \
+  -e HEX_GAMEDATA='/client-data/Data/gamedata' \
+  -e HEX_CAMPAIGN_EDITOR_PORT='8765' \
+  ghcr.io/ianutley/hex-server:0.4.3
 ```
+
+The campaign editor is at `http://localhost:8765/` and uses Hex account
+credentials to log in. Admins edit the shared campaign; other accounts can
+simulate it and save progress to their own characters in rules-enabled zones.
 
 You can try using the `latest` tag to be on the bleeding edge.
 
@@ -147,10 +156,11 @@ an image update does not cost you your progress. Watch the container log for:
     — no game data was mounted, so the database kept its old card data. Check
     the `HEX_GAMEDATA` volume before playing.
 
-The first time the data is refreshed, the database is copied once to
-`hconnect.db.preseed.bak` next to it in `$HEX_STATE`, so a bad update can be
-rolled back by replacing `hconnect.db` with that file while the container is
-stopped.
+Before the first client-data refresh that changes the stored snapshot, the
+database is copied once to `hconnect.db.preseed.bak` next to it in `$HEX_STATE`.
+That file is a rollback copy, not startup input; startup never reads it, and
+later refreshes do not overwrite it. To roll back a bad update, replace
+`hconnect.db` with the backup while the container is stopped.
 
 After starting the container, configure the Hex client to connect to the
 computer running the server.
@@ -190,10 +200,66 @@ address in both clients. This avoids Steam's single-instance and ticket
 authentication behavior. Steam configuration remains available when Steam
 authentication itself is the behavior under test.
 
+## Campaign editor
+
+The campaign editor is a local web tool for the campaign zones: the overworlds,
+dungeons and panoramas. Open it at `http://127.0.0.1:8765/` (see
+[Starting the server](#starting-the-server)) and log in with a Hex account.
+`campaign_editor/README.md` has the full reference.
+
+- **Admins** edit the shared campaign (the authored data and rules in
+  `campaign/campaign_data/` and `campaign/campaign_rules/`), and can open any
+  player's saved character from the **Character state** list.
+- **Everyone else** can simulate the campaign and load only their own characters.
+  They can't change the shared campaign.
+
+### Fixing a campaign state
+
+Use this when a champion's campaign is stuck or a node shows the wrong state
+(for example, a node that should be incomplete shows as completed, or a
+conversation won't replay).
+
+1. Pick the champion in the **Character state** dropdown at the top of the
+   editor. The dropdown keeps its choice when you switch zones, if that
+   champion has a campaign in the new zone.
+2. Open the **Simulate** tab and click **From live state**. This loads the
+   champion's real saved progress, not a reconstruction. The button is enabled
+   only while a character is chosen. The simulator also lists the nodes where
+   the rules-derived map and the server's live map disagree.
+3. Check the node in question. The node panel shows its flags, progress and
+   what it offers now. Fix the state with **Move champion here**, the node and
+   flag controls, or the quest steps.
+4. Click **Save to champion** to write the fixed state back to the champion's
+   progress. Save while the champion isn't playing. The game picks it up when
+   the zone next loads or the champion logs in.
+
+To keep a copy of a state before you change it, use **Export state**. **Import
+state** loads one back (admins only), and **Undo** steps back through your edits.
+
+Saving only changes progress rows. It doesn't change the shared campaign rules.
+If the rule itself is wrong (for example, the wrong tags on a node), an admin can
+fix it in the editor. The server picks up a changed rules file the next time the
+zone loads; it doesn't need a restart for that.
+
 ## Architecture at a glance
 
 `hconnect_server.py` serves the TCP HConnect protocol on port 9933.
 `proxy.py` serves HTTP compatibility/auth and news endpoints on port 8081.
+`campaign_editor/server.py` serves the campaign
+editor over HTTPS on port 8765; publish it with Docker mapping `8765:8765` to
+open `https://localhost:8765/`. The container makes a self-signed certificate
+at first start and keeps it in the state directory (`<HEX_DB_PATH dir>/tls/`),
+so browsers keep trusting it across restarts. Your browser will warn about an
+untrusted certificate until you accept it. To use your own certificate, mount
+it and set `HEX_CAMPAIGN_EDITOR_CERT` and `HEX_CAMPAIGN_EDITOR_KEY` (PEM paths
+inside the container). To add a public IP or DNS name to the self-signed
+certificate, set `HEX_CAMPAIGN_EDITOR_TLS_NAMES` (comma-separated); delete the
+`tls/` folder to regenerate it after changing names. The container already
+listens on all interfaces (`HEX_CAMPAIGN_EDITOR_HOST` defaults to `0.0.0.0`), so
+you don't need to set the host. The names default to `localhost,127.0.0.1`, so
+if you open the editor by another hostname or IP, list it in
+`HEX_CAMPAIGN_EDITOR_TLS_NAMES`, for example
+`HEX_CAMPAIGN_EDITOR_TLS_NAMES=localhost,127.0.0.1,myhost.local,192.168.1.20`.
 `db.py` owns the shared SQLite connection while `profile_db.py`, `pve_db.py`,
 `pvp_db.py`, `tournament_db.py`, and `replay_db.py` expose domain persistence
 APIs. `static.py` owns schema creation and server-owned seeds;

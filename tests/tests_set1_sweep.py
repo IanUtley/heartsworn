@@ -222,10 +222,10 @@ def _resolve_one(db, handler, game, session, pl_t, ai_t, bstate, ability_guid,
 
 
 def _run_sweep(all_cards=False):
-    fd, sandbox_path = tempfile.mkstemp(suffix=".db")
-    os.close(fd)
-    shutil.copy(SRC, sandbox_path)
-    db = sqlite3.connect(sandbox_path)
+    _src = sqlite3.connect(SRC)
+    db = sqlite3.connect(":memory:")
+    _src.backup(db)
+    _src.close()
     handler = HandlerStub(db)
     session = SessionStub()
     pl_t = game_engine.UID.make(244, 5)
@@ -262,10 +262,6 @@ def _run_sweep(all_cards=False):
                     fh.write(traceback.format_exc())
     finally:
         db.close()
-        try:
-            os.remove(sandbox_path)
-        except OSError:
-            pass
     label = "card catalog" if all_cards else "Set 1"
     print(f"{label} sweep: {passed}/{len(abilities)} abilities resolved cleanly")
     if fails:

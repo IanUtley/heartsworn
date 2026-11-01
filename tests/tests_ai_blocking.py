@@ -22,13 +22,11 @@ from tests.tests_combat import HandlerStub, SessionStub
 
 
 def _database_copy():
-    fd, path = tempfile.mkstemp(suffix=".db")
-    os.close(fd)
     source = sqlite3.connect(SRC)
-    target = sqlite3.connect(path)
+    target = sqlite3.connect(":memory:")
     source.backup(target)
     source.close()
-    return target, path
+    return target, None
 
 
 def _add_card(db, uid, owner, template_guid):
@@ -86,6 +84,50 @@ def _run_defense(db, attacker_attack, attacker_defense, blocker_stats,
     return bstate.get("ai_blockers") or {}
 
 
+def _run_defense_multi(db, attackers, blocker_stats, ai_health):
+    """attackers/blocker_stats are lists of (attack, defense); uids 100+/200+."""
+    for index, (attack, defense) in enumerate(attackers):
+        _add_card(db, 100 + index, 5, _template_with_stats(db, attack, defense))
+    for index, (attack, defense) in enumerate(blocker_stats, start=1):
+        _add_card(db, 200 + index, 0, _template_with_stats(db, attack, defense))
+    db.commit()
+    session = SessionStub()
+    session.session_id = 1
+    handler = HandlerStub(db)
+    game = game_engine.Game(
+        1, game_engine.UID.make(244, 5), game_engine.UID.make(3, 1000))
+    bstate = {"player_attackers": {str(100 + i): "0" for i in range(len(attackers))},
+              "ai_health": ai_health}
+    old_db = ai._db
+    ai._db = db
+    try:
+        ai.ai_pass_declare_defense(
+            handler, session, game.player_uid, game.ai_uid, bstate, game)
+    finally:
+        ai._db = old_db
+    return bstate.get("ai_blockers") or {}
+
+
+def test_chump_blocks_stop_once_the_attack_is_no_longer_lethal():
+    """8 life vs 5/3/2 (10 damage): blocking the 5 alone is enough, so only
+    that attacker is chumped -- the 3 and the 2 are taken on the face."""
+    db, path = _database_copy()
+    try:
+        # The client's block solver (ai_combat.solve_block) chooses by value and
+        # has no "stop once safe" rule, so the blocks are judged by the combat
+        # valuation.  What must hold: the AI survives, and each blocker blocks once.
+        blocks = _run_defense_multi(
+            db, [(5, 5), (3, 3), (2, 2)], [(0, 1), (0, 1), (0, 1)], ai_health=8)
+        used = [b for v in blocks.values() for b in v]
+        assert len(used) == len(set(used)), blocks
+        unblocked = sum(a for a, uid in zip((5, 3, 2), (100, 101, 102))
+                        if str(uid) not in blocks)
+        assert unblocked < 8, blocks
+    finally:
+        db.close()
+        pass  # in-memory database: nothing to remove
+
+
 def test_incomplete_dogpile_is_not_committed():
     db, path = _database_copy()
     try:
@@ -93,7 +135,48 @@ def test_incomplete_dogpile_is_not_committed():
         assert _run_defense(db, 3, 3, [(0, 1), (0, 1)]) == {}
     finally:
         db.close()
-        os.unlink(path)
+        pass  # in-memory database: nothing to remove
+
+
+def test_blocker_is_never_assigned_to_two_attackers():
+    """A troop blocks at most one attacker per combat.
+
+    ``Card.CanBlock`` returns ``InCombat`` while ``ECardStates.Blocking`` is
+    set and ``Session.AssignBlocker`` refuses an already blocking blocker, so
+    the old AI MULTIBLOCK branch (reusing a blocker that could survive the
+    second hit) let a single wall like Cavern Guard or Tribunal Magistrate
+    block the whole attacking team.  Players reported exactly that.
+    """
+    db, path = _database_copy()
+    try:
+        attacker = _template_with_stats(db, 1, 1)
+        _add_card(db, 100, 5, attacker)
+        _add_card(db, 101, 5, attacker)
+        _add_card(db, 201, 0, _template_with_stats(db, 0, 4))
+        db.commit()
+
+        session = SessionStub()
+        session.session_id = 1
+        handler = HandlerStub(db)
+        game = game_engine.Game(
+            1, game_engine.UID.make(244, 5), game_engine.UID.make(3, 1000))
+        bstate = {"player_attackers": {"100": "0", "101": "0"},
+                  "ai_health": 2}
+        old_db = ai._db
+        ai._db = db
+        try:
+            ai.ai_pass_declare_defense(
+                handler, session, game.player_uid, game.ai_uid, bstate, game)
+        finally:
+            ai._db = old_db
+        blocks = bstate.get("ai_blockers") or {}
+        blocker_uses = [b for blockers in blocks.values() for b in blockers]
+        assert len(blocker_uses) == len(set(blocker_uses)), blocks
+        # Identical attackers: either may take the one blocker.
+        assert len(blocks) == 1 and list(blocks.values()) == [["201"]], blocks
+    finally:
+        db.close()
+        pass  # in-memory database: nothing to remove
 
 
 def test_lethal_attack_uses_one_lowest_attack_chump():
@@ -102,10 +185,11 @@ def test_lethal_attack_uses_one_lowest_attack_chump():
         # The attack is lethal, but the blockers cannot combine to kill the
         # attacker.  Only the 0-attack troop should be sacrificed.
         blocks = _run_defense(db, 3, 3, [(0, 1), (2, 1)], ai_health=2)
-        assert blocks == {"100": ["201"]}, blocks
+        # Both attackers are identical, so either may take the one blocker.
+        assert len(blocks) == 1 and list(blocks.values()) == [["201"]], blocks
     finally:
         db.close()
-        os.unlink(path)
+        pass  # in-memory database: nothing to remove
 
 
 def test_ai_block_declaration_queues_the_blocked_attackers_trigger():
@@ -130,7 +214,9 @@ def test_ai_block_declaration_queues_the_blocked_attackers_trigger():
         handler = HandlerStub(db)
         game = game_engine.Game(
             1, game_engine.UID.make(244, 5), game_engine.UID.make(3, 1000))
-        bstate = {"player_attackers": {"100": "0"}, "ai_health": 20}
+        # Lethal at 4 life: the 4/2 attacker must be blocked (the survival
+        # chump), which fires its "becomes blocked" trigger.
+        bstate = {"player_attackers": {"100": "0"}, "ai_health": 4}
         old_db = ai._db
         ai._db = db
         try:
@@ -145,7 +231,7 @@ def test_ai_block_declaration_queues_the_blocked_attackers_trigger():
         assert int(items[0]["target_uid"]) == 100
     finally:
         db.close()
-        os.unlink(path)
+        pass  # in-memory database: nothing to remove
 
 
 def test_ai_turn_pauses_while_a_client_prompt_is_open():
@@ -162,6 +248,11 @@ def test_ai_turn_pauses_while_a_client_prompt_is_open():
         {"pending_discard_ability": "06570445-27e3-fc87-2e17-a7b5e1de693d"})
     assert not ai._ai_turn_prompt_pending({"pending_choice": None})
     assert not ai._ai_turn_prompt_pending(None)
+    # A RulesPort trigger target picker (revived Witch's Deploy) pauses too.
+    from types import SimpleNamespace
+    port = SimpleNamespace(trigger_prompt_open=True)
+    assert ai._ai_turn_prompt_pending(
+        {}, SimpleNamespace(_rules_port_session=port))
 
 
 def test_native_attack_declaration_survives_the_next_projection():
@@ -211,7 +302,9 @@ def test_native_attack_declaration_survives_the_next_projection():
 
 if __name__ == "__main__":
     test_incomplete_dogpile_is_not_committed()
+    test_blocker_is_never_assigned_to_two_attackers()
     test_lethal_attack_uses_one_lowest_attack_chump()
+    test_chump_blocks_stop_once_the_attack_is_no_longer_lethal()
     test_ai_block_declaration_queues_the_blocked_attackers_trigger()
     test_ai_turn_pauses_while_a_client_prompt_is_open()
     test_native_attack_declaration_survives_the_next_projection()

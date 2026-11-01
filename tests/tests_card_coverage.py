@@ -175,9 +175,11 @@ def test_matching_target_filter_pool_uses_target_as_source():
         allowed = {"Troop", "BasicAction", "QuickAction", "Artifact",
                    "Constant", "Bane", "Choice", "Resource"}
         for guid in pool:
-            values = json.loads(db.execute(
+            # Thresholds are stored as {"values": [...], "list": [...]}; a card without any is stored as "[]".
+            thresholds = json.loads(db.execute(
                 "SELECT threshold_json FROM card_templates WHERE guid=?",
-                (guid,)).fetchone()[0] or "{}").get("values") or []
+                (guid,)).fetchone()[0] or "{}")
+            values = (thresholds.get("values") if isinstance(thresholds, dict) else None) or []
             nonzero = [index for index, count in enumerate(values)
                        if int(count or 0) > 0]
             assert nonzero == [5], (guid, values)
@@ -194,9 +196,11 @@ def test_matching_target_filter_pool_uses_target_as_source():
             source_uid=4242, player=5)
         assert disjoint_pool, "disjoint-shard filter produced no candidates"
         for guid in disjoint_pool:
-            values = json.loads(db.execute(
+            # Thresholds are stored as {"values": [...], "list": [...]}; a card without any is stored as "[]".
+            thresholds = json.loads(db.execute(
                 "SELECT threshold_json FROM card_templates WHERE guid=?",
-                (guid,)).fetchone()[0] or "{}").get("values") or []
+                (guid,)).fetchone()[0] or "{}")
+            values = (thresholds.get("values") if isinstance(thresholds, dict) else None) or []
             if len(values) > 5:
                 assert not int(values[5] or 0), (guid, values)
     finally:
@@ -224,6 +228,59 @@ def test_effect_inventory_has_no_unexpected_unregistered_types():
         db.close()
 
 
+def test_every_records_card_has_a_typed_play_contract():
+    """Build the client-shaped plan for every extracted card.
+
+    This is intentionally one generated catalogue check rather than thousands
+    of hand-written card tests.  The card name and display text are never used
+    to choose an executor: every graph, target, and effect must resolve from
+    the typed Records snapshot and the native effect inventory.
+    """
+    from gamedata import DEFAULT_RECORD_STORE, PlayPlan
+    from rules_port.coverage import STRUCTURAL_EFFECTS
+
+    failures = []
+    cards = DEFAULT_RECORD_STORE.load("CardTemplate")
+    handled_effects = set(NATIVE_EFFECTS) | set(STRUCTURAL_EFFECTS)
+    for card in cards:
+        name = str(card.field("m_Name", "") or card.guid)
+        try:
+            plan = PlayPlan.from_card(
+                DEFAULT_RECORD_STORE, card.guid, source_uid=101, owner_id=5)
+        except Exception as exc:  # pragma: no cover - failure report detail
+            failures.append((name, card.guid, f"plan: {exc}"))
+            continue
+
+        if len(plan.abilities) != len(card.ability_guids):
+            failures.append((
+                name, card.guid,
+                "missing typed ability graph(s): "
+                f"{len(plan.abilities)}/{len(card.ability_guids)}"))
+
+        for ability in plan.abilities:
+            graph = ability.graph
+            if graph is None:
+                failures.append((name, card.guid,
+                                 f"ability {ability.ability_guid}: no graph"))
+                continue
+            for effect in graph.effects:
+                if effect.concrete_type not in handled_effects:
+                    failures.append((
+                        name, card.guid,
+                        f"ability {graph.guid}: unsupported effect "
+                        f"{effect.concrete_type}"))
+            for target in graph.targets:
+                if not target.guid:
+                    failures.append((
+                        name, card.guid,
+                        f"ability {graph.guid}: target has no GUID"))
+
+    assert not failures, "\n".join(
+        f"{name} ({guid}): {reason}"
+        for name, guid, reason in failures[:40]
+    )
+
+
 def main():
     tests = [
         test_typed_conscript_filter,
@@ -231,6 +288,7 @@ def main():
         test_load_player_deck_instantiates_typed_resources,
         test_matching_target_filter_pool_uses_target_as_source,
         test_effect_inventory_has_no_unexpected_unregistered_types,
+        test_every_records_card_has_a_typed_play_contract,
     ]
     for test in tests:
         test()

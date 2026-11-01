@@ -11,11 +11,6 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 
-from tests.test_db import fresh_database
-
-# Bind this process's test database before any runtime import opens ``db``.
-SRC = fresh_database()
-
 import game_engine
 
 from tests.tests_combat import HandlerStub, SessionStub
@@ -187,6 +182,9 @@ def test_ai_declares_no_attack_against_a_stealthed_champion():
         "subtype, rage_value) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
         (tpl, "Stealth Test Troop", "Troop", 1, 2, 2, 0, "[]", "[]",
          "Orc Ranger", 0))
+    # The process-wide connection can carry game rows from earlier files; the
+    # attacker list must hold only the troop this test places.
+    con.execute("DELETE FROM game_cards")
     add_card(con, 101, 0, tpl,
              state=int(game_engine.ECardStates.StartedATurnOnYourSide))
     handler = HandlerStub(con)

@@ -15,7 +15,9 @@ from gamedata.records import reference_guid
 # attribute reader (and the legacy BOM merge it mirrors) uses that underscored
 # key, so map it explicitly instead of emitting ``attributeflags``.
 _PARAM_NAMES = {"m_AttributeFlags": "attribute_flags",
-                "m_LoseHalfHealth": "lose_half_health"}
+                "m_LoseHalfHealth": "lose_half_health",
+                # The stat an attack or defense modifier reads from its target (C# Property), not the amount.
+                "m_Property": "stat_property"}
 
 
 def modifier_metadata(effect_guid=None, *, template=None):
@@ -56,7 +58,7 @@ def modifier_metadata(effect_guid=None, *, template=None):
                 "m_CardFilter", "m_SetThresholds", "m_RemoveAllCounters",
                 "m_ReplaceExistingValue", "m_IsCombatDamage", "m_CombatDamageOnly",
                 "m_NonCombatDamageOnly", "m_OneShot", "m_LastsIndefinitely",
-                "m_RandomLowestThreshold", "m_Random", "m_LoseHalfHealth"):
+                "m_RandomLowestThreshold", "m_Random", "m_LoseHalfHealth", "m_Property"):
         if key in modifier:
             result[_PARAM_NAMES.get(key, key[2:].lower())] = modifier[key]
     counter = modifier.get("m_CardCounterTemplateId")

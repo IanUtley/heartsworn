@@ -7,6 +7,59 @@ import json
 from .targeting import _shards
 
 
+_COLLECTION_CANONICAL = {
+    "none": None,
+    "none_": None,
+    "null": None,
+    "deck": "deck",
+    "hand": "hand",
+    "champions": "champions",
+    "warzone": "warzone",
+    "discard": "discard",
+    "crypt": "discard",
+    "graveyard": "discard",
+    "void": "void",
+    "playedresources": "PlayedResources",
+    "castspells": "CastSpells",
+    "underground": "underground",
+    "choosing": "choosing",
+    "mod": "mod",
+    "simulacrum": "simulacrum",
+}
+
+
+def normalize_collection(value):
+    """Return the DB spelling for a card collection value.
+
+    Hosts provide these values as lower/upper-case names, serialized enum
+    names, or the client's integer ``ECardCollections`` flags.  The condition
+    layer compares against DB locations, where ``CastSpells`` and
+    ``PlayedResources`` intentionally retain their historical casing.
+    """
+    if value is None:
+        return None
+    named = getattr(value, "name", None)
+    if named is not None:
+        value = named
+    try:
+        numeric = int(value)
+    except (TypeError, ValueError):
+        numeric = None
+    if numeric is not None:
+        import game_engine
+        for name, flag in vars(game_engine.ECardCollections).items():
+            if name.startswith("_"):
+                continue
+            try:
+                if int(flag) == numeric:
+                    value = name
+                    break
+            except (TypeError, ValueError):
+                continue
+    key = str(value).rsplit(".", 1)[-1].lower()
+    return _COLLECTION_CANONICAL.get(key, key)
+
+
 class ConditionContext:
     def __init__(self, db, session, bstate, event_type=None,
                  ability_source_uid=None, ability_source_owner_id=None,
@@ -15,7 +68,9 @@ class ConditionContext:
                  trigger_owner_id=None, event_source_collection=None,
                  event_destination_collection=None, event_previous_state=None,
                  uses_previous_state=False, event_int_attribute=None,
-                 event_tac=None, event_previous_owner_id=None):
+                 event_tac=None, event_previous_owner_id=None,
+                 effect_secondary_target_uids=None, event_data=None,
+                 event_target_owner_id=None):
         self.db, self.session = db, session
         self.bstate = bstate or {}
         self.event_type = event_type
@@ -24,8 +79,15 @@ class ConditionContext:
         self.trigger_owner_id = trigger_owner_id
         self.trigger_uid, self.extra_target = trigger_uid, extra_target
         self.pl_t, self.ai_t = pl_t, ai_t
-        self.event_source_collection = event_source_collection
-        self.event_destination_collection = event_destination_collection
+        # Collection values arrive from both enum-shaped host adapters
+        # (``ECardCollections.Warzone``/``Warzone``) and lower-case DB zone
+        # names. Conditions operate on canonical DB zone names so a wire
+        # spelling difference cannot make an authored entry trigger silently
+        # fail.
+        self.event_source_collection = normalize_collection(
+            event_source_collection)
+        self.event_destination_collection = normalize_collection(
+            event_destination_collection)
         self.event_previous_state = event_previous_state
         # The controller the entering card had before the zone move.  The
         # client's ``TriggerCardEnteredZone`` requires both the current and the
@@ -34,7 +96,16 @@ class ConditionContext:
         self.event_previous_owner_id = event_previous_owner_id
         self.event_int_attribute = event_int_attribute
         self.event_tac = event_tac or {}
+        self.event_data = event_data or {}
+        # TriggerPlayerControlsAbilitySource asks the authored trigger
+        # selector for SourcePlayerId or TargetPlayerId. Keep the target
+        # player from the typed event envelope instead of inferring it from a
+        # card row (some events carry a player target without a target card).
+        self.event_target_owner_id = event_target_owner_id
         self.uses_previous_state = bool(uses_previous_state)
+        self.effect_secondary_target_uids = tuple(
+            int(uid) for uid in (effect_secondary_target_uids or ())
+            if uid is not None)
         self.champions = champions or []
         # C# evaluates an effect condition against the ability instance, so
         # the context reads that instance's variables (RandomizeVariable and
@@ -85,6 +156,18 @@ class ConditionContext:
                     except (TypeError, ValueError):
                         continue
             counters, guids = self._counter_counts(uid)
+            # Live champions are synthetic SessionCardIds: CounterModifier
+            # persists their counters in the battle state keyed by counter
+            # template GUID (``counter_effects.change_counter``), not in a
+            # game_cards row.  Without them HasCountersValue never saw a
+            # champion counter ("if you are Burning/Dazed").
+            persisted = (self.bstate.get("champion_counters") or {}).get(
+                str(uid)) or {}
+            if isinstance(persisted, dict) and persisted:
+                counters, guids = dict(counters), dict(guids)
+                for guid, count in persisted.items():
+                    counters[str(guid)] = count
+                    guids[str(guid)] = str(guid)
             int_attrs = dict((self.bstate.get("champion_int_attrs") or {}).get(
                 str(uid), {}) or {})
             return {"card_uid": uid, "card_type": "Champion",
@@ -125,6 +208,15 @@ class ConditionContext:
                 "attack": int(row[5] or 0) + int(row[14] or 0),
                 "defense": int(row[6] or 0) + int(row[15] or 0),
                 "template_guid": row[7] or "", "name": row[8] or "",
+                "original_template_guid": row[19] or "",
+                # Socketed gems feed IsSocketed and shared-gem filters (C#
+                # reads Card.ActiveGem); without them every card looked
+                # unsocketed to conditions.
+                "gems": int(row[20] or 0) if len(row) > 20 else 0,
+                # IsSocketable reads the template's socket count (C# Card.m_CardTemplate.m_SocketCount).
+                "socket_count": int(row[22] or 0) if len(row) > 22 else 0,
+                # The template's rarity: IsRarity (and the shared-rarity filter) read it from this view.
+                "rarity": row[21] if len(row) > 21 else "",
                 "cost": int(effective_cost or 0),
                 "subtype": row[10] or "",
                 "shards": _shards(row[11]),
@@ -132,6 +224,7 @@ class ConditionContext:
                 "int_attrs": buffs.get("int_attrs", {}),
                 "card_abilities": card_abilities,
                 "counters": counters, "counter_guids": guids,
+                "position": int(row[18] or 0),
                 "tags": buffs.get("tags", {}) or {},
                 "damaged_opponent_this_turn": list(
                     self.bstate.get("damaged_opponent_this_turn") or [])}
@@ -139,14 +232,10 @@ class ConditionContext:
         return card
 
     def _zones(self, flags):
-        mapping = {"Warzone": "warzone", "Hand": "hand", "Deck": "deck",
-                   "Crypt": "discard", "Discard": "discard", "Void": "void",
-                   "CastSpells": "CastSpells", "PlayedResources": "PlayedResources",
-                   "Choosing": "choosing", "Underground": "underground",
-                   "Champions": "champions"}
-        return {mapping.get(value, value.lower()) for value in
-                str(flags or "").split("|")
-                if value and value.lower() not in {"none", "null"}}
+        return {normalized for normalized in (
+            normalize_collection(value)
+            for value in str(flags or "").split("|"))
+            if normalized is not None}
 
     def _cards_in_zones(self, zones, user_id=None):
         from pvp_db import db_condition_cards_in_zones
@@ -161,6 +250,21 @@ class ConditionContext:
                     if card is not None:
                         cards.append(card)
         return cards
+
+    def iter_cards(self):
+        """Expose the current card pool to Records filters.
+
+        C# filter leaves such as ``TopNOfDeck`` evaluate against the live
+        session's cards, even when the filter is reached through a trigger
+        condition rather than a target scan.  Keep that same contract here by
+        exposing persisted cards from every ordinary collection plus the
+        separately stored champion projections.
+        """
+        return iter(self._cards_in_zones({
+            "deck", "hand", "champions", "warzone", "discard", "void",
+            "underground", "CastSpells", "PlayedResources", "choosing",
+            "mod", "simulacrum",
+        }))
 
     def _counter_count(self, card, counter_guid):
         if not card:

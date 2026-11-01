@@ -221,7 +221,8 @@ def _game(handler, session, state, pid):
         _pvp_populate_game_state(game, state, pid, other)
         return game, _owner_uid(pid), _owner_uid(other)
     pl = _ge.UID.make(244, int(handler.client_reck_id))
-    return _ge.Game(int(session.session_id), pl, _ge.UID.make(3, 1000)), pl, _ge.UID.make(3, 1000)
+    ai_uid = _ge.UID.make(_ge.SERVICE_AI_UID_TYPE, 1000)
+    return _ge.Game(int(session.session_id), pl, ai_uid), pl, ai_uid
 
 
 def _send(handler, session, game, player_uid, pvp=False):
@@ -318,15 +319,17 @@ def _insert_card(handler, session, state, pid, guid, location):
                                  location, conn=_db)
 
 
-def _card_event(handler, session, state, pid, card_uid, collection, location, index=0):
+def _card_event(handler, session, state, pid, card_uid, collection):
     game, me, _ = _game(handler, session, state, pid)
     scid = _ge.SessionCardId(_ge.UID(int(card_uid)))
     row = db_card_basic(session.session_id, card_uid, conn=_db)
     guid = row[0] if row else None
     tpl, ct, _name, cost, atk, defense, gems = handler._card_full_data(game, scid, guid)
-    game.push_card_updated(scid, _owner_uid(pid) if state and state.get("pvp") else me,
-                           collection, ct, template_id=tpl, cost=cost, attack=atk, defense=defense, gems=gems)
-    game.push_card_moved(scid, _owner_uid(pid) if state and state.get("pvp") else me, collection, location, index)
+    game.push_card_updated(
+        scid, _owner_uid(pid) if state and state.get("pvp") else me,
+        collection, ct, template_id=tpl, cost=cost, attack=atk,
+        defense=defense, gems=gems,
+        nulling=collection == _ge.ECardCollections.Deck)
     return game, me
 
 
@@ -336,7 +339,7 @@ def _move_to_zone(handler, session, state, pid, card_uid, zone, collection):
     db_move_card_to_location(session.session_id, card_uid, zone, position=0,
                              conn=_db)
     _db.commit()
-    return _card_event(handler, session, state, pid, card_uid, collection, _ge.ECardLocations.Top)
+    return _card_event(handler, session, state, pid, card_uid, collection)
 
 
 def _draw(handler, session, state, pid, count):
@@ -367,12 +370,16 @@ def _add_card(handler, session, state, pid, guid, to_deck=False, play=False):
     scid = _ge.SessionCardId(_ge.UID(card_uid))
     full = handler._card_full_data(game, scid, tpl[0])
     if to_deck:
-        game.push_card_updated(scid, owner_uid, _ge.ECardCollections.Deck, full[1], template_id=full[0], cost=full[3], attack=full[4], defense=full[5], gems=full[6])
-        game.push_card_moved(scid, owner_uid, _ge.ECardCollections.Deck, _ge.ECardLocations.Top, 0)
+        game.push_card_updated(
+            scid, owner_uid, _ge.ECardCollections.Deck, full[1],
+            template_id=full[0], cost=full[3], attack=full[4],
+            defense=full[5], gems=full[6], nulling=True)
     else:
-        game.push_card_updated(scid, owner_uid, _ge.ECardCollections.Hand, full[1], template_id=full[0], cost=full[3], attack=full[4], defense=full[5], gems=full[6])
+        game.push_card_updated(
+            scid, owner_uid, _ge.ECardCollections.Hand, full[1],
+            template_id=full[0], cost=full[3], attack=full[4],
+            defense=full[5], gems=full[6])
         game.push_card_drawn(scid, owner_uid, 1)
-        game.push_card_moved(scid, owner_uid, _ge.ECardCollections.Hand, _ge.ECardLocations.Top, 1)
     if state and state.get("pvp"):
         from services.tournament_game import pvp_save_state
         pvp_save_state(session, state)
@@ -400,6 +407,39 @@ def _set_life(handler, session, state, pid, value, game):
         battle_engine.save_state(session, bstate)
     game.player_health = bstate["player_health"]
     game.push_player_updated(game.player_uid, champ_id=getattr(handler, "_player_champ_scid", None))
+
+
+def _card_type_for_play(card_uid):
+    """The card type recorded for a cheat-played card in this session."""
+    row = _db.execute(
+        "SELECT ct.card_type FROM game_cards gc JOIN card_templates ct "
+        "ON ct.guid=gc.template_guid WHERE gc.card_uid=?",
+        (int(card_uid),)).fetchone()
+    return row[0] if row else ""
+
+
+def _play_pvp_card_via_rulesport(handler, session, card_uid, card_type):
+    """Cast a debug-played PvP card through the RulesPort card-play seam.
+
+    The cheat supplies no client packet, so the typed intent is built here.  With
+    no attached RulesPort host there is no legacy engine to fall back to.
+    """
+    from types import SimpleNamespace
+    if getattr(session, "_rules_port_session", None) is None:
+        log_req("    Debug cheat play: no RulesPort host attached; refusing legacy play")
+        return False
+    ctype = _ge.card_type_from_db(card_type)
+    if ctype & (_ge.ECardTypes.BasicAction | _ge.ECardTypes.QuickAction):
+        kind = "play_spell"
+    elif ctype & _ge.ECardTypes.Troop:
+        kind = "play_troop"
+    elif ctype & _ge.ECardTypes.Artifact:
+        kind = "play_artifact"
+    else:
+        log_req(f"    Debug cheat play: unsupported card type {card_type}")
+        return False
+    play = SimpleNamespace(kind=kind, payload={"card_id": int(card_uid)})
+    return bool(handler._handle_rules_port_card_play(session, play))
 
 
 def _handle(handler, session, raw):
@@ -474,17 +514,10 @@ def _handle(handler, session, raw):
                     game.push_player_updated(me, champ_id=getattr(handler, "_player_champ_scid", None))
                 if action == 14:
                     if state and state.get("pvp") and pid == int(handler.client_reck_id):
-                        from services.tournament_game import (
-                            _pvp_play_spell, _pvp_play_troop, pvp_save_state)
+                        from services.tournament_game import pvp_save_state
                         _add_card_requirements(state, pid, tpl)
                         pvp_save_state(session, state)
-                        ctype = _ge.card_type_from_db(tpl[1])
-                        if ctype & (_ge.ECardTypes.BasicAction | _ge.ECardTypes.QuickAction):
-                            _pvp_play_spell(handler, session, card_uid, pid, raw)
-                        elif ctype & (_ge.ECardTypes.Troop | _ge.ECardTypes.Artifact | _ge.ECardTypes.Constant):
-                            _pvp_play_troop(handler, session, card_uid, pid, raw)
-                        else:
-                            log_req(f"    Debug cheat Play: unsupported card type {tpl[1]}")
+                        _play_pvp_card_via_rulesport(handler, session, card_uid, tpl[1])
                         return True
                     log_req("    Debug cheat Play: PvE/unowned-player play remains acknowledgement-only")
             _send(handler, session, game, me, bool(state and state.get("pvp")))
@@ -492,7 +525,7 @@ def _handle(handler, session, raw):
 
     if action == 13 and target_card:
         if state and state.get("pvp") and pid == int(handler.client_reck_id):
-            from services.tournament_game import pvp_handle_transaction, pvp_save_state
+            from services.tournament_game import pvp_save_state
             cost = db_card_cost(session.session_id, target_card, conn=_db)
             extra = max(0, int(cost or 0) - int(state.get(f"res_{pid}", 0)))
             if extra:
@@ -502,8 +535,8 @@ def _handle(handler, session, raw):
             # ``SessionCardId``; ordinary Play* transactions expose the
             # backing member ``m_SessionCardId``.  Reuse the normal PvP play
             # router after normalizing that one wire field.
-            play_raw = raw.replace(b"SessionCardId", b"m_SessionCardId", 1)
-            if pvp_handle_transaction(handler, session, play_raw):
+            if _play_pvp_card_via_rulesport(handler, session, target_card,
+                                            _card_type_for_play(target_card)):
                 return True
         log_req(f"    Debug cheat PlayCard: target {target_card} was acknowledged but not playable in this session")
         return True

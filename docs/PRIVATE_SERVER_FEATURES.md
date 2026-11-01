@@ -16,6 +16,8 @@ Frost Ring Arena implementation details are in
 - [x] HConnect TCP server on port 9933.
 - [x] HTTP proxy on port 8081 for local Steam-auth-compatible login and
   news/status endpoints.
+- [x] Campaign editor web server on port 8765, started when its private source
+  is available (loopback for local restart, container interface in Docker).
 - [x] ObjFmt request/response encoding for profile, store, mail, load-balancer,
   tournament, and related services.
 - [x] Custom binary session-event encoder and typed event dispatch to clients.
@@ -48,6 +50,27 @@ Frost Ring Arena implementation details are in
 - [x] Immediate client inventory removal for direct chest/pack opening using
   the client-compatible `InventoryUpdated` event; other inventory paths still
   need broader auditing.
+- [x] Booster treasure chests: one chest per opened pack (a Legendary chest
+  per Primal Pack). Opening a chest rolls the retail prize kinds by chest
+  rarity (`services/chest_loot.py`: 1/1/1/2/3 rolls; equipment, Stardust,
+  AA and PvE cards, chest mercenaries, sleeves, booster packs). Equipment
+  comes from the chest set's pool, built at runtime from each item's design
+  note ("Set N Chest Loot", "Scars Chest", "Frostheart Chest Loot", bare
+  "Chest" = the item's own set) and cached per process
+  (`services/equipment.py`); there is no equipment table.
+- [x] Wheels of Fate (`services/wheel_of_fate.py`): a spin costs gold by
+  chest rarity, can upgrade the chest, award re-spins, prizes and gold, and
+  leaves the chest unopened (`treasure_chests.wof_spun`/`wof_status`).
+- [x] Deck equipment: `UpdateDeck` stores owned items (one per equipment
+  type) in `decks.equipment`; GetDeckInfo, deck_bits and EncodedDecks return
+  them, and a PvE battle replaces each card with the client's
+  equipment-modified variant for the equipped items. Scene-fixed and
+  mercenary decks carry no equipment.
+- [x] Mercenary parties: `partysave`/`partyload`, saved profile deck
+  templates (`pdecktsave`/`pdeckdel`), login push of templates and parties,
+  and campaign battles fought as the chosen mercenary (its template, health
+  and party deck, no talents). The party cap is the `CAMP_PARTYCAP`
+  Reckoning flag.
 - [ ] Auction House protocol and persistence.
 
 ## Mail and notifications
@@ -137,6 +160,42 @@ Frost Ring Arena implementation details are in
   still needs fresh mode-specific traces.
 - [ ] Remove game-text compatibility fallbacks only after confirming the
   corresponding Records field is present and authoritative.
+- [ ] Card-matrix audit follow-ups (`tests/tests_card_play_matrix.py --all
+  --contracts`; 105/7,214 templates failed at the last baseline, and roughly
+  65 of those were fixed or re-classified). Re-run the full matrix serially
+  first; the items below were not re-checked after the last fixes.
+  - Picker continuations the generated fixture does not resume: Scheme,
+    Devour Secrets, Uncover Secrets, Succumb To Madness, Escape the
+    Picaroons, Reginald Imprisoned (choice pauses) and Brutal Commander,
+    Enthralling Gaze, Withering Touch (deck-search / "choose a revealed
+    card" child abilities). Next check: drive each typed continuation in
+    the matrix, or a focused test per mechanic (not per card), in PvE and
+    PvP.
+  - Trigger recursion: Alluring Alemaid, Captured Flag
+    (`CardMatrixTriggerRecursion`). Next check: decide whether this is a
+    real engine loop (compare the C# per-game/per-turn use and trigger
+    claim) or a fixture re-dispatch.
+  - Wrenlocke's Apprentice: "put the remaining cards into your deck" left
+    no effect trace after the random action moved to hand. Likely an engine
+    gap in the "remaining revealed cards" target. Next check: a focused
+    Deploy test that asserts the other three top cards are returned.
+  - Random/RNG branches: Taming Sphere, Wrathwood Larch (one random branch
+    misses an effect), Tricerobot (RNG requested but unused), Dormant Booby
+    Trap (RandomNumber condition not evaluable). Next check: confirm
+    against the C# RNG call order.
+  - Lifecycle/combat triggers the fixture did not fire: Arena Incantation
+    (GameStartedEvent), Nameless Citizen (CardBlockedEvent).
+  - War Machine: static IntAttr not projected onto a legal target.
+  - Fixture witness limits (engine believed correct): Chickatwice (troop
+    blocking the source), Timophy the Turtle, Emberbrute (troop sharing a
+    trait with the champion), Pterobot `ff73e51b`, Harvest of Sorrow (no
+    troops died this turn), and the "Choose * Transform" / Lose Control
+    choice cards run without their parent's stored target.
+  - Known gaps outside the matrix: PvP does not record the starting player
+    (`AbilityControllerIsStartingPlayerAbilityCondition`), optional
+    additional costs with `m_AllowBestEffortMinimumTargetCount` do not
+    count the legal pool server-side, and champion damage does not set
+    `ECardStates.Damaged`.
 
 ## Campaign, tournaments, chat, and replay
 
@@ -169,8 +228,8 @@ Frost Ring Arena implementation details are in
   focused compilation checks.
 - [x] Debug logging for server requests, proxy traffic, client logs, session
   events, and card/ability resolution.
-- [x] Docker image and single-task deployment documentation for ports 9933 and
-  8081.
+- [x] Docker image and single-task deployment documentation for ports 9933,
+  8081, and 8765.
 - [x] Runtime `gamedata` mount/ENV_VAR support so a fresh image can populate
   client-derived static tables without copying the original blob into the
   repository.
@@ -183,6 +242,6 @@ Frost Ring Arena implementation details are in
 The checked list describes the server's current tested surface, not a claim
 that the original C# client has been replaced line-for-line. The unchecked
 items are the main parity, coverage, and operational gaps. For a new card or
-effect, start with the client records under `Records/`, verify the extracted
+effect, start with the client records under `hex-private/Records/`, verify the extracted
 metadata in the static tables, add or correct the generic resolver, and then
 add a focused test before changing a card-name-specific rule.

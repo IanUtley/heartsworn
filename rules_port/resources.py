@@ -111,6 +111,46 @@ def _resource_ability_guids(db, session_id, card_uid):
     return decode(row[0]), decode(row[1])
 
 
+def card_template_threshold_flags(db, session_id, card_uid):
+    """Return threshold colors exposed by the card template's abilities.
+
+    This mirrors CardTemplate.GetThresholdsProvided: OR the colors from its
+    ThresholdModifier effects so a provided color is counted once.
+    """
+    from domain.enums import SHARD_TO_FLAG
+    from gamedata import DEFAULT_RECORD_STORE, ability_graph
+    from pvp_db import db_card_ability_state
+
+    state = db_card_ability_state(
+        session_id, int(card_uid), conn=db)
+    if not state:
+        return 0
+    try:
+        ability_guids = json.loads(state[1] or "[]")
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return 0
+
+    flags = 0
+    for ability_guid in ability_guids:
+        graph = ability_graph(DEFAULT_RECORD_STORE, str(ability_guid).lower())
+        if graph is None:
+            continue
+        for effect in graph.effects:
+            if effect.concrete_type != "CardModifierAbilityEffectTemplate":
+                continue
+            template = effect.template
+            modifier = (template.field("m_Modifier")
+                        if template is not None else None)
+            if modifier is None or not modifier.is_a("ThresholdModifier"):
+                continue
+            color_value = str(modifier.field("m_ThresholdColor", ""))
+            for color_name in color_value.split("|"):
+                color = SHARD_TO_FLAG.get(
+                    color_name.rsplit(".", 1)[-1].strip().lower(), 0)
+                flags |= int(color or 0)
+    return flags
+
+
 def resolve_granted_resource_abilities(game, session, db, handler, pl_t, ai_t,
                                        bstate, card_uid, owner_id, *,
                                        resolver=None):
@@ -386,6 +426,35 @@ def _owner_for_side(state, side):
     return 0
 
 
+def resource_charge_amount(db, ability_guids) -> int:
+    """Charge points a resource grants, from its authored chargepoints effects.
+
+    Each CardModifier effect whose property is ``chargepoints`` adds its resolved
+    amount (an input variable is already resolved in the authored parameters).
+    A resource with no such effect grants no charge, for example Shard of Fate.
+    """
+    from pvp_db import db_ability_effect_type_params
+    total = 0
+    for guid in ability_guids or ():
+        for effect_type, param in db_ability_effect_type_params(
+                str(guid).lower(), conn=db):
+            if effect_type != "CardModifierAbilityEffectTemplate":
+                continue
+            try:
+                modifier = json.loads(param or "{}")
+            except (TypeError, ValueError):
+                continue
+            if not isinstance(modifier, dict) or modifier.get("property") != "chargepoints":
+                continue
+            try:
+                amount = int(modifier.get("amount", 0) or 0)
+            except (TypeError, ValueError):
+                amount = 0
+            if amount > 0:
+                total += amount
+    return total
+
+
 def play_resource(state: MutableMapping, side: str, current_amount: int,
                   total_amount: int, *, threshold_color: int | None = None,
                   charge_amount: int = 1,
@@ -513,6 +582,38 @@ def pay_spell_points_for_player(state: MutableMapping, player_id,
                                "spellpoints")
 
 
+def record_start_turn_resource_gain(state: MutableMapping, bonus_key: str,
+                                    property_name: str, amount: int,
+                                    turn_number: int) -> None:
+    """Record a StartTurn resource gain as the Prep bonus it really is.
+
+    A current-resource gain is a bonus only beyond the total gained in the
+    same StartTurn: Prep refills current to total, so a current gain matched
+    by a total gain (Chained Goliath's [L1][R1]) is already granted.  Total
+    gains that arrive before their current gain are remembered per turn and
+    cancel it; stale markers from earlier turns are ignored.
+    """
+    marker_key = f"{bonus_key}_total_gain"
+    marker = state.get(marker_key)
+    pending = (int(marker.get("amount", 0) or 0)
+               if isinstance(marker, dict) and
+               int(marker.get("turn", -1) or -1) == int(turn_number) else 0)
+    bonus = int(state.get(bonus_key, 0) or 0)
+    if property_name == "currentresource":
+        offset = min(pending, amount)
+        if offset:
+            state[marker_key] = {"turn": int(turn_number),
+                                 "amount": pending - offset}
+        state[bonus_key] = bonus + amount - offset
+        return
+    offset = min(bonus, amount)
+    state[bonus_key] = bonus - offset
+    rest = amount - offset
+    if rest:
+        state[marker_key] = {"turn": int(turn_number),
+                             "amount": pending + rest}
+
+
 def begin_turn_resources_for_player(state: MutableMapping,
                                     player_id) -> ResourceChange:
     """Refill and reopen resource play for a raw tournament player ID."""
@@ -601,6 +702,9 @@ def project_resource_change(game, session, state: MutableMapping, player_uid,
         event_type = game_engine.PlayerResourceThresholdChangedSessionEventArgs
     else:
         raise ValueError(f"unsupported resource property: {property}")
+    if property == "chargepoints" and int(change.new_value) == int(change.old_value):
+        # C# Session.SetChampionChargePoints returns before it sends anything when the value does not change.
+        return change
     event = event_type()
     event.player_id = player_uid if change.side == "player" else ai_uid
     event.operation = 1 if amount >= 0 else 2

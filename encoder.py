@@ -7,6 +7,8 @@ import json
 import uuid
 from binascii import hexlify
 
+from domain.enums import EGemTypesNew
+
 
 _ZERO_GUID = "00000000-0000-0000-0000-000000000000"
 
@@ -147,13 +149,23 @@ def encode_player_state_coll(buf, sizes, find_type, player_states):
         sizes[eidx] = buf.tell() - f
 
 
-def encode_card_instance(buf, sizes, ft, guid, name, card_id, cost, atk, def_, idx):
-    """Encode one card_instance_bits inline. 6 fields."""
+# Client EGemTypesNew.Unknown (1 << 62) is the no-gem value; 0 is not a member.
+GEM_UNKNOWN = EGemTypesNew.Unknown
+
+
+def encode_card_instance(buf, sizes, ft, guid, name, card_id, cost, atk, def_, idx,
+                        is_extended=False):
+    """Encode one card_instance_bits inline. 8 DataMember fields.
+
+    CardStats is an empty Dictionary<ECardStatType,int>; SocketedGems is an
+    EGemTypesNew (ulong enum) set to Unknown, the client's no-gem value.
+    Field order follows the client class declaration.
+    """
     f = buf.tell(); sizes.append(0)
     sidx = len(sizes) - 1
     w = lambda s: buf.write(s.encode("utf-8"))
     sep = lambda: buf.write(b";")
-    w(str(idx)); sep(); w(str(sidx)); sep(); w(str(ft("Game.Shared.Domain.card_instance_bits"))); sep(); w("6"); sep()
+    w(str(idx)); sep(); w(str(sidx)); sep(); w(str(ft("Game.Shared.Domain.card_instance_bits"))); sep(); w("8"); sep()
 
     # Id
     f1 = buf.tell(); sizes.append(0)
@@ -170,6 +182,13 @@ def encode_card_instance(buf, sizes, ft, guid, name, card_id, cost, atk, def_, i
     sizes[gidx] = buf.tell() - gs
     sizes[tidx] = buf.tell() - f2
 
+    # CardStats: empty Dictionary<ECardStatType,int> (numProps=0, count=0)
+    f3 = buf.tell(); sizes.append(0)
+    w("CardStats"); sep(); w(str(len(sizes)-1)); sep()
+    w(str(ft("System.Collections.Generic.Dictionary`2#Game.Shared.Domain.ECardStatType!System.Int32")))
+    sep(); w("0"); sep(); w("0"); sep()
+    sizes[-1] = buf.tell() - f3
+
     # IsFoil
     f4 = buf.tell(); sizes.append(0)
     w("IsFoil"); sep(); w(str(len(sizes)-1)); sep(); w(str(ft("System.Boolean"))); sep(); w("0"); sep()
@@ -179,8 +198,19 @@ def encode_card_instance(buf, sizes, ft, guid, name, card_id, cost, atk, def_, i
     # IsExtended
     f5 = buf.tell(); sizes.append(0)
     w("IsExtended"); sep(); w(str(len(sizes)-1)); sep(); w(str(ft("System.Boolean"))); sep(); w("0"); sep()
-    w("0")
+    w("1" if is_extended else "0")
     sizes[-1] = buf.tell() - f5
+
+    # SocketedGems: EGemTypesNew enum (ulong) with one value__ child
+    f6 = buf.tell(); sizes.append(0)
+    w("SocketedGems"); sep(); w(str(len(sizes)-1)); sep()
+    w(str(ft("Game.Shared.Mechanics.EGemTypesNew"))); sep(); w("1"); sep()
+    f6v = buf.tell(); sizes.append(0)
+    w("value__"); sep(); w(str(len(sizes)-1)); sep()
+    w(str(ft("System.UInt64"))); sep(); w("0"); sep()
+    w(hexlify(struct.pack("<Q", GEM_UNKNOWN)).decode("ascii")); sep()
+    sizes[-1] = buf.tell() - f6v
+    sizes[-2] = buf.tell() - f6
 
     # IsNotTradeable
     f7 = buf.tell(); sizes.append(0)
@@ -199,7 +229,8 @@ def encode_card_instance(buf, sizes, ft, guid, name, card_id, cost, atk, def_, i
 
 
 def encode_deck_bits(buf, sizes, ft, did, dname, did_val, champ_did,
-                     card_guids, idx, pvp_champion_guid=None):
+                     card_guids, idx, pvp_champion_guid=None,
+                     equipment_slots=None):
     """Encode one deck_bits inline WITH element header (for use in cardlist/decklist)."""
     f = buf.tell(); sizes.append(0)
     sidx = len(sizes) - 1
@@ -207,13 +238,14 @@ def encode_deck_bits(buf, sizes, ft, did, dname, did_val, champ_did,
     sep = lambda: buf.write(b";")
     w(str(idx)); sep(); w(str(sidx)); sep(); w(str(ft("Game.Shared.Domain.deck_bits"))); sep(); w("25"); sep()
     encode_deck_bits_fields(buf, sizes, ft, did, dname, did_val, champ_did,
-                            card_guids, pvp_champion_guid)
+                            card_guids, pvp_champion_guid, equipment_slots)
     sizes[sidx] = buf.tell() - f
     return sidx
 
 
 def encode_deck_bits_fields(buf, sizes, ft, did, dname, did_val, champ_did,
-                            card_guids, pvp_champion_guid=None):
+                            card_guids, pvp_champion_guid=None,
+                            equipment_slots=None):
     """Encode the 25 deck_bits fields directly (no element wrapper)."""
     w = lambda s: buf.write(s.encode("utf-8"))
     sep = lambda: buf.write(b";")
@@ -249,9 +281,11 @@ def encode_deck_bits_fields(buf, sizes, ft, did, dname, did_val, champ_did,
     # 5-9. Talents 1-5
     for tn in ("talent_1","talent_2","talent_3","talent_4","talent_5"):
         wf_rid(tn, b"00000000-0000-0000-0000-000000000000")
-    # 10-15. Equipment 1-6
-    for en in ("equipment_1","equipment_2","equipment_3","equipment_4","equipment_5","equipment_6"):
-        wf_rid(en, b"00000000-0000-0000-0000-000000000000")
+    # 10-15. Equipment 1-6 (Head, Chest, Gloves, Feet, Weapon, Trinket)
+    slots = list(equipment_slots or [])
+    for n, en in enumerate(("equipment_1","equipment_2","equipment_3","equipment_4","equipment_5","equipment_6")):
+        wf_rid(en, (slots[n] if n < len(slots) and slots[n] else
+                    b"00000000-0000-0000-0000-000000000000"))
     # 16. CardsInDeck.  Tournament construction snapshots may provide a
     # fixed starting deck separately from the sideboard/pool.  Ordinary
     # callers still pass a flat GUID list and retain the empty default.
@@ -270,13 +304,15 @@ def encode_deck_bits_fields(buf, sizes, ft, did, dname, did_val, champ_did,
     for i, entry in enumerate(deck_cards):
         encode_card_instance(buf, sizes, ft, entry[0], entry[1],
                              int(entry[2]), int(entry[3]), int(entry[4]),
-                             int(entry[5]), i)
+                             int(entry[5]), i,
+                             bool(entry[6]) if len(entry) > 6 else False)
     sizes[-1] = buf.tell() - f_cd
     # 17. CardsInSideboard.  Tournament construction uses this list as the
     # player's limited pool.  Entries are optional six-tuples accepted by
     # encode_card_instance: (template_guid, name, instance_id, cost, atk,
-    # defense).  Ordinary profile deck encodings still pass GUID strings and
-    # therefore retain the historical empty sideboard.
+    # defense), with an optional seventh IsExtended flag. Ordinary profile
+    # deck encodings still pass GUID strings and retain the historical empty
+    # sideboard.
     f_cs = buf.tell(); sizes.append(0)
     w("CardsInSideboard"); sep(); w(str(len(sizes)-1)); sep()
     w(str(ft("System.Collections.Generic.List`1#Game.Shared.Domain.card_instance_bits"))); sep(); w("0"); sep()
@@ -287,7 +323,8 @@ def encode_deck_bits_fields(buf, sizes, ft, did, dname, did_val, champ_did,
     for i, entry in enumerate(pool):
         encode_card_instance(buf, sizes, ft, entry[0], entry[1],
                              int(entry[2]), int(entry[3]), int(entry[4]),
-                             int(entry[5]), i)
+                             int(entry[5]), i,
+                             bool(entry[6]) if len(entry) > 6 else False)
     sizes[-1] = buf.tell() - f_cs
     # 18. ActiveGems — Dictionary<ulong, EGemTypesNew> (empty)
     f_ag = buf.tell(); sizes.append(0)
@@ -428,7 +465,7 @@ def encode_champion_bits_minimal(buf, sizes, ft, cu64, cname, cid, lvl, xp, cc, 
 #  Core ObjFmt encoder
 # =============================================================================
 
-def encode_objfmt_response(type_names, fields):
+def encode_objfmt_response(type_names, fields, *, uppercase_hex=False):
     sizes = []
     buf = io.BytesIO()
 
@@ -438,6 +475,9 @@ def encode_objfmt_response(type_names, fields):
         buf.write(b";")
     def lf():
         buf.write(b"\n")
+    def encode_number_hex(value):
+        encoded = hexlify(value).decode("ascii")
+        return encoded.upper() if uppercase_hex else encoded
 
     def find_type(tname):
         if tname not in type_names:
@@ -567,19 +607,19 @@ def encode_objfmt_response(type_names, fields):
         sep()
 
         if tcode == "long":
-            w(hexlify(struct.pack("<q", val)).decode("ascii"))
+            w(encode_number_hex(struct.pack("<q", val)))
             sep()
         elif tcode == "ulong":
-            w(hexlify(struct.pack("<Q", val)).decode("ascii"))
+            w(encode_number_hex(struct.pack("<Q", val)))
             sep()
         elif tcode == "int":
-            w(hexlify(struct.pack("<i", val)).decode("ascii"))
+            w(encode_number_hex(struct.pack("<i", val)))
             sep()
         elif tcode == "uint":
-            w(hexlify(struct.pack("<I", val)).decode("ascii"))
+            w(encode_number_hex(struct.pack("<I", val)))
             sep()
         elif tcode == "byte":
-            w(hexlify(bytes([val])).decode("ascii"))
+            w(encode_number_hex(bytes([val])))
             sep()
         elif tcode == "bool":
             w('1' if val else '0')
@@ -606,7 +646,7 @@ def encode_objfmt_response(type_names, fields):
         elif tcode == "enum1":
             f_enum_start = buf.tell(); sizes.append(0)
             w("value__"); sep(); w(str(len(sizes)-1)); sep(); w(str(find_type("System.Int32"))); sep(); w("0"); sep()
-            w(hexlify(struct.pack("<i", evalue_int)).decode("ascii")); sep()
+            w(encode_number_hex(struct.pack("<i", evalue_int))); sep()
             sizes[-1] = buf.tell() - f_enum_start
         elif tcode == "coll":
             w(str(ecount))
@@ -617,13 +657,20 @@ def encode_objfmt_response(type_names, fields):
         elif tcode == "cardlist":
             w(str(ecount))
             sep()
-            for i, (guid, name, card_id, cost, atk, def_) in enumerate(card_data):
-                encode_card_instance(buf, sizes, find_type, guid, name, card_id, cost, atk, def_, i)
+            for i, card in enumerate(card_data):
+                guid, name, card_id, cost, atk, def_ = card[:6]
+                is_extended = bool(card[6]) if len(card) > 6 else False
+                encode_card_instance(buf, sizes, find_type, guid, name,
+                                     card_id, cost, atk, def_, i, is_extended)
         elif tcode == "decklist":
             w(str(ecount))
             sep()
-            for i, (did, dname, did_val, champ_did, cards_json, card_guids) in enumerate(deck_data):
-                encode_deck_bits(buf, sizes, find_type, did, dname, did_val, champ_did, card_guids, i)
+            for i, entry in enumerate(deck_data):
+                did, dname, did_val, champ_did, cards_json, card_guids = entry[:6]
+                equipment = entry[6] if len(entry) > 6 else None
+                encode_deck_bits(buf, sizes, find_type, did, dname, did_val,
+                                 champ_did, card_guids, i,
+                                 equipment_slots=equipment)
         elif tcode == "deckbits":
             did, dname, did_val, champ_did, card_guids = val[:5]
             pvp_champion_guid = val[5] if len(val) > 5 else None
@@ -644,7 +691,7 @@ def encode_objfmt_response(type_names, fields):
         elif tcode == "uid":
             f_uid_start = buf.tell(); sizes.append(0)
             w("m_UID64"); sep(); w(str(len(sizes)-1)); sep(); w(str(find_type("System.UInt64"))); sep(); w("0"); sep()
-            w(hexlify(struct.pack("<Q", uid_val)).decode("ascii")); sep()
+            w(encode_number_hex(struct.pack("<Q", uid_val))); sep()
             sizes[-1] = buf.tell() - f_uid_start
         elif tcode == "intlist":
             w(str(ecount))
@@ -653,7 +700,7 @@ def encode_objfmt_response(type_names, fields):
                 se = buf.tell(); sizes.append(0)
                 w(str(i)); sep(); w(str(len(sizes)-1)); sep()
                 w(str(find_type("System.Int32"))); sep(); w("0"); sep()
-                w(hexlify(struct.pack("<i", e)).decode("ascii")); sep()
+                w(encode_number_hex(struct.pack("<i", e))); sep()
                 sizes[-1] = buf.tell() - se
         elif tcode == "thresholdlist":
             w(str(len(threshold_data)))
@@ -807,7 +854,7 @@ def encode_objfmt_response(type_names, fields):
                 fe = buf.tell(); sizes.append(0)
                 w("m_UID64"); sep(); w(str(len(sizes)-1)); sep()
                 w(str(find_type("System.UInt64"))); sep(); w("0"); sep()
-                w(hexlify(struct.pack("<Q", e)).decode("ascii")); sep()
+                w(encode_number_hex(struct.pack("<Q", e))); sep()
                 sizes[-1] = buf.tell() - fe
                 sizes[-2] = buf.tell() - se
         elif tcode == "class":
@@ -1317,9 +1364,8 @@ def encode_sync_event(packet) -> bytes:  # packet: game_engine.NetworkPacketSess
     SessionSyncEventEventArgs:
       - RoutingPlayerId (UID)
       - SessionArgs (NetworkPacketSessionEventArgs)
-        - PlayerId (UID)
-        - EventIds (List`1#System.Int32)
-        - EventData (List`1#System.Byte[])
+        - PlayerId (UID), EventIds (List`1#System.Int32), EventData (List`1#System.Byte[])
+        - inherited SessionEventArgs fields Class (int), SessionId (UID)
     """
     sizes = []
     buf = io.BytesIO()
@@ -1330,10 +1376,6 @@ def encode_sync_event(packet) -> bytes:  # packet: game_engine.NetworkPacketSess
         "Game.Shared.Network.GameSession.SessionSyncEventEventArgs",
         "Game.Shared.UID", "System.UInt64",
         "Game.Shared.NetworkPacketSessionEventArgs",
-        "System.Int32",
-        "System.Collections.Generic.List`1#System.Int32",
-        "System.Collections.Generic.List`1#System.Byte[]",
-        "System.Byte[]",
     ]
     def ft(tn):
         if tn not in type_names:
@@ -1350,21 +1392,36 @@ def encode_sync_event(packet) -> bytes:  # packet: game_engine.NetworkPacketSess
     w("RoutingPlayerId"); sep(); w(str(len(sizes)-1)); sep(); w(str(ft("Game.Shared.UID"))); sep(); w("1"); sep()
     f1a = buf.tell(); sizes.append(0)
     w("m_UID64"); sep(); w(str(len(sizes)-1)); sep(); w(str(ft("System.UInt64"))); sep(); w("0"); sep()
-    w(hexlify(struct.pack("<Q", packet.player_id.to_uint64())).decode("ascii")); sep()
+    w(hexlify(struct.pack("<Q", packet.player_id.to_uint64())).decode("ascii").upper()); sep()
     sizes[-1] = buf.tell() - f1a
     sizes[-2] = buf.tell() - f1
 
-    # SessionArgs (NetworkPacketSessionEventArgs) — 5 fields alphabetically
+    # ObjFmt follows NetworkPacketSessionEventArgs' declared members, then its
+    # SessionEventArgs base members. This ordering is significant to the C# reader.
     f2 = buf.tell(); f2_sz_idx = len(sizes); sizes.append(0)
     w("SessionArgs"); sep(); w(str(f2_sz_idx)); sep(); w(str(ft("Game.Shared.NetworkPacketSessionEventArgs"))); sep(); w("5"); sep()
 
-    # -- Class (int)
-    f2c = buf.tell(); sizes.append(0)
-    w("Class"); sep(); w(str(len(sizes)-1)); sep(); w(str(ft("System.Int32"))); sep(); w("0"); sep()
-    w(hexlify(struct.pack("<i", 255)).decode("ascii")); sep()
-    sizes[-1] = buf.tell() - f2c
+    # -- PlayerId (UID), a direct NetworkPacketSessionEventArgs member
+    f2p = buf.tell(); sizes.append(0)
+    w("PlayerId"); sep(); w(str(len(sizes)-1)); sep(); w(str(ft("Game.Shared.UID"))); sep(); w("1"); sep()
+    f2p1 = buf.tell(); sizes.append(0)
+    w("m_UID64"); sep(); w(str(len(sizes)-1)); sep(); w(str(ft("System.UInt64"))); sep(); w("0"); sep()
+    w(hexlify(struct.pack("<Q", packet.player_id.to_uint64())).decode("ascii").upper()); sep()
+    sizes[-1] = buf.tell() - f2p1
+    sizes[-2] = buf.tell() - f2p
 
-    # -- EventData (List<byte[]>)
+    # -- EventIds (List<int>), a direct member
+    f2e = buf.tell(); f2e_sz_idx = len(sizes); sizes.append(0)
+    w("EventIds"); sep(); w(str(f2e_sz_idx)); sep(); w(str(ft("System.Collections.Generic.List`1#System.Int32"))); sep(); w("0"); sep()
+    w(str(len(packet.event_ids))); sep()
+    for idx, eid in enumerate(packet.event_ids):
+        se = buf.tell(); sizes.append(0)
+        w(str(idx)); sep(); w(str(len(sizes)-1)); sep(); w(str(ft("System.Int32"))); sep(); w("0"); sep()
+        w(hexlify(struct.pack("<i", eid)).decode("ascii").upper()); sep()
+        sizes[-1] = buf.tell() - se
+    sizes[f2e_sz_idx] = buf.tell() - f2e
+
+    # -- EventData (List<byte[]>), a direct member
     f2d = buf.tell(); f2d_sz_idx = len(sizes); sizes.append(0)
     w("EventData"); sep(); w(str(f2d_sz_idx)); sep(); w(str(ft("System.Collections.Generic.List`1#System.Byte[]"))); sep(); w("0"); sep()
     w(str(len(packet.event_data))); sep()
@@ -1376,32 +1433,18 @@ def encode_sync_event(packet) -> bytes:  # packet: game_engine.NetworkPacketSess
         sizes[-1] = buf.tell() - se
     sizes[f2d_sz_idx] = buf.tell() - f2d
 
-    # -- EventIds (List<int>)
-    f2e = buf.tell(); f2e_sz_idx = len(sizes); sizes.append(0)
-    w("EventIds"); sep(); w(str(f2e_sz_idx)); sep(); w(str(ft("System.Collections.Generic.List`1#System.Int32"))); sep(); w("0"); sep()
-    w(str(len(packet.event_ids))); sep()
-    for idx, eid in enumerate(packet.event_ids):
-        se = buf.tell(); sizes.append(0)
-        w(str(idx)); sep(); w(str(len(sizes)-1)); sep(); w(str(ft("System.Int32"))); sep(); w("0"); sep()
-        w(hexlify(struct.pack("<i", eid)).decode("ascii")); sep()
-        sizes[-1] = buf.tell() - se
-    sizes[f2e_sz_idx] = buf.tell() - f2e
+    # -- Class (int), inherited from SessionEventArgs
+    f2c = buf.tell(); sizes.append(0)
+    w("Class"); sep(); w(str(len(sizes)-1)); sep(); w(str(ft("System.Int32"))); sep(); w("0"); sep()
+    w(hexlify(struct.pack("<i", 255)).decode("ascii").upper()); sep()
+    sizes[-1] = buf.tell() - f2c
 
-    # -- PlayerId (UID)
-    f2p = buf.tell(); sizes.append(0)
-    w("PlayerId"); sep(); w(str(len(sizes)-1)); sep(); w(str(ft("Game.Shared.UID"))); sep(); w("1"); sep()
-    f2p1 = buf.tell(); sizes.append(0)
-    w("m_UID64"); sep(); w(str(len(sizes)-1)); sep(); w(str(ft("System.UInt64"))); sep(); w("0"); sep()
-    w(hexlify(struct.pack("<Q", packet.player_id.to_uint64())).decode("ascii")); sep()
-    sizes[-1] = buf.tell() - f2p1
-    sizes[-2] = buf.tell() - f2p
-
-    # -- SessionId (UID)
+    # -- SessionId (UID), inherited from SessionEventArgs
     f2s = buf.tell(); sizes.append(0)
     w("SessionId"); sep(); w(str(len(sizes)-1)); sep(); w(str(ft("Game.Shared.UID"))); sep(); w("1"); sep()
     f2s1 = buf.tell(); sizes.append(0)
     w("m_UID64"); sep(); w(str(len(sizes)-1)); sep(); w(str(ft("System.UInt64"))); sep(); w("0"); sep()
-    w(hexlify(struct.pack("<Q", packet.session_id.to_uint64())).decode("ascii")); sep()
+    w(hexlify(struct.pack("<Q", packet.session_id.to_uint64())).decode("ascii").upper()); sep()
     sizes[-1] = buf.tell() - f2s1
     sizes[-2] = buf.tell() - f2s
 
@@ -1658,6 +1701,28 @@ def encode_datawrapper(request_id, data_type, body_bytes, comp,
          "System.Guid", "System.Byte"],
         fields
     )
+
+
+def encode_game_started_response(routing_player_id, turn_order_player_ids,
+                                 seed_w, seed_z, success=True):
+    """Encode the service-level 3053 ``GameStartedEventArgs`` body.
+
+    This is separate from the nested class-1 ``GameStartedSessionEventArgs``
+    carried by 3055. Keep the DataContract members aligned with the C# type.
+    UID values are the uint64 representations used by ``encode_objfmt_response``.
+    """
+    return encode_objfmt_response(
+        ["Game.Shared.Network.GameSession.GameStartedEventArgs",
+         "Game.Shared.UID", "System.UInt64", "System.Boolean",
+         "System.Collections.Generic.List`1#Game.Shared.UID"],
+        [("RoutingPlayerId", "uid", routing_player_id),
+         ("Success", "bool", success),
+         ("TurnOrderPlayerIds", "uidlist",
+          ("System.Collections.Generic.List`1#Game.Shared.UID",
+           len(turn_order_player_ids), list(turn_order_player_ids))),
+         ("SeedW", "ulong", seed_w),
+         ("SeedZ", "ulong", seed_z)],
+        uppercase_hex=True)
 
 
 def encode_get_unread_mail_count_response(unread_count=0):

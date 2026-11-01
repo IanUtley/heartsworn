@@ -9,7 +9,7 @@ combat).
 
 Run the original Set 1 smoke runner with ``python3 pvp_autoplay.py [games]``.
 Run a selectable FRA duel with ``python3 pvp_autoplay.py --fra
---turn-limit 30 --profile``. To run unattended, pass two deck GUIDs after
+--turn-limit 20 --profile``. To run unattended, pass two deck GUIDs after
 ``--fra``. Without GUIDs, non-interactive runs use the first two authored
 encounters with complete decks; in a terminal, the runner lists those decks
 and prompts for both seats. Pass ``--choose-decks`` to request that menu
@@ -40,7 +40,8 @@ from itertools import combinations
 _SIMULATION_DB_TEMP = None
 _SIMULATION_DB_COPY = None
 if (__name__ == "__main__" and
-        ("--fra" in sys.argv or "--round-robin" in sys.argv)):
+        ("--fra" in sys.argv or "--round-robin" in sys.argv or
+         "--client-ai-mirrors" in sys.argv)):
     _source_db = os.environ.get(
         "HEX_DB_PATH", os.path.join(os.path.dirname(__file__), "hconnect.db"))
     if _source_db != ":memory:" and os.path.isfile(_source_db):
@@ -64,6 +65,7 @@ import game_session as gs
 import hconnect_server as hcs
 import encoder
 from db import _db, log_req, set_log_level
+from replay_db import SIMULATOR_SESSION_SUFFIX
 from pvp_db import (
     db_ai_hand_playables, db_clear_session_cards,
     db_copy_template_payload, db_delete_game_session,
@@ -82,6 +84,20 @@ from services.tournament_game import (
     handle_ready_for_game_setup, handle_ready_for_game_events,
     player_handlers, player_handler_lock, _pvp_fra_view, pvp_shared_port,
 )
+
+# Optional HexAI instrumentation/agent.  Import failures must never break the
+# simulation: capture is opt-in via HEXAI_CAPTURE_DIR and the agent via
+# HEXAI_MODEL, so an untouched game behaves exactly as before.
+try:
+    from hexai import capture as _hexai_capture
+    from hexai import candidates as _hexai_candidates
+    from hexai import features as _hexai_features
+    from hexai.agent import get_agent as _hexai_get_agent
+except Exception:  # pragma: no cover - defensive for stripped deployments
+    _hexai_capture = None
+    _hexai_candidates = None
+    _hexai_features = None
+    _hexai_get_agent = None
 
 SET1 = "0382f729-7710-432b-b761-13677982dcd2"
 SCRATCH_SESSION_BASE = 987700
@@ -429,6 +445,12 @@ def _transaction(handler, session, inner_bytes, typed_payload=None,
             _record_profile_timing(
                 profiler, "rules_transaction_by_kind", transaction_name,
                 elapsed)
+    # Deliver event packets emitted by this RulesPort transaction to the
+    # Unity-hosted C# client AI. Its captured Transaction bytes re-enter this
+    # same production handler path; the bridge suppresses recursive draining.
+    client_ai_bridge = getattr(session, "_headless_client_ai_bridge", None)
+    if client_ai_bridge is not None:
+        client_ai_bridge.drain()
     cur = gs.find_session_by_player(
         _ge.UID.make(PLAYER_UID_TYPE, int(handler.client_reck_id)).to_uint64()) or session
     if report is not None:
@@ -512,12 +534,36 @@ def _pass_native_priority_window(session, pids, handlers, *, phase=None,
         state = pvp_load_state(current)
         if not isinstance(state, dict):
             return
+        # A card play can open a persisted target/choice prompt before the
+        # priority window is ready for another pass. Return to the outer
+        # runner so it can resolve that prompt first; polling either AI here
+        # would submit a pass that the server must reject.
+        if any(state.get(key) for key in (
+                "pending_trigger", "pending_choice", "pending_deck_search",
+                "pending_discard_ability", "pending_conversation")):
+            return
         current_phase = state.get("phase")
         if expected_phase is None:
             expected_phase = current_phase
         if current_phase != expected_phase:
             return
         priority_pid = state.get("priority_pid")
+        native_port = (pvp_shared_port(current) or
+                       getattr(current, "_rules_port_session", None))
+        native_action = (native_port.action_stack.peek()
+                         if native_port is not None else None)
+        native_priority = (getattr(native_port.action_stack,
+                                   "priority_player_id", None)
+                           if native_port is not None else None)
+        if native_priority is not None:
+            try:
+                native_value = int(getattr(native_priority, "uid64",
+                                           native_priority))
+                priority_pid = (native_value >> 8
+                                if (native_value & 0xFF) == 244
+                                else native_value)
+            except (TypeError, ValueError):
+                pass
         if priority_pid is None:
             return
         try:
@@ -527,6 +573,52 @@ def _pass_native_priority_window(session, pids, handlers, *, phase=None,
         handler = handlers.get(priority_pid)
         if handler is None:
             return
+
+        if getattr(handler, "_headless_client_ai", False):
+            bridge = getattr(handler, "_headless_client_ai_bridge", None)
+            if bridge is None:
+                raise RuntimeError("C# client AI has no headless adapter")
+            before = (current_phase, state.get("turn_number"),
+                      state.get("priority_pid"), state.get("passes"),
+                      state.get("stack"))
+            bridge.drain()
+            latest = gs.find_session_by_player(
+                game_engine.UID.make(
+                    PLAYER_UID_TYPE, int(pids[0])).to_uint64()) or current
+            after_state = pvp_load_state(latest)
+            if not isinstance(after_state, dict):
+                return
+            after = (after_state.get("phase"),
+                     after_state.get("turn_number"),
+                     after_state.get("priority_pid"),
+                     after_state.get("passes"), after_state.get("stack"))
+            if before == after:
+                # AITactical can be silent when it has no legal combat
+                # response (and can repeat an already-accepted action after a
+                # stale GreenLight). Resolve that no-op as an explicit pass.
+                _transaction(handler, current,
+                             b"PassPriorityTransaction;",
+                             profiler=profiler)
+                latest = gs.find_session_by_player(
+                    game_engine.UID.make(
+                        PLAYER_UID_TYPE, int(pids[0])).to_uint64()
+                ) or current
+                after_state = pvp_load_state(latest)
+                if not isinstance(after_state, dict):
+                    return
+                if after_state.get("phase") != expected_phase:
+                    return
+                after_priority = after_state.get("priority_pid")
+                if (after_priority is None or
+                        int(after_priority) == priority_pid):
+                    raise RuntimeError(
+                        "C# client AI and native pass made no progress "
+                        f"(phase={current_phase}, player={priority_pid}, "
+                        f"native_action={type(native_action).__name__ if native_action else None})")
+                continue
+            if after_state.get("phase") != expected_phase:
+                return
+            continue
 
         opponent_pid = next(
             (int(pid) for pid in pids if int(pid) != priority_pid), None)
@@ -782,6 +874,95 @@ def _ai_evaluator_for_seat(handler, session, state, owner_id, opponent_id,
     return evaluator
 
 
+def _hexai_capture_decision(evaluator, session, state, seat_pid, opponent_pid,
+                            *, kind, candidates, chosen, meta=None):
+    """Write one decision sample when capture is enabled."""
+    if _hexai_capture is None or not _hexai_capture.enabled():
+        return
+    try:
+        feature_ids = _hexai_features.encode_state(
+            evaluator, state, seat_pid, opponent_pid, session=session)
+        _hexai_capture.record_decision(
+            seat_pid=seat_pid, opponent_pid=opponent_pid,
+            turn=int(state.get("turn_number", 0) or 0),
+            kind=kind, feature_ids=feature_ids,
+            candidates=[_hexai_candidates.candidate_record(c)
+                        for c in candidates],
+            chosen=chosen, meta=meta)
+    except Exception as exc:  # capture must never stop a game
+        log_req(f"    [hexai] capture skipped: {exc!r}")
+
+
+def _hexai_main_decision(evaluator, session, state, seat_pid, opponent_pid,
+                         decision, *, pre_combat):
+    """Capture the main-phase decision and optionally rerank with a model."""
+    if _hexai_capture is None:
+        return decision
+    debug = os.environ.get("HEXAI_DEBUG") == "1"
+    agent = None
+    if _hexai_get_agent is not None:
+        try:
+            agent = _hexai_get_agent()
+        except Exception:
+            agent = None
+    if agent is None and not _hexai_capture.enabled():
+        return decision
+    candidates = _hexai_candidates.main_phase_candidates(
+        evaluator, pre_combat=pre_combat, greedy_decision=decision)
+    if debug:
+        keys = ([c["key"] for c in candidates]
+                if len(candidates) > 1 else [])
+        log_req(f"    [hexai] main candidates={len(candidates)} "
+                f"greedy={_hexai_candidates.greedy_key(decision)} "
+                f"agent={'on' if agent is not None else 'off'} keys={keys}")
+    if agent is not None:
+        try:
+            replacement = agent.choose_main(
+                evaluator, state, seat_pid, opponent_pid, decision,
+                pre_combat=pre_combat, session=session,
+                candidates=candidates)
+        except Exception as exc:
+            log_req(f"    [hexai] agent skipped: {exc!r}")
+            replacement = None
+        if replacement and replacement.get("kind") != "keep":
+            if debug:
+                log_req(
+                    f"    [hexai] override {decision.get('kind')} -> "
+                    f"{replacement.get('kind')} "
+                    f"({replacement.get('reason')})")
+            decision = replacement
+    if not _hexai_capture.enabled():
+        return decision
+    chosen_key = _hexai_candidates.greedy_key(decision)
+    if chosen_key not in {candidate["key"] for candidate in candidates}:
+        if decision.get("kind") not in (None, "pass", "card"):
+            chosen_key = f"keep:{decision['kind']}"
+    _hexai_capture_decision(
+        evaluator, session, state, seat_pid, opponent_pid,
+        kind="main", candidates=candidates, chosen=chosen_key,
+        meta={"reason": decision.get("reason")})
+    return decision
+
+
+def _hexai_combat_decision(evaluator, session, state, seat_pid, opponent_pid,
+                           *, kind, chosen_key, alternates=(), meta=None):
+    """Capture an attack/block/resource/choice decision (value sample)."""
+    if _hexai_capture is None or not _hexai_capture.enabled():
+        return
+    keys = [chosen_key] + [key for key in alternates
+                            if key and key != chosen_key]
+    candidates = [{
+        "key": key,
+        "kind": kind,
+        "score": 1.0 if index == 0 else 0.0,
+        "action_ids": _hexai_features.encode_action(
+            kind, extra_keys=(key,)),
+    } for index, key in enumerate(keys)]
+    _hexai_capture_decision(
+        evaluator, session, state, seat_pid, opponent_pid, kind=kind,
+        candidates=candidates, chosen=chosen_key, meta=meta)
+
+
 def _record_card_decision(report, evaluator, chosen, choice_reason,
                           only_quick_actions=False):
     if report is None:
@@ -943,6 +1124,13 @@ def _ai_attack_decision(handler, session, state, owner_id, opponent_id,
             "eligible": [int(card.card_uid) for card in eligible],
             "blockers": [int(card.card_uid) for card in blockers],
         })
+    attack_key = ("attack:" + "+".join(sorted(
+        str(getattr(card, "template_guid", "") or "").lower()
+        for card in chosen))) if chosen else "attack:none"
+    _hexai_combat_decision(
+        evaluator, session, state, owner_id, opponent_id, kind="attack",
+        chosen_key=attack_key, alternates=("attack:none", "attack:all"),
+        meta={"reason": reason})
     return [int(card.card_uid) for card in chosen], reason
 
 
@@ -1010,6 +1198,23 @@ def _ai_block_decision(handler, session, state, owner_id, opponent_id,
             "attackers": [int(uid) for uid in attacker_uids],
             "blocks": details,
         })
+    if blocker_map:
+        templates = {}
+        for collection in (own_cards, opposing_cards):
+            for uid, card in collection.items():
+                templates[int(uid)] = str(
+                    getattr(card, "template_guid", "") or "").lower()
+        pairs = []
+        for attacker, blockers in sorted(blocker_map.items()):
+            for blocker in blockers:
+                pairs.append(f"{templates.get(int(attacker), '?')}>"
+                             f"{templates.get(int(blocker), '?')}")
+        block_key = "block:" + "+".join(sorted(pairs))
+    else:
+        block_key = "block:none"
+    _hexai_combat_decision(
+        evaluator, session, state, owner_id, opponent_id, kind="block",
+        chosen_key=block_key, alternates=("block:none",))
     return blocker_map
 
 
@@ -1438,15 +1643,19 @@ def _ai_main_decision(handler, session, state, owner_id, opponent_id,
         return {"kind": "resource_sink", "ability": resource_sink_decision,
                 "reason": "resource_sink"}
     if chosen is not None:
-        return {"kind": "card", "card": chosen,
-                "target_uid": card_decision.get("target_uid"),
-                "target_uids": list(card_decision.get("target_uids") or (
-                    [card_decision["target_uid"]]
-                    if card_decision.get("target_uid") is not None else [])),
-                "target_map": card_decision.get("target_map"),
-                "x_cost": int(card_decision.get("x_cost", 0) or 0),
-                "reason": reason}
-    return {"kind": "pass", "reason": "pass_no_play"}
+        decision = {"kind": "card", "card": chosen,
+                    "target_uid": card_decision.get("target_uid"),
+                    "target_uids": list(card_decision.get("target_uids") or (
+                        [card_decision["target_uid"]]
+                        if card_decision.get("target_uid") is not None else [])),
+                    "target_map": card_decision.get("target_map"),
+                    "x_cost": int(card_decision.get("x_cost", 0) or 0),
+                    "reason": reason}
+    else:
+        decision = {"kind": "pass", "reason": "pass_no_play"}
+    return _hexai_main_decision(
+        evaluator, session, state, owner_id, opponent_id, decision,
+        pre_combat=pre_combat)
 
 
 def _ai_quick_decision(handler, session, state, owner_id, opponent_id,
@@ -1607,14 +1816,33 @@ def _play_quick_response(handler, session, session_id, state,
 
 
 def _play_one_game(seed, turns_cap=AUTOPLAY_TURN_CAP, deck_specs=None,
-                   profiler=None, report=None, run_slot=None, outcome=None):
+                   profiler=None, report=None, run_slot=None, outcome=None,
+                   client_ai_pid=None, client_ai_timeout=90.0,
+                   unity_data_path=None):
     rnd = random.Random(seed)
+    # Engine rules (opening-hand shuffle, random discard, random picks) draw
+    # from the module-level RNG; seed it too so a serial run is reproducible.
+    random.seed(seed)
     session_id, pids = _autoplay_identity(seed, run_slot)
     _cleanup(session_id, pids)
+    hexai_game_id = f"{seed}-{int(run_slot or 0)}"
+    if _hexai_capture is not None:
+        decks = {}
+        for index, pid in enumerate(pids):
+            spec = deck_specs[index] if deck_specs and index < len(
+                deck_specs) else {}
+            decks[str(pid)] = {
+                "name": spec.get("name"),
+                "deck_guid": spec.get("deck_guid"),
+                "champion_guid": spec.get("champion_guid"),
+                "personality": spec.get("ai_deck_personality"),
+            }
+        _hexai_capture.begin_game(hexai_game_id, seed, pids, decks)
     row_id_run_base = (int(run_slot or 0) * AUTOPLAY_ROW_ID_RUN_STRIDE)
 
     session = gs.GameSession(session_id, session_id * AUTOPLAY_SERVER_ID_MULTIPLIER,
-                             f"tourney-{session_id}", pids[0])
+                             f"tourney-{session_id}{SIMULATOR_SESSION_SUFFIX}",
+                             pids[0])
     for pid in pids:
         session.add_player(encoder.make_uid(PLAYER_UID_TYPE, pid), 0)
 
@@ -1672,6 +1900,22 @@ def _play_one_game(seed, turns_cap=AUTOPLAY_TURN_CAP, deck_specs=None,
     with player_handler_lock:
         player_handlers[pids[0]] = h1
         player_handlers[pids[1]] = h2
+    client_ai_bridge = None
+    if client_ai_pid is not None:
+        client_ai_pid = int(client_ai_pid)
+        if client_ai_pid not in pids:
+            raise ValueError("client_ai_pid must be one of the game seats")
+        from experimental.headless_client_ai_bridge import (
+            HeadlessClientAiBridge)
+        client_ai_handler = player_handlers[client_ai_pid]
+        opponent_pid = next(pid for pid in pids if pid != client_ai_pid)
+        client_ai_bridge = HeadlessClientAiBridge(
+            client_ai_pid, opponent_pid, client_ai_handler, session,
+            timeout_seconds=client_ai_timeout, data_path=unity_data_path)
+        client_ai_handler._headless_client_ai = True
+        client_ai_handler._headless_client_ai_bridge = client_ai_bridge
+        client_ai_handler.send = client_ai_bridge.send
+        session._headless_client_ai_bridge = client_ai_bridge
     if report is not None:
         report["decks"] = {
             str(pid): {
@@ -1692,7 +1936,9 @@ def _play_one_game(seed, turns_cap=AUTOPLAY_TURN_CAP, deck_specs=None,
     ready_state = {}
     handle_ready_for_game_setup(h1, session, ready_state, player_handlers)
     handle_ready_for_game_setup(h2, session, ready_state, player_handlers)
-    state = pvp_load_state(session) or {}
+    state_session = gs.find_session_by_player(
+        game_engine.UID.make(PLAYER_UID_TYPE, pids[0]).to_uint64()) or session
+    state = pvp_load_state(state_session) or {}
     if not state:
         state = pvp_default_state(pids[0], pids[0])
         state["goes_first_pid"] = pids[0]
@@ -1700,21 +1946,40 @@ def _play_one_game(seed, turns_cap=AUTOPLAY_TURN_CAP, deck_specs=None,
     events_ready = {}
     handle_ready_for_game_events(h1, session, events_ready, log_req)
     handle_ready_for_game_events(h2, session, events_ready, log_req)
+    if client_ai_bridge is not None:
+        client_ai_bridge.drain()
     if report is not None:
         _autoplay_update_hand_tracker(
             hand_tracker, session_id, pids, pvp_load_state(session))
 
-    # Play/Draw pick: winner chooses to play.
-    _transaction(h1, session, b"ChoosePlayTransaction;")
-    # The user's theory: the OTHER player must also send their pick for the
-    # client to leave PickGoesFirst.  Test by having the loser send the
-    # complementary pick (Draw) too.
-    _transaction(h2, session, b"ChooseDrawTransaction;")
+    # The coin-flip winner alone receives the PickGoesFirst GreenLight.
+    # Native C# AITactical handles that prompt itself; the Python seat uses its
+    # existing play-first policy.
+    state_session = gs.find_session_by_player(
+        game_engine.UID.make(PLAYER_UID_TYPE, pids[0]).to_uint64()) or session
+    state = pvp_load_state(state_session) or {}
+    goes_first_pid = int(state.get("goes_first_pid", pids[0]))
+    if outcome is not None:
+        outcome["coin_flip_winner_pid"] = goes_first_pid
+    if report is not None:
+        report["coin_flip_winner_pid"] = goes_first_pid
+    if client_ai_bridge is None or goes_first_pid != client_ai_pid:
+        _transaction(player_handlers[goes_first_pid], session,
+                     b"ChoosePlayTransaction;")
+    else:
+        client_ai_bridge.drain()
+        state_session = gs.find_session_by_player(
+            game_engine.UID.make(PLAYER_UID_TYPE, pids[0]).to_uint64()) or session
+        state = pvp_load_state(state_session) or {}
+        if state.get("phase") == game_engine.ETurnPhases.PickGoesFirst:
+            raise RuntimeError(
+                "C# client AI did not choose play or draw after its "
+                "PickGoesFirst GreenLight")
 
     # Sequential mulligan: ask 1 redraws (player A), ask 2 redraws (player B),
     # ask 3 keeps, ask 4 keeps — exercises the alternating redraw path the
     # real client uses.
-    for round_i in range(AUTOPLAY_MULLIGAN_ROUNDS):
+    for round_i in range(max(AUTOPLAY_MULLIGAN_ROUNDS, 12)):
         cur = gs.find_session_by_player(
             game_engine.UID.make(PLAYER_UID_TYPE, pids[0]).to_uint64()) or session
         st = pvp_load_state(cur)
@@ -1723,19 +1988,38 @@ def _play_one_game(seed, turns_cap=AUTOPLAY_TURN_CAP, deck_specs=None,
             break
         ask = st.get("mulligan_pid")
         if ask in pids:
+            if client_ai_bridge is not None and int(ask) == client_ai_pid:
+                client_ai_bridge.drain()
+                latest = gs.find_session_by_player(
+                    game_engine.UID.make(
+                        PLAYER_UID_TYPE, pids[0]).to_uint64()) or session
+                after = pvp_load_state(latest) or {}
+                if (after.get("phase") == game_engine.ETurnPhases.Mulligan
+                        and after.get("mulligan_pid") == ask):
+                    raise RuntimeError(
+                        "C# client AI received its mulligan prompt but "
+                        "did not submit a decision")
+                continue
             if round_i in AUTOPLAY_REDRAW_ROUNDS:
                 # Ask 1 (A) redraws, ask 2 (B) redraws — alternating redraw.
-                _transaction(player_handlers[ask], session,
+                _transaction(player_handlers[int(ask)], session,
                              b"MulliganTransaction;")
             else:
-                _transaction(player_handlers[ask], session,
+                _transaction(player_handlers[int(ask)], session,
                              b"AcceptStartingHand;")
         else:
             break
 
-    state = pvp_load_state(session)
+    state_session = gs.find_session_by_player(
+        game_engine.UID.make(PLAYER_UID_TYPE, pids[0]).to_uint64()) or session
+    state = pvp_load_state(state_session)
     if state is None:
         state = {}
+    first_player_pid = state.get("turn_pid")
+    if outcome is not None:
+        outcome["first_player_pid"] = first_player_pid
+    if report is not None:
+        report["first_player_pid"] = first_player_pid
     log_req(f"    PvP game {seed}: phase={state.get('phase')} "
             f"turn={state.get('turn_pid')}")
     if report is not None:
@@ -1793,11 +2077,24 @@ def _play_one_game(seed, turns_cap=AUTOPLAY_TURN_CAP, deck_specs=None,
                 if state.get(key)), None)
             if pend_key is not None:
                 pend = state[pend_key]
+                chooser_pid = int(pend.get("owner_id", turn_pid) or turn_pid)
+                if (client_ai_bridge is not None and
+                        chooser_pid == client_ai_pid):
+                    before = repr(state)
+                    client_ai_bridge.drain()
+                    latest = gs.find_session_by_player(
+                        game_engine.UID.make(
+                            PLAYER_UID_TYPE, pids[0]).to_uint64()) or session
+                    after = pvp_load_state(latest) or {}
+                    if (pend_key in after and after.get(pend_key) and
+                            repr(after) == before):
+                        raise RuntimeError(
+                            f"C# client AI did not resolve {pend_key}")
+                    continue
                 if pend_key in ("pending_discard_ability",
                                 "pending_conversation"):
                     raise RuntimeError(
                         f"autoplay cannot resolve {pend_key} yet")
-                chooser_pid = int(pend.get("owner_id", turn_pid) or turn_pid)
                 if pend_key == "pending_trigger":
                     candidates = []
                     if pend.get("source_uid"):
@@ -1865,9 +2162,54 @@ def _play_one_game(seed, turns_cap=AUTOPLAY_TURN_CAP, deck_specs=None,
             # phase, pass that live window instead of repeatedly resolving the
             # automatic damage order.
             if phase in damage_phases:
+                if (client_ai_bridge is not None and
+                        int(turn_pid) == client_ai_pid):
+                    priority_pid = state.get("priority_pid")
+                    if (priority_pid is not None and
+                            int(priority_pid) != client_ai_pid):
+                        # AssignDamageOrder has already handed priority to the
+                        # Python seat. Let that seat pass before polling the C#
+                        # adapter again; AITactical submits nothing while it
+                        # does not own priority.
+                        before = repr(state)
+                        _pass_native_priority_window(
+                            session, pids, player_handlers, phase=phase,
+                            profiler=profiler)
+                        latest = gs.find_session_by_player(
+                            game_engine.UID.make(
+                                PLAYER_UID_TYPE, pids[0]).to_uint64()) or session
+                        after = pvp_load_state(latest) or {}
+                        if repr(after) == before:
+                            raise RuntimeError(
+                                "Python AI did not pass damage priority "
+                                f"(phase={phase}, turn={current_turn_number}, "
+                                f"priority={priority_pid})")
+                        continue
+                    before = repr(state)
+                    client_ai_bridge.drain()
+                    latest = gs.find_session_by_player(
+                        game_engine.UID.make(
+                            PLAYER_UID_TYPE, pids[0]).to_uint64()) or session
+                    after = pvp_load_state(latest) or {}
+                    if repr(after) == before:
+                        native_port = getattr(
+                            latest, "_rules_port_session", None)
+                        native_action = (native_port.action_stack.peek()
+                                         if native_port is not None else None)
+                        raise RuntimeError(
+                            "C# client AI did not assign damage or pass "
+                            f"phase {phase} (state_phase="
+                            f"{after.get('phase')}, turn="
+                            f"{after.get('turn_number')}, priority="
+                            f"{after.get('priority_pid')}, attackers="
+                            f"{after.get('attackers')}, native_phase="
+                            f"{getattr(native_port, 'current_turn_phase', None)}, "
+                            f"native_action={type(native_action).__name__ if native_action else None}, "
+                            f"native_priority="
+                            f"{getattr(native_port.action_stack, 'priority_player_id', None) if native_port is not None else None})")
+                    continue
                 damage_phase_key = (current_turn_number, int(phase))
                 if damage_order_phase_key != damage_phase_key:
-                    before_priority = state.get("priority_pid")
                     _transaction(
                         player_handlers[turn_pid], session,
                         b"AssignDamageOrderTransaction;",
@@ -1886,24 +2228,11 @@ def _play_one_game(seed, turns_cap=AUTOPLAY_TURN_CAP, deck_specs=None,
                             "    [pvp-autoplay] game ended during damage "
                             f"resolution: {terminal_result}")
                         break
-                    after_turn = _autoplay_report_int(after_state.get(
-                        "turn_number", current_turn_number))
-                    pending_input = any(after_state.get(key) for key in (
-                        "pending_trigger", "pending_choice",
-                        "pending_deck_search", "pending_discard_ability"))
-                    if (after_state.get("phase") == phase and
-                            after_turn == current_turn_number and
-                            after_state.get("priority_pid") == before_priority and
-                            state.get("stack") == after_state.get("stack") and
-                            state.get("passes") == after_state.get("passes") and
-                            state.get("stack_passed") ==
-                            after_state.get("stack_passed") and
-                            not pending_input):
-                        raise RuntimeError(
-                            "AssignDamageOrder did not advance the native "
-                            f"phase or priority (phase={phase}, "
-                            f"turn={current_turn_number}, "
-                            f"priority={before_priority})")
+                    # The damage transaction is consumed here. Resolved damage
+                    # triggers can rebuild the phase priority window with the
+                    # same seat first, so an unchanged snapshot is not a stall:
+                    # the next pass drives that window, and the guard below
+                    # still ends a window that never completes.
                     continue
 
                 before_priority = state.get("priority_pid")
@@ -1947,6 +2276,61 @@ def _play_one_game(seed, turns_cap=AUTOPLAY_TURN_CAP, deck_specs=None,
             # path, then the native priority owner(s) pass the live window.
             if phase in (game_engine.ETurnPhases.FirstMainPhase,
                          game_engine.ETurnPhases.SecondMainPhase):
+                # A main-phase player can pass priority to the opponent
+                # without ending the phase. Resolve that response window
+                # before asking the active player for another action; the
+                # C# AITactical correctly ignores GreenLight events addressed
+                # to the other seat.
+                priority_pid = state.get("priority_pid")
+                if (client_ai_bridge is not None and
+                        turn_pid is not None and priority_pid is not None and
+                        int(priority_pid) != int(turn_pid)):
+                    _pass_native_priority_window(
+                        session, pids, player_handlers, phase=phase,
+                        profiler=profiler)
+                    continue
+                if (client_ai_bridge is not None and
+                        int(turn_pid) == client_ai_pid):
+                    before = repr(state)
+                    submitted = client_ai_bridge.drain()
+                    latest = gs.find_session_by_player(
+                        game_engine.UID.make(
+                            PLAYER_UID_TYPE, pids[0]).to_uint64()) or session
+                    after = pvp_load_state(latest) or {}
+                    if repr(after) == before:
+                        last_transaction = getattr(
+                            client_ai_bridge, "last_transaction", None)
+                        current_window = tuple(state.get(key) for key in (
+                            "phase", "turn_number", "priority_pid"))
+                        matching_noop = (
+                            isinstance(last_transaction, dict) and
+                            last_transaction.get("signature") ==
+                            current_window and
+                            not last_transaction.get("progressed"))
+                        # AITactical can resend an already-accepted ability
+                        # while its native response window is still open, or
+                        # it can have no legal action. Treat either no-op as a
+                        # pass in this main-phase window.
+                        log_req(
+                            "    [pvp-autoplay] C# AI made no state change; "
+                            "passing native priority "
+                            f"(submitted={submitted}, "
+                            f"matching_noop={matching_noop})")
+                        _transaction(
+                            player_handlers[turn_pid], session,
+                            b"PassPriorityTransaction;",
+                            profiler=profiler)
+                        latest = gs.find_session_by_player(
+                            game_engine.UID.make(
+                                PLAYER_UID_TYPE, pids[0]).to_uint64()
+                        ) or session
+                        after = pvp_load_state(latest) or {}
+                        if repr(after) != before:
+                            continue
+                        raise RuntimeError(
+                            "C# client AI did not act in main phase "
+                            f"{phase}")
+                    continue
                 if deck_specs:
                     h = player_handlers[turn_pid]
                     res_rows = db_hand_resources_with_template(
@@ -2211,7 +2595,9 @@ def _play_one_game(seed, turns_cap=AUTOPLAY_TURN_CAP, deck_specs=None,
                                     ability.get("resource_cost", 0) or 0),
                                 "activated": bool(activated),
                             })
-                    if action_selected:
+                    if action_selected and not (
+                            client_ai_bridge is not None and
+                            int(opp_pid) == client_ai_pid):
                         latest = gs.find_session_by_player(
                             game_engine.UID.make(
                                 PLAYER_UID_TYPE, pids[0]).to_uint64()) or session
@@ -2244,6 +2630,34 @@ def _play_one_game(seed, turns_cap=AUTOPLAY_TURN_CAP, deck_specs=None,
                 continue
             # DeclareAttack: the turn player swings with all eligible troops.
             if phase == game_engine.ETurnPhases.DeclareAttack:
+                if (client_ai_bridge is not None and
+                        int(turn_pid) == client_ai_pid):
+                    before = repr(state)
+                    client_ai_bridge.drain()
+                    latest = gs.find_session_by_player(
+                        game_engine.UID.make(
+                            PLAYER_UID_TYPE, pids[0]).to_uint64()) or session
+                    after = pvp_load_state(latest) or {}
+                    if repr(after) == before:
+                        native_port = (pvp_shared_port(latest) or
+                                       getattr(latest,
+                                               "_rules_port_session", None))
+                        native_action = (native_port.action_stack.peek()
+                                         if native_port is not None else None)
+                        native_queue = list(
+                            getattr(native_action, "_priority_queue", ()) or ())
+                        raise RuntimeError(
+                            "C# client AI did not declare attackers "
+                            f"(state_phase={after.get('phase')}, turn="
+                            f"{after.get('turn_number')}, priority="
+                            f"{after.get('priority_pid')}, attackers="
+                            f"{after.get('attackers')}, native_phase="
+                            f"{getattr(native_port, 'current_turn_phase', None)}, "
+                            f"native_action={type(native_action).__name__ if native_action else None}, "
+                            f"native_queue={native_queue}, "
+                            f"native_priority="
+                            f"{getattr(native_port.action_stack, 'priority_player_id', None) if native_port is not None else None})")
+                    continue
                 attackers, attack_reason = _ai_attack_decision(
                     player_handlers[turn_pid], session, state, turn_pid,
                     opp_pid, profiler=profiler, report=report)
@@ -2272,19 +2686,42 @@ def _play_one_game(seed, turns_cap=AUTOPLAY_TURN_CAP, deck_specs=None,
                         "attacker_uids": attackers,
                     })
                 if attackers:
-                    latest = gs.find_session_by_player(
-                        game_engine.UID.make(
-                            PLAYER_UID_TYPE, pids[0]).to_uint64()) or session
-                    response_state = pvp_load_state(latest) or state
-                    deck_name = deck_specs[pids.index(opp_pid)]["name"]
-                    _play_quick_response(
-                        player_handlers[opp_pid], session, session_id,
-                        response_state, opp_pid, turn_pid, deck_name,
-                        turns + 1, profiler=profiler, report=report)
+                    if not (client_ai_bridge is not None and
+                            int(opp_pid) == client_ai_pid):
+                        latest = gs.find_session_by_player(
+                            game_engine.UID.make(
+                                PLAYER_UID_TYPE, pids[0]).to_uint64()
+                        ) or session
+                        response_state = pvp_load_state(latest) or state
+                        deck_name = deck_specs[pids.index(opp_pid)]["name"]
+                        _play_quick_response(
+                            player_handlers[opp_pid], session, session_id,
+                            response_state, opp_pid, turn_pid, deck_name,
+                            turns + 1, profiler=profiler, report=report)
+                        _pass_native_priority_window(
+                            session, pids, player_handlers,
+                            profiler=profiler)
+                    # The C# defender, if applicable, is driven by the event
+                    # packet generated above. Revisit the live phase after the
+                    # adapter has acted instead of treating the attack as an
+                    # empty declaration.
+                    continue
                 else:
                     # The empty declaration advances directly through the
                     # native no-combat path. Do not send DeclareAttack passes.
                     post_attack_state = pvp_load_state(attack_session)
+                    # Troops declared earlier in this phase already form the
+                    # combat, so an empty re-declaration keeps those attackers
+                    # and does not reach the no-combat skip. Pass the priority
+                    # window that holds the phase instead.
+                    if (post_attack_state is not None and
+                            post_attack_state.get("phase") ==
+                            game_engine.ETurnPhases.DeclareAttack and
+                            post_attack_state.get("attackers")):
+                        _pass_native_priority_window(
+                            session, pids, player_handlers,
+                            profiler=profiler)
+                        continue
                     if (post_attack_state is None or
                             post_attack_state.get("phase") ==
                             game_engine.ETurnPhases.DeclareAttack):
@@ -2292,12 +2729,20 @@ def _play_one_game(seed, turns_cap=AUTOPLAY_TURN_CAP, deck_specs=None,
                             "empty attack declaration did not advance out of "
                             "DeclareAttack")
                     continue
-                _pass_native_priority_window(
-                    session, pids, player_handlers,
-                    profiler=profiler)
-                continue
             # DeclareDefense: the defender blocks with every eligible troop.
             if phase == game_engine.ETurnPhases.DeclareDefense:
+                if (client_ai_bridge is not None and
+                        int(opp_pid) == client_ai_pid):
+                    before = repr(state)
+                    client_ai_bridge.drain()
+                    latest = gs.find_session_by_player(
+                        game_engine.UID.make(
+                            PLAYER_UID_TYPE, pids[0]).to_uint64()) or session
+                    after = pvp_load_state(latest) or {}
+                    if repr(after) == before:
+                        raise RuntimeError(
+                            "C# client AI did not assign blockers")
+                    continue
                 att_state = state
                 attacker_uids = [int(k) for k in
                                  (att_state.get("attackers") or {})]
@@ -2326,26 +2771,58 @@ def _play_one_game(seed, turns_cap=AUTOPLAY_TURN_CAP, deck_specs=None,
             _pass_native_priority_window(
                 session, pids, player_handlers, phase=phase,
                 profiler=profiler)
+        if turns < turns_cap:
+            last_session = gs.find_session_by_player(
+                game_engine.UID.make(
+                    PLAYER_UID_TYPE, pids[0]).to_uint64()) or session
+            last_state = pvp_load_state(last_session) or {}
+            if _autoplay_terminal_result(last_session, last_state, pids) is None:
+                native_port = (pvp_shared_port(last_session) or
+                               getattr(last_session,
+                                       "_rules_port_session", None))
+                native_priority = getattr(
+                    getattr(native_port, "action_stack", None),
+                    "priority_player_id", None)
+                native_chain = getattr(
+                    getattr(native_port, "chain", None), "_instance_ids", ())
+                raise RuntimeError(
+                    "Autoplay stopped before its turn limit "
+                    f"({turns}/{turns_cap}); phase={last_state.get('phase')}; "
+                    f"priority={last_state.get('priority_pid')}; "
+                    f"native_priority={native_priority}; "
+                    f"native_chain={list(native_chain)}; guard={guard}")
     except Exception:
         return turns, traceback.format_exc()
     finally:
-        if report is not None or outcome is not None:
+        stores_report = report is not None or outcome is not None
+        capturing = (_hexai_capture is not None and
+                     _hexai_capture.enabled())
+        if stores_report or capturing:
             last_session = gs.find_session_by_player(
                 game_engine.UID.make(PLAYER_UID_TYPE, pids[0]).to_uint64())
             last_session = last_session or session
             last_state = pvp_load_state(last_session) or {}
             terminal_result = _autoplay_terminal_result(
                 last_session, last_state, pids)
-            _autoplay_store_game_end(report, outcome, terminal_result)
-            if report is not None:
-                report["hand_at_end"] = _autoplay_finalize_hand(
-                    hand_tracker, session_id, pids, last_state)
-                report["turns"] = turns
-                report["last_phase"] = str(last_state.get("phase"))
-                report["health"] = {
-                    str(pid): int(last_state.get(f"hp_{pid}", 20) or 0)
-                    for pid in pids
-                }
+            if capturing:
+                _hexai_capture.end_game(
+                    hexai_game_id,
+                    (terminal_result or {}).get("winner_id"),
+                    turns=turns,
+                    health={str(pid): int(
+                        last_state.get(f"hp_{pid}", 20) or 0)
+                        for pid in pids})
+            if stores_report:
+                _autoplay_store_game_end(report, outcome, terminal_result)
+                if report is not None:
+                    report["hand_at_end"] = _autoplay_finalize_hand(
+                        hand_tracker, session_id, pids, last_state)
+                    report["turns"] = turns
+                    report["last_phase"] = str(last_state.get("phase"))
+                    report["health"] = {
+                        str(pid): int(last_state.get(f"hp_{pid}", 20) or 0)
+                        for pid in pids
+                    }
         _cleanup(session_id, pids)
     return turns, None
 
@@ -2384,16 +2861,154 @@ def _run_simulation_job(job):
         return 0, traceback.format_exc()
 
 
-def _run_simulation_jobs(jobs, workers=None, progress=None):
+def _run_simulation_job_in_process(job):
+    """Run one game in a worker process and return its report and profile.
+
+    The report and profiler are mutated in place by the game, so the worker
+    returns its own copies for the coordinator to merge back.  The profiler
+    holds a lock, which cannot cross the process boundary, so the worker
+    starts a fresh one and returns plain counters.
+    """
+    seed, kwargs = job
+    profiler = _new_simulation_profiler()
+    kwargs = dict(kwargs, profiler=profiler)
+    result = _run_simulation_job((seed, kwargs))
+    counters = {key: value for key, value in profiler.items()
+                if key != "_lock"}
+    return result, kwargs["report"], counters
+
+
+def _merge_profile_counters(target, source):
+    """Add one worker's profiler counters into the batch profiler."""
+    for key, value in source.items():
+        if isinstance(value, dict):
+            _merge_profile_counters(target.setdefault(key, {}), value)
+        else:
+            target[key] = target.get(key, 0) + value
+
+
+def _simulation_process_worker(task_queue, result_queue):
+    """Worker loop: run games until the coordinator sends a ``None`` task."""
+    while True:
+        task = task_queue.get()
+        if task is None:
+            return
+        index, payload = task
+        try:
+            outcome = ("ok", _run_simulation_job_in_process(payload))
+        except BaseException:
+            outcome = ("error", traceback.format_exc())
+        result_queue.put((index, outcome))
+
+
+def _copy_simulation_db(source, directory, index):
+    """Give one worker its own snapshot so its SQLite writes never contend."""
+    target = os.path.join(directory, f"worker-{index}.db")
+    source_connection = sqlite3.connect(source, timeout=30)
+    target_connection = sqlite3.connect(target, timeout=30)
+    try:
+        source_connection.backup(target_connection)
+    finally:
+        target_connection.close()
+        source_connection.close()
+    return target
+
+
+def _run_simulation_jobs_in_processes(jobs, worker_count, progress=None):
+    """Run ``(seed, kwargs)`` jobs in spawned worker processes, keeping order.
+
+    Pure-Python game work holds the GIL, so threads cannot use more than one
+    core.  Each worker is a fresh ``spawn`` interpreter, which imports ``db``
+    and opens its own connection; a forked child would reuse the parent's open
+    connection, which SQLite does not allow across ``fork``.  ``db`` reads
+    ``HEX_DB_PATH`` at import, so each worker is started with its own copy of
+    the snapshot in that variable.
+    """
+    import copy
+    import multiprocessing
+
+    payloads = []
+    for seed, kwargs in jobs:
+        payload = {key: value for key, value in kwargs.items()
+                   if key not in ("profiler", "report")}
+        payload["report"] = copy.deepcopy(kwargs.get("report") or {})
+        payloads.append((seed, payload))
+
+    context = multiprocessing.get_context("spawn")
+    task_queue = context.Queue()
+    result_queue = context.Queue()
+    for index, payload in enumerate(payloads):
+        task_queue.put((index, payload))
+    for _ in range(worker_count):
+        task_queue.put(None)
+
+    source = os.environ.get("HEX_DB_PATH")
+    copy_directory = None
+    if source and os.path.isfile(source):
+        copy_directory = tempfile.TemporaryDirectory(prefix="hex-pvp-workers-")
+    workers = []
+    try:
+        for index in range(worker_count):
+            previous = os.environ.get("HEX_DB_PATH")
+            if copy_directory is not None:
+                os.environ["HEX_DB_PATH"] = _copy_simulation_db(
+                    source, copy_directory.name, index)
+            try:
+                process = context.Process(
+                    target=_simulation_process_worker,
+                    args=(task_queue, result_queue), daemon=True)
+                process.start()
+            finally:
+                if copy_directory is not None:
+                    if previous is None:
+                        os.environ.pop("HEX_DB_PATH", None)
+                    else:
+                        os.environ["HEX_DB_PATH"] = previous
+            workers.append(process)
+
+        results = [None] * len(jobs)
+        for completed in range(1, len(jobs) + 1):
+            index, (status, value) = result_queue.get()
+            if status != "ok":
+                results[index] = (0, value)
+            else:
+                result, report, counters = value
+                _, kwargs = jobs[index]
+                if kwargs.get("report") is not None:
+                    kwargs["report"].clear()
+                    kwargs["report"].update(report)
+                if kwargs.get("profiler") is not None:
+                    _merge_profile_counters(kwargs["profiler"], counters)
+                results[index] = result
+            if progress is not None:
+                progress(completed, len(jobs), index, results[index])
+        for process in workers:
+            process.join()
+        return results
+    finally:
+        for process in workers:
+            if process.is_alive():
+                process.terminate()
+        if copy_directory is not None:
+            copy_directory.cleanup()
+
+
+def _run_simulation_jobs(jobs, workers=None, progress=None, processes=False):
     """Run complete games concurrently while preserving result order.
 
     ``progress`` is called from the coordinator thread as each job finishes;
     it receives ``(completed, total, job_index, result)``.  Keeping callbacks
     out of the worker threads makes progress reporting safe for callers that
-    also update shared standings or write to a single output stream.
+    also update shared standings or write to a single output stream.  With
+    ``processes`` the games run in worker processes instead of threads; the
+    jobs must then carry only ``profiler`` and ``report`` as their mutable
+    state.
     """
     jobs = list(jobs)
     worker_count = _simulation_worker_count(len(jobs), workers)
+    if processes and worker_count > 1:
+        return _run_simulation_jobs_in_processes(
+            jobs, worker_count, progress=progress)
     if worker_count <= 1:
         results = []
         for job_index, job in enumerate(jobs):
@@ -2510,7 +3125,7 @@ def main_fra(deck_guids=None, turns_cap=30, show_profile=False,
             "report": run_report,
             "run_slot": run_index,
         }))
-    results = _run_simulation_jobs(run_jobs, workers=workers)
+    results = _run_simulation_jobs(run_jobs, workers=workers, processes=True)
     for (run_index, run_seed, run_report), (turns, err) in zip(
             run_contexts, results):
         if not report["decks"]:
@@ -2914,6 +3529,132 @@ def main_fra_round_robin(turns_cap=30, show_profile=False,
     return 1 if errors else 0
 
 
+def main_client_ai_mirror_fra(turns_cap=20, report_path=None, seed=1900,
+                              client_ai_timeout=90.0,
+                              unity_data_path=None, mirror_limit=None):
+    """Run one same-deck Python-vs-client-AI mirror for every FRA deck."""
+    specs = _fra_encounter_specs(all_decks=True)
+    if mirror_limit is not None:
+        mirror_limit = int(mirror_limit)
+        if mirror_limit < 1:
+            raise ValueError("mirror_limit must be a positive integer")
+        specs = specs[:mirror_limit]
+    turn_limit = max(0, int(turns_cap))
+    first_seed = int(seed)
+    scoreboard = {
+        "python": {"wins": 0, "draws": 0, "losses": 0},
+        "csharp": {"wins": 0, "draws": 0, "losses": 0},
+    }
+    jobs = []
+    contexts = []
+    for match_index, spec in enumerate(specs):
+        run_seed = first_seed + match_index
+        _session_id, pids = _autoplay_identity(run_seed, match_index)
+        client_ai_pid = random.Random(run_seed ^ 0xC5A2).choice(pids)
+        python_pid = next(pid for pid in pids if pid != client_ai_pid)
+        outcome = {}
+        contexts.append((match_index, run_seed, spec, pids,
+                         client_ai_pid, python_pid, outcome))
+        jobs.append((run_seed, {
+            "turns_cap": turn_limit,
+            "deck_specs": [spec, spec],
+            "run_slot": match_index,
+            "outcome": outcome,
+            "client_ai_pid": client_ai_pid,
+            "client_ai_timeout": client_ai_timeout,
+            "unity_data_path": unity_data_path,
+        }))
+
+    progress_started = time.monotonic()
+
+    def report_progress(completed, total, job_index, result):
+        del job_index
+        turns, error = result
+        elapsed = time.monotonic() - progress_started
+        rate = completed / elapsed * 60 if elapsed > 0 else 0.0
+        status = (f"error: {error.strip().splitlines()[-1]}" if error
+                  else f"{turns} turns")
+        print(f"Client AI mirror progress: {completed}/{total}; {status}; "
+              f"{rate:.2f} matches/min; elapsed {elapsed:.0f}s",
+              flush=True)
+
+    # The installed Unity adapter exposes one serialized command file, so
+    # matches must be run one at a time.
+    results = _run_simulation_jobs(
+        jobs, workers=1, progress=report_progress)
+    matches = []
+    errors = []
+    for (match_index, run_seed, spec, pids, client_ai_pid, python_pid,
+         outcome), (turns, error) in zip(contexts, results):
+        game_end = outcome.get("game_end") or {}
+        winner_pid = game_end.get("winner_id")
+        try:
+            winner_pid = int(winner_pid) if winner_pid is not None else None
+        except (TypeError, ValueError):
+            winner_pid = None
+        if error:
+            result = "error"
+            errors.append({"match": match_index + 1,
+                           "deck": spec["name"], "error": error})
+        elif winner_pid == python_pid:
+            scoreboard["python"]["wins"] += 1
+            scoreboard["csharp"]["losses"] += 1
+            result = "python_win"
+        elif winner_pid == client_ai_pid:
+            scoreboard["csharp"]["wins"] += 1
+            scoreboard["python"]["losses"] += 1
+            result = "csharp_win"
+        else:
+            scoreboard["python"]["draws"] += 1
+            scoreboard["csharp"]["draws"] += 1
+            result = "draw"
+        matches.append({
+            "match": match_index + 1,
+            "seed": run_seed,
+            "deck_guid": spec["deck_guid"],
+            "deck": spec["name"],
+            "turns": turns,
+            "client_ai_pid": client_ai_pid,
+            "python_ai_pid": python_pid,
+            "first_player_pid": outcome.get("first_player_pid"),
+            "coin_flip_winner_pid": outcome.get("coin_flip_winner_pid"),
+            "winner_pid": winner_pid,
+            "result": result,
+            **({"error": error} if error else {}),
+        })
+
+    elapsed = time.monotonic() - progress_started
+    print(f"Python AI vs C# client AI: {len(specs)} FRA decks, "
+          f"one mirror match per deck, max {turn_limit} turns each")
+    print(f"Results: Python {scoreboard['python']['wins']}-"
+          f"{scoreboard['python']['draws']}-"
+          f"{scoreboard['python']['losses']}; C# client AI "
+          f"{scoreboard['csharp']['wins']}-"
+          f"{scoreboard['csharp']['draws']}-"
+          f"{scoreboard['csharp']['losses']}")
+    print(f"Elapsed: {elapsed:.1f}s; unscored errors: {len(errors)}")
+    for match in matches:
+        print(f"  {match['deck']}: {match['result']} in "
+              f"{match['turns']} turns; C# seat {match['client_ai_pid']}; "
+              f"first player {match['first_player_pid']}")
+
+    report = {
+        "mode": "client_ai_mirror_fra",
+        "seed": first_seed,
+        "max_turns": turn_limit,
+        "elapsed_seconds": elapsed,
+        "scoreboard": scoreboard,
+        "matches": matches,
+        "errors": errors,
+    }
+    if report_path:
+        with open(report_path, "w", encoding="utf-8") as output:
+            json.dump(report, output, indent=2, sort_keys=True)
+            output.write("\n")
+        print(f"Wrote report: {report_path}")
+    return 1 if errors else 0
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("games", nargs="?", type=int,
@@ -2923,8 +3664,8 @@ if __name__ == "__main__":
                              "choose both decks when no GUIDs are supplied")
     parser.add_argument("--choose-decks", action="store_true",
                         help="show the FRA deck chooser (requires --fra and a terminal)")
-    parser.add_argument("--turn-limit", type=int, default=30,
-                        help="maximum completed turns in FRA mode (default: 30)")
+    parser.add_argument("--turn-limit", type=int, default=20,
+                        help="maximum completed turns in FRA mode (default: 20)")
     parser.add_argument("--runs", type=int, default=1,
                         help="number of seeded FRA duels to aggregate")
     parser.add_argument("--seed", type=int, default=900,
@@ -2932,12 +3673,27 @@ if __name__ == "__main__":
     parser.add_argument("--round-robin", action="store_true",
                         help="run every non-elite FRA deck against every "
                              "other non-elite deck once")
+    parser.add_argument(
+        "--client-ai-mirrors", action="store_true",
+        help="run one Python-vs-original-C# client-AI mirror per FRA deck; "
+             "requires the Unity headless adapter and an open game client")
+    parser.add_argument(
+        "--adapter-timeout", type=float, default=90.0,
+        help="seconds to wait for each Unity adapter command (default: 90)")
+    parser.add_argument(
+        "--unity-data-path", default=None,
+        help="Hex_Data directory polled by the Unity adapter (or set "
+             "HEX_UNITY_DATA_PATH)")
+    parser.add_argument(
+        "--mirror-limit", type=int, default=None,
+        help="run only the first N FRA mirror decks (adapter smoke check)")
     parser.add_argument("--match-limit", type=int, default=None,
                         help="in round-robin mode, run only the first N "
                              "pairings (useful for profiling)")
     parser.add_argument("--workers", type=int, default=None,
-                        help="parallel simulation threads (default: capped "
-                             "by CPU count; use 1 for serial execution)")
+                        help="parallel simulation workers; --fra runs them in "
+                             "processes (default: capped by CPU count; use 1 "
+                             "for serial execution)")
     parser.add_argument("--profile", action="store_true",
                         help="print AI, RulesPort, and transaction timings")
     parser.add_argument(
@@ -2953,6 +3709,29 @@ if __name__ == "__main__":
         set_log_level(args.log_level)
     if args.workers is not None and args.workers < 1:
         parser.error("--workers must be at least 1")
+    if args.mirror_limit is not None and not args.client_ai_mirrors:
+        parser.error("--mirror-limit requires --client-ai-mirrors")
+    if args.client_ai_mirrors:
+        if args.fra is not None or args.round_robin or args.choose_decks:
+            parser.error("--client-ai-mirrors cannot be combined with "
+                         "--fra, --round-robin, or --choose-decks")
+        if args.runs != 1 or args.match_limit is not None:
+            parser.error("--client-ai-mirrors runs each FRA deck once; "
+                         "omit --runs and --match-limit")
+        if args.workers not in (None, 1):
+            parser.error("--client-ai-mirrors uses one Unity command channel; "
+                         "pass --workers 1")
+        if args.adapter_timeout <= 0:
+            parser.error("--adapter-timeout must be positive")
+        if args.mirror_limit is not None and args.mirror_limit < 1:
+            parser.error("--mirror-limit must be positive")
+        if _SIMULATION_DB_COPY:
+            print("Simulation database: disposable snapshot")
+        raise SystemExit(main_client_ai_mirror_fra(
+            turns_cap=args.turn_limit, report_path=args.json_report,
+            seed=args.seed, client_ai_timeout=args.adapter_timeout,
+            unity_data_path=args.unity_data_path,
+            mirror_limit=args.mirror_limit))
     if args.round_robin:
         if args.fra:
             parser.error("--round-robin cannot be combined with FRA deck GUIDs")

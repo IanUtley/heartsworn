@@ -1,0 +1,31 @@
+{
+ "schema_version": 1,
+ "cards": [
+  {
+   "name": "Lixil, Heartsworn",
+   "set_guid": "9a824393-cd11-4273-a05e-41e35eb50dbe",
+   "rarity": "Legendary",
+   "cost": 5,
+   "attack": 4,
+   "defense": 5,
+   "card_type": "Troop",
+   "subtype": "Necrotic Rogue",
+   "threshold": [
+    {
+     "shard": "Sapphire",
+     "count": 2
+    }
+   ],
+   "variable_cost": false,
+   "flavor": "\"Hello World!\" - Lixil, Heartsworn",
+   "sockets": [],
+   "guid": "ed564600-b44d-47bd-8b74-e0fe5100171a",
+   "abilities": [
+    "8ee20ab3-582b-32a4-9bd8-d7a9f07742e3",
+    "71843868-b2a4-2589-75fa-2ec9332f8843",
+    "084b3800-46ee-8018-d9e1-8921c2397d2e",
+    "0f29151b-b6ca-9755-bdb8-09df967c57ce"
+   ]
+  }
+ ]
+}

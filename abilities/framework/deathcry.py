@@ -12,17 +12,6 @@ import game_engine
 from .effects.search import move_deck_card_to_hand
 
 
-def _leaf_param(param):
-    """Parse an ability_effects.param JSON blob (parent-level child params)."""
-    if not param:
-        return None
-    try:
-        d = _json.loads(param)
-        return d if isinstance(d, dict) else None
-    except (ValueError, TypeError):
-        return None
-
-
 def _resolve_deathcry_effect(game, session, db, handler, pl_t, ai_t, bstate,
                              card_uid, tpl_guid, owner_user_id, ag, gtext):
     """Resolve one Deathcry trigger through the authoritative resolution
@@ -47,8 +36,6 @@ def _resolve_deathcry_effect(game, session, db, handler, pl_t, ai_t, bstate,
                   ag, card_uid, owner_user_id, {})
     _log(f"    Deathcry {ag[:8]} resolved from stack")
     return out
-
-
 
 
 def resolve_deathcry(game, session, db, handler, pl_t, ai_t, card_uid, tpl_guid, bstate=None):

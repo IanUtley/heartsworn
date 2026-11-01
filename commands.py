@@ -2,6 +2,7 @@
 
 All commands receive the handler instance (self) for DB access, event sending, etc.
 """
+import inspect
 import struct as _struct
 import json as _json
 import os as _os
@@ -18,6 +19,28 @@ import campaign
 from encoder import encode_datawrapper, compress_gzip, encode_sync_event
 from db import (get_log_level, latest_session_log_path_for_players,
                 player_log_path, session_log_path)
+
+
+_HANDLER_MIXIN_MODULES = (
+    "application.profile_stream",
+    "application.card_play",
+    "application.card_state",
+    "application.combat",
+    "application.chain",
+    "application.turn_flow",
+    "application.pending_choices",
+    "application.transactions",
+    "gamemodes.fra_battle",
+)
+
+
+# Modules a SIGUSR1 reload must keep. ``hconnect_server`` holds references to
+# these modules' objects, and the dispatcher is keyed by their classes: re-running
+# ``application.commands`` would give the dispatcher new command classes while
+# the server still sends the old ones ("Unsupported application command"). The
+# command types are therefore fixed for the life of the process; a change to
+# ``application/commands.py`` needs a restart.
+NOT_RELOADED = frozenset({"commands", "hconnect_server", "application.commands"})
 
 
 def reload_runtime_modules():
@@ -39,30 +62,42 @@ def reload_runtime_modules():
     import pvp_db as pvp_db_module
     import profile_db as profile_db_module
     import pve_db as pve_db_module
+    import campaign_rules as campaign_rules_module
     import chat_db as chat_db_module
     import replay_db as replay_db_module
     import tournament_db as tournament_db_module
     import application.dispatcher as application_dispatcher
     import application.player_transactions as player_transactions
-    import gamedata.play_plan as play_plan
     import rules_port.wire as rules_wire
     import rules_port.runtime_adapter as rules_runtime
     import rules_port.transactions as rules_transactions
+    import domain.constants as domain_constants
+    import campaign_playtest as campaign_playtest_module
+    import ai_eval as ai_eval_module
+    import ai_combat as ai_combat_module
 
     # Reload foundational modules first, then all already-loaded modules in
     # the application/runtime packages.  Filtering sys.modules avoids
     # importing optional services solely because SIGUSR1 was received.
+    # ``gamedata`` is deliberately not reloaded: the Records store keeps
+    # objects built from the old classes, and reloading the classes under it
+    # mixes the two generations (nested modifier fields stop matching their
+    # dict shape, so heals lose their input variable).  Records changes need
+    # a full restart.
     groups = [
+        [domain_constants],
         [dbm],
         [pvp_db_module, profile_db_module, pve_db_module, chat_db_module,
-         replay_db_module, tournament_db_module],
+         replay_db_module, tournament_db_module, campaign_rules_module],
         [game_engine_module, game_session_module, battle_engine_module,
-         application_dispatcher, player_transactions, play_plan, campaign],
+         application_dispatcher, player_transactions, campaign,
+         campaign_playtest_module],
         [rules_transactions, rules_runtime, rules_wire],
+        [ai_eval_module, ai_combat_module],
         [aim, te, ts, tg, sch, arena_service, mail_service, en],
     ]
     prefixes = ("abilities", "rules_port", "application", "services",
-                "gamemodes", "gamedata")
+                "gamemodes", "campaign_runtime")
     loaded = {
         module.__name__: module
         for module in _sys.modules.values()
@@ -70,7 +105,7 @@ def reload_runtime_modules():
             module.__name__ == prefix
             or module.__name__.startswith(prefix + ".")
             for prefix in prefixes)
-        and module.__name__ not in {"commands", "hconnect_server"}
+        and module.__name__ not in NOT_RELOADED
     }
     for module in sorted(loaded.values(),
                          key=lambda item: item.__name__.count("."),
@@ -100,15 +135,24 @@ def reload_runtime_modules():
     # change methods already copied onto the live handler class. Rebind those
     # methods explicitly so SIGUSR1 fixes profile-stream code without a full
     # socket restart.
-    profile_stream_module = importlib.import_module("application.profile_stream")
+    # The same applies to the HCPHandler mixins (card play, combat, transactions ...)
+    # and to the legacy service table: rebind their functions onto the live handler.
     handler_cls = getattr(hc, "HCPHandler", None)
-    mixin_cls = getattr(profile_stream_module, "ProfileStreamMixin", None)
     rebound = 0
-    if handler_cls is not None and mixin_cls is not None:
-        for name, value in vars(mixin_cls).items():
-            if not name.startswith("__") and callable(value):
-                setattr(handler_cls, name, value)
-                rebound += 1
+    for mixin_module in _HANDLER_MIXIN_MODULES:
+        module = importlib.import_module(mixin_module)
+        for _cls_name, mixin_cls in inspect.getmembers(module, inspect.isclass):
+            if mixin_cls.__module__ != module.__name__ or not _cls_name.endswith("Mixin"):
+                continue
+            if handler_cls is not None:
+                for name, value in vars(mixin_cls).items():
+                    if not name.startswith("__") and callable(value):
+                        setattr(handler_cls, name, value)
+                        rebound += 1
+    legacy_table = importlib.import_module("services.legacy_handlers").LEGACY_HANDLERS
+    live_table = getattr(hc, "LEGACY_HANDLERS", None)
+    if live_table is not None:
+        live_table.update(legacy_table)
     for name, value in {
         "tournament_server": ts,
         "campaign": campaign,
@@ -126,7 +170,7 @@ def reload_runtime_modules():
     }.items():
         setattr(hc, name, value)
     return (f"Reloaded {len(reloaded)} runtime modules + {rebound} "
-            "ProfileStream methods + tournament globals rebound: "
+            "mixin methods + tournament globals rebound: "
             + ", ".join(reloaded))
 
 
@@ -145,12 +189,107 @@ def _version_command():
         return "Version unavailable"
 
 
+def _arena_set_challenger_command(handler, args):
+    """Debug: make the arena's next FRA opponent a named champion, so an FRA run can be played against it.
+
+    Overwrites the roster row at the arena's current challenger index with the champion and an encounter deck
+    for it (or any encounter deck when none is authored for that champion).
+    """
+    name = " ".join(args).strip()
+    if not name:
+        return "Usage: arena.setchallenger <champion name>"
+    from pve_db import db_get_arena_state
+    db = hconnect_server._db
+    user_id = handler.user_profile["id"]
+    arena = db_get_arena_state(user_id, initialize=False, conn=db)
+    if not arena:
+        return "No arena run: start one first"
+    index = int(arena.get("challenger_index", 0) or 0)
+    champion = db.execute(
+        "SELECT guid, name FROM champion_templates_extended WHERE LOWER(name)=LOWER(?)",
+        (name,)).fetchone()
+    if champion is None:
+        return f"Unknown champion: {name}"
+    deck = db.execute(
+        "SELECT deck_guid, ai_deck_personality FROM fra_encounters WHERE champion_guid=? LIMIT 1",
+        (champion[0],)).fetchone()
+    if deck is None:
+        deck = db.execute(
+            "SELECT deck_guid, ai_deck_personality FROM fra_encounters "
+            "WHERE deck_guid IS NOT NULL LIMIT 1").fetchone()
+    cur = db.execute(
+        "UPDATE fra_challengers SET name=?, champion_guid=?, encounter_deck_guid=?, "
+        "ai_deck_personality=? WHERE user_id=? AND challenger_index=?",
+        (champion[1], champion[0], deck[0], deck[1] or "Default", user_id, index))
+    if cur.rowcount == 0:
+        return "No roster row for the next opponent: start an arena run first"
+    db.commit()
+    return f"Next challenger set to {champion[1]}"
+
+
 def _arena_clear_command(handler):
     """Reset the caller's Frost Ring Arena run outside debug mode."""
     from pve_db import db_clear_arena_run
     db_clear_arena_run(handler.user_profile["id"], conn=hconnect_server._db)
     hconnect_server._db.commit()
     return "Arena run cleared"
+
+
+def _campaign_cleanup_command(handler, args=()):
+    """Repair the caller's stuck campaign so they can continue playing.
+
+    Diagnoses every campaign owned by the profile (a panorama whose NPC
+    conversations are all completed, a quest journal with no active objective,
+    a dungeon with no actionable node, ...), runs the server's authored repair
+    passes, and pushes a ``cmpupdate`` so the client rebuilds the scene without
+    a relog.  ``!campaign-cleanup <campId>`` targets one campaign.
+    """
+    import campaign
+
+    db = hconnect_server._db
+    profile = getattr(handler, "user_profile", None) or {}
+    user_id = profile.get("id")
+    if not user_id:
+        return "No profile is bound to this session"
+    camp_id = None
+    for token in args or ():
+        try:
+            camp_id = int(token)
+            break
+        except (TypeError, ValueError):
+            continue
+    reports = campaign.repair_user_campaigns(db, int(user_id), camp_id)
+    if reports is None:
+        return "That campaign does not belong to this profile"
+    if not reports:
+        return "No broken campaign state found for this profile"
+    lines = []
+    for report in reports:
+        lines.append(
+            f"Campaign {report['camp_id']} ({report['campaign_type']} "
+            f"{report['template_name'] or '-'}): "
+            f"repairs={', '.join(report['repairs']) or 'none needed'}; "
+            f"{report['before_options']} -> {report['after_options']} "
+            f"option(s)")
+        if report["before"]:
+            lines.append(f"  before: {report['before']}")
+        if report["after"]:
+            lines.append(f"  still broken: {report['after']}")
+    # Refresh the client for the newest repaired campaign (the most likely one
+    # on screen) so a stuck panorama rebuilds immediately.
+    newest = max(reports, key=lambda item: int(item["camp_id"]))
+    try:
+        campaign.push_campupdate(
+            handler, db, newest["camp_id"], newest["champ_id"],
+            "campaign_cleanup", newest["campaign_type"] or "AREA", False,
+            newest["state"], 0, "00000000-0000-0000-0000-000000000000",
+            "ServiceCampaign",
+            str(hconnect_server.UID_TYPE["ServiceCampaign"]), 0,
+            hconnect_server.SERVICE_MAIL_UID)
+        lines.append("Client refresh pushed.")
+    except Exception as exc:  # surfaced rather than hidden in chat
+        lines.append(f"Client refresh failed: {exc}")
+    return "\n".join(lines)
 
 
 def _account_cleanup_command(handler):
@@ -163,6 +302,34 @@ def _account_cleanup_command(handler):
         "gold": 10000, "platinum": 10000, "experience": 0,
         "level": 1, "flags": "{}"})
     return "Account reset (PvE and alt-art cards kept)"
+
+
+_COLLECTION_FIX_REPORT_LIMIT = 20
+
+
+def _collection_fix_command(handler, args=()):
+    """Report, or with ``apply``, realign collection counts to owned instances."""
+    from profile_db import db_collection_count_report, db_fix_collection_counts
+    user_id = int(handler.user_profile["id"])
+    db = hconnect_server._db
+    rows = db_collection_count_report(user_id, conn=db)
+    if not rows:
+        return "Collection counts already match your owned card instances."
+    extra = sum(max(0, have - owned) for _g, _n, have, owned in rows)
+    missing = sum(max(0, owned - have) for _g, _n, have, owned in rows)
+    if not any(str(arg).lower() == "apply" for arg in args):
+        lines = [f"{len(rows)} template(s) disagree: {extra} extra collection "
+                 f"copies, {missing} missing."]
+        for guid, name, have, owned in rows[:_COLLECTION_FIX_REPORT_LIMIT]:
+            lines.append(f"  {name or guid[:8]}: collection {have} -> {owned}")
+        if len(rows) > _COLLECTION_FIX_REPORT_LIMIT:
+            lines.append(f"  ... and {len(rows) - _COLLECTION_FIX_REPORT_LIMIT} more")
+        lines.append("Run !collection-fix apply to correct them.")
+        return "\n".join(lines)
+    changed = db_fix_collection_counts(user_id, conn=db)
+    db.commit()
+    return (f"Corrected {changed} template(s). Log out and back in so the "
+            "client reloads its collection.")
 
 
 _ERROR_LOG_PATHS = (
@@ -179,7 +346,7 @@ _ERROR_LOG_TAIL_BYTES = 256 * 1024
 _ERROR_MESSAGE_LIMIT = 900
 # The issue body can carry the complete bounded report; keep enough context to
 # diagnose a multi-step failure without attaching the whole session log.
-_SESSION_LOG_TAIL_LINES = 32
+_SESSION_LOG_TAIL_LINES = 100
 _SESSION_LOG_LINE_LIMIT = 360
 _SESSION_PENDING_KEYS = (
     "pending_choice", "pending_trigger", "pending_deck_search",
@@ -315,6 +482,24 @@ def _session_log_tail(session_id=None, player_tokens=()):
     return _read_log_tail(path)[-_SESSION_LOG_TAIL_LINES:]
 
 
+def _newest_log_lines_first(lines):
+    """Order timestamp groups newest-first while keeping each group intact."""
+    groups = []
+    for line in lines:
+        match = _LOG_TIME_RE.match(line)
+        timestamp = match.group("time") if match else None
+        if timestamp:
+            if groups and groups[-1][0] == timestamp:
+                groups[-1][1].append(line)
+            else:
+                groups.append([timestamp, [line]])
+        elif groups:
+            groups[-1][1].append(line)
+        else:
+            groups.append([timestamp, [line]])
+    return [line for _timestamp, group in reversed(groups) for line in group]
+
+
 def _session_log_display_name(path):
     """Show a session log name without exposing participant IDs in a report."""
     if not path:
@@ -437,16 +622,27 @@ def _error_report(handler):
                 f"Server: version={_version_command()} log_level={get_log_level()}",
                 "Player diagnostics: authenticated profile",
             ]
-        if player_lines:
-            report.append("Recent player log:")
-            report.extend(player_lines)
         if session_lines:
             session_path = _session_log_path_for_issue(
                 session_id, player_tokens)
             report.append(
                 "Recent game log: "
-                f"{_session_log_display_name(session_path)}")
-            report.extend(session_lines)
+                f"{_session_log_display_name(session_path)} "
+                "(newest first)")
+            # Put the current game's newest events at the start of the report:
+            # the prefilled issue URL has a hard size limit and keeps a prefix.
+            report.extend(_newest_log_lines_first(session_lines))
+        if player_lines:
+            # Game-scoped output is also copied to the player log. Include only
+            # player-specific context that is not already present in the game
+            # log, avoiding a second copy of the same diagnostic trace.
+            game_log_lines = set(session_lines)
+            player_only_lines = [
+                line for line in player_lines if line not in game_log_lines]
+            if player_only_lines:
+                report.append(
+                    "Recent player log: additional context, newest first")
+                report.extend(_newest_log_lines_first(player_only_lines))
         safe_lines = []
         for line in report:
             safe = _chat_safe_error_message(line)
@@ -467,9 +663,9 @@ def _error_report(handler):
 
 
 _GITHUB_ISSUE_URL = "HTTPS://github.com/IanUtley/hex-server/issues/new"
-# Keep the generated link below common browser/proxy request-line limits. The
-# report is still bounded by _error_report; this only truncates unusually long
-# tails after the complete URL has been assembled and measured.
+# Keep the generated link below common browser/proxy request-line limits.
+# _error_report puts the newest game events first, so any prefix truncation
+# retains the most recent diagnostic context.
 _GITHUB_ISSUE_URL_LIMIT = 7500
 _GITHUB_ISSUE_TITLE_LIMIT = 256
 
@@ -478,7 +674,8 @@ def _github_issue_url(title, report):
     """Build a prefilled GitHub issue URL with a bounded diagnostics body."""
     body_prefix = "Session diagnostics collected by the Hex server:\n\n```text\n"
     body_suffix = "\n```"
-    truncation_note = "\n\n[diagnostics truncated to fit the issue link]"
+    truncation_note = (
+        "\n\n[additional diagnostics omitted to fit the issue link]")
 
     def build(report_text):
         # A log line can contain Markdown fences. Neutralize them so the
@@ -522,45 +719,60 @@ def _issue_command(handler, title):
             f"[url={issue_url}]Open GitHub issue[/url]")
 
 
-def _public_help_command():
-    return ("Available commands: !help, !commands, !version, !arena-cleanup, "
-            "!account-cleanup, !issue <title>")
+_PUBLIC_HELP_LINES = (
+    "!help / !commands — list the commands you can use",
+    "!version — show the server version",
+    "!arena-cleanup — clear your Frost Ring Arena run",
+    "!arena.setchallenger <champion name> — make the current FRA challenger that champion (debug)",
+    "!account-cleanup — reset your account, keeping PvE and alt-art cards",
+    "!collection-fix [apply] — match collection counts to owned card instances",
+    "!campaign-cleanup — repair your campaign when a scene has no options",
+    "!restart — restart the current campaign encounter (lives are not lost); in FRA, abandon the battle without a result",
+    "!issue <title> — open a prefilled GitHub issue with session diagnostics",
+    "!playtest <token> — start a campaign editor Play battle (nothing is saved)",
+)
+
+_DEVELOPER_HELP_LINES = (
+    "!game_end victory|defeat — end the campaign battle (test win/loss)",
+    "!encounter <name> — start a named campaign encounter",
+    "!additem <item name> [xN] — add an inventory item (mercenary, equipment, chest...)",
+    "!partycap <0-4> — set mercenary party slots (applies after relog)",
+    "!addchest <rarity> [set] [xN] — add booster treasure chests (applies after relog)",
+    "!addgold <amount> — add gold, e.g. to spin the Wheels of Fate",
+    "!challenge [opponent] — create a duel challenge",
+    "!reload — reload runtime modules",
+    "!hand — list cards in hand (name [id])",
+    "!aihand — reveal the AI hand",
+    "!playable [id|name ...] — set golden outlines (no args = all)",
+    "!gencard <name> — generate a copy of a card template to your hand",
+    "!addcard <name|id> — draw the next copy of that card from your deck",
+    "!threshold[/thresholds] [me|opp] C B R S W D — set 6 threshold counts",
+    "!resource [/resource] [me|opp] <current> <maximum> — set resources",
+    "!charge [me|opp] <N> — set champion charges",
+    "!spellpoints [me|opp] <N> — set champion spell points",
+    "!health [me|opp] <N> — set champion health",
+    "!pass — advance turn phase",
+    "!phase <Name> — jump to phase",
+    "!draw [me|opp] N — draw N cards (opp: the AI draws from its deck)",
+    "!irengine [on|off] — run covered abilities through the interpreter (no arg: show setting)",
+    "!discard — discard a random card from your hand",
+    "!top <id|name> — put a card from your hand on top of your deck",
+    "!zones — list cards by zone",
+    "!move <id> <zone> — move card to zone",
+    "!give [me|opp] <card name> — put a card in your or the opponent's hand, with the thresholds to play it (opp is the default)",
+    "!state <id> <flags> — set card state (Tapped|Attacking|...)",
+    "!attr/!attributes <id> <flags> — set card attributes (Flight|Speed|...)",
+    "!update <id> — resend CardUpdated for a card",
+)
 
 
-def _full_help_lines():
-    """Return the developer command help without requiring a game session."""
-    return [
-        "=== Commands ===",
-        "!version — show the server version",
-        "!arena-cleanup — clear your Frost Ring Arena run",
-        "!account-cleanup — reset your account, keeping PvE and alt-art cards",
-        "!issue <title> — open a prefilled GitHub issue with session diagnostics",
-        "!game_end victory|defeat — end the campaign battle (test win/loss)",
-        "!encounter <name> — start a named campaign encounter",
-        "!challenge [opponent] — create a duel challenge",
-        "!reload — reload runtime modules",
-        "!hand — list cards in hand (name [id])",
-        "!aihand — reveal the AI hand",
-        "!playable [id|name ...] — set golden outlines (no args = all)",
-        "!gencard <name> — generate a copy of a card template to your hand",
-        "!addcard <name|id> — draw the next copy of that card from your deck",
-        "!threshold[/thresholds] [me|opp] C B R S W D — set 6 threshold counts",
-        "!resource [/resource] [me|opp] <current> <maximum> — set resources",
-        "!charge [me|opp] <N> — set champion charges",
-        "!spellpoints [me|opp] <N> — set champion spell points",
-        "!health [me|opp] <N> — set champion health",
-        "!pass — advance turn phase",
-        "!phase <Name> — jump to phase",
-        "!draw N — draw N cards",
-        "!discard — discard a random card from your hand",
-        "!top <id|name> — put a card from your hand on top of your deck",
-        "!zones — list cards by zone",
-        "!move <id> <zone> — move card to zone",
-        "!state <id> <flags> — set card state (Tapped|Attacking|...)",
-        "!attr/!attributes <id> <flags> — set card attributes (Flight|Speed|...)",
-        "!update <id> — resend CardUpdated for a card",
-        "!help / !commands — this list",
-    ]
+def _help_lines(developer_enabled):
+    """Return the commands this user can run: public ones always, developer
+    commands only when the ``allowcon`` profile flag is enabled."""
+    lines = ["=== Commands ===", *_PUBLIC_HELP_LINES]
+    if developer_enabled:
+        lines += ["=== Developer commands (allowcon) ===", *_DEVELOPER_HELP_LINES]
+    return lines
 
 
 def handle_command(handler, cmd: str, room: str, username: str) -> str:
@@ -568,6 +780,11 @@ def handle_command(handler, cmd: str, room: str, username: str) -> str:
     action = parts[0].lower().lstrip("!/") if parts else ""
     if action == "version":
         return _version_command()
+    if action == "arena.setchallenger":
+        try:
+            return _arena_set_challenger_command(handler, parts[1:])
+        except Exception as exc:
+            return f"Error: {exc}"
     if action == "arena-cleanup":
         try:
             return _arena_clear_command(handler)
@@ -578,18 +795,57 @@ def handle_command(handler, cmd: str, room: str, username: str) -> str:
             return _account_cleanup_command(handler)
         except Exception as exc:
             return f"Error: {exc}"
+    if action == "collection-fix":
+        try:
+            return _collection_fix_command(handler, parts[1:])
+        except Exception as exc:
+            return f"Error: {exc}"
+    if action == "campaign-cleanup":
+        try:
+            return _campaign_cleanup_command(handler, parts[1:])
+        except Exception as exc:
+            return f"Error: {exc}"
+    if action == "restart":
+        try:
+            return _cmd_restart(handler)
+        except Exception as exc:
+            return f"Error: {exc}"
+    if action == "campaign-restart":
+        # Destructive: wipes this champion's campaign progress, so require
+        # an explicit "confirm".
+        if "confirm" not in [a.lower() for a in parts[1:]]:
+            return ("This deletes ALL campaign progress for your newest "
+                    "champion and restarts at the AZ0 starter. "
+                    "Run !campaign-restart confirm to proceed.")
+        from profile_db import db_latest_champion_for_user
+        db = hconnect_server._db
+        champ = db_latest_champion_for_user(
+            handler.user_profile["id"], conn=db)
+        if not champ:
+            return "No champion found — create one first"
+        import campaign
+        deleted, cid = campaign.restart_champion_campaigns(db, champ[0])
+        return (f"Deleted {deleted} campaign(s) for champion {champ[0]}; "
+                f"new starter campaign {cid}. Re-select the champion to reload.")
+    if action == "playtest":
+        # Campaign editor Play: not gated by allowcon; the token is bound to
+        # the editor account and must match this player's account.
+        try:
+            return _playtest_command(handler, parts[1:])
+        except Exception as exc:
+            import traceback
+            traceback.print_exc()
+            return f"Playtest error: {exc}"
     if action == "issue":
         raw_command = cmd.strip()
         title = raw_command[len(parts[0]):].strip() if parts else ""
         return _issue_command(handler, title)
-    if action in ("help", "commands") and "allowcon" not in getattr(
-            hconnect_server, "PROFILE_FEATURE_FLAGS", ()):
-        return _public_help_command()
     # Help is informational and must remain available from chat while the
-    # client is on the panorama.  It should not fall through to the active
-    # game/session gate used by state-mutating debug commands.
+    # client is on the panorama.  It is never gated: it lists only the
+    # commands this user can run.
     if action in ("help", "commands"):
-        return "\n".join(_full_help_lines())
+        developer = "allowcon" in getattr(hconnect_server, "PROFILE_FEATURE_FLAGS", ())
+        return "\n".join(_help_lines(developer))
     # The profile flag controls both the client's console UI and the server
     # endpoint.  Do not rely on the client hiding the backtick console: a
     # client can still submit a chat command directly.
@@ -624,6 +880,15 @@ def handle_command(handler, cmd: str, room: str, username: str) -> str:
             return _cmd_encounter(handler, args)
         except Exception as e:
             return f"Error: {e}"
+    profile_commands = {"partycap": _cmd_partycap, "additem": _cmd_additem,
+                        "addchest": _cmd_addchest, "addgold": _cmd_addgold}
+    if action in profile_commands:
+        if not getattr(handler, "user_profile", None):
+            return "No profile"
+        try:
+            return profile_commands[action](handler, args)
+        except Exception as e:
+            return f"Error: {e}"
     if action == "challenge":
         try:
             return _cmd_challenge(handler, args)
@@ -640,7 +905,7 @@ def handle_command(handler, cmd: str, room: str, username: str) -> str:
         return "No active game"
 
     pl_t = game_engine.UID.make(244, int(handler.client_reck_id))
-    ai_t = game_engine.UID.make(3, 1000)
+    ai_t = game_engine.UID.make(game_engine.SERVICE_AI_UID_TYPE, 1000)
     # Tournament game_cards are keyed by the ServicePlayer/reckoning id;
     # campaign/practice cards use the local profile id.  Debug commands must
     # use the same owner key as the active game or they can create a phantom
@@ -709,6 +974,184 @@ def _refresh_pvp_debug_options(tournament_game, session, state):
     tournament_game.pvp_push_current_phase_options(session, state)
 
 
+def _has_live_battle(player_uid):
+    """True when this player is in a battle that is still running. Sessions
+    the client abandoned stay 'joined' in game_sessions, so only a recent
+    'joined' session counts (battles do not last hours)."""
+    import json as _json
+    raw = int(player_uid) >> 8 if (int(player_uid) & 0xff) == hconnect_server.UID_TYPE["ServicePlayer"] else int(player_uid)
+    ids = {raw, encoder.make_uid(hconnect_server.UID_TYPE["ServicePlayer"], raw)}
+    import campaign_playtest
+    rows = hconnect_server._db.execute(
+        "SELECT session_name, players_json FROM game_sessions WHERE state='joined' "
+        "AND created_at > datetime('now','-3 hours')").fetchall()
+    for session_name, players_json in rows:
+        # An abandoned playtest battle (camp id above the playtest base) is not
+        # a live battle; a new playtest must be able to start.
+        name = str(session_name or "")
+        if name.startswith("camp_") and name[5:].isdigit() and \
+                int(name[5:]) >= campaign_playtest.PLAYTEST_CAMPAIGN_BASE:
+            continue
+        try:
+            players = _json.loads(players_json or "[]")
+        except (TypeError, ValueError):
+            continue
+        if any(isinstance(p, (list, tuple)) and p and int(p[0]) in ids for p in players):
+            return True
+    return False
+
+
+def _playtest_command(handler, args):
+    """``!playtest <token>``: start a campaign-editor Play battle on this
+    connection (see campaign_playtest)."""
+    if getattr(handler, "client_reck_id", None):
+        player_uid = encoder.make_uid(hconnect_server.UID_TYPE["ServicePlayer"],
+                                      int(handler.client_reck_id))
+        if _has_live_battle(player_uid):
+            return "Playtest: finish or leave your current battle first."
+    import campaign_playtest
+    return campaign_playtest.run_command(
+        handler, hconnect_server._db, args,
+        hconnect_server.UID_TYPE["ServiceCampaign"],
+        hconnect_server.SERVICE_MAIL_UID)
+
+
+def _item_name_key(name):
+    """Lowercase alphanumerics only, so "bebo" matches "B.E.B.O."."""
+    return "".join(ch for ch in str(name).lower() if ch.isalnum())
+
+
+def _cmd_additem(handler, args):
+    """Grant an inventory item by name: !additem <item name> [xN].
+
+    Works for any InventoryItemData (mercenaries, equipment, chests,
+    sleeves, ...).  Names ignore case and punctuation; an exact name wins,
+    then a unique partial match, then spelling suggestions.
+    """
+    quantity = 1
+    if args and args[-1].lower().startswith("x") and args[-1][1:].isdigit():
+        quantity = max(1, min(99, int(args[-1][1:])))
+        args = args[:-1]
+    wanted_text = " ".join(args).strip()
+    wanted = _item_name_key(wanted_text)
+    if not wanted:
+        return "Usage: !additem <item name> [xN]"
+    from gamedata import DEFAULT_RECORD_STORE
+    items = [record for record in DEFAULT_RECORD_STORE.load("InventoryItemData")
+             if record.field("m_Name")]
+    matches = [r for r in items if _item_name_key(r.field("m_Name")) == wanted]
+    if not matches:
+        matches = [r for r in items if wanted in _item_name_key(r.field("m_Name"))]
+    names = sorted({r.field("m_Name") for r in matches})
+    if not matches:
+        import difflib
+        by_key = {_item_name_key(r.field("m_Name")): r.field("m_Name") for r in items}
+        close = difflib.get_close_matches(wanted, list(by_key), n=5, cutoff=0.7)
+        if close:
+            return (f"No item named '{wanted_text}'. Did you mean: "
+                    + ", ".join(by_key[key] for key in close) + "?")
+        from profile_db import db_card_template_named
+        if db_card_template_named(wanted_text, conn=hconnect_server._db):
+            return f"'{wanted_text}' is a card, not an inventory item"
+        return f"No item named '{wanted_text}'"
+    if len(names) > 1:
+        return (f"{len(names)} items match: " + ", ".join(names[:8])
+                + (" ..." if len(names) > 8 else ""))
+    item = matches[0]
+    kind = str(item.field("m_Type") or "item").lower()
+    updates = hconnect_server._grant_pack_inventory_rewards(
+        handler, [(item.guid, kind)] * quantity)
+    hconnect_server._db.commit()
+    for template_guid, item_uid, total in updates:
+        handler.push_inventory_to_client(
+            qty=total, template_guid=template_guid, item_id=item_uid)
+    total = updates[-1][2] if updates else quantity
+    return f"Added {quantity}x {names[0]} ({item.field('m_Type')}); you now have {total}"
+
+
+# Booster sets in release order, so "!addchest rare 2" means Shattered Destiny.
+BOOSTER_SETS = (
+    ("Shards of Fate", "0382f729-7710-432b-b761-13677982dcd2"),
+    ("Shattered Destiny", "b05e69d2-299a-4eed-ac31-3f1b4fa36470"),
+    ("Armies of Myth", "fce480eb-15f9-4096-8d12-6beee9118652"),
+    ("Primal Dawn", "2d05262c-d7a0-408f-a280-36d206a29344"),
+    ("Herofall", "ecdbc188-5750-48ef-acac-05e2bcbcc46f"),
+    ("Scars of War", "fbbac856-2264-4d31-97b0-0d8a646b9597"),
+    ("Frostheart", "326602fa-e183-4dfe-8300-55cc0c7c4ce8"),
+    ("Dead of Winter", "9a824393-cd11-4273-a05e-41e35eb50dbe"),
+    ("Doombringer", "54f14f51-2afe-4a26-be28-d251b06a9cc4"),
+)
+CHEST_RARITIES = ("Common", "Uncommon", "Rare", "Legendary", "Primal")
+
+
+def _cmd_addchest(handler, args):
+    """Add booster treasure chests: !addchest <rarity> [set] [xN].
+
+    ``set`` is a set number (1 = Shards of Fate) or name and defaults to
+    Set 1.  The client builds its chest list from the login profile stream,
+    so the chests appear after the next login.
+    """
+    from profile_db import db_create_treasure_chest
+    usage = ("Usage: !addchest <common|uncommon|rare|legendary|primal> "
+             "[set number or name] [xN]  (then log out and back in)")
+    quantity = 1
+    if args and args[-1].lower().startswith("x") and args[-1][1:].isdigit():
+        quantity = max(1, min(50, int(args[-1][1:])))
+        args = args[:-1]
+    if not args:
+        return usage
+    rarity = next((r for r in CHEST_RARITIES if r.lower() == args[0].lower()), None)
+    if rarity is None:
+        return usage
+    wanted = _item_name_key(" ".join(args[1:]).removeprefix("set"))
+    if not wanted:
+        set_name, set_guid = BOOSTER_SETS[0]
+    elif wanted.isdigit() and 1 <= int(wanted) <= len(BOOSTER_SETS):
+        set_name, set_guid = BOOSTER_SETS[int(wanted) - 1]
+    else:
+        matches = [s for s in BOOSTER_SETS if wanted in _item_name_key(s[0])]
+        if len(matches) != 1:
+            return ("Unknown set. Sets: " + ", ".join(
+                f"{i} {name}" for i, (name, _) in enumerate(BOOSTER_SETS, 1)))
+        set_name, set_guid = matches[0]
+    for _ in range(quantity):
+        db_create_treasure_chest(handler.user_profile["id"], set_guid, rarity,
+                                 conn=hconnect_server._db)
+    hconnect_server._db.commit()
+    return (f"Added {quantity}x {rarity} {set_name} chest; "
+            "log out and back in to see it")
+
+
+def _cmd_addgold(handler, args):
+    """Add gold: !addgold <amount>."""
+    from profile_db import db_adjust_user_currency
+    amount = args[0].replace(",", "") if args else ""
+    if not amount.isdigit() or not 0 < int(amount) <= 10_000_000:
+        return "Usage: !addgold <amount up to 10,000,000>"
+    gold, _platinum = db_adjust_user_currency(
+        handler.user_profile["id"], gold_delta=int(amount), conn=hconnect_server._db)
+    hconnect_server._db.commit()
+    if hasattr(handler, "push_balance_to_client"):
+        handler.push_balance_to_client()
+    return f"Added {int(amount):,} gold; you now have {gold:,}"
+
+
+def _cmd_partycap(handler, args):
+    """Set the mercenary party-slot flag: !partycap <0-4>.
+
+    The client reads CAMP_PARTYCAP from the login profile stream, so the new
+    value applies after the next login.
+    """
+    from services import mercenaries
+    if not args or not args[0].isdigit():
+        return "Usage: !partycap <0-4>  (then log out and back in)"
+    slots = max(0, min(4, int(args[0])))
+    mercenaries.set_flag(hconnect_server._db, handler.user_profile["id"],
+                         mercenaries.PARTY_CAP_FLAG, slots, 4)
+    hconnect_server._db.commit()
+    return f"Mercenary party slots set to {slots}; log out and back in to apply"
+
+
 def _cmd_encounter(handler, args):
     """Launch an encounter battle: !encounter <encounter_guid>.
 
@@ -740,6 +1183,86 @@ def _cmd_encounter(handler, args):
                                "ServiceCampaign", str(hconnect_server.UID_TYPE["ServiceCampaign"]),
                                0, hconnect_server.SERVICE_MAIL_UID)
     return f"Launched encounter {encounter_guid} (camp={camp_id})"
+
+
+def _restart_fra_battle(handler, session):
+    """Abandon the caller's live FRA battle without a result, so the client returns to the arena lobby.
+
+    The client leaves a battle only through GameEnded, and the server records the arena outcome when it
+    publishes that event.  This pushes GameEnded for the screen but records nothing, so the roster, wins
+    and losses stay as they were.  The player presses Battle again to fight the same challenger.
+    """
+    from gamemodes.fra_arena import _fra_arena_setup_values
+    from pvp_db import db_delete_game_session
+    if _fra_arena_setup_values(session.encounter_data) is None:
+        return "No campaign or FRA battle to restart"
+    player_uid = game_engine.UID.make(244, int(handler.client_reck_id))
+    ai_uid = game_engine.UID.make(game_engine.SERVICE_AI_UID_TYPE, 1000)
+    push_battle_game_end(handler, session, winners=[ai_uid], losers=[player_uid])
+    db_delete_game_session(session.session_id)
+    hconnect_server._db.commit()
+    return "FRA battle abandoned without a result; press Battle to fight the same challenger"
+
+
+def _cmd_restart(handler):
+    """Restart the current campaign encounter: !restart.
+
+    The live battle is abandoned with no result: no GameEnded, no
+    gameendnotify, so Wins, Losses and dungeon lives are left alone.  The same
+    encounter (scene, conversation and mod choice) is then relaunched.  A live
+    FRA battle is abandoned without a result instead.
+    """
+    from campaign_runtime import progress, runtime
+    from campaign_playtest import is_playtest_campaign
+    from pve_db import db_campaign_protocol_row, db_champion_last_deck_id
+    from pvp_db import db_delete_game_session
+    db = hconnect_server._db
+    player_uid = encoder.make_uid(hconnect_server.UID_TYPE["ServicePlayer"],
+                                  int(handler.client_reck_id))
+    session = game_session.find_session_by_player(player_uid)
+    if session and not str(session.session_name or "").startswith("camp_"):
+        return _restart_fra_battle(handler, session)
+    if not session:
+        return "No campaign battle to restart"
+    camp_id = int(session.session_name[5:])
+    if is_playtest_campaign(camp_id):
+        return "Editor Play battles cannot be restarted"
+    row = db_campaign_protocol_row(camp_id, conn=db)
+    if not row:
+        return "Campaign not found"
+    champ_id = row[0]
+    with progress.champion_lock(champ_id):
+        state = _json.loads(row[1] or "{}")
+        encounter = state.get("ActiveEncounterGuid")
+        if not encounter:
+            return "No encounter in progress to restart"
+        # Record the battle's node and scene as battle_start does: battle_end
+        # applies the result from this record, and without it a win is dropped.
+        # Checked before anything is torn down, so a failure leaves the battle.
+        zone_id = runtime.owns(db, camp_id)
+        if zone_id:
+            zone = runtime.Zone(db, camp_id, zone_id)
+            node = zone.battle_node()
+            if not node:
+                return "No map node to restart the encounter on"
+            zone.rt["battle"] = {"node": node, "scene": encounter,
+                                 "mod": state.get("ActiveEncounterModChoice")}
+            zone.store()
+            db.commit()
+        # Drop the live battle's rows (cards, events, transactions, session)
+        # without applying a result.  The relaunch below records a fresh one.
+        db_delete_game_session(session.session_id)
+        deck_db_id = db_champion_last_deck_id(champ_id, conn=db)
+        deck_uid64 = (deck_db_id << 8) | 17 if deck_db_id else 0
+        campaign._launch_encounter(
+            handler, db, camp_id, champ_id, encounter, deck_uid64, 0,
+            "00000000-0000-0000-0000-000000000000", "ServiceCampaign",
+            str(hconnect_server.UID_TYPE["ServiceCampaign"]), 0,
+            hconnect_server.SERVICE_MAIL_UID,
+            encounter_mod_conversation_guid=state.get(
+                "ActiveEncounterConversationGuid"),
+            mod_choice=state.get("ActiveEncounterModChoice"))
+    return f"Restarted encounter {encounter} (camp={camp_id}); lives unchanged"
 
 
 def _cmd_game_end(handler, args):
@@ -951,7 +1474,7 @@ def _push_battle_game_end(handler, session, won):
     the 3055 channel so the client shows the Victory/Defeat screen.
     """
     pl_uid = game_engine.UID.make(244, int(handler.client_reck_id))
-    ai_uid = game_engine.UID.make(3, 1000)
+    ai_uid = game_engine.UID.make(game_engine.SERVICE_AI_UID_TYPE, 1000)
     if won:
         push_battle_game_end(handler, session, [pl_uid], [ai_uid])
     else:
@@ -1032,7 +1555,7 @@ def _push_card_update(handler, db, session, pl_t, card_id, user_id=None, **overr
                 gem_type = int(gems.get(str(instance_id), 0)) if gems else 0
             except: pass
     scid = game_engine.SessionCardId(game_engine.UID(card_id))
-    ai_t = game_engine.UID.make(3, 1000)
+    ai_t = game_engine.UID.make(game_engine.SERVICE_AI_UID_TYPE, 1000)
     game = game_engine.Game(session.session_id, pl_t, ai_t)
     game.card_defs[scid] = game_engine.CardDef("Card", ct, cost, atk, def_, shards, abilities)
     kwargs = {'attack': atk, 'defense': def_, 'cost': cost, 'template_id': tpl_guid, 'gems': gem_type}
@@ -1042,6 +1565,8 @@ def _push_card_update(handler, db, session, pl_t, card_id, user_id=None, **overr
     collection_override = kwargs.pop('collection_override', None)
     if collection_override is not None:
         zone_val = collection_override
+    kwargs.setdefault(
+        'nulling', zone_val == game_engine.ECardCollections.Deck)
     game.push_card_updated(scid, pl_t, zone_val, ct, state=state_val, **kwargs)
     if attr_override is not None and game.events:
         game.events[-1].attributes = attr_override
@@ -1057,8 +1582,39 @@ def _dispatch(handler, action, args, session, pl_t, ai_t, room, username):
     command_owner_id = (int(handler.client_reck_id) if is_tourney
                         else handler.user_profile["id"])
 
+    if action == "irengine":
+        # "!irengine on|off" switches the interpreter engine (rules_port/ir_exec.py) for the abilities
+        # it covers; "!irengine" alone reports the setting.
+        from rules_port import ir_exec
+        mode = str(args[0]).lower() if args else "status"
+        if mode in ("on", "off"):
+            ir_exec.set_engine(mode == "on")
+        elif mode != "status":
+            return "Usage: !irengine [on|off]"
+        return f"Interpreter engine: {'on' if ir_exec.ENGINE_ON else 'off'}"
+
     if action == "draw":
-        count = max(1, int(args[0]) if args else 1)
+        # "!draw N" draws for you; "!draw opp N" draws for the AI.
+        words = [str(arg).lower() for arg in args]
+        side = "opp" if words[:1] in (["opp"], ["opponent"]) else "me"
+        count_args = args[1:] if words[:1] in (["opp"], ["opponent"], ["me"]) else args
+        count = max(1, int(count_args[0]) if count_args else 1)
+        if side == "opp":
+            if is_tourney:
+                return "Opponent draws are not supported in PvP games"
+            from pvp_db import db_ai_deck_top_card
+            engine = handler._checkpoint_engine(session)
+            game = game_engine.Game(session.session_id, pl_t, ai_t)
+            drew = 0
+            for _ in range(count):
+                if db_ai_deck_top_card(session.session_id, conn=db) is None:
+                    break
+                battle_state = engine.load_state(session)
+                handler._ai_draw_card(game, session, ai_t, battle_state)
+                engine.save_state(session, battle_state)
+                drew += 1
+            _send_game_events(handler, game, session, pl_t)
+            return f"AI drew {drew} cards"
         if is_tourney:
             from services.tournament_game import pvp_debug_draw
             drew = pvp_debug_draw(handler, session, count)
@@ -1143,8 +1699,6 @@ def _dispatch(handler, action, args, session, pl_t, ai_t, room, username):
                                game_engine.card_type_from_db(ct_d) if ct_d else game_engine.ECardTypes.Troop,
                                attack=atk_d, defense=def_d, cost=cost_d,
                                template_id=tpl_d, gems=gem_d)
-        game.push_card_moved(scid, owner_player_uid, game_engine.ECardCollections.Discard,
-                             game_engine.ECardLocations.Top, 0)
         game.push_player_updated(pl_t, champ_id=getattr(handler, "_player_champ_scid", None))
         game.push_green_light(pl_t, game_engine.EPriorityContext.Normal)
         _send_game_events(handler, game, session, pl_t)
@@ -1191,9 +1745,6 @@ def _dispatch(handler, action, args, session, pl_t, ai_t, room, username):
             handler._card_full_data(game, scid, tpl_guid, card_tpl_id)
         card_type = (game_engine.card_type_from_db(ct_d)
                      if isinstance(ct_d, str) else ct_d)
-        game.push_card_moved(scid, owner_player_uid,
-                             game_engine.ECardCollections.Deck,
-                             game_engine.ECardLocations.Top, 0)
         game.push_card_updated(scid, owner_player_uid,
                                game_engine.ECardCollections.Deck, card_type,
                                template_id=tpl_d, cost=cost_d,
@@ -1309,6 +1860,12 @@ def _dispatch(handler, action, args, session, pl_t, ai_t, room, username):
             return f"Thresholds: {vals} for {target}"
 
         uid = pl_t if target == "me" else ai_t
+        # The client has no Colorless threshold counter, so a Colorless change crashes its threshold animation
+        # (BattleAnimationSetChampionThreshold). Colorless keeps its stored value; the other colours still change.
+        import battle_engine as _be_colorless
+        stored = dict(_be_colorless.load_state(session).get(
+            "player_threshold" if target == "me" else "ai_threshold") or {})
+        vals[0] = int(stored.get(1, stored.get("1", 0)) or 0)
         game = game_engine.Game(session.session_id, pl_t, ai_t)
         thresholds = {
             game_engine.ECardShards.Colorless: vals[0],
@@ -1404,9 +1961,19 @@ def _dispatch(handler, action, args, session, pl_t, ai_t, room, username):
             target = "me"
             val = int(args[0]) if args else 0
         uid = pl_t if target == "me" else ai_t
+        # Write the authoritative battle state first, as the resource branch
+        # does; a transient event alone is overwritten by the next damage.
+        import battle_engine as _be
+        from rules_port.runtime_helpers import set_game_champion_health
+        bstate = _be.load_state(session)
+        key = "player_health" if target == "me" else "ai_health"
+        old_val = int(bstate.get(key, 20) or 0)
+        bstate[key] = val
+        _be.save_state(session, bstate)
         game = game_engine.Game(session.session_id, pl_t, ai_t)
+        set_game_champion_health(game, bstate, uid, key, val)
         ev = game_engine.ChampionHealthChangedSessionEventArgs()
-        ev.player_id = uid; ev.old_damage_value = val; ev.new_damage_value = val
+        ev.player_id = uid; ev.old_damage_value = old_val; ev.new_damage_value = val
         game._push(ev)
         _send_game_events(handler, game, session, pl_t)
         return f"Health set to {val} for {target}"
@@ -1514,8 +2081,86 @@ def _dispatch(handler, action, args, session, pl_t, ai_t, room, username):
         _send_game_events(handler, game, session, pl_t)
         return f"Generated card: {name} ({tpl_guid})"
 
+    elif action == "give":
+        # Put a card in a player's hand, with the thresholds it needs to play.
+        # ``opp`` (the default) is the opponent's hand; ``me`` is yours.
+        if args and args[0].lower() in ("me", "opp"):
+            target, name_parts = args[0].lower(), args[1:]
+        else:
+            target, name_parts = "opp", args
+        name = " ".join(name_parts).strip().lower()
+        if not name:
+            return "Usage: !give [me|opp] <card name>"
+        row = db.execute(
+            "SELECT guid, card_type, threshold_json FROM card_templates "
+            "WHERE LOWER(name)=? "
+            "ORDER BY COALESCE(equipment_modified,0), guid LIMIT 1",
+            (name,)).fetchone()
+        if not row:
+            return f"No card named '{name}'"
+        if is_tourney:
+            from pvp_db import db_game_session_pids
+            mine = int(handler.client_reck_id)
+            if target == "me":
+                owner = mine
+            else:
+                owner = next((int(pid) for pid in db_game_session_pids(session.session_id)
+                              if int(pid) != mine), None)
+                if owner is None:
+                    return "No opponent in this session"
+        else:
+            owner = command_owner_id if target == "me" else 0
+        from pvp_db import (db_next_card_uid, db_insert_debug_card,
+                            db_set_card_abilities)
+        card_uid = db_next_card_uid(session.session_id, conn=db)
+        card_uid, _template = db_insert_debug_card(
+            session.session_id, owner, card_uid, row, "hand", conn=db)
+        # The debug insert carries no ability list, so copy the template's own
+        # abilities, as a deck-built card has them.
+        template_abilities = db.execute(
+            "SELECT abilities_json FROM card_templates WHERE guid=?",
+            (row[0],)).fetchone()
+        db_set_card_abilities(session.session_id, card_uid,
+                              (template_abilities[0] if template_abilities
+                               else None) or "[]", conn=db)
+        db.commit()
+        # Thresholds: raise the receiver's counts to what the card needs.
+        try:
+            needed = [max(0, int(v)) for v in
+                      (_json.loads(row[2] or "{}").get("values") or [])][:6]
+        except (TypeError, ValueError, _json.JSONDecodeError):
+            needed = []
+        needed += [0] * (6 - len(needed))
+        flags = [1, 4, 8, 16, 32, 64]
+        if is_tourney:
+            from services import tournament_game as _tg
+            state = _tg.pvp_load_state(session) or {}
+            current = dict(state.get(f"thresh_{owner}") or {})
+            for flag, count in zip(flags, needed):
+                current[flag] = max(int(current.get(flag, 0) or 0), count)
+            state[f"thresh_{owner}"] = {f: c for f, c in current.items() if c}
+            _tg.pvp_save_state(session, state)
+            _tg._pvp_sync_game_state(session)
+            _refresh_pvp_debug_options(_tg, session, state)
+        else:
+            import battle_engine as _be
+            bstate = _be.load_state(session)
+            threshold_key = "player_threshold" if owner == command_owner_id else "ai_threshold"
+            shard_keys = [game_engine.ECardShards.Colorless, game_engine.ECardShards.Blood,
+                          game_engine.ECardShards.Ruby, game_engine.ECardShards.Sapphire,
+                          game_engine.ECardShards.Wild, game_engine.ECardShards.Diamond]
+            current = dict(bstate.get(threshold_key) or {})
+            for key, count in zip(shard_keys, needed):
+                current[key] = max(int(current.get(key, 0) or 0), count)
+            bstate[threshold_key] = current
+            _be.save_state(session, bstate)
+        _push_card_update(handler, db, session, pl_t, card_uid, user_id=owner,
+                          collection_override=game_engine.ECardCollections.Hand)
+        return (f"Gave {name} to {target}'s hand (card {card_uid}); "
+                f"thresholds set for it to play")
+
     elif action == "help":
-        lines = _full_help_lines()
+        lines = _help_lines(True)
         for line in lines:
             _send_chat(handler, line, room, username)
         return ""
@@ -1560,12 +2205,9 @@ def _dispatch(handler, action, args, session, pl_t, ai_t, room, username):
         from pvp_db import db_move_debug_card
         db_move_debug_card(session.session_id, card_id, zone_name, conn=db)
         db.commit()
-        # CardMoved first (animation), then CardUpdated (updates cache to new zone)
-        game = game_engine.Game(session.session_id, pl_t, ai_t)
-        scid = game_engine.SessionCardId(game_engine.UID(card_id))
-        game.push_card_moved(scid, pl_t, zone_val, game_engine.ECardLocations.Unknown, 0)
-        _send_game_events(handler, game, session, pl_t)
-        _push_card_update(handler, db, session, pl_t, card_id, collection_override=zone_val)
+        _push_card_update(
+            handler, db, session, pl_t, card_id,
+            user_id=command_owner_id, collection_override=zone_val)
         return f"Moved {card_id} to {zone_name} (zone={zone_val})"
 
     elif action == "update":
