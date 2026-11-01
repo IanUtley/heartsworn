@@ -1497,6 +1497,10 @@ def _run_effects(guid: str, root: MechanicsObject, scope: Scope, start: int) -> 
                 _record_revealed_chosen(root, index, scope)
             if _short(effect_type) == "ConversationAbilityEffectTemplate":
                 _pause_for_conversation(guid, position, effect_raw, scope)
+            if _short(effect_type) == "DoubleChoiceAbilityEffectTemplate" and int(scope.owner_uid):
+                # A player's choice is offered by the native choice stage, which answers through the client; an AI's
+                # choice is made at once (run through the native leaf below).
+                _pause_for_double_choice(guid, position, effect_raw, scope)
             if _short(effect_type) == "ActivateAbilityEffectTemplate":
                 _invoke(guid, position, effect_raw, scope, _target_owners(root, index, scope))
                 continue
@@ -1894,6 +1898,23 @@ def _conversation_continuation(guid: str, position: int, scope: Scope) -> dict[s
             "picked": {str(k): list(v) for k, v in scope.picked.items()},
             "variables": dict(scope.variables), "resolved": _resolved_json(scope),
             "applied": {str(k): v for k, v in scope.applied.items()}}
+
+
+def _pause_for_double_choice(guid: str, position: int, effect_raw: dict[str, Any], scope: Scope) -> None:
+    """C# DoubleChoiceAbilityEffectTemplate for a player: the native choice stage offers the cards and queues its pending
+    choice. The interpreter's continuation rides along in that pending state, so the client's answer plays the chosen
+    card and resumes the interpreter after this clause (resume_conversation). Raises NeedsConversation when the choice
+    paused; returns when it did not (nothing to choose)."""
+    bstate = scope.context.bstate
+    scope.applied[position] = True
+    continuation = _conversation_continuation(guid, position, scope)
+    bstate["_interpreter_continuation"] = continuation
+    try:
+        run_native_leaf(scope.context, "DoubleChoiceAbilityEffectTemplate", effect_raw, [])
+    finally:
+        bstate.pop("_interpreter_continuation", None)
+    if bstate.get("pending_choice"):
+        raise NeedsConversation(continuation)
 
 
 def _pause_for_conversation(guid: str, position: int, effect_raw: dict[str, Any], scope: Scope) -> None:

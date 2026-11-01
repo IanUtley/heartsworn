@@ -937,6 +937,44 @@ class PendingChoicesMixin:
         bstate.pop("pending_choice", None)
         bstate.pop("resolution_paused", None)
         g = self._fresh_game(session, pl_t, ai_t, bstate)
+        if pending.get("kind") == "double_choice" and isinstance(pending.get("interpreter"), dict):
+            # The interpreter paused for this choice (rules_port/ir_exec.py). Play the chosen card and resolve its
+            # abilities as the native branch does, then resume the interpreter after the double-choice clause.
+            from rules_port import ir_exec
+            from rules_port.context import EffectContext
+            from rules_port.resolution import prompt_interpreted_reveal
+            bstate["_rules_port_attached"] = True
+            choice_context = EffectContext.from_rules_port(
+                g, session, _hc._db, self, pl_t, ai_t, bstate, "", ability=None)
+            if not play_choice_card(choice_context, chosen_uid, owner_id):
+                _hc.log_req(f"    Choice answer rejected: {hex(int(chosen_uid))}")
+                bstate["pending_choice"] = pending
+                bstate["resolution_paused"] = True
+                _be.save_state(session, bstate)
+                self._push_transaction_ack(session)
+                return True
+            resolve_choice_card_abilities(
+                choice_context, chosen_uid, pending.get("source_uid"), owner_id)
+            _hc.log_req(f"    Choice selected: {hex(int(chosen_uid))}: resuming the interpreter")
+            try:
+                ir_exec.resume_conversation(
+                    pending["interpreter"],
+                    context=EffectContext.from_rules_port(g, session, _hc._db, self, pl_t, ai_t, bstate, ""))
+            except ir_exec.NeedsChoice as pause:
+                prompt_interpreted_reveal(self, g, session, _hc._db, pl_t, ai_t, bstate, pause)
+            except ir_exec.NeedsConversation:
+                pass  # the next pause is saved; the client's answer resumes the interpreter
+            else:
+                self._mark_interpreted_chain_item_done(bstate)
+            _be.save_state(session, bstate)
+            self._send_battle_events(session, g, pl_t)
+            if not bstate.get("pending_choice") and not bstate.get("resolution_paused") and \
+                    self._resume_completed_rules_port_chain(session, bstate):
+                if not self._advance_rules_port_to_priority(session, pl_t, ai_t, bstate):
+                    self._push_transaction_ack(session)
+            else:
+                self._push_transaction_ack(session)
+            return True
         if pending.get("kind") == "choice_zone_target":
             # The picker was opened by the authored child target, not by a
             # summon.  Let that child play and resolve the selected token,

@@ -26,6 +26,9 @@ NATIVE_LEAF_EFFECTS = frozenset({
     "LoadPlayerDeckAbilityEffectTemplate",
     # Queues a copy of the activated ability (the one in battle state's card_activated_item), rules_port.effects._copy_ability.
     "CopyAbilityEffectTemplate",
+    # Offers the choice cards for an AI (chosen at once) or a player (the interpreter pauses for the player's answer,
+    # see rules_port.ir_exec._pause_for_double_choice). rules_port.choice_effects.double_choice.
+    "DoubleChoiceAbilityEffectTemplate",
 })
 
 # The TAC operations the native leaf (EffectContext.tac) implements. A TAC operation outside this set is refused by

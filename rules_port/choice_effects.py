@@ -304,6 +304,9 @@ def double_choice(context):
     pending = context.continuation()
     pending.update({"kind": "double_choice", "choice_uids": list(dict.fromkeys(
         int(uid) for uid in choice_uids))})
+    if context.bstate.get("_interpreter_continuation"):
+        # The interpreter paused here: its continuation resumes it once the player answers.
+        pending["interpreter"] = context.bstate["_interpreter_continuation"]
     context.bstate["pending_choice"] = pending
     context.bstate["resolution_paused"] = True
     prompt = getattr(context.handler, "_prompt_choice_cards", None)
