@@ -21,6 +21,7 @@ EFFECTS = {
     "TransformSelfAbilityEffectTemplate",
     "ConscriptAbilityEffectTemplate",
     "CreateTokenMatchingTargetAbilityEffectTemplate",
+    "TransformCardIntoReplicaAbilityEffectTemplate",
 }
 
 # The TAC flags a matching token takes: SameName narrows the pool to the target's own template, SameOwner creates the
@@ -165,6 +166,12 @@ def _transform_self(context: Any, target: int, count: int | None) -> None:
     context.transform_self()
 
 
+def _transform_replica(context: Any, target: int, count: int | None) -> None:
+    # C# TransformCardIntoReplicaAbilityEffectTemplate: the target becomes a replica of itself, keeping its zone. The
+    # native leaf reads the target from the resolving-target alias the runner names.
+    context.transform_replica()
+
+
 def _conscript(context: Any, target: int, count: int | None) -> None:
     # C# ConscriptAbilityEffectTemplate: cards from the deck for the player (the target is the player's champion).
     # The leaf reads its amount from the bridged ability variables, and the owner from the target.
@@ -194,4 +201,5 @@ _RUNNERS: dict[str, Callable[[Any, int, int | None], None]] = {
     "TransformSelfAbilityEffectTemplate": _transform_self,
     "ConscriptAbilityEffectTemplate": _conscript,
     "CreateTokenMatchingTargetAbilityEffectTemplate": _create_matching,
+    "TransformCardIntoReplicaAbilityEffectTemplate": _transform_replica,
 }
