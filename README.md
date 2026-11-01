@@ -115,7 +115,7 @@ docker run --rm `
   -e HEX_CLIENT_ROOT='/client-data' `
   -e HEX_GAMEDATA='/client-data/Data/gamedata' `
   -e HEX_CAMPAIGN_EDITOR_PORT='8765' `
-  ghcr.io/ianutley/hex-server:0.4.3
+  ghcr.io/ianutley/heartsworn:0.4.3
 ```
 
 ```bash
@@ -135,7 +135,7 @@ docker run --rm \
   -e HEX_CLIENT_ROOT='/client-data' \
   -e HEX_GAMEDATA='/client-data/Data/gamedata' \
   -e HEX_CAMPAIGN_EDITOR_PORT='8765' \
-  ghcr.io/ianutley/hex-server:0.4.3
+  ghcr.io/ianutley/heartsworn:0.4.3
 ```
 
 The campaign editor is at `http://localhost:8765/` and uses Hex account
