@@ -29,6 +29,7 @@ BRIDGED_CONDITIONS = frozenset({
     "RequiresChampionCharges", "RequiresChampionHealth", "RequiresResourceThreshold",
     "RequiresSourcePassesFilterCondition", "RequiresTotalResources", "SourceCardHasCounters",
     "SourceCardHasKeywords", "TACTriggerCondition", "TurnPhaseCondition", "NotEffectCondition",
+    "NotAbilityCondition", "NotContingentAbilityCondition", "AbilityVariableCondition",
     "TriggerPlayerControlsCard",
     # Trigger tests the native evaluator reads from the event and the ability (conditions.evaluate_condition).
     "TriggerCardIsNthCardDrawnThisTurnByThisPlayer", "TriggerAbilityHasSpellPointCostModifier",
@@ -135,6 +136,8 @@ def condition_context(scope: Any, *, target: int | None = None, event_type: str 
     # The ability's bound variables (a number the player chose, say) are what its filters read, as the native path reads
     # them from the ability's activation.
     condition.ability_variables = dict(scope.variables or {})
+    # Which earlier effects of the ability applied (a NotContingentAbilityCondition reads them).
+    condition.applied_effects = dict(getattr(scope, "applied", None) or {})
     return condition
 
 

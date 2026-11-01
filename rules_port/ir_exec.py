@@ -1037,10 +1037,13 @@ def _run_clause(root: MechanicsObject, clause: Any, scope: Scope) -> None:
         if kind == "DamageModifier":
             from rules_port.damage_effects import deal_damage
             deal_damage(scope.context, target, _input_value(modifier, scope))
+        elif kind == "CounterModifier" and modifier.m_RemoveAllCounters:
+            from rules_port.counter_effects import remove_all_counters
+            remove_all_counters(scope.context, target)
         elif kind == "CounterModifier":
             from rules_port.bom_fields import counter_template_name
             from rules_port.counter_effects import change_counter
-            if modifier.m_RemoveAllCounters or modifier.m_Operation not in COUNTER_OPERATIONS:
+            if modifier.m_Operation not in COUNTER_OPERATIONS:
                 raise NotImplementedError(f"counter operation {modifier.m_Operation}")
             counter = _guid(modifier.m_CardCounterTemplateId)
             amount = _input_value(modifier, scope)
@@ -2270,6 +2273,6 @@ def coverage(guid: str) -> list[str]:
             missing.append(f"modifier {modifier or '(untagged)'}")
         elif modifier == "CounterModifier" and (
                 (effect.get("m_Modifier") or {}).get("m_Operation") not in COUNTER_OPERATIONS
-                or (effect.get("m_Modifier") or {}).get("m_RemoveAllCounters")):
+                and not (effect.get("m_Modifier") or {}).get("m_RemoveAllCounters")):
             missing.append(f"counter operation {(effect.get('m_Modifier') or {}).get('m_Operation')}")
     return sorted(set(missing))

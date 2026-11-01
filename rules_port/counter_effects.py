@@ -265,6 +265,36 @@ def _dazed_change_blocked(context, target, name, operation):
     return _int_attr(context, target, attribute) > 0
 
 
+def remove_all_counters(context, target) -> list[tuple[str, int]]:
+    """C# CounterModifier with RemoveAllCounters: every counter the card carries is removed, whatever its kind.
+
+    A champion's counters are keyed by template GUID in the battle state; a card's are keyed by name in its
+    permanent buffs. Each counter goes through the same leaf as a single removal (so the client is told once per
+    counter). Returns the ``(name, count)`` pairs it removed."""
+    from pvp_db import db_card_mutation_field
+    from .bom_fields import counter_template_name
+    target = int(target)
+    if _champion_owner(context, target) is not None:
+        values = dict(context.bstate.get("champion_counters", {}).get(str(target), {}))
+        held = [(str(guid).lower(), counter_template_name(guid).lower() or "counter", int(count or 0))
+                for guid, count in values.items()]
+    else:
+        raw = db_card_mutation_field(context.session.session_id, target, "permanent_buffs", conn=context.db)
+        try:
+            data = json.loads(raw or "{}")
+        except (TypeError, ValueError, json.JSONDecodeError):
+            data = {}
+        held = [("", str(name).lower(), int(count or 0))
+                for name, count in (data.get("counters") or {}).items()]
+    removed = []
+    for guid, name, count in held:
+        if count <= 0:
+            continue
+        change_counter(context, target, name, guid or None, count, "remove")
+        removed.append((name, count))
+    return removed
+
+
 def change_counter(context, target, name, counter_guid, amount, operation):
     """Apply one typed counter operation and emit its client projection.
 

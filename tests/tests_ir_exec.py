@@ -681,9 +681,29 @@ def test_a_dungeon_opposing_bonus_is_recorded_once_per_resolution():
     assert dungeon_buffs.battle_bonus({dungeon_buffs.BUFFS_KEY: carried}) == (2, 8)
 
 
+def test_remove_all_counters_removes_each_counter_the_card_holds():
+    """A remove-all counter modifier removes every counter a card carries, each by its own count, and skips empty ones."""
+    import json
+    from types import SimpleNamespace
+    from unittest import mock
+
+    from rules_port import counter_effects
+
+    context = SimpleNamespace(session=SimpleNamespace(session_id=1), db=None, bstate={}, handler=None)
+    card = json.dumps({"counters": {"stealth": 2, "burning": 1, "spent": 0}})
+    removed = []
+    with mock.patch.object(counter_effects, "_champion_owner", lambda ctx, uid: None), \
+            mock.patch("pvp_db.db_card_mutation_field", lambda *args, **kwargs: card), \
+            mock.patch.object(counter_effects, "change_counter",
+                              lambda ctx, target, name, guid, amount, op: removed.append((name, amount, op))):
+        assert counter_effects.remove_all_counters(context, 5) == [("stealth", 2), ("burning", 1)]
+    assert removed == [("stealth", 2, "remove"), ("burning", 1, "remove")]
+
+
 if __name__ == "__main__":
     import db as dbmod
-    for run in (test_a_dungeon_opposing_bonus_is_recorded_once_per_resolution,
+    for run in (test_remove_all_counters_removes_each_counter_the_card_holds,
+                test_a_dungeon_opposing_bonus_is_recorded_once_per_resolution,
                 test_a_top_of_deck_int_attr_expires_when_its_source_leaves_the_top,
                 test_burning_ability_runs_from_its_ir, test_dazed_and_vulnerable_removals_match_the_live_engine,
                 test_soulcursed_sacrifices_each_soulcursed_troop_when_one_dies,
