@@ -20,6 +20,8 @@ NATIVE_LEAF_EFFECTS = frozenset({
     "CreateAndCastSpellAbilityEffectTemplate",
     # Presentation only: pushes the client animation for a talent or power (rules_port.effects._animation_trigger).
     "AnimationTriggerEffectTemplate",
+    # Records one typed entry in a named list of the ability (a shard pick's ChosenShards; rules_port.effects).
+    "StoreListAttrAbilityEffectTemplate",
 })
 
 # The TAC operations the native leaf (EffectContext.tac) implements. A TAC operation outside this set is refused by
