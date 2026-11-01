@@ -1120,7 +1120,12 @@ class BattleView:
 
 # Abilities whose static effects the live paths take from the interpreter. Empty by default: the
 # live engine computes those effects itself until an ability is opted in.
-ENABLED: set[str] = set()
+# The client's built-in statics the interpreter projects by default: Dazed (its cost increase) and Vulnerable (its damage
+# factor). Their live values come from the interpreter (builtin_rules.py, static_rules.py), and
+# tests/tests_ir_exec.py checks them against the live engine.
+DAZED_ABILITY_GUID = "16ffaa33-6b56-4e77-a9b9-c5fd8db4420a"
+VULNERABLE_ABILITY_GUID = "79c61378-3764-430e-ae8b-efebe258701d"
+ENABLED: set[str] = {DAZED_ABILITY_GUID, VULNERABLE_ABILITY_GUID}
 
 # The engine switch. When on, the live chain resolver (rules_port/resolution.py resolve_port_trigger) runs
 # each ability the interpreter covers in place of the native resolver; the others keep the native path.
@@ -1138,13 +1143,9 @@ def set_engine(on: bool) -> None:
 # rules own them (Dazed, Vulnerable, Stealth, the card-play and conscript templates), so the interpreter never resolves
 # them: coverage reports them as owned, and engine_runs leaves them on the native path.
 NATIVE_OWNED_TEMPLATES = frozenset({
-    "16ffaa33-6b56-4e77-a9b9-c5fd8db4420a",   # Dazed
     "1730bd95-7c2a-4a19-9d6d-80c9c22bb720",   # Stealth: cannot attack
     "5a8783b0-e420-4f41-b2a1-96f70b0cd851",   # Play Card (the card-play chain template)
-    "79c61378-3764-430e-ae8b-efebe258701d",   # Vulnerable
     "7e8bae76-202f-4225-84ef-dde8339ccff2",   # Stealth: spellshield
-    "8553550b-a8cb-4780-be5c-b698cd540df2",   # Conscript modifier
-    "ae783759-b8ea-427c-826b-883f9adef746",   # Finish putting into play
 })
 
 
@@ -2202,8 +2203,11 @@ def coverage(guid: str) -> list[str]:
         chain_card = player_filter == "SinglePlayer" and str(template.get("m_CollectionFlags") or "") == "CastSpells"
         # A chosen SinglePlayer target picks one card, so its one-player rule holds; an automatic one would span players.
         chosen_single_player = player_filter == "SinglePlayer" and not template.get("m_IsAutoTarget")
+        # A chosen target with no player filter (Unknown) is one the server names itself (C# Session conscript passes a
+        # locked target map), so the filter does not restrict it; an unanswered one raises before anything changes.
+        unfiltered_choice = player_filter == "Unknown" and not template.get("m_IsAutoTarget")
         if kind == "AbilityTargetTemplate" and player_filter not in TARGET_PLAYER_FILTERS and not chain_card \
-                and not chosen_single_player:
+                and not chosen_single_player and not unfiltered_choice:
             missing.append(f"target player filter {template.get('m_PlayerFilter')}")
         if kind in FOLLOW_UP_KINDS:
             missing.extend(follow_up_gaps(template, kind))
@@ -2419,7 +2423,8 @@ def coverage(guid: str) -> list[str]:
         # A triggered or player-activated clause, and an invoked child's, apply to their targets at resolution and
         # live on through the linked ledger; an authored static (none of those) is the scan's to project on read.
         linked = bool(trigger) or bool(raw.get("m_Manual")) or bool(_coverage_stack()) or guid in _linked_only_abilities()
-        if continuous_statics.covered_as_static(clause_duration, trigger, effect.get("m_Modifier"), raw,
+        if (guid.lower() in ENABLED and clause_duration == "WhileCardInPlay") or \
+                continuous_statics.covered_as_static(clause_duration, trigger, effect.get("m_Modifier"), raw,
                                                 ability_guid=guid,
                                                 effect_guid=_guid(clause.get("m_EffectTemplateId")),
                                                 invoked=bool(_coverage_stack())):

@@ -29,6 +29,8 @@ NATIVE_LEAF_EFFECTS = frozenset({
     # Offers the choice cards for an AI (chosen at once) or a player (the interpreter pauses for the player's answer,
     # see rules_port.ir_exec._pause_for_double_choice). rules_port.choice_effects.double_choice.
     "DoubleChoiceAbilityEffectTemplate",
+    # Finishes a card's move into the warzone (the card's entry bookkeeping; rules_port.effects dispatch).
+    "FinishMovingCardToWarzoneEffectTemplate",
 })
 
 # The TAC operations the native leaf (EffectContext.tac) implements. A TAC operation outside this set is refused by

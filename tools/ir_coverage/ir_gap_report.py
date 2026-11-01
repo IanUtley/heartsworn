@@ -172,6 +172,9 @@ def main(argv=None):
     print(f"orphans {len(orphans)} (refused, and not reachable from any card or other game record)")
     print(f"  client built-in templates {len(builtins)} (the server runs their rules natively)")
     print(f"  unused Records templates {len(unused)} (no card, ability or client code names them)")
+    from rules_port.ir_exec import NATIVE_OWNED_TEMPLATES
+    owned = sorted(guid for guid in NATIVE_OWNED_TEMPLATES if guid in guids)
+    print(f"native-owned, guarded from the interpreter {len(owned)} (not run by the interpreter; see IR_INTERPRETER_GAPS.md)")
     print(f"records errors {len(records_errors)} (Records data to fix; not interpreter gaps)")
     print(f"covered in context {len(in_context)} (refused only as a standalone root; each ability above them is covered, and runs them as an invoked child)")
     print(f"refused, reachable {len(refusals) - len(orphans) - len(records_errors) - len(in_context)}")

@@ -137,12 +137,14 @@ def test_static_effects_match_the_live_engine_when_opted_in(db):
 
     expected = live()
     assert expected == (2, 2, 1, 0), expected
+    previous = set(ir_exec.ENABLED)
     ir_exec.ENABLED.update({VULNERABLE_ABILITY_GUID, DAZED_ABILITY_GUID})
     try:
         assert interpreted() == expected, (interpreted(), expected)
         assert vulnerable_damage_factor(context, TROOP_UID, False) == 2
     finally:
         ir_exec.ENABLED.clear()
+        ir_exec.ENABLED.update(previous)
 
 
 def test_spitfire_elemental_damages_each_opposing_champion_and_troop(db):
