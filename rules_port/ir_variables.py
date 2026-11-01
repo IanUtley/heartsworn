@@ -24,6 +24,10 @@ CARD_PROPERTIES = {"CurrentAttackValue", "CurrentDefenseValue", "ResourceCostTru
 
 # A name an expression may use without an ability variable of that name: the source's escalation count.
 ESCALATION_NAME = "ESC"
+# The source card's inspire count, as the native resolver names it (C# AbilityInstance.CheckStaticIdentifiers "INS").
+INSPIRE_NAME = "INS"
+# The names an expression may use without declaring them (bound from the source card, not from the ability).
+STATIC_NAMES = {ESCALATION_NAME, INSPIRE_NAME}
 
 # C# int.MinValue: what a highest-card variable gives when no card passes its filter.
 _NO_CARD = -2147483648
@@ -75,7 +79,7 @@ def expression_gaps(expressions: dict[str, str], declared: set[str]) -> list[str
             gaps.append(f"expression {text}")
             continue
         for used in _names(tree):
-            if used not in declared and used != ESCALATION_NAME:
+            if used not in declared and used not in STATIC_NAMES:
                 gaps.append(f"expression name {used}")
         graph[name] = _names(tree) & set(expressions)
     for name in graph:
@@ -183,9 +187,9 @@ def threshold_value(scope: Any, variable: Any) -> int:
     return int(_source_player_threshold(scope.context.bstate, scope.owner_uid, variable.to_record()) or 0)
 
 
-def uses_escalation(expressions: dict[str, Any]) -> bool:
-    """Whether any expression variable names the source's escalation count."""
-    return any(ESCALATION_NAME in _names(tree)
+def uses_static(expressions: dict[str, Any], name: str) -> bool:
+    """Whether any expression variable names the source card's ``name`` (ESC or INS)."""
+    return any(name in _names(tree)
                for variable in expressions.values() if not _is_threshold(variable)
                for tree in [_parse(variable.m_ExpressionText or "")] if tree is not None)
 
@@ -222,6 +226,17 @@ def _value(node: ast.expr, lookup: Callable[[str], int]) -> float:
             return left * right
         return left / right
     raise ValueError(f"unsupported expression node {type(node).__name__}")
+
+
+def inspire_value(scope: Any) -> int:
+    """The source card's inspire count now, as the native resolver reads ``INS`` (its CardStatsWithSpecificDuration
+    InspireCount)."""
+    from rules_port.statistics import tac_stat
+
+    context = scope.context
+    value = tac_stat(context.bstate or {}, "cards", scope.source_uid,
+                     "CardStatsWithSpecificDuration", "InspireCount", default=None)
+    return int(value if value is not None else 0)
 
 
 def escalation_value(scope: Any) -> int:

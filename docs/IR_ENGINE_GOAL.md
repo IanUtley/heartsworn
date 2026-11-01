@@ -19,8 +19,8 @@ Measured with `tools/ir_coverage/ir_gap_report.py` over the 8,992 `AbilityTempla
 
 | Measure | Value |
 | --- | --- |
-| Covered by the interpreter | 8,962 (99.7%) |
-| Refused by `coverage()` (reachable) | 15 (0.2%) |
+| Covered by the interpreter | 8,963 (99.7%) |
+| Refused by `coverage()` (reachable) | 14 (0.2%) |
 | Orphans (refused, unreachable from any game record) | 15 |
 | Coverage check raises (bad Records data) | 0 |
 

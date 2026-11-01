@@ -647,8 +647,10 @@ def _bind_variables(root: MechanicsObject, scope: Scope, wanted: set[str] | None
             expressions[variable.m_Name] = variable
         else:
             raise NotImplementedError(f"variable {kind}")
-    if ir_variables.uses_escalation(expressions):
+    if ir_variables.uses_static(expressions, ir_variables.ESCALATION_NAME):
         scope.variables[ir_variables.ESCALATION_NAME] = ir_variables.escalation_value(scope)
+    if ir_variables.uses_static(expressions, ir_variables.INSPIRE_NAME):
+        scope.variables[ir_variables.INSPIRE_NAME] = ir_variables.inspire_value(scope)
     ir_variables.bind_expressions(expressions, scope.variables, wanted,
                                   threshold=lambda variable: ir_variables.threshold_value(scope, variable))
 
