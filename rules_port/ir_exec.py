@@ -2072,9 +2072,12 @@ def coverage(guid: str) -> list[str]:
         # the native resolver takes them. A count that varies is refused, and so is several cards for any other kind.
         for bound in ("m_MinTargetCount", "m_MaxTargetCount"):
             count = template.get(bound)
+            # An automatic follow-up target takes its constant count (its matches are capped to the maximum, as the
+            # native resolver does); a chosen one needs the player to pick several cards, which the picker does not do.
+            automatic_follow_up = kind in FOLLOW_UP_KINDS and bool(template.get("m_IsAutoTarget"))
             if isinstance(count, dict) and count.get("m_Value") is not None and int(count["m_Value"]) != 1 \
                     and not (bound == "m_MinTargetCount" and int(count["m_Value"]) == 0) \
-                    and kind != "AbilityTargetTemplate":
+                    and kind != "AbilityTargetTemplate" and not automatic_follow_up:
                 missing.append(f"multi-card target ({bound} {count['m_Value']})")
             elif isinstance(count, dict) and count.get("m_Value") is None and not (
                     _short(count.get("_t")) == "TargetVariable" and
