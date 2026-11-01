@@ -599,7 +599,7 @@ class ProfileStreamMixin:
         list_idx, _ = b.begin_list("Cards",
             "System.Collections.Generic.List`1#Game.Shared.Domain.card_instance_bits", len(cards))
         for i, (guid, name, cost, atk, def_, cid, is_ext) in enumerate(cards):
-            b.begin_element(i, "Game.Shared.Domain.card_instance_bits", 6)
+            b.begin_element(i, "Game.Shared.Domain.card_instance_bits", b.CARD_PROPS)
             b.card_fields(guid, cid, is_ext)
         batch_bytes = b.finish(1)
 

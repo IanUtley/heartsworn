@@ -265,7 +265,7 @@ def _encode_spin_response(spin, chest_uid):
                  len(cards))
     for index, card in enumerate(cards):
         # card_fields writes all eight card_instance_bits members.
-        b.begin_element(index, "Game.Shared.Domain.card_instance_bits", 8)
+        b.begin_element(index, "Game.Shared.Domain.card_instance_bits", b.CARD_PROPS)
         b.card_fields(card[0], card[5], card[6])
     b.int_list("SpinEntryColors", spin["colors"])
     b.int_list("SpinEntrySymbols", spin["symbols"])

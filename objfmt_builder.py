@@ -372,7 +372,7 @@ class ObjFmtBuilder:
         return el_idx
 
     # ── Card / chest / inventory field groups ─────────────────────
-    CARD_PROPS = 6
+    CARD_PROPS = 8  # must match the number of fields card_fields writes
     CHEST_PROPS = 8
     INVENTORY_PROPS = 6
 

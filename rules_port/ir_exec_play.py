@@ -15,6 +15,10 @@ def play_for_free(context: Any, targets: list[int], effect_raw: dict[str, Any]) 
     bstate = context.bstate
     previous_template = context.effect_template_override
     previous_target = bstate.get("resolving_target_uid")
+    # The play leaf reads resolved_target(), which prefers the chain item's stored target (player_spell_target,
+    # player_mod_target) over resolving_target_uid. An AI activation stores its pre-picked card there, so a free
+    # play would replay that card for every target. Clear those keys for the duration of the plays.
+    overriding = {key: bstate.pop(key) for key in ("player_spell_target", "player_mod_target") if key in bstate}
     context.effect_template_override = effect_raw
     try:
         for target in targets:
@@ -22,6 +26,7 @@ def play_for_free(context: Any, targets: list[int], effect_raw: dict[str, Any]) 
             context.play_card()
     finally:
         context.effect_template_override = previous_template
+        bstate.update(overriding)
         if previous_target is None:
             bstate.pop("resolving_target_uid", None)
         else:

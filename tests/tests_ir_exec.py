@@ -719,3 +719,44 @@ def test_a_zero_resource_id_is_not_a_set_cost():
     assert unsupported_costs({"m_VariableActivationCost": True}) == []
     assert unsupported_costs({"m_ActivationCost": 2, "m_LifeCost": 1, "m_CounterCosts": []}) == []
 
+
+
+NERISSA_REVEAL_TOP_TWO = "c9684f39-8372-b14c-249c-4bfc2dba2604"
+
+
+def test_nerissa_reveal_plays_every_revealed_troop_for_free(db):
+    """Nerissa's reveal power plays both revealed troops for free, not just the first."""
+    from rules_port.context import EffectContext
+    from rules_port.ir_exec import run_ability
+
+    pl_t, ai_t, game, handler, bstate, player_champ, _ai = _setup(db)
+    for uid, position in ((12, 0), (13, 1), (14, 2)):
+        add_card(db, uid, 5, TPL_GLADIATOR, loc="deck")
+        db.execute("UPDATE game_cards SET position=? WHERE card_uid=?", (position, uid))
+    db.commit()
+    context = EffectContext.from_rules_port(game, SessionStub(), db, handler, pl_t, ai_t, bstate, "")
+    assert run_ability(NERISSA_REVEAL_TOP_TWO, None, context=context, source_uid=player_champ,
+                       owner_uid=5, event={"player": 5})
+    played = sorted(row[0] for row in db.execute(
+        "SELECT card_uid FROM game_cards WHERE location='CastSpells' OR location='Warzone'"))
+    assert played == [12, 13], (played, bstate.get("revealed_cards"))
+
+
+def test_nerissa_chain_target_never_plays_a_revealed_resource(db):
+    """A chain item's stored target (the AI's pre-picked deck card) is not an answer to a revealed-troop target."""
+    from rules_port.context import EffectContext
+    from rules_port.ir_exec import run_ability
+
+    pl_t, ai_t, game, handler, bstate, _player_champ, ai_champ = _setup(db)
+    add_card(db, 12, 0, "b253393b-fdde-47c4-9288-4b8efb0698b1", loc="deck")
+    db.execute("UPDATE game_cards SET position=0, card_type='Resource' WHERE card_uid=12")
+    add_card(db, 13, 0, TPL_GLADIATOR, loc="deck")
+    db.execute("UPDATE game_cards SET position=1 WHERE card_uid=13")
+    db.commit()
+    bstate["player_mod_target"] = 12  # the chain item's stored target, as resolve_ability_item sets it
+    context = EffectContext.from_rules_port(game, SessionStub(), db, handler, pl_t, ai_t, bstate, "")
+    run_ability(NERISSA_REVEAL_TOP_TWO, None, context=context, source_uid=ai_champ,
+                owner_uid=0, event={"player": 0})
+    location = dict(db.execute("SELECT card_uid, location FROM game_cards WHERE card_uid IN (12, 13)").fetchall())
+    assert location[12] not in ("CastSpells", "warzone", "PlayedResources"), location
+    assert location[13] in ("CastSpells", "warzone"), location

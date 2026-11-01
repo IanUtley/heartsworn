@@ -251,7 +251,7 @@ def handle_opencardpack_2127(handler, target, instance, data_type, reqid, comp, 
     b.begin_list("NewCardInstances",
         "System.Collections.Generic.List`1#Game.Shared.Domain.card_instance_bits", card_count)
     for i, (tguid, tname, cost, atk, def_) in enumerate(all_cards):
-        b.begin_element(i, "Game.Shared.Domain.card_instance_bits", 6)
+        b.begin_element(i, "Game.Shared.Domain.card_instance_bits", b.CARD_PROPS)
         b.card_fields(tguid, card_instance_ids[i])
 
     # NewGemInstances (empty)
