@@ -1648,7 +1648,14 @@ class DamagedOpponentThisTurn:
             return int(value or 0) > 0
         flagged = _v(card, "damaged_opponent_this_turn", legacy, default=None)
         if isinstance(flagged, (list, tuple, set)):
-            return bool(flagged)
+            # The list names the cards that dealt damage; this card must be one of them.
+            if uid is None:
+                return False
+            try:
+                return int(getattr(uid, "uid64", uid)) in {
+                    int(getattr(entry, "uid64", entry)) for entry in flagged}
+            except (TypeError, ValueError):
+                return False
         return int(flagged or 0) > 0
 
 @dataclass(frozen=True)

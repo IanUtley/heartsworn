@@ -2046,6 +2046,13 @@ class PendingChoicesMixin:
             self._send_battle_events(session, g, pl_t)
             self._run_ai_turn(session, pl_t, ai_t, bstate,
                               start_idx=resume_idx)
+        elif getattr(session, "_rules_port_session", None) is not None:
+            # Native sessions take the pick's continuation from the RulesPort scheduler: project its window.  That
+            # resumes the AI turn when the AI has priority (an AI-first game held its StartTurn window behind this
+            # game-start pick) and otherwise presents the human's window.
+            _hc.log_req("    Deck pick resolved on the native chain: projecting priority")
+            self._send_battle_events(session, g, pl_t)
+            self._advance_rules_port_to_priority(session, pl_t, ai_t, bstate)
         else:
             phase = _be.current_phase(bstate)
             if _be.stack_empty(bstate):

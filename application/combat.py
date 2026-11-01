@@ -250,7 +250,8 @@ class CombatMixin:
             game.events = batch
             _hc.log_req("    [DEBUG-SEND] packet: " + ", ".join(
                 type(e).__name__.replace("SessionEventArgs", "") + (
-                    f"(priority={getattr(e, 'priority_player_id', None)})"
+                    f"(phase={getattr(e, 'turn_phase', None)} "
+                    f"priority={getattr(e, 'priority_player_id', None)})"
                     if type(e).__name__ == "TurnPhaseUpdatedSessionEventArgs" else "")
                 for e in batch))
             pkt = game.make_network_packet(pl_t)

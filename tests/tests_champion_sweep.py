@@ -119,6 +119,11 @@ class PvPHandlerStub(HandlerStub):
         from hconnect_server import HCPHandler
         return HCPHandler._hide_candidates_to_deck(self, *args, **kwargs)
 
+    def _prompt_deck_search(self, *args, **kwargs):
+        # The production deck-search picker: the harness stub auto-picks instead of pausing for the player.
+        from hconnect_server import HCPHandler
+        return HCPHandler._prompt_deck_search(self, *args, **kwargs)
+
     def _push_discard_prompt(self, *args, **kwargs):
         # The production prompt (the stub in HandlerStub is a no-op): a human discarder gets the hand picker.
         from application.combat import CombatMixin
@@ -1100,6 +1105,7 @@ def _drain_stack(db, handler, session, state, game):
 
 
 _REVEALED_KINDS = ("revealed_troop", "revealed_card")
+_DECK_PICK_KIND = "matching_target"
 
 
 def _pending_choices(state):
@@ -1107,7 +1113,7 @@ def _pending_choices(state):
     if not isinstance(pending, dict):
         # A revealed-card pick is stored as a deck-search continuation, with its candidates.
         revealed = state.get("pending_deck_search")
-        if isinstance(revealed, dict) and revealed.get("kind") in _REVEALED_KINDS:
+        if isinstance(revealed, dict) and revealed.get("kind") in (*_REVEALED_KINDS, _DECK_PICK_KIND):
             values = [int(c) for c in revealed.get("candidates") or ()]
             if not values:
                 raise ChampionSweepFailure(f"revealed continuation {revealed.get('kind')!r} has no candidates")
@@ -1181,6 +1187,199 @@ class _SweepSessionKey:
         self.session_id = session_id
 
 
+def _settle_start_of_game(handler, session, port):
+    """Play out the start-of-game chain before a manual power is used, as the client does.
+
+    A GameStarted trigger (Wild Root Dancer's "each champion chooses a troop") leaves a priority window open,
+    and it may pause for a deck pick.  The pick is answered with its first candidate for whichever player owns
+    it, and each open window is passed until the chain is empty.  The window beneath an empty chain is the
+    turn phase's own window: passing it would end the phase (and, repeated, the turn), handing priority to the
+    opponent before the manual power is used.
+    """
+    for _ in range(32):
+        live = tournament_game.pvp_load_state(session) or {}
+        pending = live.get("pending_deck_search")
+        if isinstance(pending, dict):
+            candidates = [int(uid) for uid in (pending.get("candidates") or [])]
+            if not candidates:
+                return
+            owner = int(pending.get("owner_id") or PLAYER_PID)
+            target_index = int((pending.get("continuation") or {}).get("target_index", 0) or 0)
+            tournament_game._pvp_resolve_matching_target(
+                handler, session, b"", owner,
+                typed_payload={"activation_data": {"target_map": {target_index: [candidates[0]]}}})
+            continue
+        if port.chain_top() is None:
+            return
+        window = port.action_stack.peek() if port.action_stack.count else None
+        pid = getattr(window, "priority_player_id", None)
+        if pid is None:
+            return
+        port.pass_player_priority(pid)
+        port.drive_until_input(max_steps=64)
+
+
+def _sweep_participant_handler(pid):
+    """A production HConnect handler seated as one tournament participant."""
+    import hconnect_server
+    handler = hconnect_server.HCPHandler(None, ("127.0.0.1", 0))
+    handler.user_profile = {"id": int(pid), "name": f"sweep{pid}"}
+    # Champion targets (IsHero filters, including the opposing champion) come from the handler's champion scids.
+    own, other = ((PLAYER_CHAMP_UID, OPPONENT_CHAMP_UID) if int(pid) == PLAYER_PID
+                  else (OPPONENT_CHAMP_UID, PLAYER_CHAMP_UID))
+    handler._player_champ_scid = game_engine.SessionCardId(game_engine.UID(own))
+    handler._ai_champ_scid = game_engine.SessionCardId(game_engine.UID(other))
+    handler.client_reck_id = int(pid)
+    handler.send = lambda header, body: None
+    return handler
+
+
+# Manual powers paid with counters that the champion earns from its own authored trigger.  The fixture plays the
+# hand through the production PvP ingress in the first main phase and lets the native turn reach the end step, so
+# the trigger, not the harness, adds the counters.  Only the damage-dealt fact is seeded (no combat is fought).
+_SOOTHING_BREEZE = "8d302dc0-ef3d-4c88-834f-c5e108a749ab"   # QuickAction: gain 7 health
+_BABY_YETI = "16390dae-9197-48f1-a287-9a606947b72a"         # Troop 1/1
+_MASTERY_OF_TIME = "ab3537a8-03d2-46fc-a669-743ea178ff9b"   # BasicAction: take an additional turn
+_EARNED_COUNTER_FIXTURES = {
+    # Spirit of the Triumvirate: three non-resource cards played (wisdom), three health gains (power), three troops
+    # that damaged the opposing champion (courage).  Mastery of Time gives the player the next turn to use the power.
+    "c537bce2-42e0-d254-d424-28fd82167cde": {
+        "ability_guid": "c537bce2-42e0-d254-d424-28fd82167cde",
+        "hand": (_SOOTHING_BREEZE, _SOOTHING_BREEZE, _SOOTHING_BREEZE,
+                 _BABY_YETI, _BABY_YETI, _BABY_YETI, _MASTERY_OF_TIME),
+        "damaged_opponent": _BABY_YETI,
+        "resources": 14,
+        "thresholds": {"diamond": 1, "ruby": 1, "sapphire": 2},
+    },
+}
+_EARNED_HAND_UID_BASE = 700
+# Captured at import, before _run_sweep silences trigger dispatch for the manual cases.
+_PRODUCTION_PVP_DISPATCH_TRIGGERS = tournament_game._pvp_dispatch_triggers
+
+
+def _seed_earned_counter_hand(db, state, fixture):
+    """Put the fixture hand in the player's hand with its real abilities and set the player's resources."""
+    for index, template_guid in enumerate(fixture["hand"]):
+        row = db.execute("SELECT abilities_json FROM card_templates WHERE guid=?", (template_guid,)).fetchone()
+        _insert_card(
+            db, int(game_engine.UID.make(1, _EARNED_HAND_UID_BASE + index).uid64), PLAYER_PID, "hand",
+            template_guid, _EARNED_HAND_UID_BASE + index, abilities=json.loads((row[0] if row else None) or "[]"))
+    db.commit()
+    resources = int(fixture["resources"])
+    thresholds = {int(game_engine.SHARD_TO_FLAG[shard]): int(value)
+                  for shard, value in fixture["thresholds"].items()}
+    for key in (f"res_{PLAYER_PID}", f"res_total_{PLAYER_PID}", "player_resources", "player_total_resources"):
+        state[key] = resources
+    state[f"thresh_{PLAYER_PID}"] = dict(thresholds)
+    state["player_threshold"] = dict(thresholds)
+
+
+def _priority_pid(session, port):
+    """The participant who holds priority, read the way the autoplay reads it (native stack first)."""
+    state = tournament_game.pvp_load_state(session) or {}
+    native = getattr(port.action_stack, "priority_player_id", None)
+    if native is not None:
+        try:
+            value = int(getattr(native, "uid64", native))
+            return value >> 8 if (value & 0xFF) == 244 else value
+        except (TypeError, ValueError):
+            pass
+    pid = state.get("priority_pid")
+    return int(pid) if pid is not None else None
+
+
+def _assert_earned_counters(state, fixture):
+    """The champion holds one of each counter the power under test spends (read from its authored costs)."""
+    graph = ability_graph(DEFAULT_RECORD_STORE, fixture["ability_guid"])
+    held = (state.get("champion_counters") or {}).get(str(PLAYER_CHAMP_UID)) or {}
+    for cost in graph.costs.counter_costs:
+        guid = str(cost.counter_guid).lower()
+        if int(held.get(guid, 0) or 0) != 1:
+            raise ChampionSweepFailure(
+                f"earned-counter fixture: champion counter {guid} is {held.get(guid, 0)}, expected 1 "
+                f"(champion counters {held})")
+
+
+def _earn_counters_through_play(db, handler, session, port, fixture):
+    """Play the fixture hand in the first main phase, then pass priority until the player's next main phase."""
+    import pvp_autoplay as autoplay
+    handlers = {PLAYER_PID: handler, OPPONENT_PID: _sweep_participant_handler(OPPONENT_PID)}
+    pass_bytes = b"PassPriorityTransaction;"
+    saved_context = dict(_activation_context)
+    # The sweep routes ability-guid/card-uid extraction to the power under test; card plays must see their own.
+    _activation_context.update(guid="", selected=[])
+    # The sweep silences PvP trigger dispatch and seats no participant handlers so a manual case resolves only its
+    # own graph.  The counters are earned by the champion's real end-of-turn trigger, so seat both participants and
+    # restore the production dispatcher while the turn is played.
+    saved_dispatch = tournament_game._pvp_dispatch_triggers
+    saved_handlers = tournament_game.player_handlers
+    tournament_game._pvp_dispatch_triggers = _PRODUCTION_PVP_DISPATCH_TRIGGERS
+    tournament_game.player_handlers = dict(handlers)
+    try:
+        main_phase = int(game_engine.ETurnPhases.FirstMainPhase)
+        start = tournament_game.pvp_load_state(session) or {}
+        start_turn = int(start.get("turn_number", 1) or 1)
+        if int(start.get("phase", 0) or 0) != main_phase or int(start.get("turn_pid") or 0) != PLAYER_PID:
+            raise ChampionSweepFailure(
+                f"earned-counter fixture: expected the player's first main phase, got "
+                f"phase={start.get('phase')} turn_pid={start.get('turn_pid')}")
+        hand = [int(row[0]) for row in db.execute(
+            "SELECT card_uid FROM game_cards WHERE session_id=? AND user_id=? AND location='hand' "
+            "AND position>=? ORDER BY position", (SESSION_ID, PLAYER_PID, _EARNED_HAND_UID_BASE))]
+        for uid in hand:
+            card_type = db.execute("SELECT card_type FROM game_cards WHERE session_id=? AND card_uid=?",
+                                   (SESSION_ID, uid)).fetchone()[0]
+            autoplay._transaction(handler, session, autoplay._card_play_bytes(uid, card_type),
+                                  typed_payload={"ability_data": [{"target_map": {}, "x_cost": 0}]})
+            location = db.execute("SELECT location FROM game_cards WHERE session_id=? AND card_uid=?",
+                                  (SESSION_ID, uid)).fetchone()[0]
+            if location == "hand":
+                raise ChampionSweepFailure(f"earned-counter fixture: card {uid} ({card_type}) was not played")
+            # Both players pass until the card resolves; the main phase stays open for the next play.
+            for _ in range(8):
+                if port.chain_top() is None:
+                    break
+                autoplay._transaction(handlers[_priority_pid(session, port)], session, pass_bytes)
+            if port.chain_top() is not None:
+                raise ChampionSweepFailure(f"earned-counter fixture: card {uid} did not resolve")
+        live = tournament_game.pvp_load_state(session)
+        if int(live.get("phase", 0) or 0) != main_phase or int(live.get("turn_number", 0) or 0) != start_turn:
+            raise ChampionSweepFailure("earned-counter fixture: the plays left the first main phase")
+        # Courage: the Yeti dealt damage to the opposing champion this turn (seeded fact, no combat).
+        damaged_template = fixture.get("damaged_opponent")
+        if damaged_template:
+            live["damaged_opponent_this_turn"] = [int(row[0]) for row in db.execute(
+                "SELECT card_uid FROM game_cards WHERE session_id=? AND user_id=? AND location='warzone' "
+                "AND template_guid=?", (SESSION_ID, PLAYER_PID, damaged_template))]
+            live["damaged_opponent_turn"] = start_turn
+            tournament_game.pvp_save_state(session, live)
+        # Pass through the end of the turn (the trigger adds the counters) into the player's next main phase.
+        for _ in range(64):
+            live = tournament_game.pvp_load_state(session) or {}
+            if int(live.get("turn_number", 0) or 0) > start_turn:
+                if int(live.get("turn_pid") or 0) != PLAYER_PID:
+                    raise ChampionSweepFailure("earned-counter fixture: the next turn is not the player's bonus turn")
+                if int(live.get("phase", 0) or 0) == main_phase and port.chain_top() is None:
+                    _assert_earned_counters(live, fixture)
+                    return live
+            if any(live.get(key) for key in ("pending_trigger", "pending_choice", "pending_deck_search",
+                                              "pending_discard_ability", "pending_conversation")):
+                raise ChampionSweepFailure(
+                    f"earned-counter fixture: unexpected prompt while passing the turn "
+                    f"(phase={live.get('phase')}, turn={live.get('turn_number')})")
+            pid = _priority_pid(session, port)
+            if pid not in handlers:
+                raise ChampionSweepFailure(
+                    f"earned-counter fixture: no priority holder (phase={live.get('phase')})")
+            autoplay._transaction(handlers[pid], session, pass_bytes)
+        raise ChampionSweepFailure("earned-counter fixture: the player's next main phase was not reached")
+    finally:
+        tournament_game._pvp_dispatch_triggers = saved_dispatch
+        tournament_game.player_handlers = saved_handlers
+        _activation_context.clear()
+        _activation_context.update(saved_context)
+
+
 def _rulesport_champion_activation(db, metadata, state, source_uid, target_map, cost_map):
     """Activate a manual power through the production RulesPort ingress.
 
@@ -1214,13 +1413,10 @@ def _rulesport_champion_activation(db, metadata, state, source_uid, target_map, 
     hconnect_server._db = db
     dbmod._db = db
     tournament_game._db = db
-    handler = hconnect_server.HCPHandler(None, ("127.0.0.1", 0))
-    handler.user_profile = {"id": PLAYER_PID, "name": "sweep"}
-    # Champion targets (IsHero filters, including the opposing champion) come from the handler's champion scids.
-    handler._player_champ_scid = game_engine.SessionCardId(game_engine.UID(PLAYER_CHAMP_UID))
-    handler._ai_champ_scid = game_engine.SessionCardId(game_engine.UID(OPPONENT_CHAMP_UID))
-    handler.client_reck_id = PLAYER_PID
-    handler.send = lambda header, body: None
+    handler = _sweep_participant_handler(PLAYER_PID)
+    earned = _EARNED_COUNTER_FIXTURES.get(str(metadata["ability_guid"]).lower())
+    if earned is not None:
+        _seed_earned_counter_hand(db, state, earned)
     session = gs.GameSession(SESSION_ID, SESSION_ID * 1000, "tourney-sweep", PLAYER_PID)
     for uid in (PLAYER_PID, OPPONENT_PID):
         session.add_player(hconnect_server.make_uid(
@@ -1234,6 +1430,10 @@ def _rulesport_champion_activation(db, metadata, state, source_uid, target_map, 
     game = game_engine.Game(SESSION_ID, PLAYER_UID, OPPONENT_UID)
     handler._maybe_attach_rules_port(session, game, state)
     port = session._rules_port_session
+    _settle_start_of_game(handler, session, port)
+    if earned is not None:
+        _earn_counters_through_play(db, handler, session, port, earned)
+        state = tournament_game.pvp_load_state(session) or state
     before = len(port.transaction_history)
     typed = {
         "source_card_id": int(source_uid),
@@ -1287,8 +1487,19 @@ def _answer_discard_prompts(db, handler, session, state, game):
             typed_payload={"activation_data": {"target_map": {index: [hand[0]]}}})
         _drain_stack(db, handler, session, state, game)
 
+def _merge_live_pending(session, state):
+    """Pending picks are stored on the live PvP state; bring them into the dict the sweep reads."""
+    live_state = tournament_game.pvp_load_state(session) or {}
+    for key in ("pending_deck_search", "pending_choice", "pending_discard_continuation"):
+        if live_state.get(key) and not state.get(key):
+            state[key] = live_state[key]
+
+
 def _run_case(db, metadata, path, *, option_check=True):
     _CURRENT_DB["db"] = db
+    # Every case reuses session id 1, and pvp_load_state reads the shared port's state before the case's own dict;
+    # drop the previous case's host so a later case does not answer the earlier case's leftover picks.
+    tournament_game.set_pvp_shared_port(_SweepSessionKey(SESSION_ID), None)
     # Random picks (reveals, random summons) fall back to the global RNG; seed it per attachment so runs repeat.
     import hashlib as _hashlib
     import random as _random
@@ -1450,6 +1661,7 @@ def _run_case(db, metadata, path, *, option_check=True):
             target_map=target_map)
 
     _drain_stack(db, handler, session, state, game)
+    _merge_live_pending(session, state)
     for choice_index in path:
         pending, choices = _pending_choices(state)
         if pending is None:
@@ -1462,7 +1674,13 @@ def _run_case(db, metadata, path, *, option_check=True):
             raise ChampionSweepFailure(
                 f"{metadata['ability_guid']}: invalid choice path {path!r}")
         state["trace_ability_resolution"] = True
-        if pending.get("kind") in _REVEALED_KINDS:
+        if pending.get("kind") == _DECK_PICK_KIND:
+            target_index = int((pending.get("continuation") or {}).get("target_index", 0) or 0)
+            tournament_game._pvp_resolve_matching_target(
+                handler, session, b"", int(pending.get("owner_id") or PLAYER_PID),
+                typed_payload={"activation_data": {
+                    "target_map": {target_index: [int(selected_uid)]}}})
+        elif pending.get("kind") in _REVEALED_KINDS:
             # The client answers a revealed pick through the revealed-choice handler, keyed by its continuation's target.
             target_index = int((pending.get("continuation") or {}).get("target_index", 0) or 0)
             tournament_game._pvp_resolve_revealed_choice(
@@ -1483,8 +1701,11 @@ def _run_case(db, metadata, path, *, option_check=True):
     settled_skipped = _fixture_skippable_guids(
         db, graph, handler, state, source_uid)
     fixture_skipped = set(pre_skipped) | set(settled_skipped)
-    # The resolver may record its trace on the live PvP state rather than this dict; read both.
+    # The resolver may record its trace and its pending picks on the live PvP state rather than this dict; read both.
     live_state = tournament_game.pvp_load_state(session) or {}
+    for _key in ("pending_deck_search", "pending_choice", "pending_discard_continuation"):
+        if live_state.get(_key) and not state.get(_key):
+            state[_key] = live_state[_key]
     if live_state is not state and live_state.get("ability_trace"):
         known = [repr(entry) for entry in state.get("ability_trace") or []]
         state.setdefault("ability_trace", [])
@@ -1522,7 +1743,7 @@ def _run_choice_paths(db, metadata, prefix=(), max_depth=8):
             f"{metadata['ability_guid']}: choice continuation exceeded "
             f"{max_depth} levels")
     kind = str(result["pending"].get("kind") or "")
-    if kind not in {"choice_zone_target", "choice_zone_copy", "double_choice", *_REVEALED_KINDS}:
+    if kind not in {"choice_zone_target", "choice_zone_copy", "double_choice", *_REVEALED_KINDS, _DECK_PICK_KIND}:
         if kind in {"conversation", "trigger", "revealed_choice",
                     "discard_continuation", "discard_ability", "deck_search"}:
             _SWEEP_STATS["non_choice_continuation"] += 1

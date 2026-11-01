@@ -723,11 +723,11 @@ _PUBLIC_HELP_LINES = (
     "!help / !commands — list the commands you can use",
     "!version — show the server version",
     "!arena-cleanup — clear your Frost Ring Arena run",
-    "arena.setchallenger <champion name> — make the next FRA opponent that champion (debug)",
+    "!arena.setchallenger <champion name> — make the current FRA challenger that champion (debug)",
     "!account-cleanup — reset your account, keeping PvE and alt-art cards",
     "!collection-fix [apply] — match collection counts to owned card instances",
     "!campaign-cleanup — repair your campaign when a scene has no options",
-    "!restart — restart the current campaign encounter (lives are not lost)",
+    "!restart — restart the current campaign encounter (lives are not lost); in FRA, abandon the battle without a result",
     "!issue <title> — open a prefilled GitHub issue with session diagnostics",
     "!playtest <token> — start a campaign editor Play battle (nothing is saved)",
 )
@@ -782,7 +782,7 @@ def handle_command(handler, cmd: str, room: str, username: str) -> str:
         return _version_command()
     if action == "arena.setchallenger":
         try:
-            return _arena_set_challenger_command(handler, args)
+            return _arena_set_challenger_command(handler, parts[1:])
         except Exception as exc:
             return f"Error: {exc}"
     if action == "arena-cleanup":
@@ -1185,12 +1185,32 @@ def _cmd_encounter(handler, args):
     return f"Launched encounter {encounter_guid} (camp={camp_id})"
 
 
+def _restart_fra_battle(handler, session):
+    """Abandon the caller's live FRA battle without a result, so the client returns to the arena lobby.
+
+    The client leaves a battle only through GameEnded, and the server records the arena outcome when it
+    publishes that event.  This pushes GameEnded for the screen but records nothing, so the roster, wins
+    and losses stay as they were.  The player presses Battle again to fight the same challenger.
+    """
+    from gamemodes.fra_arena import _fra_arena_setup_values
+    from pvp_db import db_delete_game_session
+    if _fra_arena_setup_values(session.encounter_data) is None:
+        return "No campaign or FRA battle to restart"
+    player_uid = game_engine.UID.make(244, int(handler.client_reck_id))
+    ai_uid = game_engine.UID.make(game_engine.SERVICE_AI_UID_TYPE, 1000)
+    push_battle_game_end(handler, session, winners=[ai_uid], losers=[player_uid])
+    db_delete_game_session(session.session_id)
+    hconnect_server._db.commit()
+    return "FRA battle abandoned without a result; press Battle to fight the same challenger"
+
+
 def _cmd_restart(handler):
     """Restart the current campaign encounter: !restart.
 
     The live battle is abandoned with no result: no GameEnded, no
     gameendnotify, so Wins, Losses and dungeon lives are left alone.  The same
-    encounter (scene, conversation and mod choice) is then relaunched.
+    encounter (scene, conversation and mod choice) is then relaunched.  A live
+    FRA battle is abandoned without a result instead.
     """
     from campaign_runtime import progress, runtime
     from campaign_playtest import is_playtest_campaign
@@ -1200,7 +1220,9 @@ def _cmd_restart(handler):
     player_uid = encoder.make_uid(hconnect_server.UID_TYPE["ServicePlayer"],
                                   int(handler.client_reck_id))
     session = game_session.find_session_by_player(player_uid)
-    if not session or not str(session.session_name or "").startswith("camp_"):
+    if session and not str(session.session_name or "").startswith("camp_"):
+        return _restart_fra_battle(handler, session)
+    if not session:
         return "No campaign battle to restart"
     camp_id = int(session.session_name[5:])
     if is_playtest_campaign(camp_id):

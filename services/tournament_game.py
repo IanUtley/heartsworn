@@ -1551,6 +1551,12 @@ def attach_pvp_rules_port(handler, session, game, state):
         if not next_pid:
             return False
         pids_live = db_game_session_pids(session.session_id)
+        # The native rotation does not know about a queued bonus turn
+        # (GiveBonusTurn: "take an additional turn after this one"); the
+        # checkpoint's pending bonus selects the incoming player instead.
+        bonus_pid = int(live.get("bonus_turn_pid", 0) or 0)
+        if bonus_pid in {int(pid) for pid in pids_live}:
+            next_pid = bonus_pid
         boundary = port_advance_turn_state(
             live, pids_live, incoming_player_id=next_pid)
         pvp_save_state(session, live)
@@ -8195,6 +8201,22 @@ class _PvpChainHost:
     def _view(self, state):
         return _pvp_fra_view(state, self.owner_id, self.opponent_id)
 
+    def _champion_targets(self):
+        """Both champions as (uid, participant id, name, health).
+
+        The trigger resolver receives this host as its handler; without the
+        champions, Champions-collection conditions ("you gained health three
+        or more times this turn") counted no cards in PvP.
+        """
+        champ_map = self.state.get("champ_map") or {}
+        out = []
+        for pid in (self.state.get("pids") or (self.owner_id, self.opponent_id)):
+            uid = int(champ_map.get(str(pid), 0) or 0)
+            if uid:
+                out.append((uid, int(pid), "Champ",
+                            int(self.state.get(f"hp_{pid}", 20))))
+        return out
+
     # --- rules_port.chain_items hooks -------------------------------------
     def chain_load(self, session):
         return self.state
@@ -8961,6 +8983,12 @@ def _pvp_play_troop(handler, session, played_card_uid, my_pid, inner_bytes,
     if card_transition is None:
         log_req(f"    PvP REJECTED play {card_name}: card left its playable zone")
         return True
+    # "You played N non-resource cards this turn" (ChampionCardsCastCondition)
+    # reads the cast statistics the PvE play path records with the same call.
+    from rules_port.cast_stats import record_card_cast
+    record_card_cast(state, my_pid, resource=False,
+                     card_uid=int(played_card_uid), card_type=card_type,
+                     resource_cost=cost)
     view = _pvp_fra_view(state, my_pid, opp_pid)
     # Move the card onto the CHAIN (CastSpells visual) — mirroring how spells
     # are cast.  Troops/artifacts/constants do NOT resolve instantly: they stay
@@ -9282,6 +9310,10 @@ def _pvp_play_spell(handler, session, played_card_uid, my_pid, inner_bytes,
     if card_transition is None:
         log_req(f"    PvP REJECTED spell {card_name}: card left its playable zone")
         return True
+    from rules_port.cast_stats import record_card_cast
+    record_card_cast(state, my_pid, resource=False,
+                     card_uid=int(played_card_uid), card_type=card_type,
+                     resource_cost=cost)
     if x_cost:
         log_req(f"    PvP spell {card_name}: X cost {x_cost} paid "
                 f"(resources left {state.get(f'res_{my_pid}')})")

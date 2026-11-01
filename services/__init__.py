@@ -83,6 +83,7 @@ _SERVICE_TABLE = {
     10019: ("services.arena", "handle_request", {"data_type": 10019}),
     10027: ("services.arena", "handle_request", {"data_type": 10027}),
     10029: ("services.arena", "handle_request", {"data_type": 10029}),
+    10031: ("services.arena", "handle_request", {"data_type": 10031}),
     10033: ("services.arena", "handle_request", {"data_type": 10033}),
 }
 # fmt: on

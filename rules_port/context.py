@@ -4263,6 +4263,26 @@ class EffectContext:
             else:
                 self.bstate["_choice_parent"] = previous
 
+    def _mark_paused_target(self, parent):
+        """Note on the parent continuation that a picker interrupted an effect with targets still to run.
+
+        The effect loop publishes the target it is running in ``rules_port_current_target``.  The picker's
+        continuation is saved with the pick, so the parent can resume at the paused effect and skip the
+        targets that already resolved.
+        """
+        current = self.bstate.get("rules_port_current_target")
+        if not isinstance(current, dict) or not isinstance(parent, dict):
+            return parent
+        if str(current.get("ability_guid") or "").lower() != str(
+                parent.get("ability_guid") or "").lower():
+            return parent
+        following = int(current.get("index", 0) or 0) + 1
+        if following < int(current.get("count", 0) or 0):
+            parent["rules_port_resume_target"] = {
+                "ability_guid": str(current["ability_guid"]),
+                "position": int(current["position"]), "index": following}
+        return parent
+
     def activate_ability(self):
         """Enter a child ability through the common typed resolver.
 
@@ -4426,7 +4446,7 @@ class EffectContext:
                         "variables": {},
                         "resume_effect_order": 0,
                         "target_index": int(target_index),
-                        "parent": self.continuation(),
+                        "parent": self._mark_paused_target(self.continuation()),
                     }
                     # The deck is hidden, so its current order must not leak
                     # through the picker arrangement.
@@ -4440,7 +4460,7 @@ class EffectContext:
                         continuation=continuation)
                     return (f"activate ability: awaiting choice of "
                             f"{len(choice_uids)} card(s)")
-                parent = self.continuation()
+                parent = self._mark_paused_target(self.continuation())
                 pending = {
                     "kind": "choice_zone_target",
                     "choice_uids": choice_uids,

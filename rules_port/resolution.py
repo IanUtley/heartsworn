@@ -1387,7 +1387,21 @@ class NativeEffectBackend:
                     target_values = (next(
                         (value for value in target_values
                          if value is not None), None),)
-                for target in target_values:
+                # A picker paused an earlier target of this effect: the
+                # resumed effect skips the targets it already resolved.
+                resume_target = battle_state.pop("rules_port_resume_target", None)
+                first_target = 0
+                if (isinstance(resume_target, dict) and
+                        int(resume_target.get("position", -1)) == position):
+                    first_target = int(resume_target.get("index", 0) or 0)
+                for target_offset, target in enumerate(target_values):
+                    if target_offset < first_target:
+                        continue
+                    battle_state["rules_port_current_target"] = {
+                        "ability_guid": str(getattr(
+                            ability, "ability_template_id", "") or "").lower(),
+                        "position": position, "index": target_offset,
+                        "count": len(target_values)}
                     if target is None:
                         battle_state.pop("resolving_target_uid", None)
                         for key in ("player_mod_target", "player_spell_target",
@@ -1444,6 +1458,16 @@ class NativeEffectBackend:
                     applied[instance_id] = True
                     battle_state.setdefault("rules_port_effect_results", []).append(
                         {"instance_id": instance_id, "result": str(result)})
+                    if (battle_state.get("resolution_paused") and
+                            target_offset + 1 < len(target_values)):
+                        # Each target is its own choice (one champion's deck pick, then the next's): stop here and
+                        # resume at the next target when the pick is answered.
+                        _record_resume_target(battle_state, {
+                            "ability_guid": str(getattr(
+                                ability, "ability_template_id", "") or "").lower(),
+                            "position": position, "index": target_offset + 1})
+                        break
+                battle_state.pop("rules_port_current_target", None)
                 if battle_state.get("resolution_paused"):
                     battle_state["rules_port_resume_effect_order"] = position
                     break
@@ -1548,9 +1572,13 @@ class PortAbilityResolver:
         from .persistence import load_state
         requested_resume = self.battle_state.get(
             "rules_port_resume_effect_order")
+        requested_target = self.battle_state.get("rules_port_resume_target")
         current_state = load_state(self.game_session)
         if isinstance(current_state, dict) and current_state:
             self.battle_state = current_state
+        if requested_target is not None:
+            # The parent's paused target travels with the resume request, as the effect order does.
+            self.battle_state["rules_port_resume_target"] = requested_target
         # The continuation caller may have supplied a newer in-memory offset
         # than the last checkpoint. Preserve it across the reload. Conversely
         # an explicitly fresh nested child must not inherit its parent's
@@ -1635,8 +1663,9 @@ class PortAbilityResolver:
             port_session.persist()
         elif resume_order is not None and not self.battle_state.get(
                 "resolution_paused"):
-            for key in ("rules_port_resume_effect_order", "pending_discard_ability",
-                        "pending_discard_target_template", "pending_discard_scid"):
+            for key in ("rules_port_resume_effect_order", "rules_port_resume_target",
+                        "pending_discard_ability", "pending_discard_target_template",
+                        "pending_discard_scid"):
                 self.battle_state.pop(key, None)
         if self.battle_state.get("resolution_paused"):
             return AbilityResolutionState.WAITING_FOR_INPUT
@@ -1707,6 +1736,24 @@ def resolve_port_ability(handler, game, session, db, player_uid, ai_uid,
         handler, game, session, db, player_uid, ai_uid, battle_state,
         native_effect=native_effect,
         effect_groups=effect_groups, event_tac=event_tac)(ability)
+
+
+def _record_resume_target(battle_state, record):
+    """Keep a paused effect's next target on the parent continuation of the pending pick.
+
+    The pick's continuation is what is persisted and handed back when the
+    player answers, so the target index has to live there.  The parent is the
+    ability whose ActivateAbility effect raised the pick.
+    """
+    for key in ("pending_deck_search", "pending_choice", "pending_trigger"):
+        pending = battle_state.get(key)
+        continuation = pending.get("continuation") if isinstance(pending, dict) else None
+        parent = continuation.get("parent") if isinstance(continuation, dict) else None
+        if (isinstance(parent, dict) and
+                str(parent.get("ability_guid") or "").lower() == record["ability_guid"]):
+            parent["rules_port_resume_target"] = dict(record)
+            return True
+    return False
 
 
 def resume_ability_continuation_parents(
@@ -1806,12 +1853,21 @@ def resume_ability_continuation_parents(
                 target_map = activation.get("target_map")
             if variables is None:
                 variables = activation.get("variables")
+        resume_order = int(parent.get("resume_effect_order", 0) or 0)
+        paused_target = parent.get("rules_port_resume_target")
+        if isinstance(paused_target, dict) and str(
+                paused_target.get("ability_guid") or "").lower() == parent_guid:
+            # The picker paused a target of this effect: re-enter that effect and
+            # let its target loop skip the targets already resolved.
+            resume_order = int(paused_target["position"])
+            state["rules_port_resume_target"] = {
+                "position": resume_order, "index": int(paused_target["index"])}
         result = resolve_port_ability(
             handler, game, session, db, player_uid, ai_uid, state,
             parent_guid, parent.get("source_uid"),
             int(parent.get("owner_id", 0) or 0),
             target_map=target_map or {}, variables=variables or {},
-            resume_from_order=int(parent.get("resume_effect_order", 0) or 0),
+            resume_from_order=resume_order,
             instance_id=int(parent.get(
                 "ability_instance_id", parent.get("instance_id", 1)) or 1),
             event_tac=parent.get("event_tac"))
