@@ -38,6 +38,9 @@ TRIGGER_EVENTS = {
     "CardWouldDealDamageEvent", "CardWouldBeDamagedEvent",
     "ChampionWouldLoseEvent", "CardWouldEnterZoneEvent", "CardWouldBeDrawnEvent",
     "CardInspiredEvent", "PowerShiftedEvent", "OtherCardCreatedEvent",
+    # Published at the native phase exit of combat (C# AssignDamageState.OnExit, or FirstStrikePriorityWindowState.OnExit
+    # when no Standard-phase combat damage is left). It carries only the active player, so it has no source card.
+    "CombatEndedEvent",
 }
 
 # Trigger condition classes this module evaluates.
