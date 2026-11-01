@@ -18,6 +18,7 @@ ZONE_EFFECTS = {
     "DestroyCardByDefenseAbilityEffectTemplate",
     "VoidCardAbilityEffectTemplate",
     "BuryCardAbilityEffectTemplate",
+    "DiscardOrSacrificeCardAbilityEffectTemplate",
 }
 # The effects whose number is an input value the interpreter binds (m_InputValue, or m_Amount for a bury).
 AMOUNT_FIELDS = {
@@ -99,6 +100,18 @@ def run_zone_effect(kind: str, root: Any, clause: Any, effect_raw: dict[str, Any
                     owner = context.target_owner(int(target), default=None)
                     if owner is not None:
                         context.draw(count, owner=owner)
+            elif kind == "DiscardOrSacrificeCardAbilityEffectTemplate":
+                # C# DiscardOrSacrificeCardAbilityEffectTemplate.Apply: a card in the warzone is sacrificed, a card in
+                # hand is discarded, and any other zone is left alone.
+                from pvp_db import db_card_location
+                from rules_port.death_effects import kill_troop
+                for target in _targets(root, index, scope):
+                    location = str(db_card_location(context.session.session_id, int(target),
+                                                    conn=context.db) or "").lower()
+                    if location == "warzone":
+                        kill_troop(context, int(target), cause="sacrifice")
+                    elif location == "hand":
+                        context.discard(target=int(target))
             else:
                 for target in _targets(root, index, scope):
                     _LEAF[kind](context, int(target))
