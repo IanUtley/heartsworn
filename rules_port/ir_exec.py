@@ -1134,6 +1134,20 @@ def set_engine(on: bool) -> None:
     ENGINE_ON = bool(on)
 
 
+# The client's built-in ability templates (hex-private/HexClient/.../Resources/BuiltInResources.cs). The native built-in
+# rules own them (Dazed, Vulnerable, Stealth, the card-play and conscript templates), so the interpreter never resolves
+# them: coverage reports them as owned, and engine_runs leaves them on the native path.
+NATIVE_OWNED_TEMPLATES = frozenset({
+    "16ffaa33-6b56-4e77-a9b9-c5fd8db4420a",   # Dazed
+    "1730bd95-7c2a-4a19-9d6d-80c9c22bb720",   # Stealth: cannot attack
+    "5a8783b0-e420-4f41-b2a1-96f70b0cd851",   # Play Card (the card-play chain template)
+    "79c61378-3764-430e-ae8b-efebe258701d",   # Vulnerable
+    "7e8bae76-202f-4225-84ef-dde8339ccff2",   # Stealth: spellshield
+    "8553550b-a8cb-4780-be5c-b698cd540df2",   # Conscript modifier
+    "ae783759-b8ea-427c-826b-883f9adef746",   # Finish putting into play
+})
+
+
 def engine_runs(guid: str, source_uid: Any, owner_uid: Any, answers: dict[int, Any] | None = None) -> bool:
     """Whether the interpreter resolves this ability in place of the native resolver: the engine is on, the ability
     has a source card and an owner, and no construct of it is uncovered.
@@ -1142,6 +1156,8 @@ def engine_runs(guid: str, source_uid: Any, owner_uid: Any, answers: dict[int, A
     and the abilities it invokes pick nothing. The native prompt asks the player and its answer comes back in the
     chain item; without an answer the ability stays on the native path."""
     if not (ENGINE_ON and source_uid is not None and owner_uid is not None) or coverage(guid):
+        return False
+    if str(guid).lower() in NATIVE_OWNED_TEMPLATES:
         return False
     root = _load("AbilityTemplate", guid)
     own = [index for index in range(len(root.m_AbilityTargetTemplateIds or [])) if _needs_choice(root, index)]
@@ -2133,7 +2149,10 @@ def _amount_refusals(effect: dict[str, Any], raw: dict[str, Any], field_name: st
 
 
 def coverage(guid: str) -> list[str]:
-    """The constructs in an ability the interpreter does not run (empty when it runs them all)."""
+    """The constructs in an ability the interpreter does not run (empty when it runs them all). A built-in template the
+    native rules own is not the interpreter's to run, so it has no gap (engine_runs keeps it native)."""
+    if str(guid).lower() in NATIVE_OWNED_TEMPLATES:
+        return []
     from rules_port import ir_exec_resources
     _cls, raw = _stored("AbilityTemplate", guid)
     missing: list[str] = []
