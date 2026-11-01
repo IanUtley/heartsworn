@@ -43,6 +43,18 @@ def _target_kind(raw: dict[str, Any], clause: dict[str, Any]) -> str:
     return _short(template_type)
 
 
+_SUPPORTED_DESTROY_PLAYERS = {"Self"}
+
+
+def _player_filter(raw: dict[str, Any], clause: dict[str, Any]) -> str:
+    """The player filter of a clause's player target (for example "Self")."""
+    from rules_port.ir_exec import _guid, _stored
+    ids = raw.get("m_AbilityTargetTemplateIds") or []
+    index = int(clause.get("m_TargetTemplateIndex") or 0)
+    _template_type, template = _stored("AbilityTargetTemplate", _guid(ids[index]))
+    return str(template.get("m_PlayerFilter") or "")
+
+
 def zone_effect_gaps(kind: str, raw: dict[str, Any], clause: dict[str, Any], effect: dict[str, Any]) -> list[str]:
     """The reasons a draw, discard, destroy, void or bury clause cannot run in the interpreter (empty when it can)."""
     from rules_port.ir_exec import _short
@@ -58,7 +70,10 @@ def zone_effect_gaps(kind: str, raw: dict[str, Any], clause: dict[str, Any], eff
         if not optional and amount_kind not in typed:
             gaps.append(f"{short} amount {amount_kind or 'untyped'}")
     if kind in CARD_ONLY_EFFECTS and _target_kind(raw, clause) == "PlayerTargetTemplate":
-        gaps.append(f"{short} for a player target")
+        # "Destroy you" (a champion's destroy) runs through the live destroy leaf, which ends the game for a champion;
+        # the other player-target kinds stay on the native path.
+        if not (kind == "DestroyCardAbilityEffectTemplate" and _player_filter(raw, clause) in _SUPPORTED_DESTROY_PLAYERS):
+            gaps.append(f"{short} for a player target")
     return gaps
 
 
