@@ -31,9 +31,14 @@ _LINKED_KEYWORD_DURATIONS = _TURN_BOUNDARY_DURATIONS | {"WhileCardInPlay"}
 # next turn, and while its source stays on top of its deck (the sweep checks the top card at each event).
 _INT_ATTR_DURATIONS = _TURN_BOUNDARY_DURATIONS | {"BeginningOfOpponentsTurn", "UntilDamaged", "WhileCardOnTopOfDeck"}
 _LINKED_INT_ATTR_DURATIONS = _INT_ATTR_DURATIONS | {"WhileCardInPlay"}
-DURATIONS_BY_KIND = {"AttributeModifier": _TURN_BOUNDARY_DURATIONS, "IntAttrModifier": _INT_ATTR_DURATIONS}
+# A damage multiplier is a typed rule on the card: it lasts for the turn, or until the start of the owner's next turn
+# (the rule is tagged with that owner and the boundary pass removes it; see effect_lifetimes.expire_owner_turn_rules).
+_RULE_DURATIONS = {"Permanent", "EndOfTurn", "BeginningOfOwnersTurn"}
+DURATIONS_BY_KIND = {"AttributeModifier": _TURN_BOUNDARY_DURATIONS, "IntAttrModifier": _INT_ATTR_DURATIONS,
+                     "DamageMultiplierModifier": _RULE_DURATIONS}
 LINKED_DURATIONS_BY_KIND = {"AttributeModifier": _LINKED_KEYWORD_DURATIONS,
-                            "IntAttrModifier": _LINKED_INT_ATTR_DURATIONS}
+                            "IntAttrModifier": _LINKED_INT_ATTR_DURATIONS,
+                            "DamageMultiplierModifier": _RULE_DURATIONS}
 # A keyword is granted with Add; Remove is not ported yet. An int attribute is set or added.
 ATTRIBUTE_OPERATIONS = {"Add"}
 INT_ATTR_OPERATIONS = {"Set", "Add"}

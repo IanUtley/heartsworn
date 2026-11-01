@@ -9,8 +9,8 @@ interpreter never half-runs an ability.
 
 Measured with `tools/ir_coverage/ir_gap_report.py` over the 8,992 `AbilityTemplate` records (four abilities of placeholder-art cards are excluded: OpponentChooseAndPlay, ChooseRevealAndPlay, Footsteps from the Hall (A) and (B); their implementation is done, and the migration counts them as done), at the latest run:
 
-- Covered by the interpreter: 8,983
-- Refused: 9 (9 orphans, 0 Records errors, 0 covered in context, 0 reachable; the orphans are listed below) (the reasons are under "Outstanding after the latest run" below)
+- Covered by the interpreter: 8,985
+- Refused: 7 (7 orphans, 0 Records errors, 0 covered in context, 0 reachable; the orphans are listed below) (the reasons are under "Outstanding after the latest run" below)
 - Coverage errors (the coverage check raising on bad Records data): 0 at this run
 
 Regenerate the numbers and the full reason list from the current code and Records:
@@ -61,10 +61,8 @@ A refused ability that no game record can reach: no card, champion, talent, deck
 
 | Ability GUID | Records name |
 | --- | --- |
-| `0eb4917d-6545-965d-d564-aa6917402301` | AtTheStartOfYourTurnIfYouHaveFiveOrMoreChargesYouLoseAllCharges |
 | `16ffaa33-6b56-4e77-a9b9-c5fd8db4420a` | WhileYouAreBdazedbIgnoreChainNonmresourceCardsInYourHandHaveCostP1 |
 | `1730bd95-7c2a-4a19-9d6d-80c9c22bb720` | WhileYouAreBstealthbOpposingTroopsCanTAttack |
-| `340add49-e730-a933-e64b-8bf4b4130be2` | Basic3ArrowrYourCardsAndEffectsDealDoubleNonmcombatDamageUntilTheStartOfYourNextTurn |
 | `5a8783b0-e420-4f41-b2a1-96f70b0cd851` | Play Card Ability |
 | `79c61378-3764-430e-ae8b-efebe258701d` | YourBvulnerablebChampionOrYourBvulnerablebTroopsTakeDoubleDamage |
 | `7e8bae76-202f-4225-84ef-dde8339ccff2` | WhileYouAreBstealthbYouHaveBspellshieldb |

@@ -752,11 +752,34 @@ def test_a_chain_interrupt_counters_the_spell_the_player_answered_with(db):
     assert location == {700: "discard"}, location
 
 
+def test_an_owner_turn_damage_rule_expires_at_that_owners_turn_start(db):
+    """A damage rule that lasts until the owner's next turn is removed when that owner's turn starts, and kept while the
+    other player's turn starts."""
+    import json
+
+    from pvp_db import db_card_mutation_field, db_set_card_mutation_field
+    from rules_port.effect_lifetimes import expire_owner_turn_rules
+
+    add_card(db, 900, 5, TPL_GLADIATOR, loc="warzone")
+    rule = {"property": "damagemultiplier", "value": 2, "expires_for_owner": 5}
+    db_set_card_mutation_field(1, 900, "permanent_buffs",
+                               json.dumps({"rule_modifiers": [rule]}), conn=db)
+    db.commit()
+    state = {"owner_turn_rule_cards": [900]}
+    assert expire_owner_turn_rules(db, 1, state, "start_turn", 0) == []
+    assert expire_owner_turn_rules(db, 1, state, "end_turn", 5) == []
+    assert expire_owner_turn_rules(db, 1, state, "start_turn", 5) == [900]
+    buffs = json.loads(db_card_mutation_field(1, 900, "permanent_buffs", conn=db))
+    assert buffs.get("rule_modifiers") == [], buffs
+    assert "owner_turn_rule_cards" not in state, state
+
+
 if __name__ == "__main__":
     import inspect
 
     import db as dbmod
-    for run in (test_a_chain_interrupt_counters_the_spell_the_player_answered_with,
+    for run in (test_an_owner_turn_damage_rule_expires_at_that_owners_turn_start,
+                test_a_chain_interrupt_counters_the_spell_the_player_answered_with,
                 test_a_player_double_choice_pauses_the_interpreter_for_the_answer,
                 test_a_chosen_target_with_no_maximum_takes_any_number_of_candidates,
                 test_remove_all_counters_removes_each_counter_the_card_holds,

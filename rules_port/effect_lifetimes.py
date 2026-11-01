@@ -662,6 +662,44 @@ def _intattr_expired(item, db, session_id, state, *, boundary=None,
     return False
 
 
+def expire_owner_turn_rules(db, session_id, state, boundary, boundary_owner):
+    """Remove the typed rules that last until the start of a player's turn (rule_modifiers tagged with that owner) at
+    that owner's turn start. Returns the card uids whose rules changed, so the caller can push them."""
+    if boundary != "start_turn":
+        return []
+    from pvp_db import db_card_mutation_field, db_set_card_mutation_field
+    listed = [int(uid) for uid in (state.get("owner_turn_rule_cards") or [])]
+    changed = []
+    kept = []
+    for uid in listed:
+        try:
+            buffs = json.loads(db_card_mutation_field(
+                session_id, uid, "permanent_buffs", conn=db) or "{}")
+        except (TypeError, ValueError, json.JSONDecodeError):
+            buffs = {}
+        rules = buffs.get("rule_modifiers") if isinstance(buffs, dict) else None
+        if not isinstance(rules, list):
+            continue
+        remaining = [rule for rule in rules if not (
+            isinstance(rule, dict) and rule.get("expires_for_owner") is not None and
+            int(rule["expires_for_owner"]) == int(boundary_owner or 0))]
+        if len(remaining) != len(rules):
+            changed.append(uid)
+            buffs["rule_modifiers"] = remaining
+            db_set_card_mutation_field(
+                session_id, uid, "permanent_buffs",
+                json.dumps(buffs, separators=(",", ":"), sort_keys=True), conn=db)
+        if any(isinstance(rule, dict) and rule.get("expires_for_owner") is not None for rule in remaining):
+            kept.append(uid)
+    if kept:
+        state["owner_turn_rule_cards"] = list(dict.fromkeys(kept))
+    else:
+        state.pop("owner_turn_rule_cards", None)
+    if changed:
+        db.commit()
+    return changed
+
+
 def expire_damage_bound_intattrs(db, session_id, state, uid):
     """Restore target IntAttrs removed by C#'s UntilDamaged teardown."""
     return expire_temporary_intattrs(

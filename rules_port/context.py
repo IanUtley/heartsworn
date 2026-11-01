@@ -1348,8 +1348,7 @@ class EffectContext:
         prop = str(metadata.get("property") or param.get("property") or "")
         duration = str(param.get("duration") or "")
         column = ("temporary_buffs" if duration in (
-            "EndOfTurn", "BeginningOfOwnersTurn",
-            "AfterCardsReadyOnPlayersTurn") else "permanent_buffs")
+            "EndOfTurn", "AfterCardsReadyOnPlayersTurn") else "permanent_buffs")
         buffs = self._card_buffs(int(target), column)
         rules = buffs.setdefault("rule_modifiers", [])
         rule: dict[str, Any] = {"property": prop}
@@ -1362,6 +1361,14 @@ class EffectContext:
         if prop == "damagemultiplier":
             rule["value"] = max(0, int(self.modifier_value(
                 param, metadata, "damagemultiplier") or 0))
+        if duration == "BeginningOfOwnersTurn":
+            # Lasts until the start of the resolving player's next turn: tagged with that owner, and the card is listed
+            # so the boundary pass (effect_lifetimes.expire_owner_turn_rules) removes the rule then.
+            owner = int(self.bstate.get("resolving_owner_id", 0) or 0)
+            rule["expires_for_owner"] = owner
+            listed = self.bstate.setdefault("owner_turn_rule_cards", [])
+            if int(target) not in listed:
+                listed.append(int(target))
         rules.append(rule)
         self._save_card_buffs(int(target), buffs, column)
         self._push_modifier_card(int(target))

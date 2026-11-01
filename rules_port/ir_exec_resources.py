@@ -77,13 +77,12 @@ def coverage_modifier(kind: str, effect: dict[str, Any], clause: dict[str, Any],
         return missing
     # A half-health loss has no amount to read: the champion's health is halved when it runs (C# LoseHalfHealth).
     if ix._short((modifier.get("m_InputValue") or {}).get("_t")) not in ("EffectInputVariable", "EffectConstant") \
-            and not (kind == "LoseLifeModifier" and modifier.get("m_LoseHalfHealth")):
+            and not (kind == "LoseLifeModifier" and modifier.get("m_LoseHalfHealth")) \
+            and not (kind == "ChargePointsModifier" and modifier.get("m_RemoveAllCharges")):
         missing.append(f"{kind} without a typed amount")
     player = _player_filter(raw, index)
     if player is not None and player not in ix.SUPPORTED_PLAYER_TARGETS:
         missing.append(f"{kind} for player {player}")
-    if kind == "ChargePointsModifier" and modifier.get("m_RemoveAllCharges"):
-        missing.append("remove all charges")
     return missing
 
 
@@ -146,6 +145,18 @@ def run_modifier(kind: str, modifier: MechanicsObject, root: MechanicsObject, cl
         # C# LoseHalfHealth: the champion loses half its current health, rounded down (context.lose_life halves it).
         for target in ix._targets(root, index, scope):
             context.lose_life(int(target), 0, {"lose_half_health": True})
+        return
+    if kind == "ChargePointsModifier" and modifier.m_RemoveAllCharges:
+        # C# ChargePoints removal: the champion loses every charge it has (the leaf takes the count to zero).
+        if context.bstate.get("pvp"):
+            # PvP keeps the charge count per participant; the native path removes them, before anything changes here.
+            raise NotImplementedError("remove all charges in PvP")
+        for target in ix._targets(root, index, scope):
+            owner = context.target_owner(int(target), default=None)
+            side = "player" if owner else "ai"
+            current = int(context.bstate.get(f"{side}_charges", 0) or 0)
+            if current > 0:
+                _apply_to_target(kind, modifier, int(target), -current, context)
         return
     amount = ix._input_value(modifier, scope)
     for target in ix._targets(root, index, scope):

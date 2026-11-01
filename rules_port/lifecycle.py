@@ -583,6 +583,9 @@ def clear_expired_temporary_attributes(db, session_id, owner_id, boundary,
         expire_temporary_intattrs(
             db, session_id, battle_state, boundary=boundary,
             boundary_owner=owner_id, handler=handler)
+        from .effect_lifetimes import expire_owner_turn_rules
+        rule_changes = expire_owner_turn_rules(
+            db, session_id, battle_state, boundary, owner_id)
         expire_grants(
             db, session_id, battle_state, boundary=boundary,
             boundary_owner=owner_id, handler=handler)
@@ -593,7 +596,7 @@ def clear_expired_temporary_attributes(db, session_id, owner_id, boundary,
         # event sweep only sees events; a source that left play during a step that emits none would linger).
         stat_changes = list(dict.fromkeys(
             stat_changes + expire_while_in_play(
-                db, session_id, battle_state, handler=handler)))
+                db, session_id, battle_state, handler=handler) + rule_changes))
     changed = list(stat_changes)
     for card_uid, target_owner, attrs, raw_buffs in db_temporary_attribute_rows(
             session_id, conn=db):
