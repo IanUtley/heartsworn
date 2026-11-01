@@ -718,7 +718,7 @@ def _resolved_targets(root: MechanicsObject, index: int, scope: Scope) -> list[i
     if kind == "SourceRevealedTargetTemplate":
         return _revealed_candidates(template, index, scope)
     if kind in ("AbilityTargetTemplate", "SourceRevealedTargetTemplate", "SecondaryTargetTemplate",
-                "MatchSecondaryTargetTemplate") \
+                "MatchSecondaryTargetTemplate", "TargetsAPlayerOrHisStuff") \
             and not template.m_IsAutoTarget \
             and index in scope.chosen:
         # A chosen target the player has answered: the card, or nothing when the player chose none.
@@ -844,7 +844,8 @@ def _needs_choice(root: MechanicsObject, index: int) -> bool:
     """Whether a clause's target is a card the player picks (a non-automatic card target)."""
     template = _load("AbilityTargetTemplate", _guid(root.m_AbilityTargetTemplateIds[index]))
     return _short(template.type_name) in ("AbilityTargetTemplate", "SourceRevealedTargetTemplate",
-                                          "SecondaryTargetTemplate", "MatchSecondaryTargetTemplate") \
+                                          "SecondaryTargetTemplate", "MatchSecondaryTargetTemplate",
+                                          "TargetsAPlayerOrHisStuff") \
         and not template.m_IsAutoTarget
 
 
@@ -870,6 +871,15 @@ def _choice_candidates(root: MechanicsObject, index: int, scope: Scope) -> tuple
     if _short(template.type_name) == "MatchSecondaryTargetTemplate":
         return (ir_exec_targets.match_values(template, _guid(root.m_AbilityTargetTemplateIds[index]),
                                              _guid(root.m_AbilityTemplateId), scope), bool(template.m_Optional))
+    if _short(template.type_name) == "TargetsAPlayerOrHisStuff":
+        # The chain items that target the player or the player's troops (the native port of this template).
+        from rules_port.targeting import legal_targets
+        context = scope.context
+        champions = getattr(context.handler, "_champion_targets", lambda: [])() or []
+        candidates = [int(uid) for uid in legal_targets(
+            context.db, context.session.session_id, int(scope.owner_uid), _guid(root.m_AbilityTargetTemplateIds[index]),
+            int(scope.source_uid), both_players=True, champions=champions, battle_state=context.bstate)]
+        return candidates, bool(template.m_Optional)
     return _card_candidates(template, scope), bool(template.m_Optional)
 
 
@@ -1955,7 +1965,8 @@ STAT_DURATIONS = {"Permanent", "EndOfTurn"}
 # responsible player's next turn, as native records it.
 LINKED_STAT_DURATIONS = STAT_DURATIONS | {"WhileCardInPlay", "BeginningOfOwnersTurn", "UntilEndOfDungeon"}
 SUPPORTED_TARGETS = {"AbilitySourceCardTargetTemplate", "AbilityTargetTemplate", "PlayerTargetTemplate",
-                     "SourceRevealedTargetTemplate", "DuplicateCardTargetTemplate"} | FOLLOW_UP_KINDS
+                     "SourceRevealedTargetTemplate", "DuplicateCardTargetTemplate",
+                     "TargetsAPlayerOrHisStuff"} | FOLLOW_UP_KINDS
 # The player targets run without a choice: "You", and the one opponent (its random pick is that one player).
 SUPPORTED_PLAYER_TARGETS = {"Self", "SingleOpponent"}
 

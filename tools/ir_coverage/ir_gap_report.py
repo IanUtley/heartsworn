@@ -65,6 +65,51 @@ def reachable_guids(store):
     return seen
 
 
+# The Records entries that are known data errors, not interpreter gaps (IR_ENGINE_GOAL.md, non-goals). Each is
+# listed by name in the gap document, and the Records fix is what closes it.
+RECORDS_ERRORS = {
+    "9b36aabc-dffc-edf3-eaf9-cd514adf3d6a",   # its clause points at a null template
+}
+
+
+def referrers(store):
+    """``(kinds, parents)``: each record's kind by GUID, and for each GUID the GUIDs of the records that refer to it."""
+    kinds = {}
+    parents = {}
+    for name in sorted(os.listdir(store.records_dir)):
+        if not name.endswith(".jsonl"):
+            continue
+        kind = name[:-len(".jsonl")]
+        for record in store.load(kind):
+            own = str(record.guid).lower()
+            kinds[own] = kind
+            for match in GUID.findall(json.dumps(record.raw).lower()):
+                if match != own:
+                    parents.setdefault(match, set()).add(own)
+    return kinds, parents
+
+
+def covered_in_context(guid, refusals, kinds, parents):
+    """Whether a refused ability runs correctly inside the abilities that invoke it (its parents), because every
+    ability above it is covered. A card or champion that names it directly makes it a root: it is not covered in
+    context. (An invoked child's refusal also shows on its parent as "invoked: ...", so a covered parent has checked
+    the child in its linked context.)"""
+    if any(kinds.get(parent) not in ABILITY_PART_KINDS for parent in parents.get(guid, ())):
+        return False
+    ancestors = set()
+    stack = list(parents.get(guid, ()))
+    while stack:
+        current = stack.pop()
+        if current in ancestors or current == guid:
+            continue
+        ancestors.add(current)
+        stack.extend(parents.get(current, ()))
+    abilities = [item for item in ancestors if kinds.get(item) == "AbilityTemplate"]
+    if not abilities:
+        return False
+    return all(item not in refusals for item in abilities)
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--top", type=int, default=60, help="how many reasons to print")
@@ -90,23 +135,31 @@ def main(argv=None):
             refusals[guid] = missing
 
     reachable = reachable_guids(STORE)
+    kinds, parents = referrers(STORE)
     orphans = sorted(guid for guid in refusals if guid not in reachable)
+    records_errors = sorted(guid for guid in refusals if guid in RECORDS_ERRORS)
+    in_context = sorted(guid for guid in refusals if guid in reachable and guid not in RECORDS_ERRORS and
+                        covered_in_context(guid, refusals, kinds, parents))
+    excluded = set(orphans) | set(records_errors) | set(in_context)
     reasons = collections.Counter()
     for guid, missing in refusals.items():
-        if guid in reachable:
+        if guid not in excluded:
             reasons.update(set(missing))
 
     print(f"abilities {len(guids)}")
     print(f"refused {len(refusals)}")
     print(f"orphans {len(orphans)} (refused, and not reachable from any card or other game record)")
-    print(f"refused, reachable {len(refusals) - len(orphans)}")
+    print(f"records errors {len(records_errors)} (Records data to fix; not interpreter gaps)")
+    print(f"covered in context {len(in_context)} (refused only as a standalone root; every ability above them is covered)")
+    print(f"refused, reachable {len(refusals) - len(orphans) - len(records_errors) - len(in_context)}")
     print(f"coverage errors {broken}")
     for reason, count in reasons.most_common(args.top):
         print(f"{count} {reason}")
     if args.json:
         with open(args.json, "w", encoding="utf-8") as stream:
             json.dump({"abilities": len(guids), "refused": len(refusals), "orphans": len(orphans),
-                       "orphan_guids": orphans, "coverage_errors": broken,
+                       "orphan_guids": orphans, "records_errors": records_errors, "in_context": in_context,
+                       "coverage_errors": broken,
                        "reasons": reasons.most_common()}, stream, indent=2)
     return 0
 
