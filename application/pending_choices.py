@@ -571,7 +571,7 @@ class PendingChoicesMixin:
 
     def _prompt_deck_search(self, game, session, pl_t, ai_t, bstate,
                             ability_guid, source_uid, owner_id, candidates,
-                            kind="search", continuation=None):
+                            kind="search", continuation=None, minimum=1, maximum=1):
         """Ask a HUMAN controller to pick which matching deck card a
         "search your deck" effect puts into their hand (e.g. Darkspire
         Priestess's Deathcry).  The AI auto-picks a random match instead.
@@ -613,6 +613,9 @@ class PendingChoicesMixin:
             "instance_id": inst_id,
             "candidates": [int(u) for u in (candidates or [])],
             "kind": kind,
+            # How many cards the player picks (a pick of several is answered with a list).
+            "minimum_picks": max(0, int(minimum)),
+            "maximum_picks": max(1, int(maximum)),
         }
         if continuation:
             pend["continuation"] = continuation
@@ -677,8 +680,8 @@ class PendingChoicesMixin:
             tgt.targets = [_hc.game_engine.SessionCardId(_hc.game_engine.UID(int(u)))
                            for u in pend["candidates"]]
             inst.target_instances.append(tgt)
-            inst.min_target_counts = [1]
-            inst.max_target_counts = [1]
+            inst.min_target_counts = [int(pend["minimum_picks"])]
+            inst.max_target_counts = [int(pend["maximum_picks"])]
             opt.instances.append(inst)
             ev.options.append(opt)
             g._push(ev)
@@ -1118,7 +1121,7 @@ class PendingChoicesMixin:
     def _prompt_revealed_choice(self, game, session, pl_t, ai_t, bstate,
                                 ability_guid, source_uid, owner_id,
                                 candidates, revealed_cards, optional=False,
-                                continuation=None):
+                                continuation=None, minimum=None, maximum=None):
         """Prompt for an explicit choice from cards just revealed by BOM data.
 
         Oakhenge's child target is a SourceRevealedTargetTemplate filtered by
@@ -1142,6 +1145,9 @@ class PendingChoicesMixin:
             "revealed_cards": [int(u) for u in (revealed_cards or [])],
             "kind": "revealed_card",
             "optional": bool(optional),
+            # How many cards the player picks (the client's target picker takes any number in this range).
+            "minimum_picks": int(0 if optional else 1) if minimum is None else int(minimum),
+            "maximum_picks": 1 if maximum is None else max(1, int(maximum)),
         }
         if continuation:
             pend["continuation"] = continuation
@@ -1232,8 +1238,8 @@ class PendingChoicesMixin:
                 _hc.game_engine.SessionCardId(_hc.game_engine.UID(int(u)))
                 for u in pend["candidates"]]
             inst.target_instances.append(tgt)
-            inst.min_target_counts = [0 if optional else 1]
-            inst.max_target_counts = [1]
+            inst.min_target_counts = [int(pend["minimum_picks"])]
+            inst.max_target_counts = [int(pend["maximum_picks"])]
             opt.instances.append(inst)
             opt_list.options.append(opt)
             g._push(opt_list)
@@ -1868,6 +1874,7 @@ class PendingChoicesMixin:
         if ability_guid and str(pend.get("ability_guid", "")).lower() != str(ability_guid).lower():
             return False
         chosen_uid = None
+        all_picks = []
         if isinstance(inner_bytes, bytes):
             for m_du in re.finditer(
                     rb'm_UID64;[^;]*;[^;]*;[^;]*;([0-9A-Fa-f]{16});',
@@ -1876,11 +1883,25 @@ class PendingChoicesMixin:
                     uid64 = struct.unpack('<Q', bytes.fromhex(m_du.group(1).decode()))[0]
                     if (uid64 & 0xFF) == 1:
                         chosen_uid = int(uid64)
+                        all_picks.append(int(uid64))
                 except Exception:
                     continue
+        # A pick of several cards (an interpreter target with a count above one): the cards named in the answer that
+        # are candidates, each once, up to the count. Empty when the pick is a single card.
+        picks = None
+        if int(pend.get("maximum_picks", 1) or 1) > 1:
+            offered = [int(u) for u in (pend.get("candidates") or [])]
+            chosen_many = []
+            for uid in all_picks:
+                if uid in offered and uid not in chosen_many:
+                    chosen_many.append(uid)
+            chosen_many = chosen_many[:int(pend["maximum_picks"])]
+            if chosen_many and len(chosen_many) >= int(pend.get("minimum_picks", 0) or 0):
+                picks = chosen_many
+                chosen_uid = picks[-1]
         if pend.get("kind") in ("revealed_troop", "revealed_card"):
             return self._resolve_pending_revealed_choice(
-                session, pl_t, ai_t, bstate, pend, chosen_uid)
+                session, pl_t, ai_t, bstate, pend, chosen_uid, picks=picks)
         bstate.pop("pending_deck_search")
         if pend.get("kind") == "shard":
             # Shards of Fate ("Choose a Standard resource in your deck. Gain
@@ -1892,24 +1913,26 @@ class PendingChoicesMixin:
             return self._resolve_pending_matching_target(
                 session, pl_t, ai_t, bstate, pend, chosen_uid)
         native_continuation = pend.get("continuation")
-        if (chosen_uid and chosen_uid in pend["candidates"]
+        if ((picks or (chosen_uid and chosen_uid in pend["candidates"]))
                 and isinstance(native_continuation, dict)
                 and isinstance(native_continuation.get("interpreter"), dict)):
-            # The interpreter paused for this deck pick (rules_port/ir_exec.py). The interpreter moves the chosen card
+            # The interpreter paused for this deck pick (rules_port/ir_exec.py). The interpreter moves the chosen card(s)
             # itself; resume it from the continuation with the pick, then finish the chain as the revealed branch does.
             from rules_port import ir_exec
             from rules_port.context import EffectContext
             from rules_port.resolution import prompt_interpreted_reveal
-            _hc.log_req(f"    Deck-search choice {hex(int(chosen_uid))}: resuming the interpreter")
+            answer = list(picks) if picks else int(chosen_uid)
+            _hc.log_req(f"    Deck-search choice {answer}: resuming the interpreter")
             g = self._fresh_game(session, pl_t, ai_t, bstate)
+            taken = set(picks) if picks else {int(chosen_uid)}
             self._hide_candidates_to_deck(
                 g, session, pl_t, ai_t,
-                [cu for cu in pend["candidates"] if int(cu) != int(chosen_uid)])
+                [cu for cu in pend["candidates"] if int(cu) not in taken])
             bstate.pop("pending_deck_search", None)
             bstate.pop("resolution_paused", None)
             try:
                 ir_exec.resume_ability(
-                    native_continuation["interpreter"], int(chosen_uid),
+                    native_continuation["interpreter"], answer,
                     context=EffectContext.from_rules_port(
                         g, session, _hc._db, self, pl_t, ai_t, bstate, ""))
             except ir_exec.NeedsChoice as pause:
@@ -2077,30 +2100,32 @@ class PendingChoicesMixin:
         return True
 
     def _resolve_pending_revealed_choice(self, session, pl_t, ai_t, bstate,
-                                         pend, chosen_uid):
-        """Finish a SourceRevealed choice using its child effect metadata."""
+                                         pend, chosen_uid, picks=None):
+        """Finish a SourceRevealed choice using its child effect metadata. ``picks`` is the list of cards the player
+        chose when the pick takes several (the interpreter's count); it is None for a single pick."""
         import hconnect_server as _hc
         _be = self._checkpoint_engine(session)
         bstate.pop("pending_deck_search", None)
         bstate.pop("resolution_paused", None)
         candidates = [int(u) for u in (pend.get("candidates") or [])]
         revealed = [int(u) for u in (pend.get("revealed_cards") or [])]
-        if chosen_uid and int(chosen_uid) in candidates:
+        if picks or (chosen_uid and int(chosen_uid) in candidates):
             g = self._fresh_game(session, pl_t, ai_t, bstate)
             native_continuation = pend.get("continuation")
             if isinstance(native_continuation, dict) and isinstance(native_continuation.get("interpreter"), dict):
                 # The interpreter paused for this pick (rules_port/ir_exec.py). Put the presented cards back behind
-                # the deck projection, then resume the interpreter from the continuation with the chosen card.
+                # the deck projection, then resume the interpreter from the continuation with the chosen card(s).
                 from rules_port import ir_exec
                 from rules_port.context import EffectContext
                 from rules_port.resolution import prompt_interpreted_reveal
-                _hc.log_req(f"    Revealed choice {hex(int(chosen_uid))}: resuming the interpreter")
+                answer = list(picks) if picks else int(chosen_uid)
+                _hc.log_req(f"    Revealed choice {answer}: resuming the interpreter")
                 self._hide_candidates_to_deck(g, session, pl_t, ai_t, revealed)
                 bstate.pop("pending_deck_search", None)
                 bstate.pop("resolution_paused", None)
                 try:
                     ir_exec.resume_ability(
-                        native_continuation["interpreter"], int(chosen_uid),
+                        native_continuation["interpreter"], answer,
                         context=EffectContext.from_rules_port(
                             g, session, _hc._db, self, pl_t, ai_t, bstate, ""))
                 except ir_exec.NeedsChoice as pause:

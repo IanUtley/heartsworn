@@ -247,13 +247,18 @@ class NeedsChoice(Exception):
     """The ability reached a target the player chooses. Its continuation (JSON-serialisable) resumes it with
     ``resume_ability`` once the player answers; ``candidates`` are the cards the answer may name."""
 
-    def __init__(self, continuation: dict[str, Any], candidates: list[int], optional: bool, revealed: bool = False):
+    def __init__(self, continuation: dict[str, Any], candidates: list[int], optional: bool, revealed: bool = False,
+                 minimum: int = 1, maximum: int = 1):
         super().__init__(f"choice of target {continuation['target_index']} for {continuation['ability_guid']}")
         self.continuation = continuation
         self.candidates = candidates
         self.optional = optional
         # A choice among the cards a reveal showed (the client's revealed-card picker), not among the battle's cards.
         self.revealed = revealed
+        # How many cards the player picks: a single pick (1), or several within the template's count (the client's
+        # target picker takes any number between the two).
+        self.minimum = minimum
+        self.maximum = maximum
 
 
 def _champion_owners(bstate: dict[str, Any]) -> dict[int, int]:
@@ -676,6 +681,17 @@ def _targets(root: MechanicsObject, index: int, scope: Scope) -> list[int]:
     if scope.gate is None:
         return targets
     return [uid for uid in targets if scope.gate(uid)]
+
+
+def _pick_bounds(template: MechanicsObject, candidates: list[int], optional: bool, scope: Scope) -> tuple[int, int]:
+    """How many cards a chosen target takes: the template's minimum and maximum counts (C# target counts), with an
+    unset maximum meaning every candidate. A single-card target is (1, 1); an optional one may take none."""
+    maximum = ir_exec_targets.target_count(template.m_MaxTargetCount, scope.variables)
+    maximum = len(candidates) if maximum <= 0 else min(maximum, len(candidates))
+    minimum = ir_exec_targets.target_count(template.m_MinTargetCount, scope.variables)
+    # A chosen target takes at least one card unless it is optional (the picker's own rule for a single pick).
+    minimum = 0 if optional else max(1, minimum)
+    return min(minimum, maximum), max(1, maximum)
 
 
 def _resolved_targets(root: MechanicsObject, index: int, scope: Scope) -> list[int]:
@@ -1419,7 +1435,9 @@ def _run_effects(guid: str, root: MechanicsObject, scope: Scope, start: int) -> 
                     template = _load("AbilityTargetTemplate", _guid(root.m_AbilityTargetTemplateIds[index]))
                     revealed = _short(template.type_name) in ("SourceRevealedTargetTemplate",
                                                              "SecondaryTargetTemplate")
-                    raise NeedsChoice(continuation, candidates, optional, revealed=revealed)
+                    minimum, maximum = _pick_bounds(template, candidates, optional, scope)
+                    raise NeedsChoice(continuation, candidates, optional, revealed=revealed,
+                                      minimum=minimum, maximum=maximum)
             effect_type, effect_raw = _stored("AbilityEffectTemplate", _guid(_field(clause, "m_EffectTemplateId")))
             # The targets of an effect a later clause names as its secondary target, as they are when it runs.
             instance = int(_field(clause, "m_EffectInstanceId") or 0)
@@ -2075,9 +2093,12 @@ def coverage(guid: str) -> list[str]:
             # An automatic follow-up target takes its constant count (its matches are capped to the maximum, as the
             # native resolver does); a chosen one needs the player to pick several cards, which the picker does not do.
             automatic_follow_up = kind in FOLLOW_UP_KINDS and bool(template.get("m_IsAutoTarget"))
+            # A chosen revealed target takes several picks through the client's target picker (the pick's count is
+            # bounded by the template, and the answer is checked against it when the interpreter resumes).
+            chosen_revealed = kind == "SourceRevealedTargetTemplate" and not template.get("m_IsAutoTarget")
             if isinstance(count, dict) and count.get("m_Value") is not None and int(count["m_Value"]) != 1 \
                     and not (bound == "m_MinTargetCount" and int(count["m_Value"]) == 0) \
-                    and kind != "AbilityTargetTemplate" and not automatic_follow_up:
+                    and kind != "AbilityTargetTemplate" and not automatic_follow_up and not chosen_revealed:
                 missing.append(f"multi-card target ({bound} {count['m_Value']})")
             elif isinstance(count, dict) and count.get("m_Value") is None and not (
                     _short(count.get("_t")) == "TargetVariable" and

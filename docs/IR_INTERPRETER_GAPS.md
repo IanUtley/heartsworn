@@ -9,8 +9,8 @@ interpreter never half-runs an ability.
 
 Measured with `tools/ir_coverage/ir_gap_report.py` over the 8,992 `AbilityTemplate` records (four abilities of placeholder-art cards are excluded: OpponentChooseAndPlay, ChooseRevealAndPlay, Footsteps from the Hall (A) and (B); their implementation is done, and the migration counts them as done), at the latest run:
 
-- Covered by the interpreter: 8,944
-- Refused: 48 (15 orphans, 33 reachable; the orphans are listed below) (the reasons are under "Outstanding after the latest run" below)
+- Covered by the interpreter: 8,946
+- Refused: 46 (15 orphans, 31 reachable; the orphans are listed below) (the reasons are under "Outstanding after the latest run" below)
 - Coverage errors (the coverage check raising on bad Records data): 0 at this run
 
 Regenerate the numbers and the full reason list from the current code and Records:
@@ -37,8 +37,8 @@ from sockets, payments, remembered powers and random picks (62 of the 66 grants 
 
 ## Outstanding after the latest run
 
-The 33 reachable refused abilities, by refusal reason (orphans excluded). An ability with several reasons is counted under each, so the
-column sums to 36. Regenerate with `python3 tools/ir_coverage/ir_gap_report.py --top 200`.
+The 31 reachable refused abilities, by refusal reason (orphans excluded). An ability with several reasons is counted under each, so the
+column sums to 34. Regenerate with `python3 tools/ir_coverage/ir_gap_report.py --top 200`.
 
 | Reason | Abilities |
 | --- | ---: |
@@ -52,8 +52,6 @@ column sums to 36. Regenerate with `python3 tools/ir_coverage/ir_gap_report.py -
 | `effect TransformCardIntoReplicaAbilityEffectTemplate` | 1 |
 | `AttributeModifier duration WhileCardInPlay` | 1 |
 | `move of every card in a zone` | 1 |
-| `multi-card target (m_MaxTargetCount 2147483647)` | 1 |
-| `invoked: multi-card target (m_MaxTargetCount 2147483647)` | 1 |
 | `damage shield without a lifetime` | 1 |
 | `expression name INS` | 1 |
 | `TransformSelfAbilityEffectTemplate of a player` | 1 |

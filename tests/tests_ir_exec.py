@@ -700,9 +700,21 @@ def test_remove_all_counters_removes_each_counter_the_card_holds():
     assert removed == [("stealth", 2, "remove"), ("burning", 1, "remove")]
 
 
+def test_a_chosen_target_with_no_maximum_takes_any_number_of_candidates():
+    """An unset maximum lets the player pick every candidate; an optional target may take none."""
+    from types import SimpleNamespace
+
+    from rules_port import ir_exec
+
+    template = SimpleNamespace(m_MaxTargetCount=None, m_MinTargetCount=None)
+    assert ir_exec._pick_bounds(template, [1, 2, 3], False, SimpleNamespace(variables={})) == (1, 3)
+    assert ir_exec._pick_bounds(template, [1, 2, 3], True, SimpleNamespace(variables={})) == (0, 3)
+
+
 if __name__ == "__main__":
     import db as dbmod
-    for run in (test_remove_all_counters_removes_each_counter_the_card_holds,
+    for run in (test_a_chosen_target_with_no_maximum_takes_any_number_of_candidates,
+                test_remove_all_counters_removes_each_counter_the_card_holds,
                 test_a_dungeon_opposing_bonus_is_recorded_once_per_resolution,
                 test_a_top_of_deck_int_attr_expires_when_its_source_leaves_the_top,
                 test_burning_ability_runs_from_its_ir, test_dazed_and_vulnerable_removals_match_the_live_engine,

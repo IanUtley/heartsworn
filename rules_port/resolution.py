@@ -2214,14 +2214,16 @@ def prompt_interpreted_reveal(handler, game, session, db, player_uid, ai_uid, ba
         prompt(game, session, player_uid, ai_uid, battle_state, continuation["ability_guid"],
                int(continuation["source_uid"]), int(continuation["owner_uid"]),
                list(pause.candidates), [int(uid) for uid in (battle_state.get("revealed_cards") or [])],
-               optional=bool(pause.optional), continuation=native_shape)
+               optional=bool(pause.optional), continuation=native_shape,
+               minimum=pause.minimum, maximum=pause.maximum)
     else:
         prompt = getattr(handler, "_prompt_deck_search", None)
         if not callable(prompt):
             raise RuntimeError("the interpreter paused for a deck choice, with no deck-search picker to show it")
         prompt(game, session, player_uid, ai_uid, battle_state, continuation["ability_guid"],
                int(continuation["source_uid"]), int(continuation["owner_uid"]),
-               list(pause.candidates), kind="search", continuation=native_shape)
+               list(pause.candidates), kind="search", continuation=native_shape,
+               minimum=pause.minimum, maximum=pause.maximum)
     battle_state["resolution_paused"] = True
     return "waiting"
 
