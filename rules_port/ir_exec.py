@@ -248,7 +248,7 @@ class NeedsChoice(Exception):
     ``resume_ability`` once the player answers; ``candidates`` are the cards the answer may name."""
 
     def __init__(self, continuation: dict[str, Any], candidates: list[int], optional: bool, revealed: bool = False,
-                 minimum: int = 1, maximum: int = 1, match: bool = False):
+                 minimum: int = 1, maximum: int = 1, match: bool = False, zone: str = "Deck"):
         super().__init__(f"choice of target {continuation['target_index']} for {continuation['ability_guid']}")
         self.continuation = continuation
         self.candidates = candidates
@@ -261,6 +261,8 @@ class NeedsChoice(Exception):
         self.maximum = maximum
         # A chosen match from the deck (the native matching-target picker shows it).
         self.match = match
+        # The zone a chosen match is picked from (its collection flags: "Deck" or "Discard").
+        self.zone = zone
 
 
 def _champion_owners(bstate: dict[str, Any]) -> dict[int, int]:
@@ -1443,8 +1445,9 @@ def _run_effects(guid: str, root: MechanicsObject, scope: Scope, start: int) -> 
                                                              "SecondaryTargetTemplate")
                     minimum, maximum = _pick_bounds(template, candidates, optional, scope)
                     match = _short(template.type_name) == "MatchSecondaryTargetTemplate"
+                    zone = str(template.m_CollectionFlags or "Deck")
                     raise NeedsChoice(continuation, candidates, optional, revealed=revealed,
-                                      minimum=minimum, maximum=maximum, match=match)
+                                      minimum=minimum, maximum=maximum, match=match, zone=zone)
             effect_type, effect_raw = _stored("AbilityEffectTemplate", _guid(_field(clause, "m_EffectTemplateId")))
             # The targets of an effect a later clause names as its secondary target, as they are when it runs.
             instance = int(_field(clause, "m_EffectInstanceId") or 0)

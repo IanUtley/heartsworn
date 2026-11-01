@@ -102,7 +102,8 @@ def follow_up_gaps(template: Any, kind: str) -> list[str]:
     # A "one of them" target picks among the cards its effect resolved to; the interpreter prompts for that pick.
     # A chosen match from the deck is picked through the deck-search picker's matching-target mode (the native path's
     # prompt for it); a chosen match from any other zone is not prompted for yet.
-    chosen_deck_match = kind == "MatchSecondaryTargetTemplate" and str(template.get("m_CollectionFlags") or "") == "Deck"
+    chosen_deck_match = kind == "MatchSecondaryTargetTemplate" and \
+        str(template.get("m_CollectionFlags") or "") in ("Deck", "Discard")
     if kind in COUNTED_KINDS and kind != "SecondaryTargetTemplate" and not template.get("m_IsAutoTarget") \
             and not chosen_deck_match:
         gaps.append("chosen follow-up target")

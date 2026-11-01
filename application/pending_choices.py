@@ -571,7 +571,8 @@ class PendingChoicesMixin:
 
     def _prompt_deck_search(self, game, session, pl_t, ai_t, bstate,
                             ability_guid, source_uid, owner_id, candidates,
-                            kind="search", continuation=None, minimum=1, maximum=1):
+                            kind="search", continuation=None, minimum=1, maximum=1,
+                            zone="Deck"):
         """Ask a HUMAN controller to pick which matching deck card a
         "search your deck" effect puts into their hand (e.g. Darkspire
         Priestess's Deathcry).  The AI auto-picks a random match instead.
@@ -616,6 +617,8 @@ class PendingChoicesMixin:
             # How many cards the player picks (a pick of several is answered with a list).
             "minimum_picks": max(0, int(minimum)),
             "maximum_picks": max(1, int(maximum)),
+            # The zone the presented cards really are in (a discard pile pick is shown in the discard collection).
+            "zone": str(zone or "Deck"),
         }
         if continuation:
             pend["continuation"] = continuation
@@ -648,14 +651,16 @@ class PendingChoicesMixin:
                 # A candidate keeps its real owner. The chooser sees it through a temporary view tagged for them,
                 # so a card from the opponent's deck is shown to the chooser and stays hidden from the other player.
                 card_owner = pl_t if (c_row[2] or 0) != 0 else ai_t
+                from_discard = kind == "matching_target" and pend["zone"] == "Discard"
                 g.push_card_updated(c_scid, card_owner,
-                                    (_hc.game_engine.ECardCollections.Deck if kind == "matching_target"
+                                    (_hc.game_engine.ECardCollections.Discard if from_discard
+                                     else _hc.game_engine.ECardCollections.Deck if kind == "matching_target"
                                      else _hc.game_engine.ECardCollections.Choosing), ct2,
                                     template_id=c_tpl, cost=cost2, attack=atk2,
                                     defense=def2,
                                     # A deck pick shows the cards face-down (nulled), as the hidden deck does, so
-                                    # the picker does not animate every card's face in.
-                                    nulling=(kind == "matching_target"),
+                                    # the picker does not animate every card's face in. A discard pile is face up.
+                                    nulling=(kind == "matching_target" and not from_discard),
                                     state=0,
                                     **({"int_attrs": {}} if kind == "matching_target" else {}))
                 g.events[-1]._hand_reveal_viewer_uid = player_uid
@@ -2370,6 +2375,14 @@ class PendingChoicesMixin:
             c_row = _hc.db_card_zone_details(
                 session.session_id, int(cu), conn=_hc._db)
             if not c_row:
+                continue
+            if str(c_row[3] or "").lower() == "discard":
+                # A discard pile pick never left the pile: show the card back in the discard collection.
+                owner = pl_t if (c_row[2] or 0) != 0 else ai_t
+                _tpl2, ct2, _n2, _c2, _a2, _d2, _g2 = self._card_full_data(
+                    game, c_scid, c_row[0], c_row[1])
+                game.push_card_updated(c_scid, owner, _hc.game_engine.ECardCollections.Discard, ct2,
+                                       template_id=c_row[0], cost=_c2, attack=_a2, defense=_d2)
                 continue
             if str(c_row[3] or "").lower() not in ("deck", "choosing"):
                 # A reveal of a hand (Inquisition: "look at target opposing

@@ -2224,7 +2224,8 @@ def prompt_interpreted_reveal(handler, game, session, db, player_uid, ai_uid, ba
         prompt(game, session, player_uid, ai_uid, battle_state, continuation["ability_guid"],
                int(continuation["source_uid"]), int(continuation["owner_uid"]),
                list(pause.candidates), kind="matching_target" if pause.match else "search",
-               continuation=native_shape, minimum=pause.minimum, maximum=pause.maximum)
+               continuation=native_shape, minimum=pause.minimum, maximum=pause.maximum,
+               **({"zone": pause.zone} if pause.match else {}))
     battle_state["resolution_paused"] = True
     return "waiting"
 
