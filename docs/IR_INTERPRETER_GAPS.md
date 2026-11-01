@@ -9,8 +9,8 @@ interpreter never half-runs an ability.
 
 Measured with `tools/ir_coverage/ir_gap_report.py` over the 8,992 `AbilityTemplate` records (four abilities of placeholder-art cards are excluded: OpponentChooseAndPlay, ChooseRevealAndPlay, Footsteps from the Hall (A) and (B); their implementation is done, and the migration counts them as done), at the latest run:
 
-- Covered by the interpreter: 8,978
-- Refused: 14 (12 orphans, 0 Records errors, 2 covered in context, 0 reachable; the orphans are listed below) (the reasons are under "Outstanding after the latest run" below)
+- Covered by the interpreter: 8,983
+- Refused: 9 (9 orphans, 0 Records errors, 0 covered in context, 0 reachable; the orphans are listed below) (the reasons are under "Outstanding after the latest run" below)
 - Coverage errors (the coverage check raising on bad Records data): 0 at this run
 
 Regenerate the numbers and the full reason list from the current code and Records:
@@ -55,6 +55,8 @@ Notes on the largest entries (the counts in these notes are from an earlier run,
 
 ## Orphan abilities
 
+A refused ability that no game record can reach: no card, champion, talent, deck or encounter starts it, directly or through the records they refer to. Nothing in the game can run these, so they are not interpreter gaps. There are two kinds: client built-in templates (listed in the client's BuiltInResources.cs; the server runs their rules natively, for example Dazed, Vulnerable and Stealth), and unused Records templates (no card, ability or client code names them). Closing an unused template would add a mechanic that cannot be reached, so these stay refused. Regenerate the list with `ir_gap_report.py --json`.
+
 A refused ability that no game record can reach: no card, champion, talent, deck or encounter starts it, directly or through the records they refer to. Nothing in the Records can start these, so they are not counted in the reasons above. The count is 15. Some may still be reached from client code rather than the Records: the client's built-in card-play template (`Play Card Ability`, see HOWTO.md) is one. Check each against the client before treating it as dead. Regenerate the list with `ir_gap_report.py --json`.
 
 | Ability GUID | Records name |
@@ -62,14 +64,11 @@ A refused ability that no game record can reach: no card, champion, talent, deck
 | `0eb4917d-6545-965d-d564-aa6917402301` | AtTheStartOfYourTurnIfYouHaveFiveOrMoreChargesYouLoseAllCharges |
 | `16ffaa33-6b56-4e77-a9b9-c5fd8db4420a` | WhileYouAreBdazedbIgnoreChainNonmresourceCardsInYourHandHaveCostP1 |
 | `1730bd95-7c2a-4a19-9d6d-80c9c22bb720` | WhileYouAreBstealthbOpposingTroopsCanTAttack |
-| `26f9efa9-584e-0dfc-ccca-e499245137e8` | TwoRandomArdentOrUnderworldTroopsInYourDeckGetM1AtkM1Def |
 | `340add49-e730-a933-e64b-8bf4b4130be2` | Basic3ArrowrYourCardsAndEffectsDealDoubleNonmcombatDamageUntilTheStartOfYourNextTurn |
 | `5a8783b0-e420-4f41-b2a1-96f70b0cd851` | Play Card Ability |
-| `714f16cc-9caa-1436-56f3-22acc288bfbb` | TwoRandomTroopsInYourDeckGetM1Atk |
 | `79c61378-3764-430e-ae8b-efebe258701d` | YourBvulnerablebChampionOrYourBvulnerablebTroopsTakeDoubleDamage |
 | `7e8bae76-202f-4225-84ef-dde8339ccff2` | WhileYouAreBstealthbYouHaveBspellshieldb |
 | `8553550b-a8cb-4780-be5c-b698cd540df2` | Conscript Modifier Ability |
-| `aa1c4b06-b125-9e8a-0edc-1ed28b7d6c1c` | ARandomTroopInYourHandGetsM1Atk |
 | `ae783759-b8ea-427c-826b-883f9adef746` | IgnoreChainFinishMovingSelfToWarzone |
 
 ## Closed in the latest stretch

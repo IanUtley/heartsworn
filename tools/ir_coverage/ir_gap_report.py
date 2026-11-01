@@ -71,6 +71,18 @@ def reachable_guids(store):
 RECORDS_ERRORS = set()
 
 
+def client_builtins():
+    """The ability GUIDs the client ships as built-in templates (BuiltInResources.cs). The server runs their rules natively
+    (for example Dazed, Vulnerable and Stealth), so the interpreter never runs them."""
+    path = os.path.join(ROOT, "hex-private", "HexClient", "Assembly-CSharp-firstpass", "Game", "Shared", "Resources",
+                        "BuiltInResources.cs")
+    try:
+        with open(path, encoding="utf-8") as stream:
+            return {guid.lower() for guid in GUID.findall(stream.read().lower())}
+    except OSError:
+        return set()
+
+
 def referrers(store):
     """``(kinds, parents)``: each record's kind by GUID, and for each GUID the GUIDs of the records that refer to it."""
     kinds = {}
@@ -147,6 +159,8 @@ def main(argv=None):
     from rules_port.ir_exec import _coverage_stack
     in_context = sorted(guid for guid in refusals if guid in reachable and guid not in RECORDS_ERRORS and
                         covered_in_context(guid, refusals, kinds, parents, coverage, _coverage_stack()))
+    builtins = sorted(guid for guid in orphans if guid in client_builtins())
+    unused = sorted(guid for guid in orphans if guid not in client_builtins())
     excluded = set(orphans) | set(records_errors) | set(in_context)
     reasons = collections.Counter()
     for guid, missing in refusals.items():
@@ -156,6 +170,8 @@ def main(argv=None):
     print(f"abilities {len(guids)}")
     print(f"refused {len(refusals)}")
     print(f"orphans {len(orphans)} (refused, and not reachable from any card or other game record)")
+    print(f"  client built-in templates {len(builtins)} (the server runs their rules natively)")
+    print(f"  unused Records templates {len(unused)} (no card, ability or client code names them)")
     print(f"records errors {len(records_errors)} (Records data to fix; not interpreter gaps)")
     print(f"covered in context {len(in_context)} (refused only as a standalone root; each ability above them is covered, and runs them as an invoked child)")
     print(f"refused, reachable {len(refusals) - len(orphans) - len(records_errors) - len(in_context)}")
@@ -165,7 +181,8 @@ def main(argv=None):
     if args.json:
         with open(args.json, "w", encoding="utf-8") as stream:
             json.dump({"abilities": len(guids), "refused": len(refusals), "orphans": len(orphans),
-                       "orphan_guids": orphans, "records_errors": records_errors, "in_context": in_context,
+                       "orphan_guids": orphans, "client_builtins": builtins, "unused": unused,
+                       "records_errors": records_errors, "in_context": in_context,
                        "coverage_errors": broken,
                        "reasons": reasons.most_common()}, stream, indent=2)
     return 0

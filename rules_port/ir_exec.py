@@ -2075,6 +2075,39 @@ def _comparison_ops(value: Any, out: list[str]) -> list[str]:
 _COVERAGE_LOCAL = threading.local()
 
 
+_LINKED_ONLY: frozenset[str] | None = None
+
+
+def _linked_only_abilities() -> frozenset[str]:
+    """The abilities a Records effect invokes (ActivateAbility) or grants (GrantAbility). They run as a child or a grant,
+    so their clauses take the linked rules (the lifetime is recorded against the source), not the card's own static
+    projection. Built once from the Records."""
+    global _LINKED_ONLY
+    if _LINKED_ONLY is None:
+        from gamedata import DEFAULT_RECORD_STORE
+        found: set[str] = set()
+
+        def walk(node: Any) -> None:
+            # An invoke or a grant may sit inside another effect (a repeat wraps its invoke), so every nested record counts.
+            if isinstance(node, dict):
+                kind = _short(node.get("_t"))
+                if kind == "ActivateAbilityEffectTemplate":
+                    found.add(_guid(node.get("m_AbilityToInvoke")))
+                elif kind == "GrantAbilityEffectTemplate":
+                    found.add(_guid(node.get("m_GrantedAbilityTemplateId")))
+                for value in node.values():
+                    walk(value)
+            elif isinstance(node, list):
+                for value in node:
+                    walk(value)
+
+        for record in DEFAULT_RECORD_STORE.load("AbilityEffectTemplate"):
+            walk(record.raw)
+        found.discard(ZERO_GUID)
+        _LINKED_ONLY = frozenset(found)
+    return _LINKED_ONLY
+
+
 def _coverage_stack() -> set[str]:
     """The invocation chain this thread is currently checking (an invoked child is on it)."""
     stack = getattr(_COVERAGE_LOCAL, "stack", None)
@@ -2366,7 +2399,7 @@ def coverage(guid: str) -> list[str]:
         clause_duration = str(clause.get("m_EffectDuration") or "")
         # A triggered or player-activated clause, and an invoked child's, apply to their targets at resolution and
         # live on through the linked ledger; an authored static (none of those) is the scan's to project on read.
-        linked = bool(trigger) or bool(raw.get("m_Manual")) or bool(_coverage_stack())
+        linked = bool(trigger) or bool(raw.get("m_Manual")) or bool(_coverage_stack()) or guid in _linked_only_abilities()
         if continuous_statics.covered_as_static(clause_duration, trigger, effect.get("m_Modifier"), raw,
                                                 ability_guid=guid,
                                                 effect_guid=_guid(clause.get("m_EffectTemplateId")),
