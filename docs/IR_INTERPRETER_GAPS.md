@@ -9,8 +9,8 @@ interpreter never half-runs an ability.
 
 Measured with `tools/ir_coverage/ir_gap_report.py` over the 8,992 `AbilityTemplate` records (four abilities of placeholder-art cards are excluded: OpponentChooseAndPlay, ChooseRevealAndPlay, Footsteps from the Hall (A) and (B); their implementation is done, and the migration counts them as done), at the latest run:
 
-- Covered by the interpreter: 8,973
-- Refused: 19 (12 orphans, 7 reachable; the orphans are listed below) (the reasons are under "Outstanding after the latest run" below)
+- Covered by the interpreter: 8,974
+- Refused: 18 (12 orphans, 6 reachable; the orphans are listed below) (the reasons are under "Outstanding after the latest run" below)
 - Coverage errors (the coverage check raising on bad Records data): 0 at this run
 
 Regenerate the numbers and the full reason list from the current code and Records:
@@ -37,17 +37,16 @@ from sockets, payments, remembered powers and random picks (62 of the 66 grants 
 
 ## Outstanding after the latest run
 
-The 7 reachable refused abilities, by refusal reason (orphans excluded). An ability with several reasons is counted under each, so the
-column sums to 8. Regenerate with `python3 tools/ir_coverage/ir_gap_report.py --top 200`.
+The 6 reachable refused abilities, by refusal reason (orphans excluded). An ability with several reasons is counted under each, so the
+column sums to 7. Regenerate with `python3 tools/ir_coverage/ir_gap_report.py --top 200`.
 
 | Reason | Abilities |
 | --- | ---: |
 | `target TargetsAPlayerOrHisStuff` | 2 |
 | `stat duration WhileCardInPlay` | 1 |
 | `AttributeModifier duration WhileCardInPlay` | 1 |
-| `invoke with no ability` | 1 |
 | `random invocation` | 1 |
-| `effect CopyAbilityEffectTemplate` | 1 |
+| `invoke with no ability` | 1 |
 | `effect DoubleChoiceAbilityEffectTemplate` | 1 |
 
 Notes on the largest entries (the counts in these notes are from an earlier run, and the table above is the current one):

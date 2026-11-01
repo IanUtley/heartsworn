@@ -24,6 +24,8 @@ NATIVE_LEAF_EFFECTS = frozenset({
     "StoreListAttrAbilityEffectTemplate",
     # Loads the authored deck template for the controller and shuffles it (rules_port.deck_effects.load_player_deck).
     "LoadPlayerDeckAbilityEffectTemplate",
+    # Queues a copy of the activated ability (the one in battle state's card_activated_item), rules_port.effects._copy_ability.
+    "CopyAbilityEffectTemplate",
 })
 
 # The TAC operations the native leaf (EffectContext.tac) implements. A TAC operation outside this set is refused by
