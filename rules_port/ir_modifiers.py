@@ -104,8 +104,8 @@ def _damage_shield_gaps(modifier: Any, duration: str) -> list[str]:
     gaps = []
     if duration not in SHIELD_DURATIONS:
         gaps.append(f"DamageShieldModifier duration {duration}")
-    if not (_get(modifier, "m_OneShot") or _get(modifier, "m_LastsIndefinitely")):
-        gaps.append("damage shield without a lifetime")
+    # A shield with neither flag is not one-shot: it lasts until its amount is used up or the turn ends (C#
+    # DamageShield.Apply and Card.ClearEndOfTurnDamageShields), which the native shield store already does.
     if _kind(_get(modifier, "m_InputValue")) not in INPUT_KINDS:
         gaps.append("damage shield amount")
     return gaps
