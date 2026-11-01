@@ -88,10 +88,9 @@ def modifier_gaps(modifier: Any, duration: str, *, linked: bool = False) -> list
         return gaps
     if kind == "IntAttrModifier":
         gaps = []
-        if operation not in INT_ATTR_OPERATIONS:
+        # C# checks m_Double before the operation: a doubled attribute doubles whatever the operation says.
+        if not _get(modifier, "m_Double") and operation not in INT_ATTR_OPERATIONS:
             gaps.append(f"int attribute operation {operation}")
-        if _get(modifier, "m_Double"):
-            gaps.append("int attribute doubled")
         value_field = _get(modifier, "m_ValueField")
         if value_field is not None and _kind(value_field) != "EffectInputVariable":
             gaps.append(f"int attribute value {_kind(value_field)}")
@@ -159,7 +158,7 @@ def run_modifier(modifier: MechanicsObject, effect_guid: str, duration: str,
         for target in targets:
             _int_attribute(context, int(target), {
                 "attribute": modifier.m_Attribute, "operation": modifier.m_Operation,
-                "amount": amount, "duration": duration})
+                "amount": amount, "duration": duration, "double": bool(modifier.m_Double)})
         return
     if kind == "DamageShieldModifier":
         # The native shield leaf reads the shield's own flags; the amount is its input (a constant at most).
