@@ -189,6 +189,44 @@ def _version_command():
         return "Version unavailable"
 
 
+def _arena_set_challenger_command(handler, args):
+    """Debug: make the arena's next FRA opponent a named champion, so an FRA run can be played against it.
+
+    Overwrites the roster row at the arena's current challenger index with the champion and an encounter deck
+    for it (or any encounter deck when none is authored for that champion).
+    """
+    name = " ".join(args).strip()
+    if not name:
+        return "Usage: arena.setchallenger <champion name>"
+    from pve_db import db_get_arena_state
+    db = hconnect_server._db
+    user_id = handler.user_profile["id"]
+    arena = db_get_arena_state(user_id, initialize=False, conn=db)
+    if not arena:
+        return "No arena run: start one first"
+    index = int(arena.get("challenger_index", 0) or 0)
+    champion = db.execute(
+        "SELECT guid, name FROM champion_templates_extended WHERE LOWER(name)=LOWER(?)",
+        (name,)).fetchone()
+    if champion is None:
+        return f"Unknown champion: {name}"
+    deck = db.execute(
+        "SELECT deck_guid, ai_deck_personality FROM fra_encounters WHERE champion_guid=? LIMIT 1",
+        (champion[0],)).fetchone()
+    if deck is None:
+        deck = db.execute(
+            "SELECT deck_guid, ai_deck_personality FROM fra_encounters "
+            "WHERE deck_guid IS NOT NULL LIMIT 1").fetchone()
+    cur = db.execute(
+        "UPDATE fra_challengers SET name=?, champion_guid=?, encounter_deck_guid=?, "
+        "ai_deck_personality=? WHERE user_id=? AND challenger_index=?",
+        (champion[1], champion[0], deck[0], deck[1] or "Default", user_id, index))
+    if cur.rowcount == 0:
+        return "No roster row for the next opponent: start an arena run first"
+    db.commit()
+    return f"Next challenger set to {champion[1]}"
+
+
 def _arena_clear_command(handler):
     """Reset the caller's Frost Ring Arena run outside debug mode."""
     from pve_db import db_clear_arena_run
@@ -685,6 +723,7 @@ _PUBLIC_HELP_LINES = (
     "!help / !commands — list the commands you can use",
     "!version — show the server version",
     "!arena-cleanup — clear your Frost Ring Arena run",
+    "arena.setchallenger <champion name> — make the next FRA opponent that champion (debug)",
     "!account-cleanup — reset your account, keeping PvE and alt-art cards",
     "!collection-fix [apply] — match collection counts to owned card instances",
     "!campaign-cleanup — repair your campaign when a scene has no options",
@@ -741,6 +780,11 @@ def handle_command(handler, cmd: str, room: str, username: str) -> str:
     action = parts[0].lower().lstrip("!/") if parts else ""
     if action == "version":
         return _version_command()
+    if action == "arena.setchallenger":
+        try:
+            return _arena_set_challenger_command(handler, args)
+        except Exception as exc:
+            return f"Error: {exc}"
     if action == "arena-cleanup":
         try:
             return _arena_clear_command(handler)
