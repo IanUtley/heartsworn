@@ -29,7 +29,7 @@ BRIDGED_CONDITIONS = frozenset({
     "RequiresChampionCharges", "RequiresChampionHealth", "RequiresResourceThreshold",
     "RequiresSourcePassesFilterCondition", "RequiresTotalResources", "SourceCardHasCounters",
     "SourceCardHasKeywords", "TACTriggerCondition", "TurnPhaseCondition", "NotEffectCondition",
-    "NotAbilityCondition", "NotContingentAbilityCondition", "AbilityVariableCondition",
+    "NotAbilityCondition", "NotContingentAbilityCondition", "AbilityVariableCondition", "RequiresDateTime",
     "TriggerPlayerControlsCard",
     # Trigger tests the native evaluator reads from the event and the ability (conditions.evaluate_condition).
     "TriggerCardIsNthCardDrawnThisTurnByThisPlayer", "TriggerAbilityHasSpellPointCostModifier",

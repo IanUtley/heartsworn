@@ -22,6 +22,8 @@ NATIVE_LEAF_EFFECTS = frozenset({
     "AnimationTriggerEffectTemplate",
     # Records one typed entry in a named list of the ability (a shard pick's ChosenShards; rules_port.effects).
     "StoreListAttrAbilityEffectTemplate",
+    # Loads the authored deck template for the controller and shuffles it (rules_port.deck_effects.load_player_deck).
+    "LoadPlayerDeckAbilityEffectTemplate",
 })
 
 # The TAC operations the native leaf (EffectContext.tac) implements. A TAC operation outside this set is refused by

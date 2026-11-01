@@ -9,8 +9,8 @@ interpreter never half-runs an ability.
 
 Measured with `tools/ir_coverage/ir_gap_report.py` over the 8,992 `AbilityTemplate` records (four abilities of placeholder-art cards are excluded: OpponentChooseAndPlay, ChooseRevealAndPlay, Footsteps from the Hall (A) and (B); their implementation is done, and the migration counts them as done), at the latest run:
 
-- Covered by the interpreter: 8,966
-- Refused: 26 (15 orphans, 11 reachable; the orphans are listed below) (the reasons are under "Outstanding after the latest run" below)
+- Covered by the interpreter: 8,971
+- Refused: 21 (12 orphans, 9 reachable; the orphans are listed below) (the reasons are under "Outstanding after the latest run" below)
 - Coverage errors (the coverage check raising on bad Records data): 0 at this run
 
 Regenerate the numbers and the full reason list from the current code and Records:
@@ -37,21 +37,19 @@ from sockets, payments, remembered powers and random picks (62 of the 66 grants 
 
 ## Outstanding after the latest run
 
-The 11 reachable refused abilities, by refusal reason (orphans excluded). An ability with several reasons is counted under each, so the
-column sums to 12. Regenerate with `python3 tools/ir_coverage/ir_gap_report.py --top 200`.
+The 9 reachable refused abilities, by refusal reason (orphans excluded). An ability with several reasons is counted under each, so the
+column sums to 10. Regenerate with `python3 tools/ir_coverage/ir_gap_report.py --top 200`.
 
 | Reason | Abilities |
 | --- | ---: |
 | `target TargetsAPlayerOrHisStuff` | 2 |
-| `effect condition RequiresDateTime` | 1 |
 | `stat duration WhileCardInPlay` | 1 |
 | `AttributeModifier duration WhileCardInPlay` | 1 |
-| `invoke with no ability` | 1 |
 | `random invocation` | 1 |
+| `invoke with no ability` | 1 |
 | `multi-card target (m_MaxTargetCount 3)` | 1 |
 | `invoked: multi-card target (m_MaxTargetCount 3)` | 1 |
 | `effect CopyAbilityEffectTemplate` | 1 |
-| `effect LoadPlayerDeckAbilityEffectTemplate` | 1 |
 | `effect DoubleChoiceAbilityEffectTemplate` | 1 |
 
 Notes on the largest entries (the counts in these notes are from an earlier run, and the table above is the current one):
@@ -70,13 +68,11 @@ A refused ability that no game record can reach: no card, champion, talent, deck
 
 | Ability GUID | Records name |
 | --- | --- |
-| `05142808-ee47-3c38-8f96-78c138046e3d` | IfYouWouldLoseTheGameYourHealthBecomes60TriggerEncounterConversationDf62d557m6041m4f3dmbfa8mb026de1ebf9aYourResourcesBecomeL0R1SummonThreeRandomNonmuniqueBloodGnollsOrWildGnollsSummonBzaggbSummonBvargarbYouTransformIntoBkingKazragabVoidAllCardsInYourHandAndDeckCreateDeckDbe04b5dmd76bm42f3ma045m56f1bd111b7dAndPutItIntoYourDeckDrawSevenCardsInstead |
 | `0eb4917d-6545-965d-d564-aa6917402301` | AtTheStartOfYourTurnIfYouHaveFiveOrMoreChargesYouLoseAllCharges |
 | `16ffaa33-6b56-4e77-a9b9-c5fd8db4420a` | WhileYouAreBdazedbIgnoreChainNonmresourceCardsInYourHandHaveCostP1 |
 | `1730bd95-7c2a-4a19-9d6d-80c9c22bb720` | WhileYouAreBstealthbOpposingTroopsCanTAttack |
 | `26f9efa9-584e-0dfc-ccca-e499245137e8` | TwoRandomArdentOrUnderworldTroopsInYourDeckGetM1AtkM1Def |
 | `340add49-e730-a933-e64b-8bf4b4130be2` | Basic3ArrowrYourCardsAndEffectsDealDoubleNonmcombatDamageUntilTheStartOfYourNextTurn |
-| `4cdd9f55-6a37-ffdc-0d05-4099b2019797` | IfYouWouldLoseTheGameYourHealthBecomes60TriggerEncounterConversation4a58c545m6f50m42f7m8a19m1a5c8ab508caYourResourcesBecomeL0R1SummonThreeRandomNonmuniqueBloodGnollsOrWildGnollsSummonBburggbSummonBzaggbYouTransformIntoBkingKazragabVoidAllCardsInYourHandAndDeckCreateDeckDbe04b5dmd76bm42f3ma045m56f1bd111b7dAndPutItIntoYourDeckDrawSevenCardsInstead |
 | `5a8783b0-e420-4f41-b2a1-96f70b0cd851` | Play Card Ability |
 | `714f16cc-9caa-1436-56f3-22acc288bfbb` | TwoRandomTroopsInYourDeckGetM1Atk |
 | `79c61378-3764-430e-ae8b-efebe258701d` | YourBvulnerablebChampionOrYourBvulnerablebTroopsTakeDoubleDamage |
@@ -84,7 +80,6 @@ A refused ability that no game record can reach: no card, champion, talent, deck
 | `8553550b-a8cb-4780-be5c-b698cd540df2` | Conscript Modifier Ability |
 | `aa1c4b06-b125-9e8a-0edc-1ed28b7d6c1c` | ARandomTroopInYourHandGetsM1Atk |
 | `ae783759-b8ea-427c-826b-883f9adef746` | IgnoreChainFinishMovingSelfToWarzone |
-| `c9578196-be1c-0cc9-8eee-be1fa6535e2f` | IfYouWouldLoseTheGameYourHealthBecomes60TriggerEncounterConversationDd29f795m456am4f13ma7efm64e83720f5bfYourResourcesBecomeL0R1SummonThreeRandomNonmuniqueBloodGnollsOrWildGnollsSummonBburggbSummonBvargarbYouTransformIntoBkingKazragabVoidAllCardsInYourHandAndDeckCreateDeckDbe04b5dmd76bm42f3ma045m56f1bd111b7dAndPutItIntoYourDeckDrawSevenCardsInstead |
 
 ## Closed in the latest stretch
 
