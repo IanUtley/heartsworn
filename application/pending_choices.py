@@ -2318,6 +2318,12 @@ class PendingChoicesMixin:
                 session.session_id, int(cu), conn=_hc._db)
             if not c_row:
                 continue
+            if str(c_row[3] or "").lower() not in ("deck", "choosing"):
+                # A reveal of a hand (Inquisition: "look at target opposing
+                # champion's hand") never moved its cards, so there is no
+                # deck projection to hide. Moving them to the deck emptied the
+                # hand and left the chosen card undiscardable.
+                continue
             _hc.db_move_card_to_deck(
                 session.session_id, int(cu), state_after_zone_exit(0),
                 conn=_hc._db)
