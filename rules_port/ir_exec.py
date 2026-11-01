@@ -1962,6 +1962,8 @@ def _tagged_classes(value: Any, out: list[str]) -> list[str]:
     return out
 
 
+# The zones a move of every card of a target's controller may name (the live move leaf maps these, context.py).
+EVERY_CARD_ZONES = {"hand", "warzone", "deck", "discard", "crypt", "void", "underground"}
 # The destinations the live move leaf moves a card to (its deck reinsertion is not ported).
 MOVE_DESTINATIONS = {"hand", "discard", "void", "warzone", "underground", "deck", "playedresources"}
 
@@ -2209,7 +2211,10 @@ def coverage(guid: str) -> list[str]:
             entered = destination in ("", "none") and trigger == "CardEnteredZoneEvent"
             if destination not in MOVE_DESTINATIONS and not entered:
                 missing.append(f"move to {destination or 'no zone'}")
-            if str(effect.get("m_AllCardsOfTargetInZone") or "None") not in ("None", ""):
+            # Every card the target's controller holds in an authored zone moves (the live move leaf's own branch, which
+            # maps the zones named here); any other zone stays refused.
+            every_zone = _short(effect.get("m_AllCardsOfTargetInZone") or "None").lower()
+            if every_zone not in ("none", "") and every_zone not in EVERY_CARD_ZONES:
                 missing.append("move of every card in a zone")
             continue
         if kind == "CounterSpellAbilityEffectTemplate":
