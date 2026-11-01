@@ -80,7 +80,9 @@ def refusals(kind: str, effect: dict[str, Any], target_kind: str) -> list[str]:
         allowed = STORED_COPY_FLAGS if copy_form else TRANSFORM_FLAGS
     if data and not (allowed and _only_flags(data, allowed)):
         missing.append(f"{kind} with a serialized TAC")
-    if target_kind == "PlayerTargetTemplate" and kind not in PLAYER_TARGET_EFFECTS:
+    # A garden transform (m_PlantGarden) rolls its plant and never reads the target, so a player target is no obstacle.
+    garden = kind == "TransformSelfAbilityEffectTemplate" and bool(effect.get("m_PlantGarden"))
+    if target_kind == "PlayerTargetTemplate" and kind not in PLAYER_TARGET_EFFECTS and not garden:
         missing.append(f"{kind} of a player")
     if kind == "TransformCardAbilityEffectTemplate" and not effect.get("m_Portal") and not copy_form:
         template = str((effect.get("m_CardTemplateId") or {}).get("m_Guid") or ZERO_GUID)
