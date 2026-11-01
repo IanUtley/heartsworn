@@ -9,8 +9,8 @@ interpreter never half-runs an ability.
 
 Measured with `tools/ir_coverage/ir_gap_report.py` over the 8,992 `AbilityTemplate` records (four abilities of placeholder-art cards are excluded: OpponentChooseAndPlay, ChooseRevealAndPlay, Footsteps from the Hall (A) and (B); their implementation is done, and the migration counts them as done), at the latest run:
 
-- Covered by the interpreter: 8,936
-- Refused: 56 (15 orphans, 41 reachable; the orphans are listed below) (the reasons are under "Outstanding after the latest run" below)
+- Covered by the interpreter: 8,942
+- Refused: 50 (15 orphans, 35 reachable; the orphans are listed below) (the reasons are under "Outstanding after the latest run" below)
 - Coverage errors (the coverage check raising on bad Records data): 0 at this run
 
 Regenerate the numbers and the full reason list from the current code and Records:
@@ -37,13 +37,12 @@ from sockets, payments, remembered powers and random picks (62 of the 66 grants 
 
 ## Outstanding after the latest run
 
-The 41 reachable refused abilities, by refusal reason (orphans excluded). An ability with several reasons is counted under each, so the
-column sums to 46. Regenerate with `python3 tools/ir_coverage/ir_gap_report.py --top 200`.
+The 35 reachable refused abilities, by refusal reason (orphans excluded). An ability with several reasons is counted under each, so the
+column sums to 40. Regenerate with `python3 tools/ir_coverage/ir_gap_report.py --top 200`.
 
 | Reason | Abilities |
 | --- | ---: |
 | `effect StoreListAttrAbilityEffectTemplate` | 5 |
-| `cost duration EndOfTurn` | 5 |
 | `chosen follow-up target` | 4 |
 | `invoked: chosen follow-up target` | 4 |
 | `multi-card target (m_MinTargetCount 2)` | 2 |
@@ -69,7 +68,6 @@ column sums to 46. Regenerate with `python3 tools/ir_coverage/ir_gap_report.py -
 | `effect LoadPlayerDeckAbilityEffectTemplate` | 1 |
 | `effect DoubleChoiceAbilityEffectTemplate` | 1 |
 | `target DuplicateCardTargetTemplate` | 1 |
-| `cost duration BeginningOfOwnersTurn` | 1 |
 
 Notes on the largest entries (the counts in these notes are from an earlier run, and the table above is the current one):
 
