@@ -2220,10 +2220,11 @@ def prompt_interpreted_reveal(handler, game, session, db, player_uid, ai_uid, ba
         prompt = getattr(handler, "_prompt_deck_search", None)
         if not callable(prompt):
             raise RuntimeError("the interpreter paused for a deck choice, with no deck-search picker to show it")
+        # A chosen deck match uses the matching-target mode (the child's own target, as the native path shows it).
         prompt(game, session, player_uid, ai_uid, battle_state, continuation["ability_guid"],
                int(continuation["source_uid"]), int(continuation["owner_uid"]),
-               list(pause.candidates), kind="search", continuation=native_shape,
-               minimum=pause.minimum, maximum=pause.maximum)
+               list(pause.candidates), kind="matching_target" if pause.match else "search",
+               continuation=native_shape, minimum=pause.minimum, maximum=pause.maximum)
     battle_state["resolution_paused"] = True
     return "waiting"
 

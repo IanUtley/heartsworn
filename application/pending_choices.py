@@ -2035,6 +2035,34 @@ class PendingChoicesMixin:
         self._hide_candidates_to_deck(g, session, pl_t, ai_t, candidates)
 
         continuation = pend.get("continuation") or {}
+        interpreted = continuation.get("interpreter")
+        if isinstance(interpreted, dict):
+            # The interpreter paused for this deck match (rules_port/ir_exec.py). Resume it with the card, then finish the
+            # chain as the deck-search branch does.
+            from rules_port import ir_exec
+            from rules_port.context import EffectContext
+            from rules_port.resolution import prompt_interpreted_reveal
+            _hc.log_req(f"    Matching-target choice {hex(int(chosen_uid))}: resuming the interpreter")
+            bstate.pop("pending_deck_search", None)
+            try:
+                ir_exec.resume_ability(
+                    interpreted, int(chosen_uid),
+                    context=EffectContext.from_rules_port(g, session, _hc._db, self, pl_t, ai_t, bstate, ""))
+            except ir_exec.NeedsChoice as pause:
+                prompt_interpreted_reveal(self, g, session, _hc._db, pl_t, ai_t, bstate, pause)
+                _be.save_state(session, bstate)
+                self._send_battle_events(session, g, pl_t)
+                self._push_transaction_ack(session)
+                return True
+            self._mark_interpreted_chain_item_done(bstate)
+            _be.save_state(session, bstate)
+            self._send_battle_events(session, g, pl_t)
+            if self._resume_completed_rules_port_chain(session, bstate):
+                if not self._advance_rules_port_to_priority(session, pl_t, ai_t, bstate):
+                    self._push_transaction_ack(session)
+            else:
+                self._push_transaction_ack(session)
+            return True
         from rules_port.resolution import (
             resolve_port_ability,
             resume_ability_continuation_parents)

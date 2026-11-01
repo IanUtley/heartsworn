@@ -248,7 +248,7 @@ class NeedsChoice(Exception):
     ``resume_ability`` once the player answers; ``candidates`` are the cards the answer may name."""
 
     def __init__(self, continuation: dict[str, Any], candidates: list[int], optional: bool, revealed: bool = False,
-                 minimum: int = 1, maximum: int = 1):
+                 minimum: int = 1, maximum: int = 1, match: bool = False):
         super().__init__(f"choice of target {continuation['target_index']} for {continuation['ability_guid']}")
         self.continuation = continuation
         self.candidates = candidates
@@ -259,6 +259,8 @@ class NeedsChoice(Exception):
         # target picker takes any number between the two).
         self.minimum = minimum
         self.maximum = maximum
+        # A chosen match from the deck (the native matching-target picker shows it).
+        self.match = match
 
 
 def _champion_owners(bstate: dict[str, Any]) -> dict[int, int]:
@@ -711,7 +713,8 @@ def _resolved_targets(root: MechanicsObject, index: int, scope: Scope) -> list[i
         return [int(uid) for uid in chosen] if isinstance(chosen, list) else [int(chosen)]
     if kind == "SourceRevealedTargetTemplate":
         return _revealed_candidates(template, index, scope)
-    if kind in ("AbilityTargetTemplate", "SourceRevealedTargetTemplate", "SecondaryTargetTemplate") \
+    if kind in ("AbilityTargetTemplate", "SourceRevealedTargetTemplate", "SecondaryTargetTemplate",
+                "MatchSecondaryTargetTemplate") \
             and not template.m_IsAutoTarget \
             and index in scope.chosen:
         # A chosen target the player has answered: the card, or nothing when the player chose none.
@@ -828,7 +831,7 @@ def _needs_choice(root: MechanicsObject, index: int) -> bool:
     """Whether a clause's target is a card the player picks (a non-automatic card target)."""
     template = _load("AbilityTargetTemplate", _guid(root.m_AbilityTargetTemplateIds[index]))
     return _short(template.type_name) in ("AbilityTargetTemplate", "SourceRevealedTargetTemplate",
-                                          "SecondaryTargetTemplate") \
+                                          "SecondaryTargetTemplate", "MatchSecondaryTargetTemplate") \
         and not template.m_IsAutoTarget
 
 
@@ -851,6 +854,9 @@ def _choice_candidates(root: MechanicsObject, index: int, scope: Scope) -> tuple
         return _revealed_candidates(template, index, scope), bool(template.m_Optional)
     if _short(template.type_name) == "SecondaryTargetTemplate":
         return _secondary_candidates(template, scope), bool(template.m_Optional)
+    if _short(template.type_name) == "MatchSecondaryTargetTemplate":
+        return (ir_exec_targets.match_values(template, _guid(root.m_AbilityTargetTemplateIds[index]),
+                                             _guid(root.m_AbilityTemplateId), scope), bool(template.m_Optional))
     return _card_candidates(template, scope), bool(template.m_Optional)
 
 
@@ -1436,8 +1442,9 @@ def _run_effects(guid: str, root: MechanicsObject, scope: Scope, start: int) -> 
                     revealed = _short(template.type_name) in ("SourceRevealedTargetTemplate",
                                                              "SecondaryTargetTemplate")
                     minimum, maximum = _pick_bounds(template, candidates, optional, scope)
+                    match = _short(template.type_name) == "MatchSecondaryTargetTemplate"
                     raise NeedsChoice(continuation, candidates, optional, revealed=revealed,
-                                      minimum=minimum, maximum=maximum)
+                                      minimum=minimum, maximum=maximum, match=match)
             effect_type, effect_raw = _stored("AbilityEffectTemplate", _guid(_field(clause, "m_EffectTemplateId")))
             # The targets of an effect a later clause names as its secondary target, as they are when it runs.
             instance = int(_field(clause, "m_EffectInstanceId") or 0)

@@ -100,7 +100,11 @@ def follow_up_gaps(template: Any, kind: str) -> list[str]:
             _short(template.get("m_TriggerSelector") or "TriggerSource") not in TRIGGER_SELECTORS:
         gaps.append(f"trigger selector {_short(template.get('m_TriggerSelector'))}")
     # A "one of them" target picks among the cards its effect resolved to; the interpreter prompts for that pick.
-    if kind in COUNTED_KINDS and kind != "SecondaryTargetTemplate" and not template.get("m_IsAutoTarget"):
+    # A chosen match from the deck is picked through the deck-search picker's matching-target mode (the native path's
+    # prompt for it); a chosen match from any other zone is not prompted for yet.
+    chosen_deck_match = kind == "MatchSecondaryTargetTemplate" and str(template.get("m_CollectionFlags") or "") == "Deck"
+    if kind in COUNTED_KINDS and kind != "SecondaryTargetTemplate" and not template.get("m_IsAutoTarget") \
+            and not chosen_deck_match:
         gaps.append("chosen follow-up target")
     for count in ("m_MaxTargetCount", "m_MinTargetCount"):
         if template.get(count) in (None, 0, "", [], {}, "0"):
@@ -157,15 +161,29 @@ def follow_up_targets(template: Any, template_guid: str, root_guid: str, scope: 
             if effect["secondary_target_index"] >= 0 else ())
         return [int(uid) for uid in filter_resolved_targets(
             db, session_id, scope.owner_uid, template_guid, scope.source_uid, raw, bstate)]
-    champions = getattr(context.handler, "_champion_targets", lambda: [])() or []
-    values = resolution._match_secondary_values(
-        db, session_id, ability, effect, target_spec, bstate, champions=champions,
-        resolved_by_instance=scope.resolved_by_instance)
+    values = match_values(template, template_guid, root_guid, scope)
     # The live resolver's random sample, or its truncation to the maximum count, for an automatic match.
     maximum = constant_count(template, "m_MaxTargetCount")
     if template.m_IsRandomTarget:
         return [int(uid) for uid in resolution._random_target_sample(values, maximum, bstate)]
     return [int(uid) for uid in (values[:maximum] if maximum > 0 else values)]
+
+
+def match_values(template: Any, template_guid: str, root_guid: str, scope: Any) -> list[int]:
+    """Every card a match target finds from the secondary effect it names, before any count is applied (an automatic
+    match is truncated by follow_up_targets; a chosen one lets the player pick among all of them)."""
+    from rules_port import resolution
+    context = scope.context
+    bstate = context.bstate
+    db = context.db
+    session_id = context.session.session_id
+    ability = _ability_shim(root_guid, scope)
+    target_spec = SimpleNamespace(guid=template_guid)
+    effect = {"secondary_target_index": instance_ref(_get(scope.clause, "m_SecondaryTargetIndex"))}
+    champions = getattr(context.handler, "_champion_targets", lambda: [])() or []
+    return [int(uid) for uid in resolution._match_secondary_values(
+        db, session_id, ability, effect, target_spec, bstate, champions=champions,
+        resolved_by_instance=scope.resolved_by_instance)]
 
 
 def store_targets(scope: Any, root_guid: str, effect_raw: dict[str, Any], targets: list[int]) -> None:
