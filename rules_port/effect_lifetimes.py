@@ -172,6 +172,16 @@ def _source_ability_gone(db, session_id, entry):
     return ability not in abilities
 
 
+def _left_top_of_deck(db, session_id, source_uid):
+    """Whether a card is no longer the top card of its owner's deck (drawn, moved, or covered)."""
+    from pvp_db import db_card_owner_location_position, db_deck_top_card_details
+    row = db_card_owner_location_position(session_id, int(source_uid), conn=db)
+    if not row or str(row[1] or "").lower() != "deck":
+        return True
+    top = db_deck_top_card_details(session_id, int(row[0] or 0), conn=db)
+    return not top or int(top[1]) != int(source_uid)
+
+
 def _while_in_play_source_gone(db, session_id, entry, state, *, handler=None):
     """Whether a while-in-play effect's source left play or lost the ability that created it.
 
@@ -233,12 +243,7 @@ def _expired(entry, db, session_id, state, *, boundary=None,
     if duration == "UntilItLeavesYourHand" and source is not None:
         return _card_location(db, session_id, source) != "hand"
     if duration == "WhileCardOnTopOfDeck" and source is not None:
-        from pvp_db import db_card_owner_location_position, db_deck_top_card_details
-        row = db_card_owner_location_position(session_id, int(source), conn=db)
-        if not row or str(row[1] or "").lower() != "deck":
-            return True
-        top = db_deck_top_card_details(session_id, int(row[0] or 0), conn=db)
-        return not top or int(top[1]) != int(source)
+        return _left_top_of_deck(db, session_id, int(source))
     if duration == "WhileCardTapped" and source is not None:
         from pvp_db import db_card_state_value
         import game_engine
@@ -646,6 +651,11 @@ def _intattr_expired(item, db, session_id, state, *, boundary=None,
         if source is None:
             source = item.get("uid")
         return _card_location(db, session_id, source, state) != "hand"
+    if duration == "WhileCardOnTopOfDeck":
+        source = item.get("source_uid")
+        if source is None:
+            source = item.get("uid")
+        return _left_top_of_deck(db, session_id, int(source))
     if duration == "WhileCardInPlay":
         return _while_in_play_source_gone(db, session_id, item, state,
                                           handler=handler)

@@ -9,8 +9,8 @@ interpreter never half-runs an ability.
 
 Measured with `tools/ir_coverage/ir_gap_report.py` over the 8,992 `AbilityTemplate` records (four abilities of placeholder-art cards are excluded: OpponentChooseAndPlay, ChooseRevealAndPlay, Footsteps from the Hall (A) and (B); their implementation is done, and the migration counts them as done), at the latest run:
 
-- Covered by the interpreter: 8,915
-- Refused: 77 (the reasons are under "Outstanding after the latest run" below)
+- Covered by the interpreter: 8,925
+- Refused: 67 (the reasons are under "Outstanding after the latest run" below)
 - Coverage errors (the coverage check raising on bad Records data): 0 at this run
 
 Regenerate the numbers and the full reason list from the current code and Records:
@@ -37,8 +37,8 @@ from sockets, payments, remembered powers and random picks (62 of the 66 grants 
 
 ## Outstanding after the latest run
 
-The 77 refused abilities, by refusal reason. An ability with several reasons is counted under each, so the
-column sums to 85, which is more than 77. Regenerate with `python3 tools/ir_coverage/ir_gap_report.py --top 200`.
+The 67 refused abilities, by refusal reason. An ability with several reasons is counted under each, so the
+column sums to 75, which is more than 67. Regenerate with `python3 tools/ir_coverage/ir_gap_report.py --top 200`.
 
 | Reason | Abilities |
 | --- | ---: |
@@ -47,7 +47,6 @@ column sums to 85, which is more than 77. Regenerate with `python3 tools/ir_cove
 | `cost duration EndOfTurn` | 5 |
 | `stat duration WhileCardInPlay` | 4 |
 | `chosen follow-up target` | 4 |
-| `IntAttrModifier duration WhileCardOnTopOfDeck` | 4 |
 | `invoked: chosen follow-up target` | 4 |
 | `effect LoadPlayerDeckAbilityEffectTemplate` | 4 |
 | `AttributeModifier duration WhileCardInPlay` | 3 |
@@ -56,8 +55,6 @@ column sums to 85, which is more than 77. Regenerate with `python3 tools/ir_cove
 | `multi-card target (m_MinTargetCount 2)` | 2 |
 | `target TargetsAPlayerOrHisStuff` | 2 |
 | `trigger CombatEndedEvent` | 2 |
-| `grant duration BeginningOfOpponentsTurn` | 2 |
-| `stat duration UntilEndOfDungeon` | 2 |
 | `effect BuiltInPlayCardAbilityEffectTemplate` | 1 |
 | `effect FinishResolvingCardAbilityEffectTemplate` | 1 |
 | `target player filter Unknown` | 1 |
@@ -70,9 +67,8 @@ column sums to 85, which is more than 77. Regenerate with `python3 tools/ir_cove
 | `damage shield without a lifetime` | 1 |
 | `expression name INS` | 1 |
 | `TransformSelfAbilityEffectTemplate of a player` | 1 |
-| `random invocation` | 1 |
 | `invoke with no ability` | 1 |
-| `cost duration UntilItLeavesYourHand` | 1 |
+| `random invocation` | 1 |
 | `multi-card target (m_MaxTargetCount 3)` | 1 |
 | `invoked: multi-card target (m_MaxTargetCount 3)` | 1 |
 | `effect DiscardOrSacrificeCardAbilityEffectTemplate` | 1 |
@@ -83,7 +79,6 @@ column sums to 85, which is more than 77. Regenerate with `python3 tools/ir_cove
 | `target DuplicateCardTargetTemplate` | 1 |
 | `effect condition NotContingentAbilityCondition` | 1 |
 | `cost duration BeginningOfOwnersTurn` | 1 |
-| `IntAttrModifier duration UntilDamaged` | 1 |
 | `DamageMultiplierModifier duration BeginningOfOwnersTurn` | 1 |
 | `ChargePointsModifier without a typed amount` | 1 |
 | `remove all charges` | 1 |

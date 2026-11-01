@@ -32,7 +32,7 @@ EFFECTS = {"ReplenishResourcesAbilityEffectTemplate", "LoseThresholdAbilityEffec
 # instantaneous and permanent durations are the same on both paths. Lasting durations belong to area H.
 RESOURCE_DURATIONS = {"Instant", "Permanent"}
 # A card cost change runs through the live cost leaf, which handles these two durations.
-COST_DURATIONS = {"Instant", "Permanent"}
+COST_DURATIONS = {"Instant", "Permanent", "UntilItLeavesYourHand"}
 # A linked clause (triggered, player-activated, or an invoked child's) also takes the while-in-play and this-turn
 # lifetimes: the cost delta is applied at resolution and recorded in the linked ledger, which reverses it when its
 # source is gone or at the end of the turn.

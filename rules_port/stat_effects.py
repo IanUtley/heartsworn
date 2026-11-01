@@ -23,22 +23,27 @@ def apply_stat_mod(context, target, attack=0, defense=0, *, this_turn=False,
     row = db_card_source_info(context.session.session_id, uid, conn=context.db)
     if not row:
         return None
-    column = "temporary_buffs" if this_turn else "permanent_buffs"
-    raw = db_card_mutation_field(
-        context.session.session_id, uid, column, conn=context.db)
-    try:
-        buffs = json.loads(raw or "{}")
-    except (TypeError, ValueError, json.JSONDecodeError):
-        buffs = {}
-    if not isinstance(buffs, dict):
-        buffs = {}
-    buffs["atk"] = int(buffs.get("atk", 0) or 0) + int(attack or 0)
-    buffs["def"] = int(buffs.get("def", 0) or 0) + int(defense or 0)
-    db_set_card_mutation_field(
-        context.session.session_id, uid, column,
-        json.dumps(buffs, separators=(",", ":"), sort_keys=True),
-        conn=context.db)
-    context.db.commit()
+    # An until-end-of-dungeon bonus on an opposing troop is carried by the run and added by the continuous scan, so
+    # the card itself is not written (writing it too would count the bonus twice).
+    from campaign_runtime.dungeon_buffs import record_opposing_bonus
+    carried_by_run = record_opposing_bonus(context, uid, attack, defense, duration) is True
+    if not carried_by_run:
+        column = "temporary_buffs" if this_turn else "permanent_buffs"
+        raw = db_card_mutation_field(
+            context.session.session_id, uid, column, conn=context.db)
+        try:
+            buffs = json.loads(raw or "{}")
+        except (TypeError, ValueError, json.JSONDecodeError):
+            buffs = {}
+        if not isinstance(buffs, dict):
+            buffs = {}
+        buffs["atk"] = int(buffs.get("atk", 0) or 0) + int(attack or 0)
+        buffs["def"] = int(buffs.get("def", 0) or 0) + int(defense or 0)
+        db_set_card_mutation_field(
+            context.session.session_id, uid, column,
+            json.dumps(buffs, separators=(",", ":"), sort_keys=True),
+            conn=context.db)
+        context.db.commit()
     if duration in LEDGER_DURATIONS:
         from .effect_lifetimes import record_temporary_stat
         record_temporary_stat(

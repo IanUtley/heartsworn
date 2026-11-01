@@ -27,9 +27,13 @@ _TURN_BOUNDARY_DURATIONS = {"Permanent", "EndOfTurn", "BeginningOfOwnersTurn", "
 # A linked clause (triggered, player-activated, or an invoked child's) also takes the while-in-play lifetime: the
 # grant is applied to its targets at resolution and recorded in the linked ledger, which expires it with its source.
 _LINKED_KEYWORD_DURATIONS = _TURN_BOUNDARY_DURATIONS | {"WhileCardInPlay"}
-DURATIONS_BY_KIND = {"AttributeModifier": _TURN_BOUNDARY_DURATIONS, "IntAttrModifier": _TURN_BOUNDARY_DURATIONS}
+# An int attribute also takes the lifetimes its native leaf records and expires: damage (UntilDamaged), the opponent's
+# next turn, and while its source stays on top of its deck (the sweep checks the top card at each event).
+_INT_ATTR_DURATIONS = _TURN_BOUNDARY_DURATIONS | {"BeginningOfOpponentsTurn", "UntilDamaged", "WhileCardOnTopOfDeck"}
+_LINKED_INT_ATTR_DURATIONS = _INT_ATTR_DURATIONS | {"WhileCardInPlay"}
+DURATIONS_BY_KIND = {"AttributeModifier": _TURN_BOUNDARY_DURATIONS, "IntAttrModifier": _INT_ATTR_DURATIONS}
 LINKED_DURATIONS_BY_KIND = {"AttributeModifier": _LINKED_KEYWORD_DURATIONS,
-                            "IntAttrModifier": _LINKED_KEYWORD_DURATIONS}
+                            "IntAttrModifier": _LINKED_INT_ATTR_DURATIONS}
 # A keyword is granted with Add; Remove is not ported yet. An int attribute is set or added.
 ATTRIBUTE_OPERATIONS = {"Add"}
 INT_ATTR_OPERATIONS = {"Set", "Add"}

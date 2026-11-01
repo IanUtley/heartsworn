@@ -974,6 +974,8 @@ def _int_attribute(context, target, param):
         # A while-in-play write is a recorded grant: it lives in the temporary payload and the linked ledger
         # expires it with the source (the sweep at each event and turn boundary).
         "WhileCardInPlay",
+        # Likewise a write for as long as its source stays on top of its deck (the sweep checks the top card).
+        "WhileCardOnTopOfDeck",
     }
     resolving_owner = int(context.bstate.get("resolving_owner_id", 0) or 0)
     if duration == "BeginningOfOwnersTurn":
@@ -1026,7 +1028,7 @@ def _int_attribute(context, target, param):
         "EndOfTurn", "EndOfNextTurn", "BeginningOfOwnersTurn",
         "BeginningOfOpponentsTurn",
         "AfterCardsReadyOnPlayersTurn", "UntilDamaged",
-        "UntilItLeavesYourHand", "WhileCardInPlay"}
+        "UntilItLeavesYourHand", "WhileCardInPlay", "WhileCardOnTopOfDeck"}
     column = "temporary_buffs" if temporary else "permanent_buffs"
     raw = db_card_mutation_field(
         context.session.session_id, int(target), column, conn=context.db)

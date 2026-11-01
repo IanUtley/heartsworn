@@ -639,9 +639,53 @@ def test_a_reveal_that_feeds_a_store_is_covered():
     assert coverage(REVEAL_THEN_STORE_ABILITY_GUID) == []
 
 
+def test_a_top_of_deck_int_attr_expires_when_its_source_leaves_the_top():
+    """A WhileCardOnTopOfDeck int-attr write holds while its source is the top card and is undone once it is not."""
+    from unittest import mock
+
+    from rules_port import effect_lifetimes
+
+    item = {"uid": 5, "attribute": "Tamed", "duration": "WhileCardOnTopOfDeck", "source_uid": 9, "owner_id": 1}
+    with mock.patch.object(effect_lifetimes, "_left_top_of_deck", lambda db, session_id, uid: uid != 9):
+        assert effect_lifetimes._intattr_expired(item, None, 1, {}) is False
+    with mock.patch.object(effect_lifetimes, "_left_top_of_deck", lambda db, session_id, uid: uid == 9):
+        assert effect_lifetimes._intattr_expired(item, None, 1, {}) is True
+
+
+def test_a_dungeon_opposing_bonus_is_recorded_once_per_resolution():
+    """An until-end-of-dungeon bonus is kept in the champion's run once per resolution, however many troops it hits."""
+    import copy
+    from unittest import mock
+
+    import campaign_source  # noqa: F401  (puts campaign/ on the import path)
+    from campaign_runtime import dungeon_buffs, progress
+
+    stored = {"campaign": {}}
+
+    class Db:
+        def commit(self):
+            pass
+
+    def load(db, champion_id):
+        return copy.deepcopy(stored["campaign"]), {}
+
+    def save(db, champion_id, campaign, zones):
+        stored["campaign"] = copy.deepcopy(campaign)
+
+    with mock.patch.object(progress, "load", load), mock.patch.object(progress, "save", save):
+        assert dungeon_buffs.record(Db(), 7, "session:9:ability:1:4", 1, 4) is True
+        assert dungeon_buffs.record(Db(), 7, "session:9:ability:1:4", 1, 4) is False
+        assert dungeon_buffs.record(Db(), 7, "session:12:ability:1:4", 1, 4) is True
+        carried = dungeon_buffs.campaign_bonuses(Db(), 7)
+    assert [(item["attack"], item["defense"]) for item in carried] == [(1, 4), (1, 4)]
+    assert dungeon_buffs.battle_bonus({dungeon_buffs.BUFFS_KEY: carried}) == (2, 8)
+
+
 if __name__ == "__main__":
     import db as dbmod
-    for run in (test_burning_ability_runs_from_its_ir, test_dazed_and_vulnerable_removals_match_the_live_engine,
+    for run in (test_a_dungeon_opposing_bonus_is_recorded_once_per_resolution,
+                test_a_top_of_deck_int_attr_expires_when_its_source_leaves_the_top,
+                test_burning_ability_runs_from_its_ir, test_dazed_and_vulnerable_removals_match_the_live_engine,
                 test_soulcursed_sacrifices_each_soulcursed_troop_when_one_dies,
                 test_static_effects_match_the_live_engine_when_opted_in,
                 test_spitfire_elemental_damages_each_opposing_champion_and_troop,
@@ -760,3 +804,4 @@ def test_nerissa_chain_target_never_plays_a_revealed_resource(db):
     location = dict(db.execute("SELECT card_uid, location FROM game_cards WHERE card_uid IN (12, 13)").fetchall())
     assert location[12] not in ("CastSpells", "warzone", "PlayedResources"), location
     assert location[13] in ("CastSpells", "warzone"), location
+

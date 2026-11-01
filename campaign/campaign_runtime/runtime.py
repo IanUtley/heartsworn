@@ -25,7 +25,7 @@ from typing import Callable
 
 import campaign_rules as engine
 import pve_db
-from campaign_runtime import (catalog_data, locate, progress,
+from campaign_runtime import (catalog_data, dungeon_buffs, locate, progress,
                               projection, quests, rules_loader)
 
 RUNTIME = "_runtime"
@@ -106,6 +106,8 @@ class Zone:
             self.campaign.setdefault("counters", {})["lives"] = int(
                 ((self.rules.get("start") or {}).get("counters") or {}).get("lives", 3))
             self.campaign["counters"]["run_streak"] = 0
+            # A new run starts without the bonuses the last run's opposing troops took.
+            self.campaign.pop(dungeon_buffs.BUFFS_KEY, None)
         self.eng = engine.zone_view(self.rules, self.campaign, part)
         self.rt = dict((part or {}).get(RUNTIME) or {})
         # A panorama's talks count at its parent map node too: start from
@@ -779,6 +781,9 @@ def _enter_runtime_zone(handler, zone: Zone, dest: str, node: str, *,
         previous = {k: v for k, v in previous.items()
                     if k in ("Started", "TutorialDone")}
     row_type = locate.ROW_TYPES[entry["kind"]]
+    if zone.ctype == dungeon_buffs.DUNGEON and row_type == "AREA":
+        # Leaving the dungeon for an area ends its run, and with it the "until the end of the dungeon" bonuses.
+        zone.campaign.pop(dungeon_buffs.BUFFS_KEY, None)
     template = (entry.get("server_template") if entry["kind"] != "panorama"
                 else pve_db.db_campaign_template_name(row_id, conn=zone.db) or "AZ1")
     dest_zone = Zone.__new__(Zone)

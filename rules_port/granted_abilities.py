@@ -23,7 +23,8 @@ def is_zero_guid(value: Any) -> bool:
 
 
 # The durations a granted ability can run with. ``effect_lifetimes`` expires each of them on the live path.
-GRANT_DURATIONS = frozenset({"Instant", "Permanent", "EndOfTurn", "BeginningOfOwnersTurn", "WhileCardInPlay"})
+GRANT_DURATIONS = frozenset({"Instant", "Permanent", "EndOfTurn", "BeginningOfOwnersTurn", "WhileCardInPlay",
+                             "BeginningOfOpponentsTurn"})
 
 # The power sources a grant can take its abilities from (sockets, payments, remembered powers, a random pick).
 # The live leaf reads each of them from the battle this ability is resolving in (``db_card_gem_ability_guids``,

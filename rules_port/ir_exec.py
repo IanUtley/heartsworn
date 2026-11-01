@@ -1911,7 +1911,7 @@ STAT_DURATIONS = {"Permanent", "EndOfTurn"}
 # A linked clause -- triggered, player-activated, or an invoked child's -- applies its stat to its targets when it
 # resolves and is recorded in the linked ledger: it expires with its source (while in play), or at the start of the
 # responsible player's next turn, as native records it.
-LINKED_STAT_DURATIONS = STAT_DURATIONS | {"WhileCardInPlay", "BeginningOfOwnersTurn"}
+LINKED_STAT_DURATIONS = STAT_DURATIONS | {"WhileCardInPlay", "BeginningOfOwnersTurn", "UntilEndOfDungeon"}
 SUPPORTED_TARGETS = {"AbilitySourceCardTargetTemplate", "AbilityTargetTemplate", "PlayerTargetTemplate",
                      "SourceRevealedTargetTemplate"} | FOLLOW_UP_KINDS
 # The player targets run without a choice: "You", and the one opponent (its random pick is that one player).

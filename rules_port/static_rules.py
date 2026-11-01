@@ -1738,6 +1738,15 @@ def _scan_static_deltas(db, session_id, battle_state, card_uid, cache,
                         total["flags"].add(_CHAMPION_INTATTR_FLAGS[attribute])
                     elif attribute in {"lethal", "crush"}:
                         total["flags"].add(attribute)
+    if properties is None:
+        # A dungeon run's "until the end of the dungeon" bonus is a continuous effect on the opposing troops: it reaches
+        # every AI troop on the warzone, including one that enters later (campaign_runtime.dungeon_buffs).
+        from campaign_runtime.dungeon_buffs import battle_bonus, is_opposing_troop_on_warzone
+        bonus_atk, bonus_def = battle_bonus(battle_state)
+        if (bonus_atk or bonus_def) and is_opposing_troop_on_warzone(
+                db, session_id, card_uid, owner, location):
+            total["atk"] += bonus_atk
+            total["def"] += bonus_def
     return total, unsupported
 
 

@@ -1996,6 +1996,12 @@ def handle_readytostartgame_22031(handler, target, instance, data_type, reqid, c
             _hc.log_req(f"    AI deck: {len(ai_deck_cards)} cards from "
                     f"{source} (hands dealt after PickGoesFirst)")
     if ai_deck_cards:
+        # A dungeon run's "until the end of the dungeon" bonuses carry into this battle's state, where the continuous
+        # scan adds them to the AI troops (before the deck is pushed, so the client sees the bonused stats).
+        from campaign_runtime import dungeon_buffs
+        dungeon_camp = dungeon_buffs.camp_id_from_session(getattr(session, "session_name", ""))
+        if dungeon_camp is not None:
+            dungeon_buffs.carry_into_battle(_hc._db, dungeon_camp, setup_bstate)
         game.push_deck_created_with_cards(
             ai_uid_t, ai_deck_cards,
             sleeve_guid=ai_deck_sleeve_guid)
