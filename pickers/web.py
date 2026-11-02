@@ -17,6 +17,7 @@ def to_web_message(request: PickRequest) -> dict[str, Any]:
         "source": request.source_uid,
         "instance": request.instance_id,
         "targetIds": list(request.option_target_ids()),
+        "reveal": None if request.reveal is None else [uid for uid, _pos in request.reveal],
         "targets": [
             {
                 "index": slot.index,

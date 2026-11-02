@@ -29,6 +29,10 @@ class PickRequest:
     # triggered ability's target picker) or "ability" (class 23, AbilityActivationDataRequired, for a DoubleChoice
     # card choice, which the client configures as a built-in ability).
     prompt_kind: str = "triggered"
+    # The revealed cards the Unity picker shows as a reveal, as (uid, position) pairs. None means no reveal is sent
+    # here (the caller already sent one). An existing reveal is reused when its cards are exactly ``reveal_ids``.
+    reveal: tuple[tuple[int, int], ...] | None = None
+    reveal_ids: tuple[int, ...] = ()
 
     def option_target_ids(self) -> tuple[str, ...]:
         return self.target_ids or tuple(target.template_id for target in self.targets)

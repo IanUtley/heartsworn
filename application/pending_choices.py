@@ -1073,105 +1073,32 @@ class PendingChoicesMixin:
         pend["move_location"] = str(
             move_spec.get("location") or "").lower()
 
+        # The picked slot is the continuation's target (a "one of them" choice is not slot 0,
+        # which may be the look's automatic TopNOfDeck target).
+        target_index = int((continuation or {}).get("target_index") or 0)
+        try:
+            target_id = json.loads(_hc.db_ability_target_template_ids(
+                ability_guid, conn=_hc._db) or "[]")[target_index]
+        except (TypeError, ValueError, IndexError, json.JSONDecodeError):
+            target_id = "00000000-0000-0000-0000-000000000000"
+
         def build_prompt(g, player_uid):
+            from pickers import PickRequest, PickTarget, present_pick
             rows = _hc.db_card_positions(
                 session.session_id, pend["revealed_cards"], conn=_hc._db)
-            # The client only turns a reveal into a picker when the same
-            # packet carries the class-23 activation-data request for the
-            # revealing ability instance: NetworkPacketSessionEventArgs.
-            # CombineRevealAndChoose drops the plain Coverflow and turns the
-            # revealed cards that are not legal targets into the picker's
-            # AdditionalTargets.  Without the shared instance id the client
-            # keeps the informational Coverflow -- whose OK button cannot
-            # select a card -- and no troop picker ever opens.
-            #
-            # The reveal leaf normally already emitted CardsRevealed into this
-            # same Game/packet, so reuse that event instead of queueing a
-            # second Coverflow.  A controller-private PvP reveal is delivered
-            # in its own packet and is not repeated here.
-            if not (bstate or {}).get("private_reveal_sent"):
-                revealed_ids = {int(u) for u in pend["revealed_cards"]}
-                reveal_event = None
-                for event in getattr(g, "events", ()):
-                    if not isinstance(
-                            event,
-                            _hc.game_engine.CardsRevealedSessionEventArgs):
-                        continue
-                    event_ids = {
-                        int(card.uid.uid64)
-                        for card in (event.session_card_ids or [])
-                    }
-                    if event_ids == revealed_ids:
-                        reveal_event = event
-                        break
-                if reveal_event is None:
-                    reveal_event = g._make_event(
-                        _hc.game_engine.CardsRevealedSessionEventArgs)
-                    reveal_event.player_id = player_uid
-                    reveal_event.session_card_ids = [
-                        _hc.game_engine.SessionCardId(_hc.game_engine.UID(int(cu)))
-                        for cu, _pos in rows]
-                    reveal_event.collections = (
-                        [_hc.game_engine.ECardCollections.Deck] * len(rows))
-                    reveal_event.owning_players = [player_uid] * len(rows)
-                    reveal_event.positions = [
-                        int(pos or 0) for _cu, pos in rows]
-                    g._push(reveal_event)
-                reveal_event.ability_instance_id = inst_id
-
-            opt_list = g._make_event(
-                _hc.game_engine.PlayerOptionListSessionEventArgs)
-            opt_list.player_id = player_uid
-            opt = g._make_event(_hc.game_engine.PlayerOptionSessionEventArgs)
-            opt.card = _hc.game_engine.SessionCardId(
-                _hc.game_engine.UID(int(source_uid)))
-            opt.state = _hc.game_engine.ECardUsage.Activate
-            inst = g._make_event(_hc.game_engine.OptionInstanceSessionEventArgs)
-            inst.opt_id = _hc.game_engine.ResourceId.from_str(ability_guid)
-            target_ids_json = _hc.db_ability_target_template_ids(
-                ability_guid, conn=_hc._db)
-            # The picked slot is the continuation's target (a "one of them" choice is not slot 0,
-            # which may be the look's automatic TopNOfDeck target).
-            target_index = int((continuation or {}).get("target_index") or 0)
-            try:
-                target_id = json.loads(target_ids_json or "[]")[target_index]
-            except (TypeError, ValueError, IndexError, json.JSONDecodeError):
-                target_id = "00000000-0000-0000-0000-000000000000"
-            inst.target_ids.append(_hc.game_engine.ResourceId.from_str(target_id))
-            tgt = g._make_event(_hc.game_engine.TargetInstanceSessionEventArgs)
-            tgt.target_index = target_index
-            tgt.target_id = _hc.game_engine.ResourceId.from_str(target_id)
-            tgt.targets = [
-                _hc.game_engine.SessionCardId(_hc.game_engine.UID(int(u)))
-                for u in pend["candidates"]]
-            inst.target_instances.append(tgt)
-            inst.min_target_counts = [int(pend["minimum_picks"])]
-            inst.max_target_counts = [int(pend["maximum_picks"])]
-            opt.instances.append(inst)
-            opt_list.options.append(opt)
-            g._push(opt_list)
-
-            # Class 23 is the client's activation-data picker for one ability
-            # instance (UIBattle.OnAbilityActivationDataRequested pushes
-            # BattleStateUseTriggeredAbility -> BattleStateConfigureAbility).
-            # The class-39 triggered-ability request would instead show the
-            # triggered-ability stack and answer with a different transaction.
-            req = g._make_event(
-                _hc.game_engine.AbilityActivationDataRequiredSessionEventArgs)
-            req.player_id = player_uid
-            req.ability_instance_id = inst_id
-            req.ability_parent_id = 0
-            req.source_card_id = _hc.game_engine.SessionCardId(
-                _hc.game_engine.UID(int(source_uid)))
-            req.ability_template_id = _hc.game_engine.ResourceId.from_str(
-                ability_guid)
-            req.effect_group_id = 1
-            # Read back by the client only as the picker's effect scope; the
-            # revealed-card choice is the ability's first effect instance.
-            req.effect_instance_ids = [0]
-            req.resolve_chain = False
-            g._push(req)
-            g.push_green_light(player_uid, _hc.game_engine.EPriorityContext.Normal)
+            # The reveal is sent unless a controller-private PvP reveal already went out in its own packet.
+            # The picker reuses the reveal the game already holds for these cards, if there is one.
+            reveal = (None if (bstate or {}).get("private_reveal_sent")
+                      else tuple((int(cu), int(pos or 0)) for cu, pos in rows))
+            present_pick(g, PickRequest(
+                player_id=player_uid, prompt_ability=ability_guid, source_uid=int(source_uid),
+                instance_id=inst_id,
+                targets=(PickTarget(
+                    index=target_index, template_id=target_id,
+                    candidates=tuple(int(u) for u in pend["candidates"]),
+                    minimum=int(pend["minimum_picks"]), maximum=int(pend["maximum_picks"])),),
+                prompt_kind="ability", reveal=reveal,
+                reveal_ids=tuple(int(u) for u in pend["revealed_cards"])))
 
         if bstate.get("pvp"):
             from services.tournament_game import (
