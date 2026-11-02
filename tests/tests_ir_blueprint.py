@@ -94,3 +94,22 @@ def test_emitted_inquisition_text_loads_back_to_the_same_objects():
     assert {"CHOOSE", "CHOOSE_TARGET_0", "CHOOSE_DOES_0", "INVOKE", "ROOT"} <= set(names)
     assert ir_python.dumps(ir_python.loads(text)["ROOT"]) == ir_python.dumps(names["ROOT"])
     assert "[rule text not in the Blueprint yet]" in text
+
+
+INQUISITION_TEXT = '''\
+Inquisition [BasicAction, cost 2] "Look at target opposing champion's hand. Choose a revealed non-resource card. They discard that card."
+  Target  <- OpposingChampion "Target opposing champion."
+  Look    : Reveal(Target.Hand) -> Revealed "Look at target opposing champion's hand."
+  Choose  : Choose(Revealed, NonResource) -> Pick "Choose a revealed non-resource card."
+  Discard : Discard(Pick, Owner=Target) "They discard that card."
+'''
+
+
+def test_authored_rule_text_reaches_the_emitted_effects():
+    card = bp.parse(INQUISITION_TEXT)
+    assert card.text.startswith("Look at target opposing champion's hand.")
+    assert card.steps[0].text == "Target opposing champion."
+    text = bp.emit(card)
+    assert "Choose a revealed non-resource card." in text
+    assert "They discard that card." in text
+    assert text.count("[rule text not in the Blueprint yet]") == 1   # only the invoke effect has no text of its own

@@ -50,20 +50,22 @@ class Token:
 
 @dataclass
 class Binding:
-    """``NAME <- SOURCE``: a target found by name."""
+    """``NAME <- SOURCE "text"``: a target found by name, with its rule text."""
     name: str
     source: str
     line: int
+    text: str | None = None
 
 
 @dataclass
 class Step:
-    """``NAME : ACTION(args) [-> OUT]``."""
+    """``NAME : ACTION(args) [-> OUT] ["text"]``."""
     name: str
     action: str
     args: list[Any]
     out: str | None
     line: int
+    text: str | None = None
 
 
 @dataclass
@@ -72,6 +74,7 @@ class Card:
     card_type: str
     cost: int | None
     steps: list[Binding | Step] = field(default_factory=list)
+    text: str | None = None   # the card's rule text, after the header
 
 
 def _tokenize(text: str) -> list[Token]:
@@ -139,7 +142,7 @@ class _Parser:
             self.take("name", "cost")
             cost = int(self.take("int").text)
         self.take("punct", "]")
-        card = Card(name.text, card_type, cost)
+        card = Card(name.text, card_type, cost, text=self.optional_text())
         self.take("newline")
         self.skip_newlines()
         while self.peek().kind == "indent":
@@ -154,8 +157,9 @@ class _Parser:
         if self.peek().text == "<-":
             self.take("arrow_in")
             source = self.take("name")
+            text = self.optional_text()
             self.take("newline") if self.peek().kind == "newline" else None
-            return Binding(name.text, source.text, name.line)
+            return Binding(name.text, source.text, name.line, text)
         self.take("punct", ":")
         action = self.take("name")
         self.take("punct", "(")
@@ -170,9 +174,15 @@ class _Parser:
         if self.peek().kind == "arrow_out":
             self.take("arrow_out")
             out = self.take("name").text
+        text = self.optional_text()
         if self.peek().kind == "newline":
             self.take("newline")
-        return Step(name.text, action.text, args, out, name.line)
+        return Step(name.text, action.text, args, out, name.line, text)
+
+    def optional_text(self) -> str | None:
+        if self.peek().kind == "string":
+            return self.take("string").text[1:-1]
+        return None
 
     def argument(self) -> Any:
         token = self.peek()
@@ -312,7 +322,7 @@ def lower(card: Card) -> Lowered:
         if isinstance(item, Binding):
             if item.source not in BINDING_SOURCES:
                 raise BlueprintError(item.line, f"no stored target for {item.source!r}")
-            effect = S.shared(BINDING_SOURCES[item.source])
+            effect = S.shared(BINDING_SOURCES[item.source])   # its stored text is the Records'; the Blueprint text is kept
             targets[item.name] = next_index
             clauses.append(_clause(effect_template_id=effect.ref, target_template_index=next_index,
                                    effect_instance_id=len(clauses), effect_group_id=len(clauses) + 1))
@@ -332,11 +342,11 @@ def lower(card: Card) -> Lowered:
                 raise BlueprintError(item.line, f"the output {item.out!r} must go to exactly one Discard")
             discard = after[0]
             # Choose stores the picked card, then Discard discards it: the Records' two effects, in that order.
-            store = S.store_target(MISSING_TEXT, id=S._stable_guid("effect", "store " + item.name))
-            drop = S.discard(MISSING_TEXT, id=S._stable_guid("effect", discard.name),
+            store = S.store_target(item.text or MISSING_TEXT, id=S._stable_guid("effect", "store " + item.name))
+            drop = S.discard(discard.text or MISSING_TEXT, id=S._stable_guid("effect", discard.name),
                              owner=str(discard.args[1]["value"]))
             local = S.choose_revealed(
-                MISSING_TEXT,
+                item.text or MISSING_TEXT,
                 id=S._stable_guid("ability", card.name + item.name), target_id=S._stable_guid("target", card.name + item.name),
                 card_filter=S.non_resource(), does=[store, drop])
             invoke_id = S._stable_guid("effect", "invoke " + item.name)
@@ -360,14 +370,15 @@ ROOT_TARGETS = ["0a64e181-c49b-35c6-5c47-1b95924a7c48", "584ae879-0468-bb00-ff27
                 "614afb2a-a723-797c-5a34-faae1c64cdd7"]
 
 
-def emit(card: Card, game_text: str) -> str:
+def emit(card: Card, game_text: str | None = None) -> str:
     """The card as ir_python text: the local Choose ability with its target and discard, the invoke effect, then the
-    root ability. ``game_text`` is the card's rule text, as the Records' root ability has it."""
+    root ability. The rule text is the card's own, or ``game_text`` when the card has none."""
     from gamedata import ir_python
     from gamedata import ir_surface as S
 
     lowered = lower(card)
     local = lowered.local
+    game_text = card.text or game_text or ""
     lines = [f"# {card.name}: {game_text}", "# Written from the Blueprint card by gamedata/ir_blueprint.emit."]
     for index, target in enumerate(local._surface_targets):
         lines.append(f"CHOOSE_TARGET_{index} = {ir_python.dumps(target)}")
