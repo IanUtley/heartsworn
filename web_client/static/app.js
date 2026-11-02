@@ -575,6 +575,20 @@ function markChainTargets() {
   });
 }
 
+// The pointer is a targeting cross while the player is choosing a target: a card's target steps, or the server's choose
+// prompt with candidates. act() clears the target mode when the last target is confirmed, so the cursor reverts then.
+function targetingNow() {
+  if (S.busy) return false;
+  if (S.ui && S.ui.mode === "target") return true;
+  return !!(S.prompt && S.prompt.kind === "choose" && S.prompt.pick_kind !== "threshold" &&
+    (S.prompt.candidates || []).length);
+}
+
+// The heading and status for a choose prompt: a threshold pick is not a target.
+function chooseWord() {
+  return S.prompt && S.prompt.pick_kind === "threshold" ? "threshold" : "card";
+}
+
 function render() {
   if (!S.info) return;
   const before = handRects();
@@ -582,6 +596,7 @@ function render() {
   document.body.dataset.board = boardChoice();
   document.body.dataset.combat = phase >= 11 && phase <= 18 ? "1" : "";
   document.body.classList.toggle("chain-active", S.chain.length > 0);
+  document.body.classList.toggle("targeting", targetingNow());
   const b = board3d();
   renderChampion(S.opp, "#opp-champion");
   renderChampion(S.me, "#my-champion");
@@ -788,7 +803,8 @@ function renderActions() {
     label = ui.blocker ? "Now pick the attacker to block." : "Pick a blocker, then the attacker it blocks.";
     html = `<button data-act="commit-defense">Confirm blocks</button>`;
   } else if (p.kind === "choose") {
-    label = p.candidates.length ? "Choose a target for the ability." : "That ability has no legal target.";
+    label = !p.candidates.length ? "That ability has no legal target."
+      : chooseWord() === "threshold" ? "Choose a threshold." : "Choose a target for the ability.";
     html = p.candidates.length ? "" : `<button data-act="choose-none">Continue</button>`;
   } else if (p.kind === "ended") {
     label = p.you_won ? "Victory!" : "Defeat.";
@@ -815,7 +831,7 @@ function renderModal() {
     html = `<h2>Starting hand</h2><div class="row">${hand.map((c) => faceHTML(c)).join("")}</div>
       <div class="buttons"><button data-act="keep">Keep</button><button class="secondary" data-act="mulligan">Mulligan</button></div>`;
   } else if (p && !S.busy && p.kind === "choose" && p.candidates.some((uid) => !onBoard(uid))) {
-    html = `<h2>Choose a card</h2><div class="row">${p.candidates.map((uid) => {
+    html = `<h2>Choose a ${chooseWord()}</h2><div class="row">${p.candidates.map((uid) => {
       const c = S.cards.get(uid) || { uid, card_id: NO_GUID, controller: S.me };
       return cardHTML(c, "selectable");
     }).join("")}</div>`;

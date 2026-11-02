@@ -1953,10 +1953,10 @@ def _pvp_resolve_granted_resource_abilities(handler, session, state,
         game, session, _db, owner_handler, pl_uid, opp_uid, view,
         int(card_uid), owner_pid,
         resolver=lambda _handler, _game, _session, _db_conn, _pl_t, _ai_t,
-        _bstate, guid, source, owner, _target_map:
+        _bstate, guid, source, owner, target_map:
         resolve_port_ability(
             _handler, _game, _session, _db_conn, _pl_t, _ai_t, _bstate,
-            guid, source, owner, target_map={}))
+            guid, source, owner, target_map=target_map))
     if printed_skip is not None:
         logs += resolve_printed_resource_abilities(
             game, session, _db, owner_handler, pl_uid, opp_uid, view,

@@ -112,3 +112,60 @@ def test_web_seat_gets_its_options_and_never_the_opponents_hand():
 if __name__ == "__main__":
     test_web_seat_gets_its_options_and_never_the_opponents_hand()
     print("ok")
+
+
+def test_shards_of_fate_offers_the_web_seat_a_threshold_pick():
+    """Playing Shards of Fate in a PvP session (the web seat's) must resolve to a threshold pick, not abort.
+
+    The opening hand is forced to hold Shards of Fate (a Resource whose abilities are the template's), so the
+    play is deterministic. The granted-ability resolver used to fail on its ``target_map`` keyword, which left the
+    pick unopened.
+    """
+    from db import _db, db_get_card_abilities
+    shards_of_fate = _db.execute(
+        "SELECT guid FROM card_templates WHERE name='Shards of Fate' LIMIT 1").fetchone()[0].lower()
+    decks = _ensure_two_decks()
+    match = web_match.WebMatch(decks[0]["deck_guid"], decks[1]["deck_guid"],
+                               seed=11, ai_delay=0)
+    try:
+        snap, packets, after = _settle(match)
+        forced = None
+        for _ in range(6):
+            kind = snap["prompt"]["kind"]
+            if kind == "mulligan" and forced is None:
+                uid = _db.execute(
+                    "SELECT card_uid FROM game_cards WHERE session_id=? AND user_id=? "
+                    "AND location='hand' ORDER BY position LIMIT 1",
+                    (match.session_id, match.human_pid)).fetchone()[0]
+                _db.execute(
+                    "UPDATE game_cards SET template_guid=?, card_template_id=?, card_type='Resource', "
+                    "card_abilities=? WHERE session_id=? AND card_uid=?",
+                    (shards_of_fate, shards_of_fate, db_get_card_abilities(shards_of_fate)[0],
+                     match.session_id, uid))
+                _db.commit()
+                forced = int(uid)
+            if kind not in ("goes_first", "mulligan"):
+                break
+            match.submit({"type": "play_first" if kind == "goes_first" else "keep"})
+            snap, more, after = _settle(match, after)
+            packets.extend(more)
+        assert forced is not None, "the mulligan prompt never came"
+
+        match.submit({"type": "play", "card": forced})
+        snap, more, after = _settle(match, after)
+        packets.extend(more)
+        assert snap["error"] is None, snap["error"]
+        prompt = snap["prompt"]
+        assert prompt["kind"] == "choose" and prompt["pick_kind"] == "threshold", prompt
+        candidates = prompt["candidates"]
+        assert candidates, "no Standard resource offered"
+
+        match.submit({"type": "choose", "card": candidates[0]})
+        snap, more, after = _settle(match, after)
+        packets.extend(more)
+        assert snap["error"] is None, snap["error"]
+        assert snap["prompt"]["kind"] == "priority", snap["prompt"]
+        events = [e for p in packets for e in p.get("events", ())]
+        assert any(e["type"] == "PlayerResourceThresholdChanged" for e in events)
+    finally:
+        match.close()

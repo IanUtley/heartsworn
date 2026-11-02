@@ -445,3 +445,9 @@ body[data-combat="1"] .firebar { display: block; }
 /* Right-click view: the card enlarged, its powers beneath */
 .enlarged { display: grid; justify-items: center; gap: 12px; }
 .enlarged .card { --card-w: 300px; --card-h: 420px; animation: none; transform: none; filter: none; }
+
+/* While a target is being chosen the pointer is a targeting cross everywhere. The board's canvas sets its own cursor
+   inline, which !important overrides. render() sets the class and clears it once no target is left to choose. */
+body.targeting, body.targeting * {
+  cursor: url("target_cursor.svg") 16 16, crosshair !important;
+}

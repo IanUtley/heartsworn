@@ -332,15 +332,29 @@ class WebMatch:
                "your_turn": int(state.get("turn_pid") or 0) == self.human_pid}
         if kind == "choose":
             pending = details["pending"]
+            candidates = [int(uid) for uid in self._candidates(
+                details["key"], pending)]
             out.update({
                 "pending": details["key"],
+                "pick_kind": self._pick_kind(candidates),
                 "source": pending.get("source_uid"),
-                "candidates": [int(uid) for uid in self._candidates(
-                    details["key"], pending)],
+                "candidates": candidates,
             })
         elif kind == "defend":
             out["attackers"] = details["attackers"]
         return out
+
+    def _pick_kind(self, candidates):
+        """``"threshold"`` when every candidate is a card that provides a threshold (a Standard resource, so the pick
+        gains its threshold), otherwise ``"card"``. The candidates' own templates decide, not the ability's name."""
+        from rules_port.resources import card_template_threshold_flags
+        if not candidates:
+            return "card"
+        with ENGINE_LOCK:
+            if all(card_template_threshold_flags(_db, self.session_id, uid)
+                   for uid in candidates):
+                return "threshold"
+        return "card"
 
     def _candidates(self, key, pending):
         if key == "pending_choice":
