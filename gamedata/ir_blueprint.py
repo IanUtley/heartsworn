@@ -274,6 +274,9 @@ ACTIONS: dict[str, dict[str, str]] = {
 }
 
 
+# A rule text the Blueprint does not carry yet. Steps have no text of their own, so generated effects are marked.
+MISSING_TEXT = "[rule text not in the Blueprint yet]"
+
 # The stored effects a Blueprint binding or step refers to, by name (resolved through ir_surface.shared).
 BINDING_SOURCES: dict[str, str] = {"OpposingChampion": "AATargetTargetOpposingChampion"}
 REVEAL_EFFECT = "lookAt"
@@ -327,14 +330,14 @@ def lower(card: Card) -> Lowered:
             if len(after) != 1:
                 raise BlueprintError(item.line, f"the output {item.out!r} must go to exactly one Discard")
             discard = after[0]
-            move = S.move_card(f"{discard.args[0]} is discarded.", id=S._stable_guid("effect", discard.name),
+            move = S.move_card(MISSING_TEXT, id=S._stable_guid("effect", discard.name),
                                zone="discard", owner=str(discard.args[1]["value"]))
             local = S.choose_revealed(
-                f"Choose a revealed non-resource card. {discard.args[0]} is discarded.",
+                MISSING_TEXT,
                 id=S._stable_guid("ability", card.name + item.name), target_id=S._stable_guid("target", card.name + item.name),
                 card_filter=S.non_resource(), does=[move])
             invoke_id = S._stable_guid("effect", "invoke " + item.name)
-            invoke = S.activate(f"You invoke {item.name}.", id=invoke_id, ability=local)
+            invoke = S.activate(MISSING_TEXT, id=invoke_id, ability=local)
             clauses.append(_clause(effect_template_id=S._ref(invoke_id),
                                    target_template_index=next_index,
                                    effect_instance_id=len(clauses), effect_group_id=len(clauses) + 1))
@@ -346,3 +349,30 @@ def lower(card: Card) -> Lowered:
     if local is None:
         raise BlueprintError(card.steps[-1].line, "the card has no Choose step")
     return Lowered(clauses=clauses, local=local, invoke=invoke)
+
+
+# The Records' targets of Inquisition's root ability (champion, revealed hand, player). Until targets are named in the
+# surface, the root names these stored records by GUID, as the Records do.
+ROOT_TARGETS = ["0a64e181-c49b-35c6-5c47-1b95924a7c48", "584ae879-0468-bb00-ff27-7a5ff46c5bc2",
+                "614afb2a-a723-797c-5a34-faae1c64cdd7"]
+
+
+def emit(card: Card, game_text: str) -> str:
+    """The card as ir_python text: the local Choose ability with its target and discard, the invoke effect, then the
+    root ability. ``game_text`` is the card's rule text, as the Records' root ability has it."""
+    from gamedata import ir_python
+    from gamedata import ir_surface as S
+
+    lowered = lower(card)
+    local = lowered.local
+    lines = [f"# {card.name}: {game_text}", "# Written from the Blueprint card by gamedata/ir_blueprint.emit."]
+    for index, target in enumerate(local._surface_targets):
+        lines.append(f"CHOOSE_TARGET_{index} = {ir_python.dumps(target)}")
+    for index, effect in enumerate(local._surface_does):
+        lines.append(f"CHOOSE_DOES_{index} = {ir_python.dumps(effect)}")
+    lines.append(f"CHOOSE = {ir_python.dumps(local)}")
+    lines.append(f"INVOKE = {ir_python.dumps(lowered.invoke)}")
+    root = S.ability(game_text, id=S._stable_guid("ability", game_text), ability_effect_list=lowered.clauses,
+                     ability_target_template_ids=[S._ref(guid) for guid in ROOT_TARGETS])
+    lines.append(f"ROOT = {ir_python.dumps(root)}")
+    return "\n".join(lines) + "\n"

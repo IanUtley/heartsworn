@@ -311,6 +311,7 @@ def choose_revealed(text: str, *, id: str, target_id: str, card_filter: Typed, d
                                                   "ability_effect_list": clauses})
     obj._surface_guid = str(id).lower()
     obj._surface_targets = [target]
+    obj._surface_does = list(does)
     return obj
 
 

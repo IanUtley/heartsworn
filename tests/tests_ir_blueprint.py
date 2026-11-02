@@ -83,3 +83,13 @@ def test_lowering_inquisition_matches_the_records_effects_and_target_order():
     assert [c["m_TargetTemplateIndex"] for c in lowered.clauses] == [0, 1, 2]
     assert lowered.local._surface_targets[0].m_CardFilter is not None
     assert lowered.invoke._surface_invokes is lowered.local
+
+
+def test_emitted_inquisition_text_loads_back_to_the_same_objects():
+    from gamedata import ir_blueprint as bp2
+    from gamedata import ir_python
+    text = bp2.emit(bp.parse(INQUISITION), "Look at target opposing champion's hand.")
+    names = ir_python.loads(text)
+    assert {"CHOOSE", "CHOOSE_TARGET_0", "CHOOSE_DOES_0", "INVOKE", "ROOT"} <= set(names)
+    assert ir_python.dumps(ir_python.loads(text)["ROOT"]) == ir_python.dumps(names["ROOT"])
+    assert "[rule text not in the Blueprint yet]" in text
