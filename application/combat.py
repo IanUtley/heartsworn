@@ -1084,38 +1084,22 @@ class CombatMixin:
             return
         child_ability, target_template = prompt
         source_uid = bstate.get("resolving_source_uid")
-        source_card_id = (_hc.game_engine.SessionCardId(_hc.game_engine.UID(
-            int(source_uid))) if source_uid else
-            (player_champ_scid if player_champ_scid else pl_t))
-        options = game._make_event(_hc.game_engine.PlayerOptionListSessionEventArgs)
-        options.player_id = pl_t
-        opt = game._make_event(_hc.game_engine.PlayerOptionSessionEventArgs)
-        opt.card = source_card_id
-        opt.state = _hc.game_engine.ECardUsage.Activate
-        child = game._make_event(_hc.game_engine.OptionInstanceSessionEventArgs)
-        child.opt_id = _hc.game_engine.ResourceId.from_str(child_ability)
-        child.target_ids = [_hc.game_engine.ResourceId.from_str(target_template)]
-        tgt = game._make_event(_hc.game_engine.TargetInstanceSessionEventArgs)
-        tgt.target_index = 0
-        tgt.target_id = _hc.game_engine.ResourceId.from_str(target_template)
-        tgt.targets = hand
-        child.target_instances = [tgt]
-        child.min_target_counts = [1]
-        child.max_target_counts = [1]
-        opt.instances = [child]
-        options.options = [opt]
-        game._push(options)
-        req = _hc.game_engine.AbilityActivationDataRequiredSessionEventArgs()
-        req.player_id = pl_t
-        req.ability_instance_id = 1
-        req.ability_parent_id = 0
-        req.source_card_id = source_card_id
-        req.ability_template_id = _hc.game_engine.ResourceId.from_str(child_ability)
-        req.effect_group_id = 1
-        req.effect_instance_ids = [0]
-        req.resolve_chain = False
-        game._push(req)
-        game.push_green_light(pl_t, _hc.game_engine.EPriorityContext.Normal)
+        # The option's card is the resolving source, or the champion (or the player) when there is none.
+        if source_uid:
+            pick_source = int(source_uid)
+        elif player_champ_scid:
+            pick_source = int(player_champ_scid.uid.uid64)
+        else:
+            pick_source = int(pl_t.uid64)
+        from pickers import PickRequest, PickTarget, present_pick
+        present_pick(game, PickRequest(
+            player_id=pl_t, prompt_ability=child_ability, source_uid=pick_source,
+            instance_id=1,
+            targets=(PickTarget(
+                index=0, template_id=target_template,
+                candidates=tuple(int(scid.uid.uid64) for scid in hand),
+                minimum=1, maximum=1),),
+            prompt_kind="ability"))
         bstate["pending_discard_ability"] = child_ability
         bstate["pending_discard_ability_instance_id"] = 1
         bstate["pending_discard_target_template"] = target_template

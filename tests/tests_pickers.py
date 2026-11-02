@@ -31,3 +31,28 @@ def test_present_pick_sends_option_list_then_the_kind_of_request_it_names():
         assert list(option.min_target_counts) == [1]
         assert list(option.max_target_counts) == [1]
         assert to_web_message(request)["kind"] == kind
+
+
+def test_pvp_discard_prompt_sends_the_hand_as_candidates_only_to_its_controller():
+    from unittest import mock
+    from types import SimpleNamespace
+    from services import tournament_game as tg
+
+    session = SimpleNamespace(session_id=1)
+    state = {"pending_discard_ability": ABILITY,
+             "pending_discard_target_template": CHOICE_TEMPLATE}
+    sent = []
+    handler = object()
+    with mock.patch.object(tg, "player_handlers", {5: handler}), \
+            mock.patch.object(tg, "db_game_get_hand", return_value=[(0x301,), (0x302,)]), \
+            mock.patch.object(tg, "_send_pvp_packet",
+                              side_effect=lambda h, s, g, uid, kind: sent.append((h, uid, kind, g))):
+        assert tg._pvp_push_discard_prompt(session, state, 5, 6, 0x101) is True
+    (target, uid, kind, game), = sent
+    assert target is handler and kind == "discard-prompt"
+    names = [event.__class__.__name__ for event in game.events]
+    assert names[-3:] == ["PlayerOptionListSessionEventArgs",
+                          "AbilityActivationDataRequiredSessionEventArgs",
+                          "GreenLightSessionEventArgs"], names
+    option = game.events[-3].options[0].instances[0]
+    assert [int(c.uid.uid64) for c in option.target_instances[0].targets] == [0x301, 0x302]

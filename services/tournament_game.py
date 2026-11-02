@@ -4719,36 +4719,15 @@ def _pvp_push_discard_prompt(session, state, my_pid, opp_pid, source_uid):
     if not hand:
         log_req("    PvP discard prompt: no hand target after draw")
         return False
-    option_list = g._make_event(_ge.PlayerOptionListSessionEventArgs)
-    option_list.player_id = my_uid
-    option = g._make_event(_ge.PlayerOptionSessionEventArgs)
-    option.card = _ge.SessionCardId(_ge.UID(int(source_uid)))
-    option.state = _ge.ECardUsage.Activate
-    child_option = g._make_event(_ge.OptionInstanceSessionEventArgs)
-    child_option.opt_id = _ge.ResourceId.from_str(child)
-    child_option.target_ids.append(_ge.ResourceId.from_str(target_id))
-    child_option.min_target_counts = [1]
-    child_option.max_target_counts = [1]
-    target = g._make_event(_ge.TargetInstanceSessionEventArgs)
-    target.target_index = 0
-    target.target_id = _ge.ResourceId.from_str(target_id)
-    target.targets = hand
-    child_option.target_instances.append(target)
-    option.instances.append(child_option)
-    option_list.options.append(option)
-    g._push(option_list)
-
-    req = g._make_event(_ge.AbilityActivationDataRequiredSessionEventArgs)
-    req.player_id = my_uid
-    req.ability_instance_id = 1
-    req.ability_parent_id = 0
-    req.source_card_id = _ge.SessionCardId(_ge.UID(int(source_uid)))
-    req.ability_template_id = _ge.ResourceId.from_str(child)
-    req.effect_group_id = 1
-    req.effect_instance_ids = [0]
-    req.resolve_chain = False
-    g._push(req)
-    g.push_green_light(my_uid, _ge.EPriorityContext.Normal)
+    from pickers import PickRequest, PickTarget, present_pick
+    present_pick(g, PickRequest(
+        player_id=my_uid, prompt_ability=child, source_uid=int(source_uid),
+        instance_id=1,
+        targets=(PickTarget(
+            index=0, template_id=target_id,
+            candidates=tuple(int(scid.uid.uid64) for scid in hand),
+            minimum=1, maximum=1),),
+        prompt_kind="ability"))
     _send_pvp_packet(h, session, g, my_uid, "discard-prompt")
     return True
 
