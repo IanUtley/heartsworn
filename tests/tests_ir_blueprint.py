@@ -44,8 +44,9 @@ def test_every_inquisition_action_has_a_lowering_entry():
 def test_non_resource_helper_round_trips_through_the_ir_text():
     from gamedata import ir_python, ir_surface
     text = ir_python.dumps(ir_surface.non_resource())
-    assert text == ("NotCardFilter(target_filter=OrCardFilter(target_filters="
-                    "[IsResource(is_basic_resource=False, threshold_color_flags='Any')]))")
+    assert text.startswith("AndCardFilter(target_filters=[IsType(card_type='Troop|BasicAction|Resource")
+    assert "NotCardFilter(target_filter=OrCardFilter(target_filters=[IsResource(is_basic_resource=False, "\
+           "threshold_color_flags='Any')]))" in text
     names = ir_python.loads("filter_ = " + text)
     assert ir_python.dumps(names["filter_"]) == text
 

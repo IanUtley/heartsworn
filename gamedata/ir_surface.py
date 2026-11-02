@@ -496,11 +496,18 @@ def card_matches(card_filter: Typed) -> Typed:
     return T.TriggerCardMatchesFilter(card_filter=card_filter)
 
 
+ALL_CARD_TYPES = "Troop|BasicAction|Resource|Artifact|QuickAction|Constant|Bane|Choice"
+
+
 def non_resource() -> Typed:
-    """Any card that is not a resource (Blueprint's NonResource). The Records' form: not a resource of any shard
-    colour, and not a basic or a non-standard resource."""
-    return T.NotCardFilter(target_filter=T.OrCardFilter(target_filters=[
-        T.IsResource(is_basic_resource=False, is_non_standard_resource=False, threshold_color_flags="Any")]))
+    """Any card that is not a resource (Blueprint's NonResource), in the Records' form: every card type, and not a
+    resource of any shard colour (a basic or non-standard resource is not excepted)."""
+    return T.AndCardFilter(target_filters=[
+        T.IsType(card_type=ALL_CARD_TYPES),
+        T.NotCardFilter(target_filter=T.OrCardFilter(target_filters=[
+            T.IsResource(is_basic_resource=False, is_non_standard_resource=False, threshold_color_flags="Any")])),
+        T.IsType(card_type=ALL_CARD_TYPES),
+    ])
 
 
 def troop_with(attribute: str) -> Typed:
