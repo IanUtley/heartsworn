@@ -665,40 +665,13 @@ class PendingChoicesMixin:
                                     **({"int_attrs": {}} if kind == "matching_target" else {}))
                 g.events[-1]._hand_reveal_viewer_uid = player_uid
                 g.events[-1]._temporary_reveal = True
-            ev = g._make_event(_hc.game_engine.PlayerOptionListSessionEventArgs)
-            ev.player_id = player_uid
-            opt = g._make_event(_hc.game_engine.PlayerOptionSessionEventArgs)
-            opt.card = _hc.game_engine.SessionCardId(_hc.game_engine.UID(int(source_uid)))
-            opt.state = _hc.game_engine.ECardUsage.Activate
-            inst = g._make_event(_hc.game_engine.OptionInstanceSessionEventArgs)
-            inst.opt_id = _hc.game_engine.ResourceId.from_str(prompt_ability)
-            tgt = g._make_event(_hc.game_engine.TargetInstanceSessionEventArgs)
-            tgt.target_index = pick_index if matching_targets else 0
-            tgt.target_id = _hc.game_engine.ResourceId.from_str(target_id)
-            # ConfigureAbility matches target instances through this parallel
-            # target-template list.  Without it the client can render the
-            # candidates but keep the outer BattleStateTarget alive after a
-            # selection because it cannot associate the chosen card with the
-            # nested search ability's target.
-            for parallel_id in (matching_targets or [target_id]):
-                inst.target_ids.append(_hc.game_engine.ResourceId.from_str(parallel_id))
-            tgt.targets = [_hc.game_engine.SessionCardId(_hc.game_engine.UID(int(u)))
-                           for u in pend["candidates"]]
-            inst.target_instances.append(tgt)
-            inst.min_target_counts = [int(pend["minimum_picks"])]
-            inst.max_target_counts = [int(pend["maximum_picks"])]
-            opt.instances.append(inst)
-            ev.options.append(opt)
-            g._push(ev)
-            ev39 = _hc.game_engine.TriggeredAbilityActivationDataRequiredSessionEventArgs()
-            ev39.player_id = player_uid
-            ev39.ability_instance_ids = [inst_id]
-            ev39.ability_template_ids = [
-                _hc.game_engine.ResourceId.from_str(prompt_ability)]
-            ev39.source_card_ids = [
-                _hc.game_engine.SessionCardId(_hc.game_engine.UID(int(source_uid)))]
-            g._push(ev39)
-            g.push_green_light(player_uid, _hc.game_engine.EPriorityContext.Normal)
+            from pickers import PickRequest, present_pick
+            present_pick(g, PickRequest(
+                player_id=player_uid, prompt_ability=prompt_ability, source_uid=int(source_uid),
+                instance_id=inst_id, target_index=(pick_index if matching_targets else 0),
+                target_template_id=target_id, candidates=tuple(int(u) for u in pend["candidates"]),
+                minimum=int(pend["minimum_picks"]), maximum=int(pend["maximum_picks"]),
+                matching_targets=tuple(matching_targets)))
 
         if bstate.get("pvp"):
             from services.tournament_game import (
