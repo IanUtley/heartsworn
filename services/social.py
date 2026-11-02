@@ -372,16 +372,6 @@ def push_friend_request_received(handler, sender_name, SERVICE_PROFILE_UID):
     _push_event(handler, 2192, args, SERVICE_PROFILE_UID)
 
 
-def push_friend_request_accepted(handler, reck_id, keepname, SERVICE_PROFILE_UID):
-    """Push FriendRequestAccepted (2193) — your request was accepted."""
-    log_req(f">>> PUSH FriendRequestAccepted {reck_id} ({keepname})")
-    b = ObjFmtBuilder("Game.Shared.Network.Profile.FriendRequestAcceptedEventArgs")
-    b.field_ulong("ReckId", reck_id)
-    b.field_str("Keepname", keepname)
-    b.field_int("OriginClusterHash", 0)
-    b.field_guid("RequestHandlerSessionId", "00000000-0000-0000-0000-000000000000")
-    args = b.finish(4)
-    _push_event(handler, 2193, args, SERVICE_PROFILE_UID)
 
 
 def push_friend_added(handler, reck_id, keepname, is_online, SERVICE_PROFILE_UID):
@@ -408,15 +398,6 @@ def push_friend_removed(handler, keepname, SERVICE_PROFILE_UID):
     _push_event(handler, 2195, args, SERVICE_PROFILE_UID)
 
 
-def push_friend_request_removed(handler, keepname, SERVICE_PROFILE_UID):
-    """Push FriendRequestRemoved (2200) — a pending request was removed."""
-    log_req(f">>> PUSH FriendRequestRemoved {keepname}")
-    b = ObjFmtBuilder("Game.Shared.Network.Profile.FriendRequestRemovedEventArgs")
-    b.field_str("Keepname", keepname)
-    b.field_int("OriginClusterHash", 0)
-    b.field_guid("RequestHandlerSessionId", "00000000-0000-0000-0000-000000000000")
-    args = b.finish(3)
-    _push_event(handler, 2200, args, SERVICE_PROFILE_UID)
 
 
 def push_friend_come_online(handler, rek_id, SERVICE_PROFILE_UID):

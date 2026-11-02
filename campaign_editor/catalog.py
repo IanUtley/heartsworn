@@ -67,11 +67,6 @@ AREA_TEMPLATE = "AZ1"
 SCENE_NAME = "Howling Plains"
 
 
-def area_scene() -> dict[str, Any]:
-    for record in records("SceneData"):
-        if record.get("m_Name") == SCENE_NAME:
-            return record
-    raise LookupError(f"SceneData {SCENE_NAME!r} not found")
 
 
 def warm_caches(db_path: Path = REPO / "hconnect.db") -> None:

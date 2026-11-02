@@ -21,25 +21,6 @@ from ._shared import _log
 
 # ── Activation helpers ──────────────────────────────────────────────────────
 
-def validate_ability_cost(db, session, player_uid, ability_guid, bstate):
-    """Check whether *player_uid* can pay for *ability_guid*.
-
-    Returns (ok: bool, charge_cost: int, spell_cost: int, eff_sp_cost: int,
-             missing_charges: int, missing_sp: int).
-    """
-    from pve_db import db_talent_ability_costs
-    row = db_talent_ability_costs(ability_guid, conn=db)
-    if not row:
-        return False, 0, 0, 0, 0, 0
-    cc = row[0] or 0
-    sc = row[1] or 0
-    charges = bstate.get("player_charges", 0)
-    sp = bstate.get("player_spell_points", 0)
-    sp_uses = bstate.get("player_sp_uses", {}) or {}
-    used = int(sp_uses.get(ability_guid, 0))
-    eff_sc = sc + (used if sc > 0 else 0)
-    return (charges >= cc and sp >= eff_sc, cc, sc, eff_sc,
-            max(0, cc - charges), max(0, eff_sc - sp))
 
 
 # ── Common champion ability patterns ────────────────────────────────────────

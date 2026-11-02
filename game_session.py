@@ -61,9 +61,6 @@ def make_uid(uid_type, inst):
     return (inst << 8) | uid_type
 
 
-def uid_to_hex(uid_val):
-    """Convert a UID ulong to hex string for ObjFmt."""
-    return hexlify(__import__("struct").pack("<Q", uid_val)).decode("ascii")
 
 
 class GameSession:
@@ -270,11 +267,3 @@ def remove_session(session_name, conn=None):
             conn.close()
 
 
-def cleanup_ended_sessions():
-    """Remove sessions that have ended."""
-    conn = _db()
-    try:
-        db_layer.db_cleanup_ended_sessions(conn=conn)
-        conn.commit()
-    finally:
-        conn.close()

@@ -817,28 +817,8 @@ def ai_declare_attackers(handler, game, session, ai_t, pl_t, battle_state):
     return battle_state
 
 
-def _aieval_alpha_wins(ev, player_champ_uid64, battle_state, attackers,
-                       blockers):
-    """Alpha-strike lethal check (AICardEvaluator.AlphaStrikeWins)."""
-    try:
-        health = int(battle_state.get("player_health", 20))
-        return ev.alpha_strike_wins(health, attackers, blockers)
-    except Exception:
-        return False
 
 
-def _aieval_best_attack_value(ev, card, blockers):
-    """Best (damage, value) for this attacker vs the opponent's blockers —
-    the strongest single blocker counts (the client evaluates the full
-    subset; a single-blocker worst case is the safe simplification)."""
-    best = (card.effective_attack(), card.effective_attack() * 1.0)
-    for b in blockers:
-        if not ev._can_block(b, card):
-            continue
-        dmg, value = ev.value_attack(card, [b])
-        if value < best[1]:
-            best = (dmg, value)
-    return best
 
 
 def _aieval_attack_set_value(ev, attackers, blockers):
@@ -2470,33 +2450,6 @@ def ai_tunnel_hand_troop(handler, game, session, ai_t, pl_t, battle_state,
     return None if decision_only else False
 
 
-def ai_consider_removal(handler, game, session, ai_t, pl_t, battle_state, ev):
-    """Port of AITactical.BuildBoard's removal step + AttemptToRemove: if we
-    hold removal and the opponent controls a threatening target (dangerous
-    troop, non-troop permanent, high-value/legendary card, or the champion),
-    play the best removal that answers it."""
-    if not ev.have_removal():
-        return False
-    for target in ev.threatening_targets():
-        removal, x_cost, target_uid = ev.find_removal_for(target)
-        if removal is None:
-            continue
-        if ev.is_playable(removal) == "NeedsResources":
-            return False  # GenerateResource happens in the main loop
-        # Cache the concrete target so ai_play_hand_card targets correctly.
-        card = removal
-        if card.has_variable_cost and not card.is_troop() and x_cost:
-            ai_play_hand_card(handler, game, session, ai_t, battle_state, card,
-                              evaluator=ev, x_cost=x_cost,
-                              target_uid=target_uid)
-            return True
-        ai_play_hand_card(handler, game, session, ai_t, battle_state, card,
-                          evaluator=ev, target_uid=target_uid)
-        log_req(f"    AI removal: {card.name} -> "
-                f"{target.name if target else 'champion'} "
-                f"(x={x_cost})")
-        return True
-    return False
 
 
 def ai_choose_main_phase_card(handler, session, battle_state, ai_t, pl_t,

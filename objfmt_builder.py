@@ -464,16 +464,7 @@ class ObjFmtBuilder:
 
 
 # ── Standalone helpers (delegate to builder) ──────────────────────
-def encode_card_6fields(b, guid, card_id, is_ext=0):
-    """Encode 6 card_instance_bits fields into an existing builder b."""
-    b.card_fields(guid, card_id, is_ext)
 
 
-def encode_chest_8fields(b, rarity_val, spin_status, pack_guid, inventory_id):
-    """Encode 8 chest_bits fields into an existing builder b."""
-    b.chest_fields(rarity_val, spin_status, pack_guid, inventory_id)
 
 
-def encode_inventory_6fields(b, template_guid, item_id, quantity=1, bound=True):
-    """Encode 6 inventory_bits fields into an existing builder b."""
-    b.inventory_fields(template_guid, item_id, quantity, bound)

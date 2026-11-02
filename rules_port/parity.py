@@ -110,12 +110,5 @@ def replay_transactions(session, transactions, factory: Callable) -> None:
             raise ParityMismatch(f"transaction was not handled during replay: {record!r}")
 
 
-def load_capture(path: str | Path) -> ParityCapture:
-    with open(path, encoding="utf-8") as source:
-        return ParityCapture.from_dict(json.load(source))
 
 
-def save_capture(path: str | Path, capture: ParityCapture) -> None:
-    with open(path, "w", encoding="utf-8") as target:
-        json.dump(capture.to_dict(), target, indent=2, sort_keys=True)
-        target.write("\n")

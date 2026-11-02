@@ -696,20 +696,6 @@ _OVERRIDES: dict[str, tuple[float, dict[str, dict]]] = {}
 _OVERRIDES_LOCK = threading.Lock()
 
 
-def _override(table, key_field, key):
-    """The campaign files' row for ``key`` (the last one wins), cached per
-    change of the data files."""
-    stamp = catalog_data.data_mtime()
-    with _OVERRIDES_LOCK:
-        cached = _OVERRIDES.get(table)
-    if cached is None or cached[0] != stamp:
-        rows = {}
-        for row in catalog_data.data_overrides(table):
-            rows[str(row.get(key_field) or "").lower()] = row
-        cached = (stamp, rows)
-        with _OVERRIDES_LOCK:
-            _OVERRIDES[table] = cached
-    return cached[1].get(str(key).lower())
 
 
 def quest_reward(db, script):

@@ -1230,14 +1230,6 @@ def describe_root(guid: str, root: dict[str, Any]) -> dict[str, Any]:
             "reasons": first_reasons[-2:]}
 
 
-def _row_defaults(record: dict[str, Any]) -> bool:
-    """Whether a target is the kind a row states: all zones, one, automatic, all players."""
-    count = lambda value: (value or {}).get("m_Value") if isinstance(value, dict) else None
-    return (record.get("m_CollectionFlags") == ability_targets.ALL_ZONES
-            and bool(record.get("m_IsAutoTarget"))
-            and record.get("m_PlayerFilter") == "MultiplePlayers"
-            and count(record.get("m_MinTargetCount")) == 1
-            and count(record.get("m_MaxTargetCount")) == 1)
 
 
 def _with_target_rows(parsed: dict[str, Any], root: dict[str, Any], overlay: dict) -> dict[str, Any]:

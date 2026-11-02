@@ -71,9 +71,5 @@ def register_mode(arg=None):
         return deco
 
 
-def get_mode(mode_id: str):
-    return _MODES.get(mode_id)
 
 
-def list_modes() -> list[str]:
-    return list(_MODES.keys())

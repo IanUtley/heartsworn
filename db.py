@@ -135,9 +135,6 @@ def set_log_context(player_id=None, session_id=None, participant_ids=None):
     return get_log_session()
 
 
-def set_log_session(session_id, player_id=None, participant_ids=None):
-    """Compatibility wrapper for binding the session logging context."""
-    return set_log_context(player_id, session_id, participant_ids)
 
 
 def get_log_session():
@@ -248,14 +245,6 @@ def _write_log_path_locked(path, line):
         return
 
 
-def _write_session_log_locked(line):
-    """Append one already-timestamped line to the bound session log.
-
-    Logging must never be allowed to break gameplay if a temporary directory
-    is unavailable or becomes read-only, so file errors are deliberately
-    ignored after the process-wide log has been written.
-    """
-    _write_log_path_locked(session_log_path(), line)
 
 
 def _write_bound_logs_locked(line):
@@ -812,12 +801,6 @@ def db_bump_card_use(session_id, card_uid, ability_guid):
     return uses[ability_guid]
 
 
-def db_card_state(session_id, card_uid):
-    """Current card_state bitmask for an instance (0 if absent)."""
-    row = _db.execute(
-        "SELECT card_state FROM game_cards WHERE session_id=? AND card_uid=?",
-        (session_id, int(card_uid))).fetchone()
-    return int(row[0]) if row and row[0] else 0
 
 
 def db_warzone_troop_count(session_id, user_id):
@@ -829,15 +812,6 @@ def db_warzone_troop_count(session_id, user_id):
     return int(row[0]) if row else 0
 
 
-def db_card_stat_mods(session_id, card_uid):
-    """(card_attack_mod, card_defense_mod) for an instance (0s if absent)."""
-    row = _db.execute(
-        "SELECT card_attack_mod, card_defense_mod FROM game_cards "
-        "WHERE session_id=? AND card_uid=?",
-        (session_id, int(card_uid))).fetchone()
-    if not row:
-        return 0, 0
-    return (row[0] or 0), (row[1] or 0)
 
 
 # Diagnostics-only UID -> name annotation.  Template names are immutable so
@@ -915,20 +889,12 @@ def log(msg: str, level: str | int = "INFO") -> bool:
     return True
 
 
-def log_debug(msg: str) -> bool:
-    return log_req(msg, level="DEBUG")
 
 
-def log_info(msg: str) -> bool:
-    return log_req(msg, level="INFO")
 
 
-def log_warning(msg: str) -> bool:
-    return log_req(msg, level="WARNING")
 
 
-def log_error(msg: str) -> bool:
-    return log_req(msg, level="ERROR")
 
 
 # --- Idle-transaction watchdog -------------------------------------------
@@ -2067,17 +2033,8 @@ def db_get_decks(user_id):
 
 # === Sessions (reconnect) ===
 
-def db_save_connection_session(sid, user_id, username, auth_id, reck_id, uid, addr):
-    _db.execute("INSERT OR REPLACE INTO sessions (sid, user_id, username, client_auth_id, client_reck_id, client_uid, addr) VALUES (?,?,?,?,?,?,?)",
-                (sid, user_id, username, auth_id, reck_id, uid, addr))
-    _db.commit()
 
 
-def db_find_session(addr):
-    row = _db.execute("SELECT sid, username, client_auth_id, client_reck_id FROM sessions WHERE addr=? ORDER BY created_at DESC LIMIT 1", (addr,)).fetchone()
-    if row:
-        return {"username": row[1], "auth_id": row[2], "reck_id": row[3]}
-    return None
 
 
 # === Chat ===
@@ -3039,25 +2996,8 @@ def db_set_card_resolved_at(session_id, card_uid, resolved_at):
     _db.commit()
 
 
-def db_warzone_by_resolved_at(session_id, user_id=None):
-    """Return warzone card_uids ordered by resolved_at (oldest first).
-    Used for trigger resolution ordering (FIFO: first in, first resolved)."""
-    sql = ("SELECT card_uid FROM game_cards "
-           "WHERE session_id=? AND location='warzone'")
-    params = [session_id]
-    if user_id is not None:
-        sql += " AND user_id=?"
-        params.append(user_id)
-    sql += " ORDER BY resolved_at ASC"
-    rows = _db.execute(sql, params).fetchall()
-    return [r[0] for r in rows]
 
 
-def db_get_deck(deck_id, user_id):
-    """Return a deck row: (id, cards, pvp_champion_guid, pve_champion_id)."""
-    return _db.execute(
-        "SELECT id, cards, pvp_champion_guid, pve_champion_id FROM decks "
-        "WHERE id=? AND user_id=?", (deck_id, user_id)).fetchone()
 
 
 def db_user_owns_deck(deck_id, user_id, conn=None):
@@ -3068,11 +3008,6 @@ def db_user_owns_deck(deck_id, user_id, conn=None):
         (deck_id, user_id)).fetchone())
 
 
-def db_get_last_deck(user_id):
-    """Return the player's last-saved deck."""
-    return _db.execute(
-        "SELECT id, cards, pvp_champion_guid, pve_champion_id FROM decks "
-        "WHERE user_id=? ORDER BY last_saved DESC LIMIT 1", (user_id,)).fetchone()
 
 
 def db_get_champion_guid(pve_champion_id):
@@ -3110,13 +3045,6 @@ def db_get_card_abilities(template_guid):
     return ("[]", 0)
 
 
-def db_get_card_template_for_instance(instance_id, user_id):
-    """Resolve a card_instances row to (template_guid, card_type)."""
-    return _db.execute(
-        "SELECT ci.template_guid, ct.card_type FROM card_instances ci "
-        "JOIN card_templates ct ON ci.template_guid=ct.guid "
-        "WHERE ci.instance_id=? AND ci.user_id=?",
-        (instance_id, user_id)).fetchone()
 
 
 def db_clear_session_cards(session_id):
@@ -3322,16 +3250,6 @@ def db_hand_cards_with_templates(session_id, user_id):
         (session_id, user_id)).fetchall()
 
 
-def db_hand_quick_actions(session_id, user_id):
-    """Return list of (card_uid, cost, card_type, threshold_json, abilities_json)
-    for QuickAction cards in hand."""
-    return _db.execute(
-        "SELECT gc.card_uid, ct.cost, ct.card_type, ct.threshold_json, ct.abilities_json "
-        "FROM game_cards gc "
-        "JOIN card_templates ct ON ct.guid = gc.template_guid "
-        "WHERE gc.session_id=? AND gc.user_id=? AND gc.location='hand' "
-        "AND ct.card_type LIKE '%QuickAction%' ORDER BY gc.position",
-        (session_id, user_id)).fetchall()
 
 
 def db_hand_cards_raw(session_id, user_id):
@@ -3376,16 +3294,6 @@ def db_warzone_troops_basic(session_id, user_id=None):
     return _db.execute(sql, params).fetchall()
 
 
-def db_warzone_blockers(session_id, user_id):
-    """Return list of (card_uid, combined_attributes) for untapped warzone troops
-    that could block (not Tapped)."""
-    import game_engine
-    return _db.execute(
-        "SELECT card_uid, (ct.attributes | gc.card_attributes) FROM game_cards gc "
-        "JOIN card_templates ct ON ct.guid = gc.template_guid "
-        "WHERE gc.session_id=? AND user_id=? AND location='warzone' "
-        "AND gc.card_type LIKE '%Troop%' AND (gc.card_state & ?) = 0",
-        (session_id, user_id, game_engine.ECardStates.Tapped)).fetchall()
 
 
 def db_card_with_template(session_id, card_uid):
@@ -3462,13 +3370,6 @@ def db_game_card_effective_cost(session_id, card_uid, battle_state=None):
         return max(0, cost)
 
 
-def db_card_owner(session_id, card_uid):
-    """Return (id, owner_user_id, template_guid) for a card, or None."""
-    row = _db.execute(
-        "SELECT id, owner_user_id, template_guid FROM game_cards "
-        "WHERE session_id=? AND card_uid=?",
-        (session_id, int(card_uid))).fetchone()
-    return row
 
 
 def db_card_basic(session_id, card_uid, conn=None):
@@ -3510,17 +3411,6 @@ def db_card_template_lethal(template_guid):
     return int(row[0] or 0) if row else 0
 
 
-def db_card_info_joined(session_id, card_uid):
-    """Return (template_guid, card_type, name, cost, attack, defense) for a card
-    joined with its template, or None. Resolves instances through card_instances."""
-    row = _db.execute(
-        "SELECT ci.template_guid, ct.card_type, ct.name, ct.cost, ct.attack, ct.defense "
-        "FROM game_cards gc "
-        "LEFT JOIN card_instances ci ON ci.instance_id = gc.card_template_id "
-        "LEFT JOIN card_templates ct ON ct.guid = ci.template_guid "
-        "WHERE gc.session_id=? AND gc.card_uid=?",
-        (session_id, int(card_uid))).fetchone()
-    return row
 
 
 def db_rules_port_card_projection(session_id, card_uid):
@@ -3563,11 +3453,6 @@ def db_rules_port_session_card_ids(session_id, user_id):
         (session_id, int(user_id))).fetchall()]
 
 
-def db_rules_port_deck_active_gems(deck_id):
-    """Return the serialized active-gem map for an opening deck."""
-    row = _db.execute("SELECT active_gems FROM decks WHERE id=?",
-                      (int(deck_id),)).fetchone()
-    return row[0] if row else None
 
 
 def db_rules_port_draw_rows(session_id, user_id, count):
@@ -3638,12 +3523,6 @@ def db_rules_port_cards_with_ability(session_id, user_id, ability_guid,
     return _db.execute(sql, tuple(params)).fetchall()
 
 
-def db_rules_port_ability_costs(ability_guid):
-    """Return (charge_cost, spell_cost) for a talent ability, if authored."""
-    row = _db.execute(
-        "SELECT charge_cost, spell_cost FROM talent_abilities "
-        "WHERE ability_guid=? LIMIT 1", (str(ability_guid),)).fetchone()
-    return row if row else None
 
 
 def db_rules_port_redraw_hand(session_id, user_id, draw_count):
@@ -3748,9 +3627,6 @@ def db_discard_card(session_id, card_uid, owner_user_id=None,
     return owner
 
 
-def db_set_card_owner_and_discard(session_id, card_uid, owner_user_id):
-    """Discard a card to its owner's graveyard (restore user_id + location=discard)."""
-    return db_discard_card(session_id, card_uid, owner_user_id=owner_user_id)
 
 
 def db_set_card_state_or(session_id, card_uid, state_bits, conn=None):
@@ -3763,24 +3639,8 @@ def db_set_card_state_or(session_id, card_uid, state_bits, conn=None):
     connection.commit()
 
 
-def db_set_card_state_replace(session_id, card_uid, clear_bits, set_bits):
-    """Clear mask bits then set new bits on a card's state. Persisted and committed."""
-    _db.execute(
-        "UPDATE game_cards SET card_state = (card_state & ~?) | ? "
-        "WHERE session_id=? AND card_uid=?",
-        (clear_bits, set_bits, session_id, int(card_uid)))
-    _db.commit()
 
 
-def db_clear_combat_states(session_id, card_uid):
-    """Clear Attacking, HasBlocked states from a warzone troop (Prep reset)."""
-    import game_engine
-    _db.execute(
-        "UPDATE game_cards SET card_state = (card_state & ~?) "
-        "WHERE session_id=? AND card_uid=?",
-        (game_engine.ECardStates.Attacking | game_engine.ECardStates.HasBlocked,
-         session_id, int(card_uid)))
-    _db.commit()
 
 
 def db_set_card_played_to_zone(session_id, card_uid, location, conn=None):
@@ -4248,30 +4108,8 @@ def db_is_champion_template(template_guid):
 
 
 # Card instance resolve (for player collection cards): template_guid + card_type.
-def db_instance_resolve(instance_id, user_id=None):
-    """Return (template_guid, card_type, name, cost, attack, defense) for a
-    player-owned card_instances row by instance_id, or None."""
-    if user_id is None:
-        return None
-    row = _db.execute(
-        "SELECT ci.template_guid, ct.card_type, ct.name, ct.cost, ct.attack, "
-        "ct.defense FROM card_instances ci JOIN card_templates ct "
-        "ON ci.template_guid=ct.guid "
-        "WHERE ci.user_id=? AND ci.instance_id=?",
-        (user_id, instance_id)).fetchone()
-    return row
 
 
-def db_power_shift_triggers(ability_guids):
-    """Return list of (ability_guid, game_text) for PowerShifted trigger abilities."""
-    if not ability_guids:
-        return []
-    ph = ",".join("?" * len(ability_guids))
-    rows = _db.execute(
-        f"SELECT ability_guid, game_text FROM card_abilities_meta "
-        f"WHERE trigger_event_type=? AND ability_guid IN ({ph})",
-        ("Game.Shared.Mechanics.PowerShiftedEvent",) + tuple(ability_guids)).fetchall()
-    return rows
 
 
 def db_card_original_template(session_id, card_uid):
@@ -4285,23 +4123,8 @@ def db_card_original_template(session_id, card_uid):
 
 # Ability-grant lookup: for a troop ability activation, find the source card
 # whose card_abilities JSON contains the given ability_guid.
-def db_warzone_card_with_ability(session_id, user_id, ability_guid):
-    """Return (card_uid, card_uses) for a warzone card of user_id that has
-    ability_guid in its card_abilities JSON, or None."""
-    row = _db.execute(
-        "SELECT card_uid, card_uses FROM game_cards "
-        "WHERE session_id=? AND user_id=? AND location='warzone' "
-        "AND card_abilities LIKE ?",
-        (session_id, user_id, f'%"{ability_guid}"%')).fetchone()
-    return row
 
 
-def db_is_champion_ability(ability_guid):
-    """True if the ability is a champion talent ability (in talent_abilities)."""
-    row = _db.execute(
-        "SELECT 1 FROM talent_abilities WHERE ability_guid=? LIMIT 1",
-        (ability_guid,)).fetchone()
-    return row is not None
 
 
 # --- card_template full read for card_instances resolution ---

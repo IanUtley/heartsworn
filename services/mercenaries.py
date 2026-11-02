@@ -28,9 +28,6 @@ def list_type(element_type):
     return f"System.Collections.Generic.List`1#{element_type}"
 
 
-def max_party_slots(race):
-    """Client UIPartyMercenarySelector.GetMaxPartyForRace (Human=1 -> 4)."""
-    return 4 if int(race or 0) == 1 else 3
 
 
 # ── ObjFmt list encoding ─────────────────────────────────────────────
@@ -125,12 +122,6 @@ class ObjFmtListWriter:
         return self.buf.getvalue()
 
 
-def encode_flag_list(flags):
-    """flags: iterable of (name, progress, maximum, completed)."""
-    elements = [[("Name", "string", name), ("Progress", "int", progress),
-                 ("Maximum", "int", maximum), ("Completed", "bool", completed)]
-                for name, progress, maximum, completed in flags]
-    return ObjFmtListWriter(FLAG_DATA_TYPE).encode(FLAG_DATA_TYPE, elements)
 
 
 def encode_party_list(parties):
@@ -222,12 +213,6 @@ def battle_mercenary(db, user_id, champion_id, item_guid):
 
 # ── Persistence ───────────────────────────────────────────────────────
 
-def get_flags(db, user_id):
-    """Profile flags live in the shared ``reckoning_flags`` table, which the
-    login stream sends as the one List<FlagData>."""
-    from profile_db import db_get_reckoning_flags
-    return [(flag["name"], flag["progress"], flag["maximum"], flag["completed"])
-            for flag in db_get_reckoning_flags(user_id, conn=db)]
 
 
 def set_flag(db, user_id, name, progress, maximum=0, completed=False):

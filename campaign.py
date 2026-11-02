@@ -731,17 +731,6 @@ def _conversation_name(db, conversation_guid):
 
 
 
-def _conversation_matches_faction(conversation_name, faction):
-    """Match explicit authored Ardent/Underworld conversation labels."""
-    if not faction:
-        return True
-    label = str(conversation_name or "").lower()
-    explicit = None
-    if "underworld" in label:
-        explicit = "underworld"
-    elif "ardent" in label or "aria" in label:
-        explicit = "ardent"
-    return explicit is None or explicit == str(faction).lower()
 
 
 _AZ1_MASKED_ARMY_QUESTS = (
@@ -767,21 +756,6 @@ def _quest_state_row(db, champ_id, quest_script):
         return row[0], {}
 
 
-def _quest_is_turnin_ready(state):
-    """Whether a quest's current objective is its final conversation."""
-    if not isinstance(state, dict) or state.get("Finished"):
-        return False
-    flags = state.get("Flags") or {}
-    objectives = flags.get("_quest_objectives") or []
-    try:
-        index = int(flags.get("_quest_objective_idx", 0))
-    except (TypeError, ValueError):
-        index = 0
-    if index >= len(objectives):
-        return False
-    return str(objectives[index].get("type") or "").lower() in {
-        "conversation", "convo"
-    } and index == len(objectives) - 1
 
 
 def _quest_faction_for_champion(db, champ_id):

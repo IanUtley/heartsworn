@@ -92,31 +92,6 @@ def _get_service_uid(handler):
     return SERVICE_MATCHMAKING_UID
 
 
-def _extract_field_bytes(inner_bytes, field_name):
-    """Extract a raw field value from ObjFmt bytes by field name.
-    
-    Returns (field_type, raw_value_bytes) or (None, None).
-    For strings: raw_value is the string bytes (without length prefix).
-    For ints: raw_value is the hex string bytes.
-    """
-    if not isinstance(inner_bytes, bytes):
-        return None, None
-    pos = inner_bytes.find(field_name if isinstance(field_name, bytes) else field_name.encode())
-    if pos < 0:
-        return None, None
-    rest = inner_bytes[pos + max(len(field_name), 1):]
-    parts = rest.split(b";", 6)
-    if len(parts) < 5:
-        return None, None
-    # parts[0] = size_idx, parts[1] = type_code, parts[2] = numProps, parts[3] = field_content...
-    field_type = parts[2]
-    num_props = int(parts[3]) if parts[3].isdigit() else 0
-    if num_props > 0:
-        # Struct type — need to go deeper
-        return parts[1].decode("ascii", errors="replace"), rest
-    # For string: parts[4] = length, parts[5:] = value
-    # For int/ulong: parts[4] = hex value before next ;
-    return parts[1].decode("ascii", errors="replace"), parts[4] if len(parts) > 4 else b""
 
 
 def _extract_str(inner_bytes, field_name):

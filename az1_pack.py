@@ -434,9 +434,6 @@ def _eligible_pve_cards(card_data, record_store,
     return by_rarity
 
 
-def _eligible_az1_cards(card_data, record_store) -> dict[str, list[tuple]]:
-    """Compatibility helper for the former AZ1-only card pool."""
-    return _eligible_pve_cards(card_data, record_store, (AZ1_PVE_GUID,))
 
 
 def generate_campaign_pack(card_data, record_store, rng=None, *,

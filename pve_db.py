@@ -798,14 +798,6 @@ def db_campaign_for_champion_template(champion_id, template_name, conn=None):
         (int(champion_id), str(template_name or ""))).fetchone()
 
 
-def db_latest_campaign_for_champion(champion_id, campaign_type, conn=None):
-    """Return the newest campaign identity/state without creating one."""
-    return _connection(conn).execute(
-        "SELECT id, camp_uid_lo, camp_uid_hi, is_started, state_json "
-        "FROM campaigns WHERE champion_id=? AND campaign_type=? "
-        "ORDER BY id DESC LIMIT 1",
-        (champion_id, campaign_type),
-    ).fetchone()
 
 
 def db_campaign_user_id(champion_id, conn=None):
@@ -864,31 +856,10 @@ def db_campaign_set_zone(campaign_id, campaign_type, template_name,
          campaign_id))
 
 
-def db_promote_campaign_to_dungeon(campaign_id, state_json, conn=None):
-    """Promote an existing campaign row to the Crayburn dungeon."""
-    _connection(conn).execute(
-        "UPDATE campaigns SET campaign_type='DUNGEON', "
-        "template_name='Crayburn Castle', is_started=1, state_json=? "
-        "WHERE id=?", (state_json, campaign_id))
 
 
-def db_latest_quest_state(champion_id, conn=None):
-    """Return the newest quest campaign ID and serialized state."""
-    row = _connection(conn).execute(
-        "SELECT id, state_json FROM campaigns WHERE champion_id=? "
-        "AND campaign_type='QUEST' ORDER BY id DESC LIMIT 1", (champion_id,)
-    ).fetchone()
-    return row
 
 
-def db_user_campaign_states(user_id, conn=None):
-    """Return ``(campaign_id, champion_id, campaign_type, template_name,
-    is_started, state_json)`` for every campaign owned by one profile."""
-    return _connection(conn).execute(
-        "SELECT c.id, c.champion_id, c.campaign_type, c.template_name, "
-        "c.is_started, c.state_json FROM campaigns c "
-        "JOIN champions ch ON ch.id=c.champion_id "
-        "WHERE ch.user_id=? ORDER BY c.id DESC", (int(user_id),)).fetchall()
 
 
 def db_campaign_owner_user_id(campaign_id, conn=None):
@@ -915,10 +886,6 @@ def db_campaign_forfeit_row(campaign_id, conn=None):
         "WHERE id=?", (campaign_id,)).fetchone()
 
 
-def db_campaign_clear_state(campaign_id, conn=None):
-    """Clear a saved state for an explicit campaign reset operation."""
-    _connection(conn).execute(
-        "UPDATE campaigns SET state_json=NULL WHERE id=?", (campaign_id,))
 
 
 def db_campaign_delete_for_champion(champion_id, conn=None):
@@ -993,36 +960,12 @@ def db_az1_scene_rows(conn=None):
     return [(r.get("guid"), r.get("name"), r.get("title")) for r in rows]
 
 
-def db_az1_scene_metadata(conn=None):
-    """Return AZ1 scene identity, names, and authored rewards."""
-    return [(r.get("guid"), r.get("name"), r.get("rewards_json"))
-            for r in _content().scenes() if _like(r.get("name"), "AZ 1 - NODE ")]
 
 
-def db_az1_edges(conn=None):
-    """Return the authored directed AZ1 map edges."""
-    # Ordered by to_node, as the (campaign_template, to_node) index returned them.
-    return sorted(((r["from_node"], r["to_node"], r["path_name"])
-                   for r in _content().edges() if r["campaign_template"] == "AZ1"),
-                  key=lambda row: str(row[1]))
 
 
-def db_az1_edge_exists(from_node, to_node, conn=None):
-    """Whether two AZ1 nodes are directly connected."""
-    return any(r["campaign_template"] == "AZ1" and str(r["from_node"]) == str(from_node)
-               and str(r["to_node"]) == str(to_node) for r in _content().edges())
 
 
-def db_az1_fork_edge_exists(from_node, to_node, conn=None):
-    """Whether two AZ1 nodes connect through one client-only fork node."""
-    edges = [r for r in _content().edges() if r["campaign_template"] == "AZ1"]
-    for first in edges:
-        if str(first["from_node"]) != str(from_node) or not _like(first["to_node"], "fork"):
-            continue
-        for second in edges:
-            if second["from_node"] == first["to_node"] and str(second["to_node"]) == str(to_node):
-                return True
-    return False
 
 
 def db_quest_template(script_name=None, campaign_group=None, conn=None):
@@ -1099,76 +1042,18 @@ def db_active_campaign_candidates(champion_id, campaign_type, template=None,
         "WHERE id=?", (row[0],)).fetchone()[0] is None]
 
 
-def db_latest_campaign_state(champion_id, campaign_type, conn=None,
-                             *, template_name=None):
-    """Return the newest campaign identity and state for a champion."""
-    sql = ("SELECT id, camp_uid_lo, camp_uid_hi, state_json FROM campaigns "
-           "WHERE champion_id=? AND campaign_type=?")
-    params = [champion_id, campaign_type]
-    if template_name is not None:
-        sql += " AND template_name=?"
-        params.append(template_name)
-    sql += " ORDER BY id DESC LIMIT 1"
-    return _connection(conn).execute(sql, params).fetchone()
 
 
-def db_gaal_nodes(campaign_template, conn=None):
-    """Return enabled authored Gaal camp node IDs for an area."""
-    nodes = set()
-    for r in _visible_node_rows(str(campaign_template or "")):
-        name = str(r.get("conversation_name") or "").lower()
-        if "gaal" in name and "already has fortune" not in name:
-            nodes.add(r.get("node_id"))
-    return [(node,) for node in sorted(nodes, key=str)]
 
 
-def db_panorama_conversation_npc(node_id, conversation_guid, conn=None):
-    """Return the authored NPC/role for an AZ1 conversation node."""
-    rows = [r for r in _quest_rows(campaign_template="AZ1", node_id=str(node_id),
-                                   conversation_guid=str(conversation_guid or "").lower())
-            if int(bool(r.get("enabled", 1)))]
-    rows = sorted(rows, key=lambda r: int(r.get("priority") or 0))
-    return (rows[0].get("npc"), rows[0].get("role")) if rows else None
 
 
-def db_champion_template_guid_by_name(name, conn=None):
-    """Return the extended champion GUID matching an NPC display name."""
-    row = _connection(conn).execute(
-        "SELECT guid FROM champion_templates_extended "
-        "WHERE lower(name)=lower(?) LIMIT 1", (name,)).fetchone()
-    return row[0] if row else None
 
 
-def db_panorama_quest_rows(node, conn=None):
-    """Return authored quest-linked AZ1 conversations for a node."""
-    content = _content()
-    templates = {r.get("script_name"): r for r in content.quest_templates()}
-    rows = []
-    for r in _quest_rows(campaign_template="AZ1", node_id=str(node)):
-        if not int(bool(r.get("enabled", 1))):
-            continue
-        template = templates.get(r.get("quest_script")) or {}
-        start = r.get("start_hook") or template.get("start_hook") or ""
-        rows.append((r.get("quest_script"), r.get("conversation_guid"), r.get("role"),
-                     r.get("faction"), r.get("npc"), r.get("priority"), start,
-                     r.get("conditions_json") or "{}"))
-    return sorted(rows, key=lambda row: int(row[5] or 0))
 
 
-def db_panorama_generic_rows(node, conn=None):
-    """Return generic authored AZ1 node conversations."""
-    rows = sorted(_visible_node_rows("AZ1", str(node)),
-                  key=lambda r: (int(r.get("priority") or 0), str(r.get("conversation_guid") or "").lower()))
-    return [(r.get("conversation_guid"), r.get("trigger_json"), r.get("conversation_name"),
-             r.get("priority")) for r in rows]
 
 
-def db_node_conversation_rows(node, campaign_template="AZ1", conn=None):
-    """Return enabled authored conversations for an exact campaign node."""
-    rows = sorted(_visible_node_rows(str(campaign_template or "AZ1"), str(node)),
-                  key=lambda r: (int(r.get("priority") or 0), str(r.get("conversation_guid") or "").lower()))
-    return [(r.get("conversation_guid"), r.get("trigger_json"), r.get("priority"),
-             r.get("conversation_name")) for r in rows]
 
 
 def db_conversation_name(conversation_guid, conn=None):
@@ -1184,40 +1069,10 @@ def db_conversation_name(conversation_guid, conn=None):
     return None
 
 
-def db_conversation_action_tables(conversation_guid, conn=None):
-    """Return the editor's ending-action tables (``{ending|"*": [action]}``)
-    authored on a conversation's node and quest rows."""
-    guid = str(conversation_guid or "").lower()
-    content = _content()
-    sources = [(r.get("trigger_json"), r) for r in content.table("campaign_node_conversations")
-               if str(r.get("conversation_guid") or "").lower() == guid and int(bool(r.get("enabled", 1)))]
-    sources += [(r.get("conditions_json"), r) for r in content.quest_conversations()
-                if str(r.get("conversation_guid") or "").lower() == guid and int(bool(r.get("enabled", 1)))]
-    tables = []
-    for raw, _row in sources:
-        try:
-            actions = (json.loads(raw or "{}") or {}).get("actions")
-        except (TypeError, ValueError, AttributeError):
-            continue
-        if isinstance(actions, dict):
-            tables.append(actions)
-    return tables
 
 
-def db_quest_template_start(quest_script, conn=None):
-    """Return ``(start_hook, campaign_group)`` for a quest template, or None."""
-    for r in _content().quest_templates():
-        if r.get("script_name") == str(quest_script):
-            return (r.get("start_hook") or "", r.get("campaign_group") or "AREA")
-    return None
 
 
-def db_panorama_npc_quest_scripts(node, npc, conn=None):
-    """Return quest scripts associated with an AZ1 node/NPC pair."""
-    scripts = {r.get("quest_script") for r in _quest_rows(campaign_template="AZ1", node_id=str(node),
-                                                          npc=str(npc))
-               if int(bool(r.get("enabled", 1)))}
-    return [(script,) for script in sorted(scripts, key=str)]
 
 
 def db_encounter_scene_rewards(scene_guid, conn=None):
@@ -1226,10 +1081,6 @@ def db_encounter_scene_rewards(scene_guid, conn=None):
     return row.get("rewards_json") if row else None
 
 
-def db_encounter_scene_actions(scene_guid, conn=None):
-    """Serialized ``{"pre"|"victory"|"defeat": [action]}`` for one scene."""
-    row = _content().scene(str(scene_guid))
-    return row.get("actions_json") if row else None
 
 
 def db_void_tamed_troop_rows(session_id, player_user_id, owner, conn=None):
@@ -1254,11 +1105,6 @@ def db_card_in_warzone(session_id, player_user_id, template_guid, owner="opponen
         (int(session_id), str(template_guid).lower(), int(player_user_id))).fetchone() is not None
 
 
-def db_campaign_rows_for_champion(champion_id, conn=None):
-    """``(id, campaign_type, template_name, state_json)`` of every campaign row."""
-    return _connection(conn).execute(
-        "SELECT id, campaign_type, template_name, state_json FROM campaigns "
-        "WHERE champion_id=? ORDER BY id", (int(champion_id),)).fetchall()
 
 
 def db_campaign_progress_rows(champion_id, conn=None):
@@ -1362,15 +1208,6 @@ def db_campaign_talents(campaign_id, conn=None):
     return row[0] if row else None
 
 
-def db_talent_descriptions(talent_guids, conn=None):
-    """Return descriptions for a set of authored talent GUIDs."""
-    if not talent_guids:
-        return []
-    connection = _connection(conn)
-    placeholders = ",".join("?" for _ in talent_guids)
-    return connection.execute(
-        "SELECT description FROM talent_data WHERE talent_guid IN (" +
-        placeholders + ")", tuple(talent_guids)).fetchall()
 
 
 def db_starting_hand_size(race, champion_class, conn=None):
@@ -1532,24 +1369,8 @@ def db_campaign_owner_user_id(campaign_id, conn=None):
     return row[0] if row else None
 
 
-def db_active_area_campaign(champion_id, template_name="AZ1", conn=None):
-    """Return the latest active area campaign identity and state."""
-    return _connection(conn).execute(
-        "SELECT id, state_json FROM campaigns WHERE champion_id=? "
-        "AND campaign_type='AREA' AND template_name=? ORDER BY id DESC LIMIT 1",
-        (champion_id, template_name)).fetchone()
 
 
-def db_active_quest_hooks(champion_id, conn=None):
-    """Return started quest campaigns and their authored start hooks."""
-    hooks = {r.get("script_name"): r.get("start_hook") or ""
-             for r in _content().quest_templates()
-             if int(bool(r.get("enabled", 1))) and (r.get("start_hook") or "")}
-    campaigns = _connection(conn).execute(
-        "SELECT id, template_name FROM campaigns WHERE champion_id=? "
-        "AND campaign_type='QUEST' AND state_json IS NOT NULL AND is_started=1 "
-        "ORDER BY id", (champion_id,)).fetchall()
-    return [(cid, hooks[template]) for cid, template in campaigns if template in hooks]
 
 
 def db_campaign_state(campaign_id, conn=None):
@@ -1560,27 +1381,10 @@ def db_campaign_state(campaign_id, conn=None):
     return row[0] if row else None
 
 
-def db_az1_node_conversation_ids(conn=None):
-    """Return enabled authored AZ1 node/conversation pairs."""
-    return [(r.get("node_id"), r.get("conversation_guid"))
-            for r in _visible_node_rows("AZ1")]
 
 
-def db_started_quest_states(champion_id, conn=None):
-    """Return started quest campaign scripts and serialized states."""
-    return _connection(conn).execute(
-        "SELECT template_name, state_json FROM campaigns "
-        "WHERE champion_id=? AND campaign_type='QUEST' "
-        "AND is_started=1 AND state_json IS NOT NULL", (champion_id,)
-    ).fetchall()
 
 
-def db_encounter_deck_personality(deck_guid, conn=None):
-    """Return an authored AI deck personality, if one exists."""
-    for r in _content().scenes():
-        if str(r.get("ai_deck_guid") or "") == str(deck_guid) and r.get("ai_deck_personality") is not None:
-            return r["ai_deck_personality"]
-    return None
 
 
 def db_encounter_deck_sleeve(deck_guid, conn=None):

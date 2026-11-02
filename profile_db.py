@@ -650,16 +650,6 @@ def db_open_chest(chest_db_id, conn=None):
         connection.commit()
 
 
-def db_chest_template(template_guid, conn=None):
-    """Return the authored metadata for one chest template.
-
-    ``chest_templates`` is the Records-derived table of every
-    ``InventoryTreasureChest`` definition, so it is the authority for deciding
-    whether an inventory item is a chest the fixed client can open.
-    """
-    return _profile_connection(conn).execute(
-        "SELECT guid, name, set_guid, chest_type, spin_type, promotional_id "
-        "FROM chest_templates WHERE guid=?", (template_guid,)).fetchone()
 
 
 def db_get_unopened_chests(user_id, conn=None):
@@ -1386,21 +1376,6 @@ def db_card_instance_for_encoded_deck(user_id, instance_id, conn=None):
     return db_card_instance_art(user_id, instance_id, conn=conn)
 
 
-def db_spend_user_gold(user_id, amount, conn=None):
-    """Atomically take up to ``amount`` gold (never below zero); returns the
-    new ``(gold, platinum)`` balances. The caller owns the transaction when
-    ``conn`` is supplied."""
-    import db as _db_layer
-    connection = conn or _db_layer._db
-    connection.execute(
-        "UPDATE users SET gold=gold-MIN(MAX(gold, 0), ?) WHERE id=?",
-        (max(0, int(amount)), int(user_id)))
-    row = connection.execute(
-        "SELECT gold, platinum FROM users WHERE id=?", (int(user_id),)
-    ).fetchone()
-    if conn is None:
-        connection.commit()
-    return (int(row[0] or 0), int(row[1] or 0)) if row else (0, 0)
 
 
 def db_get_user_currency(user_id, currency, conn=None):

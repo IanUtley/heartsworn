@@ -39,9 +39,6 @@ def save_golden(name, data):
     print(f"  wrote {len(data):5d} bytes → tests/goldens/{name}.golden")
 
 
-def make_type_names_fresh():
-    """Return an empty type-names list for building fresh outputs."""
-    return []
 
 
 # ── actual golden generation ─────────────────────────────────────────

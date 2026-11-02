@@ -158,11 +158,6 @@ def _submesh_triangles(mesh, handler, vertex_count):
     return result
 
 
-def _submesh_vertex_sets(mesh, handler, vertex_count):
-    """Vertex indices used by each submesh (one textured quad per material)."""
-    result = [sorted({v for tri in tris for v in tri})
-              for tris in _submesh_triangles(mesh, handler, vertex_count)]
-    return [ids for ids in result if ids] or [list(range(vertex_count))]
 
 
 def _fit_tile(world, uvs, vertex_ids):

@@ -71,17 +71,6 @@ def is_editable(rel: str) -> bool:
             parts[1] != "zones.json")
 
 
-def extra_paths(directory: Path) -> list[Path]:
-    """Documents only the current player has in ``directory``."""
-    docs = current() or {}
-    if not docs:
-        return []
-    try:
-        base = relative(directory)
-    except ValueError:
-        return []
-    return [CAMPAIGN_ROOT / rel for rel in sorted(docs)
-            if rel.startswith(base + "/") and not (CAMPAIGN_ROOT / rel).exists()]
 
 
 # ---------------------------------------------------------------- merge
@@ -233,24 +222,5 @@ def reset(db, user_id: int) -> int:
                       (int(user_id),)).rowcount
 
 
-def scene_value(db, user_id, scene_guid: str, column: str):
-    """A player's personal value of one ``encounter_scenes`` column
-    (``mods_json``, ``ai_deck_personality``), or None to use the default.
-    Rewards are never personal."""
-    if user_id is None or column in REWARD_FIELDS:
-        return None
-    row = db.execute(
-        "SELECT doc_json FROM campaign_user_data WHERE user_id=? AND path=?",
-        (int(user_id), "campaign_data/encounter_scenes.json")).fetchone()
-    if not row:
-        return None
-    for scene in (json.loads(row[0] or "{}").get("tables") or {}).get(
-            "encounter_scenes") or ():
-        if str(scene.get("guid") or "").lower() == str(scene_guid or "").lower():
-            return scene.get(column)
-    return None
 
 
-def default_doc(rel: str) -> dict | None:
-    path = CAMPAIGN_ROOT / rel
-    return json.loads(path.read_text(encoding="utf-8")) if path.exists() else None

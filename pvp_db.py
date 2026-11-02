@@ -996,21 +996,6 @@ def db_bump_card_use(session_id, card_uid, ability_guid, conn=None):
         return uses[ability_guid]
 
 
-def db_copy_card_uses(session_id, from_uid, to_uid, conn=None):
-    """Copy per-game/per-turn uses and cooldowns onto a card copy.
-
-    Mirrors C# ``Card.CopyFrom`` for a non-replica copy, which clones
-    ``m_PerTurnUses``, ``m_PerGameUses`` and ``m_Cooldowns``: a copy summoned
-    by "[ONE-SHOT]: Deploy - Summon a copy of this" inherits the spent ONE-SHOT.
-    The caller owns the commit.
-    """
-    connection = conn or _db_layer._db
-    with _CARD_COOLDOWN_LOCK:
-        uses = db_card_uses(session_id, from_uid, conn=connection)
-        connection.execute(
-            "UPDATE game_cards SET card_uses=? WHERE session_id=? AND card_uid=?",
-            (json.dumps(uses, separators=(",", ":")),
-             session_id, int(to_uid)))
 
 
 def db_card_ability_use_counts(session_id, card_uid, ability_guid,
@@ -1549,14 +1534,6 @@ def db_card_damage_shield_fields(session_id, card_uid, conn=None):
     ).fetchone()
 
 
-def db_card_current_damage(session_id, card_uid, conn=None):
-    """Return the persisted damage currently marked on one card."""
-    row = (conn or _db_layer._db).execute(
-        "SELECT card_damage FROM game_cards "
-        "WHERE session_id=? AND card_uid=?",
-        (session_id, int(card_uid)),
-    ).fetchone()
-    return int(row[0] or 0) if row else 0
 
 
 def db_condition_card_row(session_id, card_uid, conn=None):
@@ -1763,17 +1740,6 @@ def db_set_card_mutation_field(session_id, card_uid, field, value, conn=None):
         (value, session_id, int(card_uid))).rowcount
 
 
-def db_clear_temporary_buffs(session_id, card_uid=None, conn=None):
-    """Clear this-turn modifier payloads for one card or the whole session."""
-    connection = conn or _db_layer._db
-    if card_uid is None:
-        return connection.execute(
-            "UPDATE game_cards SET temporary_buffs='{}' "
-            "WHERE session_id=?", (session_id,)).rowcount
-    return connection.execute(
-        "UPDATE game_cards SET temporary_buffs='{}' "
-        "WHERE session_id=? AND card_uid=?",
-        (session_id, int(card_uid))).rowcount
 
 
 def db_card_template_threshold_subtype(session_id, card_uid, conn=None):
@@ -2649,12 +2615,6 @@ def db_static_card_rows(session_id, zones, conn=None):
         [session_id, *zones]).fetchall()
 
 
-def db_card_stat_buffs(session_id, card_uid, conn=None):
-    """Return persistent and temporary stat-buff payloads."""
-    return (conn or _db_layer._db).execute(
-        "SELECT permanent_buffs, temporary_buffs FROM game_cards "
-        "WHERE session_id=? AND card_uid=?",
-        (session_id, int(card_uid))).fetchone()
 
 
 def db_card_property_state(session_id, card_uid, conn=None):
@@ -2926,19 +2886,8 @@ def db_talent_ability_condition(ability_guid, conn=None):
         "WHERE ability_guid=? LIMIT 1", (str(ability_guid),)).fetchone()
 
 
-def db_talent_description(talent_guid, conn=None):
-    """Return localized talent description metadata."""
-    row = (conn or _db_layer._db).execute(
-        "SELECT description FROM talent_data WHERE talent_guid=?",
-        (str(talent_guid),)).fetchone()
-    return row[0] if row else None
 
 
-def db_talent_has_ability(talent_guid, conn=None):
-    """Whether a talent has a materialized ability row."""
-    return bool((conn or _db_layer._db).execute(
-        "SELECT 1 FROM talent_abilities WHERE talent_guid=? LIMIT 1",
-        (str(talent_guid),)).fetchone())
 
 
 def db_talent_target_template_ids(ability_guid, conn=None):
@@ -4209,30 +4158,8 @@ def db_template_projection(template_guid, conn=None):
         "FROM card_templates WHERE guid=?", (template_guid,)).fetchone()
 
 
-def db_card_effective_combat_stats(session_id, card_uid, conn=None):
-    """Return effective attack, attributes, and remaining defense."""
-    return (conn or _db_layer._db).execute(
-        "SELECT COALESCE(ct.attack,0)+COALESCE(gc.card_attack_mod,0), "
-        "(COALESCE(ct.attributes,0) | COALESCE(gc.card_attributes,0)), "
-        "COALESCE(ct.defense,0)+COALESCE(gc.card_defense_mod,0) "
-        "-COALESCE(gc.card_damage,0) FROM game_cards gc "
-        "JOIN card_templates ct ON ct.guid=gc.template_guid "
-        "WHERE gc.session_id=? AND gc.card_uid=?",
-        (session_id, int(card_uid))).fetchone()
 
 
-def db_battle_target_stats(session_id, card_uids, conn=None):
-    """Return UID, effective attributes, and remaining defense for targets."""
-    if not card_uids:
-        return []
-    placeholders = ",".join("?" * len(card_uids))
-    return (conn or _db_layer._db).execute(
-        "SELECT gc.card_uid, (COALESCE(ct.attributes,0) | "
-        "COALESCE(gc.card_attributes,0)), COALESCE(ct.defense,0) "
-        "+COALESCE(gc.card_defense_mod,0)-COALESCE(gc.card_damage,0) "
-        "FROM game_cards gc JOIN card_templates ct ON ct.guid=gc.template_guid "
-        f"WHERE gc.session_id=? AND gc.card_uid IN ({placeholders})",
-        (session_id, *[int(uid) for uid in card_uids])).fetchall()
 
 
 def db_ability_target_effect_rows(ability_guid, conn=None):
@@ -4262,13 +4189,6 @@ def db_card_cost(session_id, card_uid, conn=None):
     return row[0] if row else None
 
 
-def db_card_is_battleboard(session_id, card_uid, conn=None):
-    """Whether a session card uses the hidden battleboard subtype."""
-    return (conn or _db_layer._db).execute(
-        "SELECT 1 FROM game_cards gc JOIN card_templates ct "
-        "ON ct.guid=gc.template_guid WHERE gc.session_id=? AND gc.card_uid=? "
-        "AND LOWER(COALESCE(ct.subtype,''))='battleboard' LIMIT 1",
-        (session_id, int(card_uid))).fetchone()
 
 
 def db_warzone_ability_cards(session_id, include_non_troops=False, conn=None,

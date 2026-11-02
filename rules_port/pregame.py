@@ -271,22 +271,6 @@ def _target_template_flags_for_id(db, target_id):
     return _target_filter_flags(value)
 
 
-def _legacy_target_template_flags(db, ability_guid):
-    """Return aggregate target flags for older callers."""
-    from pvp_db import db_talent_target_template_ids
-    payload = db_talent_target_template_ids(ability_guid, conn=db)
-    if not payload:
-        return set(), set()
-    try:
-        target_guids = json.loads(payload or "[]")
-    except (TypeError, ValueError):
-        target_guids = []
-    card_types, zones = set(), set()
-    for target_guid in target_guids if isinstance(target_guids, list) else []:
-        types, target_zones = _target_template_flags_for_id(db, target_guid)
-        card_types.update(types)
-        zones.update(target_zones)
-    return card_types, zones
 
 
 def _condition_contains_previous_dungeon_win(condition):

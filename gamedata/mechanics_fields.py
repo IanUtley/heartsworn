@@ -74,13 +74,6 @@ def is_default(cls: str, field_name: str, value: Any) -> bool:
     return type(value) is type(default) and value == default
 
 
-def fill_defaults(cls: str, fields: dict[str, Any]) -> dict[str, Any]:
-    """The fields with every missing current field set to its stored default."""
-    filled = dict(fields)
-    for field_name, default in current_fields(cls).items():
-        if field_name not in filled:
-            filled[field_name] = default
-    return filled
 
 
 def version_table(pairs: Iterable[tuple[str, int | None]]) -> list[dict[str, int]]:

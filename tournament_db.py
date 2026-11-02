@@ -532,21 +532,6 @@ def db_tournament_finalize_player_run(tid, player_uid, result="quit",
     }
 
 
-def db_tournament_results(tid, player_uid=None, conn=None):
-    """Return immutable per-run results retained after match cleanup."""
-    connection = conn or _db_layer._db
-    query = ("SELECT id, tournament_id, player_uid, run_number, wins, losses, "
-             "result, final_match_id, completed_at FROM tournament_results "
-             "WHERE tournament_id=?")
-    params = [int(tid)]
-    if player_uid is not None:
-        query += " AND player_uid=?"
-        params.append(int(player_uid))
-    query += " ORDER BY id"
-    rows = connection.execute(query, params).fetchall()
-    keys = ("id", "tournament_id", "player_uid", "run_number", "wins",
-            "losses", "result", "final_match_id", "completed_at")
-    return [dict(zip(keys, row)) for row in rows]
 
 
 def db_tournament_match_result(tid, session_id, winner_uid, loser_uid,

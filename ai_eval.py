@@ -2618,16 +2618,6 @@ class CardEvaluator:
         return None
 
 
-def best_play_for_ai(handler, session, battle_state, ai_uid, player_uid,
-                     pre_combat=True):
-    """Top-level entry: evaluate the AI hand and return the card to play
-    (CardInfo) or None.  The caller moves it to the chain."""
-    try:
-        ev = build_evaluator(handler, session, battle_state, ai_uid, player_uid)
-        return ev.get_best_board_builder(pre_combat)
-    except Exception as exc:
-        log_req(f"    ai_eval error: {exc!r}")
-        return None
 
 
 def build_evaluator(handler, session, battle_state, ai_uid, player_uid,

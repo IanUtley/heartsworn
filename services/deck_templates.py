@@ -149,14 +149,6 @@ def encode_template(template):
     return buf.getvalue()
 
 
-def template_cards(data):
-    """Return the main-deck card GUIDs of ProfileDeckTemplate bytes.
-
-    Reserve (sideboard) cards are skipped; each card is repeated ``count``
-    times.
-    """
-    return [card["guid"] for card in decode_template(data)["cards"]
-            if not card["reserves"] for _ in range(card["count"])]
 
 
 def template_name(data):

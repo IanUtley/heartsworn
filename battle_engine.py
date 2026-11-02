@@ -414,9 +414,5 @@ def skip_to_phase(state, phase):
     return True
 
 
-def turn_player_uid(state, pl_uid, ai_uid):
-    return pl_uid if state.get("turn_player") == PLAYER else ai_uid
 
 
-def other_player_uid(state, pl_uid, ai_uid):
-    return ai_uid if state.get("turn_player") == PLAYER else pl_uid

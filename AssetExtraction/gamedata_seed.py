@@ -139,12 +139,6 @@ def load_records_text(path: str | Path | None = None) -> str:
     return "".join(sections)
 
 
-def source_available() -> bool:
-    """Whether the configured gamedata or local Records source exists."""
-    path = configured_path()
-    if path:
-        return os.path.isfile(os.path.abspath(os.path.expanduser(path)))
-    return records_available()
 
 
 def section_text(data: str, name: str) -> list[str]:
@@ -930,45 +924,6 @@ def _campaign_conversation_row(name: str, conversation_guid: str,
             name, json_text(trigger, {}), 0, 1)
 
 
-def extract_campaign_node_conversations(path: str | None = None) -> list[tuple[Any, ...]]:
-    """Load only the conversation/scene records needed for campaign links."""
-    if path or configured_path():
-        return _extract_campaign_node_conversations(load_text(path))
-
-    # Avoid rebuilding the complete multi-section Records stream during each
-    # server process startup.  The campaign catalog only needs this one JSONL
-    # section, and ConversationTemplate uses relaxed JSON that parse_record()
-    # already handles via PyYAML.
-    pattern = re.compile(
-        r"^AZ([12])\s*-?\s*Node\s*([0-9A-Za-z]+)"
-        r"(?:\s+[A-Z])?\s*-\s*(.+?)\s*$",
-        re.IGNORECASE,
-    )
-    rows = []
-    conversation_path = configured_records_path() / "ConversationTemplate.jsonl"
-    for line in conversation_path.read_text(
-            encoding="utf-8", errors="replace").splitlines()[1:]:
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            value = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        raw = value if isinstance(value, str) else line
-        name_match = re.search(r'"m_Name"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)"', raw)
-        guid_match = re.search(
-            r'"m_Id"\s*:\s*\{\s*"m_Guid"\s*:\s*"([0-9a-fA-F-]+)"',
-            raw,
-        )
-        row = _campaign_conversation_row(
-            name_match.group(1) if name_match else "",
-            guid_match.group(1).lower() if guid_match else "",
-            pattern,
-        )
-        if row:
-            rows.append(row)
-    return sorted(set(rows))
 
 
 def _quest_text(value: Any) -> str:
@@ -1198,18 +1153,8 @@ def _extract_quest_conversations(data: str) -> list[tuple[Any, ...]]:
     return sorted(set(rows))
 
 
-def extract_quest_templates(path: str | None = None) -> list[tuple[Any, ...]]:
-    """Extract quest templates from gamedata or the checked-in Records."""
-    if path or configured_path():
-        return _extract_quest_templates(load_text(path))
-    return _extract_quest_templates(load_records_text(configured_records_path()))
 
 
-def extract_quest_conversations(path: str | None = None) -> list[tuple[Any, ...]]:
-    """Extract quest/conversation links from gamedata or local Records."""
-    if path or configured_path():
-        return _extract_quest_conversations(load_text(path))
-    return _extract_quest_conversations(load_records_text(configured_records_path()))
 
 
 def extract_mercenary_champions(path: str | None = None) -> dict[str, list[tuple[Any, ...]]]:
