@@ -62,7 +62,7 @@ Rules that govern the layers (from `HOWTO.md`):
 - Each message is one packet:
 
 ```text
-"HCPKT"                 5 bytes  identifier (ASCII)
+"~HCP~"                 5 bytes  identifier (ASCII)
 rest_length             4 bytes  big-endian uint32: bytes after this field
 header_length           4 bytes  big-endian uint32
 headers                 header_length bytes: UTF-8 JSON object (route, target, instance, ...)
