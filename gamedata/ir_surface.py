@@ -331,6 +331,19 @@ def move_card(text: str, *, id: str, zone: str, owner: str | None = None, name: 
     return obj
 
 
+def store_target(text: str, *, id: str, name: str | None = None) -> Typed:
+    """Store the chosen target so the next effect in the ability can act on it (the Records' StoreTargets)."""
+    return _effect(T.StoreTargetsAbilityEffectTemplate, text, id, name)
+
+
+def discard(text: str, *, id: str, owner: str | None = None, name: str | None = None) -> Typed:
+    """Discard the stored target (the Records' DiscardCard). ``owner`` is kept on the surface object, as for move_card:
+    the Records' effect has no owner field, the owner comes from the target."""
+    obj = _effect(T.DiscardCardAbilityEffectTemplate, text, id, name)
+    obj._surface_owner = owner
+    return obj
+
+
 def transform(text: str, *, id: str, card: str, name: str | None = None) -> Typed:
     """Transform the target into a card (by GUID)."""
     return _effect(T.TransformCardAbilityEffectTemplate, text, id, name, card_template_id=_ref(card))

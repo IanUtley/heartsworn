@@ -323,19 +323,22 @@ def lower(card: Card) -> Lowered:
             # The hand is its own target (the Records give it a separate target template), after the champion's.
             targets[item.out] = next_index
             clauses.append(_clause(effect_template_id=effect.ref, target_template_index=next_index,
-                                   effect_instance_id=len(clauses), effect_group_id=len(clauses) + 1))
+                                   effect_instance_id=len(clauses), effect_group_id=len(clauses) + 1,
+                                   secondary_target_index=0))
             next_index += 1
         elif item.action == "Choose":
             after = [s for s in consumers.get(item.out, []) if isinstance(s, Step) and s.action == "Discard"]
             if len(after) != 1:
                 raise BlueprintError(item.line, f"the output {item.out!r} must go to exactly one Discard")
             discard = after[0]
-            move = S.move_card(MISSING_TEXT, id=S._stable_guid("effect", discard.name),
-                               zone="discard", owner=str(discard.args[1]["value"]))
+            # Choose stores the picked card, then Discard discards it: the Records' two effects, in that order.
+            store = S.store_target(MISSING_TEXT, id=S._stable_guid("effect", "store " + item.name))
+            drop = S.discard(MISSING_TEXT, id=S._stable_guid("effect", discard.name),
+                             owner=str(discard.args[1]["value"]))
             local = S.choose_revealed(
                 MISSING_TEXT,
                 id=S._stable_guid("ability", card.name + item.name), target_id=S._stable_guid("target", card.name + item.name),
-                card_filter=S.non_resource(), does=[move])
+                card_filter=S.non_resource(), does=[store, drop])
             invoke_id = S._stable_guid("effect", "invoke " + item.name)
             invoke = S.activate(MISSING_TEXT, id=invoke_id, ability=local)
             clauses.append(_clause(effect_template_id=S._ref(invoke_id),
