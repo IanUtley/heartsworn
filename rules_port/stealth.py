@@ -52,14 +52,29 @@ def is_stealthed(battle_state, champion_uid):
     return stealth_counters(battle_state, champion_uid) > 0
 
 
-def champion_target_is_spellshielded(battle_state, card):
+def _interpreted_view(db, session_id, battle_state):
+    """The battle view the interpreter reads its statics from (ir_exec.BattleView)."""
+    from .ir_exec import BattleView
+    if db is None:
+        import db as db_layer
+        db = db_layer._db
+    return BattleView(db, int(session_id or 0), battle_state or {})
+
+
+def champion_target_is_spellshielded(battle_state, card, db=None, session_id=None):
     """Whether a champion target candidate is protected by Stealth.
 
     ``card`` is one candidate row from the target scan; only champions carry
-    counters in the persisted champion map.
+    counters in the persisted champion map. When the Stealth keyword is taken
+    from the interpreter (ir_exec.ENABLED), the champion's SpellShield is read
+    from its Records ability instead.
     """
     if str((card or {}).get("card_type") or "") != "Champion":
         return False
+    from . import ir_exec
+    if ir_exec.STEALTH_SPELLSHIELD_ABILITY_GUID in ir_exec.ENABLED:
+        view = _interpreted_view(db, session_id, battle_state)
+        return ir_exec.static_flag_set(view, int(card.get("card_uid") or 0), "SpellShield")
     return is_stealthed(battle_state, (card or {}).get("card_uid"))
 
 
@@ -102,6 +117,17 @@ def defending_champion_is_stealthed(adapter, attacker, defender):
     champions because they have no ``game_cards`` row).
     """
     battle_state = getattr(adapter, "battle_state", None) or {}
+    from . import ir_exec
+    if attacker is not None and ir_exec.STEALTH_CANT_ATTACK_ABILITY_GUID in ir_exec.ENABLED:
+        # The Records "opposing troops can't attack" keyword, read by the interpreter: an opposing troop cannot attack
+        # while its opponent's champion is Stealth. The default attack target is that champion, so this is the same
+        # refusal as the champion-defender check below.
+        view = _interpreted_view(None, getattr(adapter, "session_id", 0), battle_state)
+        try:
+            attacker_uid = raw_uid(getattr(attacker, "session_card_id", attacker))
+        except (TypeError, ValueError):
+            return False
+        return ir_exec.static_flag_set(view, attacker_uid, "CantAttack")
     champions = champion_uids_by_owner(adapter, battle_state)
     if not champions:
         return False

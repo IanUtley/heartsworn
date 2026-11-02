@@ -1125,7 +1125,12 @@ class BattleView:
 # tests/tests_ir_exec.py checks them against the live engine.
 DAZED_ABILITY_GUID = "16ffaa33-6b56-4e77-a9b9-c5fd8db4420a"
 VULNERABLE_ABILITY_GUID = "79c61378-3764-430e-ae8b-efebe258701d"
-ENABLED: set[str] = {DAZED_ABILITY_GUID, VULNERABLE_ABILITY_GUID}
+# The two Stealth keywords (stealth.py): while the champion is Stealth, opposing troops can't attack (CantAttack), and
+# the champion has Spellshield (SpellShield).
+STEALTH_CANT_ATTACK_ABILITY_GUID = "1730bd95-7c2a-4a19-9d6d-80c9c22bb720"
+STEALTH_SPELLSHIELD_ABILITY_GUID = "7e8bae76-202f-4225-84ef-dde8339ccff2"
+ENABLED: set[str] = {DAZED_ABILITY_GUID, VULNERABLE_ABILITY_GUID,
+                     STEALTH_CANT_ATTACK_ABILITY_GUID, STEALTH_SPELLSHIELD_ABILITY_GUID}
 
 # The engine switch. When on, the live chain resolver (rules_port/resolution.py resolve_port_trigger) runs
 # each ability the interpreter covers in place of the native resolver; the others keep the native path.
@@ -1143,9 +1148,7 @@ def set_engine(on: bool) -> None:
 # rules own them (Dazed, Vulnerable, Stealth, the card-play and conscript templates), so the interpreter never resolves
 # them: coverage reports them as owned, and engine_runs leaves them on the native path.
 NATIVE_OWNED_TEMPLATES = frozenset({
-    "1730bd95-7c2a-4a19-9d6d-80c9c22bb720",   # Stealth: cannot attack
     "5a8783b0-e420-4f41-b2a1-96f70b0cd851",   # Play Card (the card-play chain template)
-    "7e8bae76-202f-4225-84ef-dde8339ccff2",   # Stealth: spellshield
 })
 
 
@@ -1335,6 +1338,28 @@ def static_int_set(context: Any, target: int, attribute: str) -> int | None:
                         and int(target) in _targets(root, index, scope)):
                     value = int(modifier.m_Value)
     return value
+
+
+def static_flag_set(view: Any, target: int, flag: str) -> bool:
+    """Whether an enabled ability's static AttributeModifier grants ``flag`` (for example CantAttack, SpellShield) to
+    ``target``, while its condition holds for the champion that carries it. Mirrors static_cost_increase."""
+    for scope in _champion_scopes(view):
+        for guid in ENABLED:
+            root = _load("AbilityTemplate", guid)
+            _bind_variables(root, scope)
+            for clause in root.m_AbilityEffectList:
+                effect_type, effect_raw = _stored("AbilityEffectTemplate", _guid(_field(clause, "m_EffectTemplateId")))
+                if _short(effect_type) != "CardModifierAbilityEffectTemplate":
+                    continue
+                modifier = _typed(effect_raw["m_Modifier"], "Modifier", effect_raw.get("_v"))
+                if not isinstance(modifier, MechanicsObject) or _short(modifier.type_name) != "AttributeModifier":
+                    continue
+                if flag not in str(_field(modifier, "m_AttributeFlags") or ""):
+                    continue
+                index = int(_field(clause, "m_TargetTemplateIndex") or 0)
+                if _clause_condition_holds(clause, scope) and int(target) in _targets(root, index, scope):
+                    return True
+    return False
 
 
 def static_cost_increase(context: Any, card_uid: int, owner: int) -> int:

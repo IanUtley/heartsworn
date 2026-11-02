@@ -75,7 +75,7 @@ def _protected_target(db, session_id, battle_state, card, source, source_owner,
     if int(card.get("attributes", 0) or 0) & _SPELL_SHIELD_ATTR:
         return True
     from .stealth import champion_target_is_spellshielded
-    if champion_target_is_spellshielded(battle_state, card):
+    if champion_target_is_spellshielded(battle_state, card, db=db, session_id=session_id):
         return True
     return _targeting_immune(db, session_id, battle_state, card, source)
 
@@ -1464,7 +1464,7 @@ def validate_target_selection(db, session_id, controller_uid, template_id,
                     if int(card.get("attributes", 0) or 0) & _SPELL_SHIELD_ATTR:
                         return []
                     from .stealth import champion_target_is_spellshielded
-                    if champion_target_is_spellshielded(state, card):
+                    if champion_target_is_spellshielded(state, card, db=db, session_id=session_id):
                         return []
                 if (not bool(template.get("is_auto_target")) and
                         in_protected_zone and owner != int(controller_uid or 0)

@@ -776,11 +776,43 @@ def test_an_owner_turn_damage_rule_expires_at_that_owners_turn_start(db):
     assert "owner_turn_rule_cards" not in state, state
 
 
+def test_stealth_keywords_match_the_native_rules_when_taken_from_the_interpreter(db):
+    """While the player's champion is Stealth: the champion has Spellshield (the native rule and the interpreter agree),
+    and an opposing troop cannot attack (the interpreter's CantAttack; the troop the player controls is unaffected)."""
+    from rules_port import ir_exec, stealth
+    from rules_port.ir_exec import BattleView
+
+    pl_t, ai_t, game, handler, bstate, player_champ, ai_champ = _setup(db)
+    bstate["champion_counters"] = {str(player_champ): {stealth.STEALTH_COUNTER_GUID: 1}}
+    add_card(db, 300, 0, TPL_GLADIATOR, loc="warzone")
+    add_card(db, 301, 5, TPL_GLADIATOR, loc="warzone")
+    db.commit()
+    stealthed = {"card_type": "Champion", "card_uid": player_champ}
+    unstealthed = {"card_type": "Champion", "card_uid": ai_champ}
+    previous = set(ir_exec.ENABLED)
+    try:
+        ir_exec.ENABLED.clear()
+        native = (stealth.champion_target_is_spellshielded(bstate, stealthed),
+                  stealth.champion_target_is_spellshielded(bstate, unstealthed))
+        ir_exec.ENABLED.update(previous)
+        interpreted = (stealth.champion_target_is_spellshielded(bstate, stealthed, db=db, session_id=1),
+                       stealth.champion_target_is_spellshielded(bstate, unstealthed, db=db, session_id=1))
+        view = BattleView(db, 1, bstate)
+        cant_attack = (ir_exec.static_flag_set(view, 300, "CantAttack"),
+                       ir_exec.static_flag_set(view, 301, "CantAttack"))
+    finally:
+        ir_exec.ENABLED.clear()
+        ir_exec.ENABLED.update(previous)
+    assert native == interpreted == (True, False), (native, interpreted)
+    assert cant_attack == (True, False), cant_attack
+
+
 if __name__ == "__main__":
     import inspect
 
     import db as dbmod
-    for run in (test_an_owner_turn_damage_rule_expires_at_that_owners_turn_start,
+    for run in (test_stealth_keywords_match_the_native_rules_when_taken_from_the_interpreter,
+                test_an_owner_turn_damage_rule_expires_at_that_owners_turn_start,
                 test_a_chain_interrupt_counters_the_spell_the_player_answered_with,
                 test_a_player_double_choice_pauses_the_interpreter_for_the_answer,
                 test_a_chosen_target_with_no_maximum_takes_any_number_of_candidates,
