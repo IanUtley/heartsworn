@@ -423,14 +423,11 @@ def _interpreted(case):
     def counting(*args, **kwargs):
         runs.append(args[0])
         return original(*args, **kwargs)
-    previous = ir_exec.ENGINE_ON
-    ir_exec.set_engine(True)
     ir_exec.run_ability = counting
     try:
         snapshot = _live(case)
     finally:
         ir_exec.run_ability = original
-        ir_exec.set_engine(previous)
     if not runs:
         raise NotRunByInterpreter("the interpreter did not run this ability")
     return snapshot

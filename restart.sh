@@ -61,8 +61,6 @@ if [[ -f "$CAMPAIGN_EDITOR_SCRIPT" && -d "$CAMPAIGN_EDITOR_DATA/campaign_runtime
 fi
 export HEX_CAMPAIGN_EDITOR_HOST="${HEX_CAMPAIGN_EDITOR_HOST:-127.0.0.1}"
 export HEX_CAMPAIGN_EDITOR_PORT="$CAMPAIGN_EDITOR_PORT"
-# The IR interpreter engine is on by default. Set HEX_IR_ENGINE=0 to run the native resolver.
-export HEX_IR_ENGINE="${HEX_IR_ENGINE:-1}"
 
 stop_services() {
     log "Stopping previous processes (hconnect_server, proxy, campaign editor, tournament, replay)..."

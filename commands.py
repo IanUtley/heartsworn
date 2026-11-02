@@ -754,7 +754,6 @@ _DEVELOPER_HELP_LINES = (
     "!pass — advance turn phase",
     "!phase <Name> — jump to phase",
     "!draw [me|opp] N — draw N cards (opp: the AI draws from its deck)",
-    "!irengine [on|off] — run covered abilities through the interpreter (no arg: show setting)",
     "!discard — discard a random card from your hand",
     "!top <id|name> — put a card from your hand on top of your deck",
     "!zones — list cards by zone",
@@ -1581,17 +1580,6 @@ def _dispatch(handler, action, args, session, pl_t, ai_t, room, username):
     is_tourney = session and (session.session_name or "").startswith("tourney-")
     command_owner_id = (int(handler.client_reck_id) if is_tourney
                         else handler.user_profile["id"])
-
-    if action == "irengine":
-        # "!irengine on|off" switches the interpreter engine (rules_port/ir_exec.py) for the abilities
-        # it covers; "!irengine" alone reports the setting.
-        from rules_port import ir_exec
-        mode = str(args[0]).lower() if args else "status"
-        if mode in ("on", "off"):
-            ir_exec.set_engine(mode == "on")
-        elif mode != "status":
-            return "Usage: !irengine [on|off]"
-        return f"Interpreter engine: {'on' if ir_exec.ENGINE_ON else 'off'}"
 
     if action == "draw":
         # "!draw N" draws for you; "!draw opp N" draws for the AI.

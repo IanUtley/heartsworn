@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import functools
 import json
-import os
 import re
 import threading
 from contextlib import contextmanager
@@ -1132,18 +1131,6 @@ STEALTH_SPELLSHIELD_ABILITY_GUID = "7e8bae76-202f-4225-84ef-dde8339ccff2"
 ENABLED: set[str] = {DAZED_ABILITY_GUID, VULNERABLE_ABILITY_GUID,
                      STEALTH_CANT_ATTACK_ABILITY_GUID, STEALTH_SPELLSHIELD_ABILITY_GUID}
 
-# The engine switch. When on, the live chain resolver (rules_port/resolution.py resolve_port_trigger) runs
-# each ability the interpreter covers in place of the native resolver; the others keep the native path.
-# HEX_IR_ENGINE=1 turns it on at start-up, and set_engine() changes it while the server runs.
-ENGINE_ON: bool = os.environ.get("HEX_IR_ENGINE", "") == "1"
-
-
-def set_engine(on: bool) -> None:
-    """Turn the interpreter engine on or off for the abilities resolved from now on."""
-    global ENGINE_ON
-    ENGINE_ON = bool(on)
-
-
 # The client's built-in ability templates (hex-private/HexClient/.../Resources/BuiltInResources.cs). The native built-in
 # rules own them (Dazed, Vulnerable, Stealth, the card-play and conscript templates), so the interpreter never resolves
 # them: coverage reports them as owned, and engine_runs leaves them on the native path.
@@ -1159,7 +1146,7 @@ def engine_runs(guid: str, source_uid: Any, owner_uid: Any, answers: dict[int, A
     A card the player picks is allowed when the player's answer for it is given (``answers``, keyed by target index),
     and the abilities it invokes pick nothing. The native prompt asks the player and its answer comes back in the
     chain item; without an answer the ability stays on the native path."""
-    if not (ENGINE_ON and source_uid is not None and owner_uid is not None) or coverage(guid):
+    if not (source_uid is not None and owner_uid is not None) or coverage(guid):
         return False
     if str(guid).lower() in NATIVE_OWNED_TEMPLATES:
         return False

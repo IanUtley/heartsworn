@@ -567,18 +567,13 @@ def test_oakhenge_matches_the_client_oracle_run_when_the_revealed_cards_are_reso
 
 
 def test_the_engine_takes_a_chosen_target_only_once_it_is_answered(db):
-    """With the engine switch on, an ability that picks a card stays on the native path until the chain item
-    carries the player's answer; the answered ability then runs in the interpreter."""
+    """An ability that picks a card stays on the native path until the chain item carries the player's answer; the
+    answered ability then runs in the interpreter."""
     from rules_port import ir_exec
 
-    previous = ir_exec.ENGINE_ON
-    ir_exec.set_engine(True)
-    try:
-        assert not ir_exec.engine_runs(SACRIFICE_CHOICE_ABILITY, 900, 5)
-        assert not ir_exec.engine_runs(SACRIFICE_CHOICE_ABILITY, 900, 5, answers={})
-        assert ir_exec.engine_runs(SACRIFICE_CHOICE_ABILITY, 900, 5, answers={0: 601})
-    finally:
-        ir_exec.set_engine(previous)
+    assert not ir_exec.engine_runs(SACRIFICE_CHOICE_ABILITY, 900, 5)
+    assert not ir_exec.engine_runs(SACRIFICE_CHOICE_ABILITY, 900, 5, answers={})
+    assert ir_exec.engine_runs(SACRIFICE_CHOICE_ABILITY, 900, 5, answers={0: 601})
 
 
 CHOOSE_ONE_PLAYED_RESOURCES_ABILITY_GUID = "fe6dcce6-cabb-e24e-ae4b-7a8248ee3a84"
