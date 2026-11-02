@@ -831,7 +831,9 @@ function renderModal() {
     html = `<h2>Starting hand</h2><div class="row">${hand.map((c) => faceHTML(c)).join("")}</div>
       <div class="buttons"><button data-act="keep">Keep</button><button class="secondary" data-act="mulligan">Mulligan</button></div>`;
   } else if (p && !S.busy && p.kind === "choose" && p.candidates.some((uid) => !onBoard(uid))) {
-    html = `<h2>Choose a ${chooseWord()}</h2><div class="row">${p.candidates.map((uid) => {
+    // Two or three choices show at 300% of a card's size; a longer list keeps the normal size.
+    const few = p.candidates.length <= 3 ? " few" : "";
+    html = `<h2>Choose a ${chooseWord()}</h2><div class="row${few}">${p.candidates.map((uid) => {
       const c = S.cards.get(uid) || { uid, card_id: NO_GUID, controller: S.me };
       return cardHTML(c, "selectable");
     }).join("")}</div>`;
