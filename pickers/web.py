@@ -11,6 +11,7 @@ from pickers.request import PickRequest
 def to_web_message(request: PickRequest) -> dict[str, Any]:
     return {
         "type": "pick",
+        "kind": request.prompt_kind,
         "player": request.player_id,
         "ability": request.prompt_ability,
         "source": request.source_uid,

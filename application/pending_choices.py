@@ -686,58 +686,16 @@ class PendingChoicesMixin:
                 level="DEBUG")
 
         def build_prompt(target_game, player_uid):
-            ev = target_game._make_event(
-                _hc.game_engine.PlayerOptionListSessionEventArgs)
-            ev.player_id = player_uid
-            opt = target_game._make_event(
-                _hc.game_engine.PlayerOptionSessionEventArgs)
-            opt.card = _hc.game_engine.SessionCardId(
-                _hc.game_engine.UID(int(pending["source_uid"])))
-            opt.state = _hc.game_engine.ECardUsage.Activate
-            inst = target_game._make_event(
-                _hc.game_engine.OptionInstanceSessionEventArgs)
-            inst.opt_id = _hc.game_engine.ResourceId.from_str(
-                prompt_ability)
-            inst.target_ids.append(_hc.game_engine.ResourceId.from_str(
-                CHOICE_TARGET_TEMPLATE))
-            inst.min_target_counts = [1]
-            inst.max_target_counts = [1]
-            target = target_game._make_event(
-                _hc.game_engine.TargetInstanceSessionEventArgs)
-            target.target_index = 0
-            target.target_id = _hc.game_engine.ResourceId.from_str(
-                CHOICE_TARGET_TEMPLATE)
-            target.targets = [_hc.game_engine.SessionCardId(_hc.game_engine.UID(int(uid)))
-                              for uid in pending["choice_uids"]]
-            inst.target_instances.append(target)
-            opt.instances.append(inst)
-            ev.options.append(opt)
-            target_game._push(ev)
-            # DoubleChoice is resolved by the client's normal triggered-ability
-            # configuration flow: PlayerOptionList supplies the generated cards,
-            # then class 23 tells UIBattle to push BattleStateUseTriggeredAbility
-            # for the built-in ChooseAndPlay ability. Without this event the
-            # options only update the cache; no picker state is pushed.
-            req = target_game._make_event(
-                _hc.game_engine.AbilityActivationDataRequiredSessionEventArgs)
-            req.player_id = player_uid
-            req.ability_instance_id = int(pending.get("instance_id", 1))
-            req.ability_parent_id = 0
-            req.source_card_id = _hc.game_engine.SessionCardId(
-                _hc.game_engine.UID(int(pending["source_uid"])))
-            req.ability_template_id = _hc.game_engine.ResourceId.from_str(
-                prompt_ability)
-            req.effect_group_id = 1
-            # ChooseAndPlay has one explicit target effect (the generated
-            # card in Choosing).  The client uses this effect-instance list
-            # while building BattleStateConfigureAbility; an empty list can
-            # leave the class-23 state with no selectable threshold even
-            # though the PlayerOptionList contains the two choice cards.
-            req.effect_instance_ids = [0]
-            req.resolve_chain = False
-            target_game._push(req)
-            target_game.push_green_light(
-                player_uid, _hc.game_engine.EPriorityContext.Normal)
+            from pickers import PickRequest, PickTarget, present_pick
+            present_pick(target_game, PickRequest(
+                player_id=player_uid, prompt_ability=prompt_ability,
+                source_uid=int(pending["source_uid"]),
+                instance_id=int(pending.get("instance_id", 1)),
+                targets=(PickTarget(
+                    index=0, template_id=CHOICE_TARGET_TEMPLATE,
+                    candidates=tuple(int(uid) for uid in pending["choice_uids"]),
+                    minimum=1, maximum=1),),
+                prompt_kind="ability"))
 
         bstate["pending_choice"] = pending
         bstate["resolution_paused"] = True

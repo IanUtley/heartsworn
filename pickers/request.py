@@ -25,6 +25,10 @@ class PickRequest:
     # The parallel target-template GUIDs on the option. Empty means one per slot, in slot order.
     # Matching-target picks name the template the ability itself uses at the slot.
     target_ids: tuple[str, ...] = ()
+    # Which client request asks for the answer: "triggered" (class 39, TriggeredAbilityActivationDataRequired, for a
+    # triggered ability's target picker) or "ability" (class 23, AbilityActivationDataRequired, for a DoubleChoice
+    # card choice, which the client configures as a built-in ability).
+    prompt_kind: str = "triggered"
 
     def option_target_ids(self) -> tuple[str, ...]:
         return self.target_ids or tuple(target.template_id for target in self.targets)
