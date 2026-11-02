@@ -15,10 +15,15 @@ def to_web_message(request: PickRequest) -> dict[str, Any]:
         "ability": request.prompt_ability,
         "source": request.source_uid,
         "instance": request.instance_id,
-        "targetIndex": request.target_index,
-        "targetTemplate": request.target_template_id,
-        "candidates": list(request.candidates),
-        "minimum": request.minimum,
-        "maximum": request.maximum,
-        "matchingTargets": list(request.matching_targets),
+        "targetIds": list(request.option_target_ids()),
+        "targets": [
+            {
+                "index": slot.index,
+                "template": slot.template_id,
+                "candidates": list(slot.candidates),
+                "minimum": slot.minimum,
+                "maximum": slot.maximum,
+            }
+            for slot in request.targets
+        ],
     }
