@@ -272,3 +272,77 @@ ACTIONS: dict[str, dict[str, str]] = {
         "helper": "move_card(text, id=, zone=) exists; Owner= argument is missing",
     },
 }
+
+
+# The stored effects a Blueprint binding or step refers to, by name (resolved through ir_surface.shared).
+BINDING_SOURCES: dict[str, str] = {"OpposingChampion": "AATargetTargetOpposingChampion"}
+REVEAL_EFFECT = "lookAt"
+
+
+@dataclass
+class Lowered:
+    """The card's objects: the root's clauses in order (effect reference, target index), the local Choose ability, and
+    the invoke effect that runs it."""
+    clauses: list[dict[str, Any]]
+    local: Any
+    invoke: Any
+
+
+def lower(card: Card) -> Lowered:
+    """Lower a checked card to surface objects. Targets are numbered in step order; a Choose step becomes a local
+    ability, and the Discard step that consumes its output is placed inside that ability."""
+    from gamedata import ir_surface as S
+    from gamedata.ir_python import _clause
+
+    consumers = {}
+    for item in card.steps:
+        if isinstance(item, Step):
+            for arg in item.args:
+                for ref in _references(arg):
+                    consumers.setdefault(ref, []).append(item)
+
+    targets: dict[str, int] = {}
+    clauses: list[dict[str, Any]] = []
+    local = invoke = None
+    next_index = 0   # the next target index a clause may name
+    for item in card.steps:
+        if isinstance(item, Binding):
+            if item.source not in BINDING_SOURCES:
+                raise BlueprintError(item.line, f"no stored target for {item.source!r}")
+            effect = S.shared(BINDING_SOURCES[item.source])
+            targets[item.name] = next_index
+            clauses.append(_clause(effect_template_id=effect.ref, target_template_index=next_index,
+                                   effect_instance_id=len(clauses), effect_group_id=len(clauses) + 1))
+            next_index += 1
+        elif item.action == "Reveal":
+            target = item.args[0].split(".", 1)[0]
+            effect = S.shared(REVEAL_EFFECT)
+            # The hand is its own target (the Records give it a separate target template), after the champion's.
+            targets[item.out] = next_index
+            clauses.append(_clause(effect_template_id=effect.ref, target_template_index=next_index,
+                                   effect_instance_id=len(clauses), effect_group_id=len(clauses) + 1))
+            next_index += 1
+        elif item.action == "Choose":
+            after = [s for s in consumers.get(item.out, []) if isinstance(s, Step) and s.action == "Discard"]
+            if len(after) != 1:
+                raise BlueprintError(item.line, f"the output {item.out!r} must go to exactly one Discard")
+            discard = after[0]
+            move = S.move_card(f"{discard.args[0]} is discarded.", id=S._stable_guid("effect", discard.name),
+                               zone="discard", owner=str(discard.args[1]["value"]))
+            local = S.choose_revealed(
+                f"Choose a revealed non-resource card. {discard.args[0]} is discarded.",
+                id=S._stable_guid("ability", card.name + item.name), target_id=S._stable_guid("target", card.name + item.name),
+                card_filter=S.non_resource(), does=[move])
+            invoke_id = S._stable_guid("effect", "invoke " + item.name)
+            invoke = S.activate(f"You invoke {item.name}.", id=invoke_id, ability=local)
+            clauses.append(_clause(effect_template_id=S._ref(invoke_id),
+                                   target_template_index=next_index,
+                                   effect_instance_id=len(clauses), effect_group_id=len(clauses) + 1))
+            next_index += 1
+        elif item.action == "Discard":
+            continue   # placed inside the local ability above
+        else:
+            raise BlueprintError(item.line, f"no lowering for {item.action}")
+    if local is None:
+        raise BlueprintError(card.steps[-1].line, "the card has no Choose step")
+    return Lowered(clauses=clauses, local=local, invoke=invoke)

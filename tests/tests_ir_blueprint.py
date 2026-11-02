@@ -72,3 +72,14 @@ def test_choose_revealed_is_a_local_ability_invoked_by_activate():
     invoke = ir_surface.activate("You invoke it.", id="00000000-0000-0000-0000-0000000c0a03", ability=choose)
     assert invoke._surface_invokes is choose
     assert str(invoke.m_AbilityToInvoke["m_Guid"]) == "00000000-0000-0000-0000-0000000c0a01"
+
+
+def test_lowering_inquisition_matches_the_records_effects_and_target_order():
+    from gamedata import ir_blueprint as bp2
+    lowered = bp2.lower(bp.parse(INQUISITION))
+    refs = [c["m_EffectTemplateId"]["m_Guid"] for c in lowered.clauses]
+    assert refs[0] == "e9aea9b3-e553-22fe-f985-45934d2d8907"     # store the opposing champion (Records clause 1)
+    assert refs[1] == "ceb72f0c-d606-0ac4-fbe3-08816f78bc9b"     # reveal the hand (Records clause 2)
+    assert [c["m_TargetTemplateIndex"] for c in lowered.clauses] == [0, 1, 2]
+    assert lowered.local._surface_targets[0].m_CardFilter is not None
+    assert lowered.invoke._surface_invokes is lowered.local

@@ -263,6 +263,35 @@ def activate(text: str, *, id: str, ability: "str | Typed", name: str | None = N
     return obj
 
 
+@functools.lru_cache(maxsize=None)
+def _effect_names() -> dict[str, tuple[str, ...]]:
+    """Effect template name -> the GUIDs that carry it, built once from the Records."""
+    names: dict[str, list[str]] = {}
+    for record in STORE.load("AbilityEffectTemplate"):
+        name = str(record.field("m_Name", "") or "")
+        if name:
+            names.setdefault(name, []).append(str(record.guid).lower())
+    return {name: tuple(guids) for name, guids in names.items()}
+
+
+class SharedEffect:
+    """An effect template that other records also use, named in the card and resolved by name."""
+
+    def __init__(self, name: str, guid: str) -> None:
+        self.name = name
+        self.guid = guid
+        self.ref = _ref(guid)
+
+
+def shared(name: str) -> SharedEffect:
+    """The stored effect template with this name (Records effect names are unique; a name with no or several
+    matches is refused)."""
+    guids = _effect_names().get(name, ())
+    if len(guids) != 1:
+        raise ValueError(f"{len(guids)} effect templates are named {name!r}")
+    return SharedEffect(name, guids[0])
+
+
 def revealed_target(card_filter: Typed, *, id: str, text: str = "", ignore_acted_on: bool = False) -> Typed:
     """A target among the cards revealed to the player, restricted to ``card_filter`` (the Records'
     SourceRevealedTargetTemplate). ``id`` is its own template ID."""
