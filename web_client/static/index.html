@@ -8,7 +8,60 @@
 </head>
 <body>
 <div id="app">
-  <section id="lobby" class="screen">
+  <section id="home" class="screen">
+    <div class="home-panel">
+      <h1>Heartsworn</h1>
+      <p class="subtitle">Hex: Shards of Fate, in the browser</p>
+      <nav class="home-nav">
+        <button id="nav-battle" class="primary">Battle</button>
+        <button id="nav-collection" class="primary">Collection</button>
+        <button id="nav-settings" class="secondary">Settings</button>
+      </nav>
+      <div id="settings-panel" class="settings-panel hidden">
+        <h2>Settings</h2>
+        <label>Background <select id="home-background"></select></label>
+        <button id="settings-close" class="secondary">Close</button>
+      </div>
+    </div>
+  </section>
+
+  <section id="collection" class="screen hidden">
+    <div class="collection-page">
+      <header class="collection-head">
+        <h1>Collection</h1>
+        <button id="collection-home" class="secondary">Main page</button>
+      </header>
+      <div class="collection-body">
+        <div class="collection-browse">
+          <div class="collection-tools">
+            <input id="collection-search" placeholder="Search cards" aria-label="Search cards">
+            <select id="collection-sort" aria-label="Sort cards">
+              <option value="name">Name</option>
+              <option value="cost">Cost</option>
+            </select>
+          </div>
+          <div id="collection-grid" class="collection-grid"></div>
+        </div>
+        <aside class="deck-editor">
+          <div class="deck-toolbar">
+            <select id="deck-select" aria-label="Saved decks"></select>
+            <button id="deck-new" class="secondary">New deck</button>
+          </div>
+          <label>Name <input id="deck-name" maxlength="40"></label>
+          <label>Champion <select id="deck-champion"></select></label>
+          <p id="deck-count" class="status"></p>
+          <div id="deck-list" class="deck-list"></div>
+          <div class="buttons">
+            <button id="deck-save" class="primary">Save deck</button>
+            <button id="deck-delete" class="secondary">Delete</button>
+          </div>
+          <p id="deck-status" class="status"></p>
+        </aside>
+      </div>
+    </div>
+  </section>
+
+  <section id="lobby" class="screen hidden">
     <div class="lobby-panel">
       <h1>Heartsworn</h1>
       <p class="subtitle">Hex: Shards of Fate, in the browser</p>
@@ -34,7 +87,7 @@
         <label>Gameboard <select id="board-choice"></select></label>
         <label>Sound volume <input type="range" id="volume-choice" min="0" max="100" step="5"> <span id="volume-value"></span></label>
       </div>
-      <button id="start-match" class="primary">Battle</button>
+      <div class="buttons"><button id="lobby-home" class="secondary">Main page</button><button id="start-match" class="primary">Battle</button></div>
       <p id="lobby-status" class="status"></p>
     </div>
   </section>
@@ -84,5 +137,6 @@
 <script type="module" src="/static/hex_assets.js"></script>
 <script type="module" src="/static/board3d.js"></script>
 <script src="/static/app.js"></script>
+<script src="/static/home.js"></script>
 </body>
 </html>

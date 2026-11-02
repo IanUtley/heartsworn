@@ -153,6 +153,13 @@ class Handler(BaseHTTPRequestHandler):
                     champ = names.get(deck["champion_guid"].lower()) or {}
                     deck["champion"] = champ.get("name", "")
                 return self._send(200, {"decks": decks})
+            if path in ("/api/profile", "/api/collection", "/api/profile/decks", "/api/profile/champions"):
+                from web_client import profile
+                body = {"/api/profile": profile.profile_summary,
+                        "/api/collection": lambda: {"cards": profile.collection()},
+                        "/api/profile/decks": lambda: {"decks": profile.decks()},
+                        "/api/profile/champions": lambda: {"champions": profile.champions()}}[path]()
+                return self._send(200, body)
             art = re.fullmatch(r"/art/(a\d{7})\.jpg", path)
             if art:
                 from web_client import catalog
@@ -178,6 +185,9 @@ class Handler(BaseHTTPRequestHandler):
             body = self._body()
             if path == "/api/matches":
                 return self._send(200, {"id": MATCHES.create(body)})
+            if path == "/api/profile/decks":
+                from web_client import profile
+                return self._send(200, profile.save_deck(body))
             if path == "/api/catalog":
                 from web_client import catalog
                 return self._send(200, catalog.describe(body))
@@ -199,6 +209,10 @@ class Handler(BaseHTTPRequestHandler):
             self._send(500, {"error": str(exc)})
 
     def do_DELETE(self):
+        deck = re.fullmatch(r"/api/profile/decks/(\d+)", urlparse(self.path).path)
+        if deck:
+            from web_client import profile
+            return self._send(200, {"deleted": profile.delete_deck(int(deck.group(1)))})
         matched = re.fullmatch(r"/api/matches/(m\d+)",
                                urlparse(self.path).path)
         if not matched:

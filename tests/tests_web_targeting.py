@@ -71,6 +71,8 @@ def _cursor(tab):
 
 def test_targeting_cursor_is_a_cross_while_a_target_is_chosen_and_reverts_after(page):
     # Start a match through the lobby (the folder gate is a UI check; the battle does not need the art).
+    page.click("#nav-battle")   # the main page's Battle button opens the lobby
+    page.wait_for_selector("#lobby:not(.hidden)")
     page.evaluate("document.querySelector('#start-match').disabled = false")
     page.click("#start-match")
     page.wait_for_function("typeof S !== 'undefined' && S.matchId && S.prompt", timeout=90000)

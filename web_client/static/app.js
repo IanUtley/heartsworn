@@ -1445,8 +1445,7 @@ async function startMatch() {
     S.me = S.info.player_uid;
     S.opp = S.info.opponent_uid;
     S.names[S.me] = $("#player-name").value;
-    $("#lobby").classList.add("hidden");
-    $("#battle").classList.remove("hidden");
+    showView("battle");
     poll();
   } catch (err) {
     $("#lobby-status").textContent = `Could not start: ${err.message}`;
@@ -1459,8 +1458,7 @@ function backToLobby() {
   if (S.matchId) api(`/api/matches/${S.matchId}`, null, "DELETE").catch(() => {});
   S.matchId = null;
   $("#modal").classList.add("hidden");
-  $("#battle").classList.add("hidden");
-  $("#lobby").classList.remove("hidden");
+  showView("lobby");
   $("#lobby-status").textContent = "";
 }
 
