@@ -5,6 +5,9 @@ import * as THREE from "./vendor/three.module.min.js";
 
 const FOV = 40;   // vertical field of view, in degrees
 
+// Unity's colours are authored in sRGB; THREE would brighten them as linear, so they are read as sRGB.
+const srgb = (c) => new THREE.Color().setRGB(c[0], c[1], c[2], THREE.SRGBColorSpace);
+
 const mid = (range) => (Array.isArray(range) ? (range[0] + range[1]) / 2 : Number(range) || 0);
 
 // A decoded texture as a three.js texture. Decoded rows run from the top of the image, and V runs up from the bottom,
@@ -28,7 +31,8 @@ export class BackgroundScene {
     this.layers = layers;
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
-    this.renderer.setClearColor(0x07060c, 1);
+    const solid = this.layers.clearColor;
+    this.renderer.setClearColor(solid ? srgb(solid) : new THREE.Color(0x07060c), 1);
     this.scene = new THREE.Scene();
     this.camera = new THREE.PerspectiveCamera(FOV, 1, 0.1, 100000);
     this.textures = new Map();
@@ -63,7 +67,10 @@ export class BackgroundScene {
       }
       return { lo, hi, area: (hi[0] - lo[0]) * (hi[1] - lo[1]) };
     };
-    const widest = parts.length ? parts.reduce((best, part) => (extent(part).area > extent(best).area ? part : best)) : null;
+    // The overlays (the Logo) are not the backdrop: with a backdrop they sit on it, without one they are framed alone.
+    const backdrops = parts.filter((part) => !part.overlay);
+    this.overlayOnly = backdrops.length === 0;
+    const widest = backdrops.length ? backdrops.reduce((best, part) => (extent(part).area > extent(best).area ? part : best)) : null;
     this.backdrop = widest
       ? [[extent(widest).lo[0], extent(widest).lo[1], 0], [extent(widest).hi[0], extent(widest).hi[1], 0]]
       : this.layers.bounds;
@@ -79,7 +86,7 @@ export class BackgroundScene {
       geometry.setAttribute("uv", new THREE.BufferAttribute(part.uvs, 2));
       geometry.setIndex(new THREE.BufferAttribute(part.indices, 1));
       const material = new THREE.MeshBasicMaterial({
-        map: this.texture(part.texture), color: new THREE.Color(...part.tint),
+        map: this.texture(part.texture), color: srgb(part.tint),
         transparent: true, depthTest: false, depthWrite: false, side: THREE.DoubleSide,
       });
       const mesh = new THREE.Mesh(geometry, material);
@@ -96,7 +103,7 @@ export class BackgroundScene {
       const [r, g, b, a] = emitter.startColor || [1, 1, 1, 1];
       for (let n = 0; n < count; n++) {
         const material = new THREE.SpriteMaterial({
-          map, color: new THREE.Color(r, g, b), transparent: true, opacity: 0, depthTest: false, depthWrite: false,
+          map, color: srgb([r, g, b]), transparent: true, opacity: 0, depthTest: false, depthWrite: false,
         });
         const sprite = new THREE.Sprite(material);
         sprite.renderOrder = emitterOrder + index;
@@ -119,12 +126,18 @@ export class BackgroundScene {
     this.renderer.setSize(width, height, false);
     const [lo, hi] = this.backdrop;
     const cx = (lo[0] + hi[0]) / 2, cy = (lo[1] + hi[1]) / 2, cz = (lo[2] + hi[2]) / 2;
-    const w = Math.max(hi[0] - lo[0], 1), h = Math.max(hi[1] - lo[1], 1);
+    const w = Math.max(hi[0] - lo[0], 1e-9), h = Math.max(hi[1] - lo[1], 1e-9);
     const aspect = width / height;
     // The view must sit inside the backdrop, so the visible height is the smaller of its height and its width over the aspect.
-    const visibleHeight = Math.min(h, w / aspect);
+    // A backdrop fills the view; an overlay-only scene (a logo on a solid colour) is framed with room around it.
+    // An overlay-only scene (a logo on a solid colour) is framed so the logo fills about 30% of the height or 50% of the
+    // width. The prefab scales its whole root by its import scale, so the logo's size is taken from its own bounds.
+    const visibleHeight = this.overlayOnly ? Math.max(h / 0.3, w / 0.5 / aspect) : Math.min(h, w / aspect);
     const distance = visibleHeight / (2 * Math.tan(THREE.MathUtils.degToRad(FOV / 2)));
     this.camera.aspect = aspect;
+    // The clipping planes follow the distance: a prefab's units can be far smaller or larger than one.
+    this.camera.near = distance / 100;
+    this.camera.far = distance * 1000;
     this.camera.position.set(cx, cy, cz + distance);
     this.camera.lookAt(cx, cy, cz);
     this.camera.updateProjectionMatrix();

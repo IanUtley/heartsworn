@@ -272,6 +272,7 @@ window.HexAssets = {
   pickFolder,
   hasSavedFolder,
   useSavedFolder,
+  ready: () => !!state.install,
   openFolder,
   boardNames,
   artUrl,

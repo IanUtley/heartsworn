@@ -43,12 +43,16 @@ async function applyHomeBackground() {
   const token = ++homeScene.token;
   const layers = window.HexAssets ? await HexAssets.background(BACKGROUND_PREFAB[key]) : null;
   if (token !== homeScene.token) return;
-  const drawable = layers && (layers.parts.length || layers.emitters.length) ? layers : null;
+  const drawable = layers && (layers.parts.length || layers.emitters.length || layers.clearColor) ? layers : null;
   disposeHomeScene();
   $("#home-scene").classList.toggle("hidden", !drawable);
-  if (!drawable) return;
+  // data-scene names the background that is now drawn, so a test can wait for it.
+  if (!drawable) { $("#home").dataset.scene = key; return; }
   const { BackgroundScene } = await import("/static/background3d.js");
-  if (token === homeScene.token) homeScene.scene = new BackgroundScene($("#home-scene"), drawable);
+  if (token === homeScene.token) {
+    homeScene.scene = new BackgroundScene($("#home-scene"), drawable);
+    $("#home").dataset.scene = key;
+  }
 }
 
 function disposeHomeScene() {
@@ -56,9 +60,26 @@ function disposeHomeScene() {
   homeScene.scene = null;
 }
 
+// The backgrounds are drawn from the Hex folder, so Settings says whether it has been read, and offers to choose it.
+async function renderFolderStatus() {
+  if (!window.HexAssets) return;
+  const status = $("#settings-folder-status"), button = $("#settings-folder");
+  if (HexAssets.ready()) {
+    status.textContent = "Backgrounds are drawn from your Hex folder.";
+    button.textContent = "Choose a different Hex folder\u2026";
+    return;
+  }
+  const saved = await HexAssets.hasSavedFolder();
+  status.textContent = saved
+    ? "Your Hex folder from an earlier visit is saved. Use it to draw the backgrounds."
+    : "Choose your HEX SHARDS OF FATE folder to draw the backgrounds. Nothing is uploaded.";
+  button.textContent = saved ? "Use saved Hex folder\u2026" : "Choose Hex folder\u2026";
+}
+
 function openSettings(open) {
   $("#settings-panel").classList.toggle("hidden", !open);
   if (!open) return;
+  renderFolderStatus();
   $("#home-background").innerHTML = BACKGROUNDS.map((key) => `<option value="${key}">${key}</option>`).join("");
   $("#home-background").value = backgroundChoice();
 }
@@ -228,6 +249,12 @@ $("#nav-battle").addEventListener("click", () => showView("lobby"));
 $("#nav-collection").addEventListener("click", () => showView("collection"));
 $("#nav-settings").addEventListener("click", () => openSettings($("#settings-panel").classList.contains("hidden")));
 $("#settings-close").addEventListener("click", () => openSettings(false));
+$("#settings-folder").addEventListener("click", () => chooseHexFolder(false));
+// Reading the folder makes the backgrounds and the boards available: draw the main page again.
+window.addEventListener("hex-assets-ready", () => {
+  renderFolderStatus();
+  if (!$("#home").classList.contains("hidden")) applyHomeBackground();
+});
 $("#home-background").addEventListener("change", (e) => chooseBackground(e.target.value));
 $("#lobby-home").addEventListener("click", () => showView("home"));
 $("#collection-home").addEventListener("click", () => showView("home"));

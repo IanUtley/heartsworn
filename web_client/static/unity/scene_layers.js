@@ -62,13 +62,14 @@ export function emitterFrom(system, position, texture, name) {
 
 import { decodeTexture, decodeMesh } from "./media.js";
 
-const CLASS = { GameObject: 1, Transform: 4, MeshFilter: 33, MeshRenderer: 23, ParticleSystem: 198, ParticleSystemRenderer: 199 };
+const CLASS = { GameObject: 1, Transform: 4, Camera: 20, MeshFilter: 33, MeshRenderer: 23, Texture2D: 28, ParticleSystem: 198, ParticleSystemRenderer: 199 };
 
 // The layers of a Background_* prefab (resources.assets): every textured MeshRenderer under its root, placed where the
 // prefab places it, and its particle systems. Animators and scripts are not run, so animated layers stay where authored.
 // Returns { name, parts, emitters, bounds } in three.js axes, or null when the prefab is not in the file.
 // ``readStream(path, offset, size)`` reads a range of a stream file (the textures' pixels, in resources.assets.resS).
-export async function backgroundLayers(serialized, prefabName, readStream) {
+// ``readFile(name)`` returns another serialized file the prefab refers to (Unity's built-in meshes, such as the Quad).
+export async function backgroundLayers(serialized, prefabName, readStream, readFile = null) {
   const byId = (classId) => serialized.objects.filter((o) => o.classId === classId);
   const transformById = new Map(), transformByGo = new Map();
   for (const o of byId(CLASS.Transform)) {
@@ -99,7 +100,32 @@ export async function backgroundLayers(serialized, prefabName, readStream) {
   };
 
   const textures = new Map();
-  // A material's albedo texture, decoded. Large textures keep their pixels in a stream file, read by range.
+  // A Texture2D object decoded to pixels. Large textures keep their pixels in a stream file, read by range.
+  const loadTexture = async (object) => {
+    if (object.classId !== 28) return null;
+    const texture = serialized.read(object);
+    const inline = texture["image data"];
+    const stream = texture.m_StreamData;
+    const data = inline && inline.length ? inline
+      : stream && stream.size ? await readStream(stream.path, stream.offset, stream.size) : null;
+    return data ? decodeTexture(texture, data) : null;
+  };
+  // A PPtr to an object: this file's, or one in the external file it names. Returns { file, object } or null.
+  const otherFiles = new Map();
+  const resolve = async (ref) => {
+    if (!ref || !ref.m_PathID) return null;
+    if (!ref.m_FileID) {
+      const object = serialized.get(ref.m_PathID);
+      return object ? { file: serialized, object } : null;
+    }
+    const name = serialized.externals[ref.m_FileID - 1];
+    if (!name || !readFile) return null;
+    if (!otherFiles.has(name)) otherFiles.set(name, readFile(name).catch(() => null));
+    const file = await otherFiles.get(name);
+    const object = file ? file.get(ref.m_PathID) : null;
+    return object ? { file, object } : null;
+  };
+  // A material's albedo texture, decoded.
   const textureOf = async (materialId) => {
     const material = serialized.get(materialId);
     if (!material || material.classId !== 21) return null;
@@ -109,14 +135,7 @@ export async function backgroundLayers(serialized, prefabName, readStream) {
     if (!textures.has(texId)) {
       const object = serialized.get(texId);
       let pixels = null;
-      if (object && object.classId === 28) {
-        const texture = serialized.read(object);
-        const inline = texture["image data"];
-        const stream = texture.m_StreamData;
-        const data = inline && inline.length ? inline
-          : stream && stream.size ? await readStream(stream.path, stream.offset, stream.size) : null;
-        pixels = data ? decodeTexture(texture, data) : null;
-      }
+      pixels = object ? await loadTexture(object) : null;
       textures.set(texId, pixels);
     }
     return textures.get(texId);
@@ -159,13 +178,11 @@ export async function backgroundLayers(serialized, prefabName, readStream) {
     const filter = components.find((o) => classOf(o) === CLASS.MeshFilter);
     const renderer = components.find((o) => classOf(o) === CLASS.MeshRenderer);
     if (filter && renderer) {
-      const meshRef = serialized.read(filter).m_Mesh;
-      const mesh = meshRef.m_FileID ? null : serialized.get(meshRef.m_PathID);
-      if (mesh && mesh.classId !== 43) continue;   // a Mesh pointer must name a Mesh in this file
+      const found = await resolve(serialized.read(filter).m_Mesh);
       const materialId = serialized.read(renderer).m_Materials[0]?.m_PathID;
       const texture = materialId ? await textureOf(materialId) : null;
-      if (mesh && texture) {
-        const data = decodeMesh(serialized.read(mesh));
+      if (found && found.object.classId === 43 && texture) {
+        const data = decodeMesh(found.file.read(found.object));
         if (data.positions && data.uvs) {
           const positions = toThree(data.positions, world);
           for (const sub of data.submeshes) {
@@ -187,6 +204,35 @@ export async function backgroundLayers(serialized, prefabName, readStream) {
     }
   }
 
+  // The camera's solid colour (clear flags 2), and the Logo: the file's hex_logo_white texture as a quad at the Logo
+  // object's authored place. The Logo's script is not run; the texture is the one the file names for the logo.
+  let clearColor = null, logo = null;
+  for (const goId of inside) {
+    const go = serialized.read(serialized.get(goId));
+    for (const c of go.m_Component) {
+      const component = serialized.get(c.component.m_PathID);
+      if (component && component.classId === CLASS.Camera && !clearColor) {
+        const camera = serialized.read(component);
+        if (camera.m_ClearFlags === 2) {
+          const bg = camera.m_BackGroundColor;
+          clearColor = [bg.r, bg.g, bg.b];
+        }
+      }
+    }
+    if (go.m_Name === "Logo" && !logo && transformByGo.has(goId)) logo = goId;
+  }
+  const logoTexture = logo !== null ? byId(CLASS.Texture2D).find((o) => serialized.read(o).m_Name === "hex_logo_white") : null;
+  if (logoTexture) {
+    const pixels = await loadTexture(logoTexture);
+    if (pixels) {
+      const aspect = pixels.width / pixels.height;
+      const w = worldOf(transformByGo.get(logo));
+      const quad = new Float32Array([-aspect / 2, -0.5, 0, aspect / 2, -0.5, 0, aspect / 2, 0.5, 0, -aspect / 2, 0.5, 0]);
+      parts.push({ name: "Logo", positions: toThree(quad, w), uvs: new Float32Array([0, 0, 1, 0, 1, 1, 0, 1]),
+        indices: flip(new Uint32Array([0, 1, 2, 0, 2, 3])), texture: pixels, tint: [1, 1, 1], overlay: true });
+    }
+  }
+
   const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
   for (const part of parts) for (let i = 0; i < part.positions.length; i += 3) for (let k = 0; k < 3; k++) {
     lo[k] = Math.min(lo[k], part.positions[i + k]);
@@ -196,5 +242,6 @@ export async function backgroundLayers(serialized, prefabName, readStream) {
     lo[k] = Math.min(lo[k], e.position[k]);
     hi[k] = Math.max(hi[k], e.position[k]);
   }
-  return { name: prefabName, parts, emitters, bounds: [lo, hi] };
+  const bounds = parts.length || emitters.length ? [lo, hi] : [[-1, -1, 0], [1, 1, 0]];
+  return { name: prefabName, parts, emitters, bounds, clearColor };
 }

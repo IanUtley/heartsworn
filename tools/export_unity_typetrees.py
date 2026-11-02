@@ -19,8 +19,8 @@ from UnityPy.helpers import Tpk
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "web_client", "static", "unity", "typetrees.json")
 
 # Unity class IDs: GameObject, Transform, Material, MeshRenderer, Texture2D, MeshFilter, Mesh, ParticleSystem,
-# ParticleSystemRenderer.
-CLASSES = [1, 4, 21, 23, 28, 33, 43, 198, 199]
+# ParticleSystemRenderer, Camera, MonoBehaviour, MonoScript.
+CLASSES = [1, 4, 20, 21, 23, 28, 33, 43, 114, 115, 198, 199]
 
 
 def nested(node):

@@ -225,7 +225,21 @@ export class HexInstall {
         }
         const readStream = async (path, offset, size) =>
           (await (await this.tree.file(`Hex_Data/${path}`)).read(offset, size));
-        return backgroundLayers(await this.resources, prefabName, readStream);
+        // External files the prefab refers to: "library/..." and "resources/..." are the built-in files in Hex_Data/Resources.
+        const readFile = async (name) => {
+          if (!this.externalFiles) this.externalFiles = new Map();
+          if (!this.externalFiles.has(name)) {
+            const base = name.replace(/^(library|resources)\//, "");
+            const path = /^(library|resources)\//.test(name) ? `Hex_Data/Resources/${base}` : `Hex_Data/${name}`;
+            this.externalFiles.set(name, (async () => {
+              const source = await this.tree.file(path);
+              const layouts = (await (await fetch("/static/unity/typetrees.json")).json()).classes;
+              return parseSerializedFile(await source.read(0, source.size), layouts);
+            })());
+          }
+          return this.externalFiles.get(name);
+        };
+        return backgroundLayers(await this.resources, prefabName, readStream, readFile);
       })().catch(() => null));
     }
     return this.backgroundScenes.get(prefabName);

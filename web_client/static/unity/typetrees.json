@@ -304,6 +304,271 @@
     }
    ]
   },
+  "20": {
+   "type": "Camera",
+   "name": "Base",
+   "level": 0,
+   "meta": 32768,
+   "children": [
+    {
+     "type": "PPtr<GameObject>",
+     "name": "m_GameObject",
+     "level": 1,
+     "meta": 65,
+     "children": [
+      {
+       "type": "int",
+       "name": "m_FileID",
+       "level": 2,
+       "meta": 65,
+       "children": []
+      },
+      {
+       "type": "SInt64",
+       "name": "m_PathID",
+       "level": 2,
+       "meta": 65,
+       "children": []
+      }
+     ]
+    },
+    {
+     "type": "UInt8",
+     "name": "m_Enabled",
+     "level": 1,
+     "meta": 16641,
+     "children": []
+    },
+    {
+     "type": "unsigned int",
+     "name": "m_ClearFlags",
+     "level": 1,
+     "meta": 0,
+     "children": []
+    },
+    {
+     "type": "ColorRGBA",
+     "name": "m_BackGroundColor",
+     "level": 1,
+     "meta": 2097152,
+     "children": [
+      {
+       "type": "float",
+       "name": "r",
+       "level": 2,
+       "meta": 2097153,
+       "children": []
+      },
+      {
+       "type": "float",
+       "name": "g",
+       "level": 2,
+       "meta": 2097153,
+       "children": []
+      },
+      {
+       "type": "float",
+       "name": "b",
+       "level": 2,
+       "meta": 2097153,
+       "children": []
+      },
+      {
+       "type": "float",
+       "name": "a",
+       "level": 2,
+       "meta": 2097153,
+       "children": []
+      }
+     ]
+    },
+    {
+     "type": "Rectf",
+     "name": "m_NormalizedViewPortRect",
+     "level": 1,
+     "meta": 0,
+     "children": [
+      {
+       "type": "float",
+       "name": "x",
+       "level": 2,
+       "meta": 0,
+       "children": []
+      },
+      {
+       "type": "float",
+       "name": "y",
+       "level": 2,
+       "meta": 0,
+       "children": []
+      },
+      {
+       "type": "float",
+       "name": "width",
+       "level": 2,
+       "meta": 0,
+       "children": []
+      },
+      {
+       "type": "float",
+       "name": "height",
+       "level": 2,
+       "meta": 0,
+       "children": []
+      }
+     ]
+    },
+    {
+     "type": "float",
+     "name": "near clip plane",
+     "level": 1,
+     "meta": 0,
+     "children": []
+    },
+    {
+     "type": "float",
+     "name": "far clip plane",
+     "level": 1,
+     "meta": 0,
+     "children": []
+    },
+    {
+     "type": "float",
+     "name": "field of view",
+     "level": 1,
+     "meta": 0,
+     "children": []
+    },
+    {
+     "type": "bool",
+     "name": "orthographic",
+     "level": 1,
+     "meta": 16384,
+     "children": []
+    },
+    {
+     "type": "float",
+     "name": "orthographic size",
+     "level": 1,
+     "meta": 0,
+     "children": []
+    },
+    {
+     "type": "float",
+     "name": "m_Depth",
+     "level": 1,
+     "meta": 0,
+     "children": []
+    },
+    {
+     "type": "BitField",
+     "name": "m_CullingMask",
+     "level": 1,
+     "meta": 0,
+     "children": [
+      {
+       "type": "unsigned int",
+       "name": "m_Bits",
+       "level": 2,
+       "meta": 4194305,
+       "children": []
+      }
+     ]
+    },
+    {
+     "type": "int",
+     "name": "m_RenderingPath",
+     "level": 1,
+     "meta": 0,
+     "children": []
+    },
+    {
+     "type": "PPtr<RenderTexture>",
+     "name": "m_TargetTexture",
+     "level": 1,
+     "meta": 0,
+     "children": [
+      {
+       "type": "int",
+       "name": "m_FileID",
+       "level": 2,
+       "meta": 1,
+       "children": []
+      },
+      {
+       "type": "SInt64",
+       "name": "m_PathID",
+       "level": 2,
+       "meta": 1,
+       "children": []
+      }
+     ]
+    },
+    {
+     "type": "int",
+     "name": "m_TargetDisplay",
+     "level": 1,
+     "meta": 0,
+     "children": []
+    },
+    {
+     "type": "int",
+     "name": "m_TargetEye",
+     "level": 1,
+     "meta": 0,
+     "children": []
+    },
+    {
+     "type": "bool",
+     "name": "m_HDR",
+     "level": 1,
+     "meta": 0,
+     "children": []
+    },
+    {
+     "type": "bool",
+     "name": "m_AllowMSAA",
+     "level": 1,
+     "meta": 0,
+     "children": []
+    },
+    {
+     "type": "bool",
+     "name": "m_ForceIntoRT",
+     "level": 1,
+     "meta": 0,
+     "children": []
+    },
+    {
+     "type": "bool",
+     "name": "m_OcclusionCulling",
+     "level": 1,
+     "meta": 16384,
+     "children": []
+    },
+    {
+     "type": "float",
+     "name": "m_StereoConvergence",
+     "level": 1,
+     "meta": 0,
+     "children": []
+    },
+    {
+     "type": "float",
+     "name": "m_StereoSeparation",
+     "level": 1,
+     "meta": 0,
+     "children": []
+    },
+    {
+     "type": "bool",
+     "name": "m_StereoMirrorMode",
+     "level": 1,
+     "meta": 0,
+     "children": []
+    }
+   ]
+  },
   "21": {
    "type": "Material",
    "name": "Base",
@@ -3115,6 +3380,357 @@
        ]
       }
      ]
+    }
+   ]
+  },
+  "114": {
+   "type": "MonoBehaviour",
+   "name": "Base",
+   "level": 0,
+   "meta": 32768,
+   "children": [
+    {
+     "type": "PPtr<GameObject>",
+     "name": "m_GameObject",
+     "level": 1,
+     "meta": 65,
+     "children": [
+      {
+       "type": "int",
+       "name": "m_FileID",
+       "level": 2,
+       "meta": 65,
+       "children": []
+      },
+      {
+       "type": "SInt64",
+       "name": "m_PathID",
+       "level": 2,
+       "meta": 65,
+       "children": []
+      }
+     ]
+    },
+    {
+     "type": "UInt8",
+     "name": "m_Enabled",
+     "level": 1,
+     "meta": 16641,
+     "children": []
+    },
+    {
+     "type": "PPtr<MonoScript>",
+     "name": "m_Script",
+     "level": 1,
+     "meta": 0,
+     "children": [
+      {
+       "type": "int",
+       "name": "m_FileID",
+       "level": 2,
+       "meta": 1,
+       "children": []
+      },
+      {
+       "type": "SInt64",
+       "name": "m_PathID",
+       "level": 2,
+       "meta": 1,
+       "children": []
+      }
+     ]
+    },
+    {
+     "type": "string",
+     "name": "m_Name",
+     "level": 1,
+     "meta": 32769,
+     "children": [
+      {
+       "type": "Array",
+       "name": "Array",
+       "level": 2,
+       "meta": 16385,
+       "children": [
+        {
+         "type": "int",
+         "name": "size",
+         "level": 3,
+         "meta": 1,
+         "children": []
+        },
+        {
+         "type": "char",
+         "name": "data",
+         "level": 3,
+         "meta": 1,
+         "children": []
+        }
+       ]
+      }
+     ]
+    }
+   ]
+  },
+  "115": {
+   "type": "MonoScript",
+   "name": "Base",
+   "level": 0,
+   "meta": 32768,
+   "children": [
+    {
+     "type": "string",
+     "name": "m_Name",
+     "level": 1,
+     "meta": 32769,
+     "children": [
+      {
+       "type": "Array",
+       "name": "Array",
+       "level": 2,
+       "meta": 16385,
+       "children": [
+        {
+         "type": "int",
+         "name": "size",
+         "level": 3,
+         "meta": 1,
+         "children": []
+        },
+        {
+         "type": "char",
+         "name": "data",
+         "level": 3,
+         "meta": 1,
+         "children": []
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "type": "int",
+     "name": "m_ExecutionOrder",
+     "level": 1,
+     "meta": 16,
+     "children": []
+    },
+    {
+     "type": "Hash128",
+     "name": "m_PropertiesHash",
+     "level": 1,
+     "meta": 16,
+     "children": [
+      {
+       "type": "UInt8",
+       "name": "bytes[0]",
+       "level": 2,
+       "meta": 16,
+       "children": []
+      },
+      {
+       "type": "UInt8",
+       "name": "bytes[1]",
+       "level": 2,
+       "meta": 16,
+       "children": []
+      },
+      {
+       "type": "UInt8",
+       "name": "bytes[2]",
+       "level": 2,
+       "meta": 16,
+       "children": []
+      },
+      {
+       "type": "UInt8",
+       "name": "bytes[3]",
+       "level": 2,
+       "meta": 16,
+       "children": []
+      },
+      {
+       "type": "UInt8",
+       "name": "bytes[4]",
+       "level": 2,
+       "meta": 16,
+       "children": []
+      },
+      {
+       "type": "UInt8",
+       "name": "bytes[5]",
+       "level": 2,
+       "meta": 16,
+       "children": []
+      },
+      {
+       "type": "UInt8",
+       "name": "bytes[6]",
+       "level": 2,
+       "meta": 16,
+       "children": []
+      },
+      {
+       "type": "UInt8",
+       "name": "bytes[7]",
+       "level": 2,
+       "meta": 16,
+       "children": []
+      },
+      {
+       "type": "UInt8",
+       "name": "bytes[8]",
+       "level": 2,
+       "meta": 16,
+       "children": []
+      },
+      {
+       "type": "UInt8",
+       "name": "bytes[9]",
+       "level": 2,
+       "meta": 16,
+       "children": []
+      },
+      {
+       "type": "UInt8",
+       "name": "bytes[10]",
+       "level": 2,
+       "meta": 16,
+       "children": []
+      },
+      {
+       "type": "UInt8",
+       "name": "bytes[11]",
+       "level": 2,
+       "meta": 16,
+       "children": []
+      },
+      {
+       "type": "UInt8",
+       "name": "bytes[12]",
+       "level": 2,
+       "meta": 16,
+       "children": []
+      },
+      {
+       "type": "UInt8",
+       "name": "bytes[13]",
+       "level": 2,
+       "meta": 16,
+       "children": []
+      },
+      {
+       "type": "UInt8",
+       "name": "bytes[14]",
+       "level": 2,
+       "meta": 16,
+       "children": []
+      },
+      {
+       "type": "UInt8",
+       "name": "bytes[15]",
+       "level": 2,
+       "meta": 16,
+       "children": []
+      }
+     ]
+    },
+    {
+     "type": "string",
+     "name": "m_ClassName",
+     "level": 1,
+     "meta": 32784,
+     "children": [
+      {
+       "type": "Array",
+       "name": "Array",
+       "level": 2,
+       "meta": 16401,
+       "children": [
+        {
+         "type": "int",
+         "name": "size",
+         "level": 3,
+         "meta": 17,
+         "children": []
+        },
+        {
+         "type": "char",
+         "name": "data",
+         "level": 3,
+         "meta": 17,
+         "children": []
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "type": "string",
+     "name": "m_Namespace",
+     "level": 1,
+     "meta": 32784,
+     "children": [
+      {
+       "type": "Array",
+       "name": "Array",
+       "level": 2,
+       "meta": 16401,
+       "children": [
+        {
+         "type": "int",
+         "name": "size",
+         "level": 3,
+         "meta": 17,
+         "children": []
+        },
+        {
+         "type": "char",
+         "name": "data",
+         "level": 3,
+         "meta": 17,
+         "children": []
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "type": "string",
+     "name": "m_AssemblyName",
+     "level": 1,
+     "meta": 32784,
+     "children": [
+      {
+       "type": "Array",
+       "name": "Array",
+       "level": 2,
+       "meta": 16401,
+       "children": [
+        {
+         "type": "int",
+         "name": "size",
+         "level": 3,
+         "meta": 17,
+         "children": []
+        },
+        {
+         "type": "char",
+         "name": "data",
+         "level": 3,
+         "meta": 17,
+         "children": []
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "type": "bool",
+     "name": "m_IsEditorScript",
+     "level": 1,
+     "meta": 1,
+     "children": []
     }
    ]
   },
