@@ -421,6 +421,13 @@ def card_matches(card_filter: Typed) -> Typed:
     return T.TriggerCardMatchesFilter(card_filter=card_filter)
 
 
+def non_resource() -> Typed:
+    """Any card that is not a resource (Blueprint's NonResource). The Records' form: not a resource of any shard
+    colour, and not a basic or a non-standard resource."""
+    return T.NotCardFilter(target_filter=T.OrCardFilter(target_filters=[
+        T.IsResource(is_basic_resource=False, is_non_standard_resource=False, threshold_color_flags="Any")]))
+
+
 def troop_with(attribute: str) -> Typed:
     """A troop with an integer attribute of at least 1 (``troop_with("Soulcursed")``)."""
     return T.AndCardFilter(target_filters=[T.IsTroop(), attribute_is(attribute, 1)])
@@ -535,6 +542,7 @@ CONSTANTS: dict[str, Any] = {
 }
 FACTORIES: dict[str, Any] = {
     "counter": counter,
+    "non_resource": non_resource,
     "count": count,
     "counter_value": counter_value,
     "damage": damage,

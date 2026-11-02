@@ -39,3 +39,12 @@ def test_every_inquisition_action_has_a_lowering_entry():
     actions = {s.action for s in card.steps if isinstance(s, bp.Step)}
     assert actions <= set(bp.ACTIONS), actions - set(bp.ACTIONS)
     assert "local ability" in bp.ACTIONS["Choose"]["lowers_to"]
+
+
+def test_non_resource_helper_round_trips_through_the_ir_text():
+    from gamedata import ir_python, ir_surface
+    text = ir_python.dumps(ir_surface.non_resource())
+    assert text == ("NotCardFilter(target_filter=OrCardFilter(target_filters="
+                    "[IsResource(is_basic_resource=False, threshold_color_flags='Any')]))")
+    names = ir_python.loads("filter_ = " + text)
+    assert ir_python.dumps(names["filter_"]) == text
