@@ -566,13 +566,13 @@ def test_oakhenge_matches_the_client_oracle_run_when_the_revealed_cards_are_reso
                                                int(oracle["initial_seed"]["seed_w"]))
 
 
-def test_the_engine_takes_a_chosen_target_only_once_it_is_answered(db):
-    """An ability that picks a card stays on the native path until the chain item carries the player's answer; the
-    answered ability then runs in the interpreter."""
+def test_a_chosen_target_runs_in_the_interpreter_with_or_without_an_answer(db):
+    """An ability that picks a card runs in the interpreter whether or not the player has answered yet: an unanswered
+    pick pauses the interpreter, and its picker takes the answer (there is no native fallback)."""
     from rules_port import ir_exec
 
-    assert not ir_exec.engine_runs(SACRIFICE_CHOICE_ABILITY, 900, 5)
-    assert not ir_exec.engine_runs(SACRIFICE_CHOICE_ABILITY, 900, 5, answers={})
+    assert ir_exec.engine_runs(SACRIFICE_CHOICE_ABILITY, 900, 5)
+    assert ir_exec.engine_runs(SACRIFICE_CHOICE_ABILITY, 900, 5, answers={})
     assert ir_exec.engine_runs(SACRIFICE_CHOICE_ABILITY, 900, 5, answers={0: 601})
 
 
@@ -830,7 +830,7 @@ if __name__ == "__main__":
                 test_a_random_branch_searches_the_deck_for_a_named_card_and_moves_the_choice,
                 test_a_revealed_choice_takes_one_card_and_the_rest_go_back_in_random_places,
                 test_oakhenge_matches_the_client_oracle_run_when_the_revealed_cards_are_resources,
-                test_the_engine_takes_a_chosen_target_only_once_it_is_answered):
+                test_a_chosen_target_runs_in_the_interpreter_with_or_without_an_answer):
         dbmod._db = make_db()
         # Some tests take the database; the others need none.
         if inspect.signature(run).parameters:

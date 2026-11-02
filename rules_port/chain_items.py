@@ -642,13 +642,11 @@ def resolve_ability_item(host, session, db, game, state, item, player_uid,
         state["player_mod_target"] = int(target_uid)
     from .resolution import _answers_from_target_map, resolve_port_ability
     if graph is not None and not graph.trigger_event_type and source_uid is not None:
-        # A spell or activated ability (no trigger): the interpreter runs it when the engine switch covers it, with
-        # the player's answers from the item. A refusal before any client event falls back to the native path.
+        # A spell or activated ability (no trigger): the interpreter runs it, with the player's answers from the item.
         from . import ir_exec
         answers = _answers_from_target_map(target_map)
         if ir_exec.engine_runs(ability_guid, source_uid, owner_id, answers=answers):
             from .context import EffectContext
-            started = len(game.events)
             try:
                 ir_exec.run_ability(
                     ability_guid, None,
@@ -657,9 +655,6 @@ def resolve_ability_item(host, session, db, game, state, item, player_uid,
                     source_uid=int(source_uid), owner_uid=int(owner_id), event={"player": int(owner_id)},
                     answers=answers)
                 return
-            except NotImplementedError:
-                if len(game.events) != started:
-                    raise
             except ir_exec.NeedsChoice as pause:
                 from .resolution import prompt_interpreted_reveal
                 prompt_interpreted_reveal(host, game, session, db, player_uid, ai_uid, state, pause)

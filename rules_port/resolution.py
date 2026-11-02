@@ -2262,7 +2262,6 @@ def run_interpreted_trigger(handler, game, session, db, player_uid, ai_uid, batt
     was sent is re-raised: the effects have started, so they cannot be replayed."""
     from . import ir_exec
     from .context import EffectContext
-    started = len(game.events)
     try:
         ir_exec.run_ability(
             guid, event_name,
@@ -2273,10 +2272,6 @@ def run_interpreted_trigger(handler, game, session, db, player_uid, ai_uid, batt
                                      target_player_uid, source_player_uid, target_card_uid=target_card_uid),
             answers=answers,
             instance_id=None if instance_id is None else int(instance_id))
-    except NotImplementedError:
-        if len(game.events) != started:
-            raise
-        return None
     except ir_exec.NeedsChoice as pause:
         return prompt_interpreted_reveal(handler, game, session, db, player_uid, ai_uid, battle_state, pause)
     except ir_exec.NeedsConversation:

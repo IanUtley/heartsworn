@@ -31,6 +31,9 @@ NATIVE_LEAF_EFFECTS = frozenset({
     "DoubleChoiceAbilityEffectTemplate",
     # Finishes a card's move into the warzone (the card's entry bookkeeping; rules_port.effects dispatch).
     "FinishMovingCardToWarzoneEffectTemplate",
+    # The card-play template's two effects: play the card (the native play machinery queues it on the chain) and finish
+    # its resolution (rules_port.effects.play_card, and the finish leaf).
+    "BuiltInPlayCardAbilityEffectTemplate", "FinishResolvingCardAbilityEffectTemplate",
 })
 
 # The TAC operations the native leaf (EffectContext.tac) implements. A TAC operation outside this set is refused by

@@ -1135,26 +1135,17 @@ ENABLED: set[str] = {DAZED_ABILITY_GUID, VULNERABLE_ABILITY_GUID,
 # rules own them (Dazed, Vulnerable, Stealth, the card-play and conscript templates), so the interpreter never resolves
 # them: coverage reports them as owned, and engine_runs leaves them on the native path.
 NATIVE_OWNED_TEMPLATES = frozenset({
-    "5a8783b0-e420-4f41-b2a1-96f70b0cd851",   # Play Card (the card-play chain template)
 })
 
 
 def engine_runs(guid: str, source_uid: Any, owner_uid: Any, answers: dict[int, Any] | None = None) -> bool:
-    """Whether the interpreter resolves this ability in place of the native resolver: the engine is on, the ability
-    has a source card and an owner, and no construct of it is uncovered.
-
-    A card the player picks is allowed when the player's answer for it is given (``answers``, keyed by target index),
-    and the abilities it invokes pick nothing. The native prompt asks the player and its answer comes back in the
-    chain item; without an answer the ability stays on the native path."""
-    if not (source_uid is not None and owner_uid is not None) or coverage(guid):
-        return False
+    """Whether the interpreter resolves this ability. Every ability does except two: the card-play template the native
+    card-play machinery owns (NATIVE_OWNED_TEMPLATES), and an ability whose invoked choice is picked from a zone the
+    interpreter has no picker for (the choice zone). A player's choice that has no answer yet pauses the interpreter,
+    and its picker takes the answer."""
     if str(guid).lower() in NATIVE_OWNED_TEMPLATES:
         return False
-    root = _load("AbilityTemplate", guid)
-    own = [index for index in range(len(root.m_AbilityTargetTemplateIds or [])) if _needs_choice(root, index)]
-    if any(index not in (answers or {}) for index in own):
-        return False
-    return not _invoked_non_revealed_choice(root, set())
+    return not _invoked_non_revealed_choice(_load("AbilityTemplate", guid), set())
 
 
 def _repeat_gaps(effect: dict[str, Any]) -> list[str]:
