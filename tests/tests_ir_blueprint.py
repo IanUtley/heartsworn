@@ -58,3 +58,17 @@ def test_move_card_keeps_its_owner_for_the_clause_target():
     assert str(move.m_DestinationCollection) == "Discard"
     plain = ir_surface.move_card("Discard it.", id="00000000-0000-0000-0000-00000000d15d", zone="Discard")
     assert plain._surface_owner is None
+
+
+def test_choose_revealed_is_a_local_ability_invoked_by_activate():
+    from gamedata import ir_surface
+    discard = ir_surface.move_card("They discard that card.", id="00000000-0000-0000-0000-00000000d1a1", zone="Discard")
+    choose = ir_surface.choose_revealed(
+        "Choose a revealed non-resource card. They discard that card.",
+        id="00000000-0000-0000-0000-0000000c0a01", target_id="00000000-0000-0000-0000-0000000c0a02",
+        card_filter=ir_surface.non_resource(), does=[discard])
+    assert choose._surface_guid == "00000000-0000-0000-0000-0000000c0a01"
+    assert choose._surface_targets[0].m_CardFilter is not None
+    invoke = ir_surface.activate("You invoke it.", id="00000000-0000-0000-0000-0000000c0a03", ability=choose)
+    assert invoke._surface_invokes is choose
+    assert str(invoke.m_AbilityToInvoke["m_Guid"]) == "00000000-0000-0000-0000-0000000c0a01"

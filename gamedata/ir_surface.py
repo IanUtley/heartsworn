@@ -253,9 +253,36 @@ def summon(text: str, *, id: str, card: str, zone: str = "Warzone", amount: int 
                    card_collection=zone, card_location="Unknown", amount=amount, **fields)
 
 
-def activate(text: str, *, id: str, ability: str, name: str | None = None) -> Typed:
-    """Use another ability (by GUID): "you invoke Discard a card"."""
-    return _effect(T.ActivateAbilityEffectTemplate, text, id, name, ability_to_invoke=_ref(ability))
+def activate(text: str, *, id: str, ability: "str | Typed", name: str | None = None) -> Typed:
+    """Use another ability: "you invoke Discard a card". ``ability`` is its GUID, or a local ability built in this card
+    (``choose_revealed``); a local one is kept on the surface object so the lowering defines it with the card."""
+    local = ability if isinstance(ability, Typed) else None
+    guid = local._surface_guid if local is not None else ability
+    obj = _effect(T.ActivateAbilityEffectTemplate, text, id, name, ability_to_invoke=_ref(guid))
+    obj._surface_invokes = local
+    return obj
+
+
+def revealed_target(card_filter: Typed, *, id: str, text: str = "", ignore_acted_on: bool = False) -> Typed:
+    """A target among the cards revealed to the player, restricted to ``card_filter`` (the Records'
+    SourceRevealedTargetTemplate). ``id`` is its own template ID."""
+    return T.SourceRevealedTargetTemplate(card_filter=card_filter, game_text=text,
+                                          template_id=_ref(str(id).lower()), ignore_acted_on=ignore_acted_on)
+
+
+def choose_revealed(text: str, *, id: str, target_id: str, card_filter: Typed, does: list[Typed]) -> Typed:
+    """A local ability (Blueprint's Choose): the player picks one revealed card matching ``card_filter``, and the
+    effects in ``does`` run on it in order. It is local to the card that invokes it, with its own target and effects,
+    as the Records have it. Build it with ``activate(..., ability=<this>)``."""
+    from gamedata.ir_python import _clause
+    target = revealed_target(card_filter, id=target_id, text=text)
+    clauses = [_clause(effect_template_id=item, target_template_index=0, effect_instance_id=index, effect_group_id=index + 1)
+               for index, item in enumerate(does)]
+    obj = _explicit_ability(text, str(id).lower(), {"ability_target_template_ids": [_ref(str(target_id).lower())],
+                                                  "ability_effect_list": clauses})
+    obj._surface_guid = str(id).lower()
+    obj._surface_targets = [target]
+    return obj
 
 
 def grant(text: str, *, id: str, ability: str, name: str | None = None) -> Typed:
