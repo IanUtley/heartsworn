@@ -487,3 +487,6 @@ body.targeting, body.targeting * {
   .collection-body { grid-template-columns: 1fr; }
   .deck-editor { position: static; }
 }
+
+#home-scene { position: fixed; inset: 0; width: 100%; height: 100%; z-index: 0; }
+#home .home-panel { position: relative; z-index: 1; }

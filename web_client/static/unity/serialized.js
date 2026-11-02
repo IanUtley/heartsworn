@@ -148,7 +148,8 @@ function readValue(node, c) {
 
 // Parses a serialized file (version 9 to 21). Returns the header facts and the
 // object table, plus read(object) which decodes one object with its TypeTree.
-export function parseSerializedFile(bytes) {
+// ``layouts`` (optional) holds the engine's type trees by class ID, for files stored without their own (resources.assets).
+export function parseSerializedFile(bytes, layouts = null) {
   const header = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   const version = header.getUint32(8);
   const dataOffset = header.getUint32(12);
@@ -202,7 +203,8 @@ export function parseSerializedFile(bytes) {
     }
     if (version >= 11 && version < 17) c.i16();
     if (version === 15 || version === 16) c.u8();
-    const object = { pathId, byteStart, byteSize, classId, node: type ? type.node : null };
+    const object = { pathId, byteStart, byteSize, classId,
+      node: (type && type.node) || (layouts && layouts[String(classId)]) || null };
     objects.push(object);
     byId.set(pathId, object);
   }

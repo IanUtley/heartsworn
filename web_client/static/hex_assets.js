@@ -231,6 +231,12 @@ async function gameboard(key) {
   return board;
 }
 
+// The layers of a Settings background (a Background_* prefab), or null until the folder is read.
+async function background(prefabName) {
+  if (!state.install) return null;
+  return state.install.background(prefabName);
+}
+
 async function packBoard(board) {
   const memo = new Map();
   const pack = async (pixels) => {
@@ -275,4 +281,5 @@ window.HexAssets = {
   playSound,
   setVolume,
   gameboard,
+  background,
 };

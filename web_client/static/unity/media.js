@@ -148,7 +148,68 @@ function float16(h) {
 // Decodes an uncompressed Mesh into attribute arrays and one index list per
 // submesh. Positions and normals stay in Unity's left-handed space; the caller
 // converts them. Compressed meshes are reported as unsupported.
+// Unity's PackedBitVector: values of m_BitSize bits, packed end to end (the bit order of UnityPy's unpack_ints).
+export function unpackInts(packed, start = 0, count = packed.m_NumItems) {
+  const bits = packed.m_BitSize, data = packed.m_Data;
+  const out = new Array(count);
+  let bitPos = bits * start;
+  let indexPos = Math.floor(bitPos / 8);
+  bitPos %= 8;
+  for (let i = 0; i < count; i++) {
+    let value = 0, got = 0;
+    while (got < bits) {
+      value += (data[indexPos] >> bitPos) * 2 ** got;
+      const take = Math.min(bits - got, 8 - bitPos);
+      bitPos += take;
+      got += take;
+      if (bitPos === 8) { indexPos++; bitPos = 0; }
+    }
+    out[i] = value % 2 ** bits;
+  }
+  return out;
+}
+
+// The quantized floats of a PackedBitVector, scaled from m_Start over m_Range.
+export function unpackFloats(packed, start = 0, count = packed.m_NumItems) {
+  const out = new Float32Array(count);
+  if (!packed.m_BitSize) return out.fill(packed.m_Start);
+  const scale = packed.m_Range / (2 ** packed.m_BitSize - 1);
+  const quantized = unpackInts(packed, start, count);
+  for (let i = 0; i < count; i++) out[i] = quantized[i] * scale + packed.m_Start;
+  return out;
+}
+
+// A compressed mesh (the m_CompressedMesh of a Mesh stored without its vertex buffer): positions, the first UV set and
+// the triangles per submesh, in the same shape decodeMesh returns. Normals are not read: the background does not light.
+export function decodeCompressedMesh(mesh) {
+  const cm = mesh.m_CompressedMesh;
+  const count = cm.m_Vertices.m_NumItems / 3;
+  const positions = unpackFloats(cm.m_Vertices, 0, cm.m_Vertices.m_NumItems);
+  let uvs = null;
+  if (cm.m_UV && cm.m_UV.m_NumItems > 0) {
+    // m_UVInfo packs four bits per channel: bit 2 says the channel exists, bits 0-1 give its dimension minus one.
+    const info = cm.m_UVInfo || 0;
+    const dim = info && (info & 4) ? 1 + (info & 3) : 2;
+    const raw = unpackFloats(cm.m_UV, 0, count * dim);
+    uvs = new Float32Array(count * 2);
+    for (let i = 0; i < count; i++) {
+      uvs[i * 2] = raw[i * dim];
+      uvs[i * 2 + 1] = dim > 1 ? raw[i * dim + 1] : 0;
+    }
+  }
+  const triangles = cm.m_Triangles && cm.m_Triangles.m_NumItems > 0 ? unpackInts(cm.m_Triangles) : [];
+  const perIndex = mesh.m_IndexFormat === 1 ? 4 : 2;   // m_IndexFormat: 0 = 16-bit, 1 = 32-bit
+  const submeshes = mesh.m_SubMeshes.map((sub) => {
+    const first = sub.firstByte / perIndex;
+    return { indices: Uint32Array.from(triangles.slice(first, first + sub.indexCount)), topology: sub.topology };
+  });
+  return { positions, normals: null, uvs, submeshes };
+}
+
 export function decodeMesh(mesh) {
+  const cm = mesh.m_CompressedMesh;
+  if (cm && cm.m_Vertices && cm.m_Vertices.m_NumItems > 0 && (!mesh.m_VertexData || !mesh.m_VertexData.m_VertexCount))
+    return decodeCompressedMesh(mesh);
   if (mesh.m_MeshCompression !== 0) throw new Error("compressed meshes are not supported");
   const vertexData = mesh.m_VertexData;
   const count = vertexData.m_VertexCount;

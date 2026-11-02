@@ -8,6 +8,7 @@ const VIEW_IDS = ["home", "lobby", "battle", "collection"];
 
 function showView(name) {
   for (const id of VIEW_IDS) $(`#${id}`).classList.toggle("hidden", id !== name);
+  if (name !== "home") disposeHomeScene();
   if (name === "home") applyHomeBackground();
   if (name === "collection") openCollection();
 }
@@ -26,8 +27,33 @@ function backgroundChoice() {
   return BACKGROUNDS.includes(key) ? key : DEFAULT_BACKGROUND;
 }
 
-function applyHomeBackground() {
-  $("#home").dataset.background = backgroundChoice();
+// The Settings background names -> the Background_* prefab that draws them. Latest is the Doombringer scene (Set09).
+const BACKGROUND_PREFAB = {
+  Latest: "Background_Set09", Black: "Background_Black", HexLogo: "Background_HexLogo", Cosmic: "Background_Cosmic",
+  Set04: "Background_Set04", Set05: "Background_Set05", Set06: "Background_Set06", Set07: "Background_Set07",
+  Set08: "Background_Set08", Set09: "Background_Set09",
+};
+const homeScene = { scene: null, token: 0 };
+
+// Draws the chosen background behind the page. Without the Hex folder there is no art, so the page keeps its plain
+// background; a choice that has no layers (Black, HexLogo) is the plain background too.
+async function applyHomeBackground() {
+  const key = backgroundChoice();
+  $("#home").dataset.background = key;
+  const token = ++homeScene.token;
+  const layers = window.HexAssets ? await HexAssets.background(BACKGROUND_PREFAB[key]) : null;
+  if (token !== homeScene.token) return;
+  const drawable = layers && (layers.parts.length || layers.emitters.length) ? layers : null;
+  disposeHomeScene();
+  $("#home-scene").classList.toggle("hidden", !drawable);
+  if (!drawable) return;
+  const { BackgroundScene } = await import("/static/background3d.js");
+  if (token === homeScene.token) homeScene.scene = new BackgroundScene($("#home-scene"), drawable);
+}
+
+function disposeHomeScene() {
+  if (homeScene.scene) homeScene.scene.dispose();
+  homeScene.scene = null;
 }
 
 function openSettings(open) {

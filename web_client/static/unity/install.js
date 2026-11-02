@@ -7,6 +7,7 @@ import { openBundle, openHarc } from "./reader.js";
 import { parseSerializedFile } from "./serialized.js";
 import { decodeTexture, decodeMesh, clipLocation } from "./media.js";
 import { parseVorbisBank, vorbisBankToOgg } from "./fsb.js";
+import { quatMatrix, mul, emitterFrom, backgroundLayers } from "./scene_layers.js";
 
 const ART = /^a\d{7}$/;
 
@@ -209,6 +210,27 @@ export class HexInstall {
     return index;
   }
 
+  // The layers of a Background_* prefab (Settings > Background), read from resources.assets, which is parsed once.
+  // resources.assets stores no type trees, so the engine layouts in typetrees.json stand in for them.
+  background(prefabName) {
+    if (!this.backgroundScenes) this.backgroundScenes = new Map();
+    if (!this.backgroundScenes.has(prefabName)) {
+      this.backgroundScenes.set(prefabName, (async () => {
+        if (!this.resources) {
+          this.resources = (async () => {
+            const source = await this.tree.file("Hex_Data/resources.assets");
+            const layouts = (await (await fetch("/static/unity/typetrees.json")).json()).classes;
+            return parseSerializedFile(await source.read(0, source.size), layouts);
+          })();
+        }
+        const readStream = async (path, offset, size) =>
+          (await (await this.tree.file(`Hex_Data/${path}`)).read(offset, size));
+        return backgroundLayers(await this.resources, prefabName, readStream);
+      })().catch(() => null));
+    }
+    return this.backgroundScenes.get(prefabName);
+  }
+
   // A battleboard: its textured meshes in Unity's world space, converted to
   // three.js axes (Unity is left-handed, so Z is mirrored and winding flips).
   // Battleboard keys: the AssetBundles/gameboards/<key>.ab files that hold a
@@ -406,27 +428,6 @@ async function atlasPixels(tree, f) {
 }
 
 // -- battleboard scene -------------------------------------------------------
-
-function quatMatrix(q, s, p) {
-  const [x, y, z, w] = [q.x, q.y, q.z, q.w];
-  const xx = x * x, yy = y * y, zz = z * z, xy = x * y, xz = x * z, yz = y * z, wx = w * x, wy = w * y, wz = w * z;
-  return [
-    (1 - 2 * (yy + zz)) * s.x, 2 * (xy + wz) * s.x, 2 * (xz - wy) * s.x, 0,
-    2 * (xy - wz) * s.y, (1 - 2 * (xx + zz)) * s.y, 2 * (yz + wx) * s.y, 0,
-    2 * (xz + wy) * s.z, 2 * (yz - wx) * s.z, (1 - 2 * (xx + yy)) * s.z, 0,
-    p.x, p.y, p.z, 1,
-  ];
-}
-
-function mul(a, b) {
-  const out = new Array(16);
-  for (let c = 0; c < 4; c++) for (let r = 0; r < 4; r++) {
-    let v = 0;
-    for (let k = 0; k < 4; k++) v += a[k * 4 + r] * b[c * 4 + k];
-    out[c * 4 + r] = v;
-  }
-  return out;
-}
 
 // CRC32 (the zlib polynomial), the hash Unity's animation clips use for object
 // paths and property names.
@@ -762,41 +763,7 @@ function boardFrom(serialized, bundle) {
 
 // A Unity MinMaxCurve as [low, high]: a constant, or a random pick between two
 // constants (state 2). Curves are approximated by their scalar.
-const minMax = (m) => (m.minMaxState === 2 ? [m.minScalar, m.scalar] : [m.scalar, m.scalar]);
 
-// Colour keys of a Unity gradient as sorted { t, rgba } stops, t in 0..1.
-function gradientStops(gradient) {
-  const stops = [];
-  for (let i = 0; i < gradient.m_NumColorKeys; i++) {
-    const key = gradient[`key${i}`];
-    stops.push({ t: gradient[`ctime${i}`] / 65535, rgba: [key.r, key.g, key.b, key.a] });
-  }
-  return stops.sort((a, b) => a.t - b.t);
-}
-
-function emitterFrom(system, position, texture, name) {
-  const init = system.InitialModule, emission = system.EmissionModule, shape = system.ShapeModule, color = system.ColorModule;
-  const start = init.startColor.maxColor;
-  return {
-    name, position, texture,
-    looping: !!system.looping,
-    duration: system.lengthInSec,
-    delay: minMax(system.startDelay)[1],
-    rate: emission.enabled ? minMax(emission.rateOverTime) : [0, 0],
-    bursts: emission.enabled ? emission.m_Bursts.map((b) => ({ time: b.time, count: [b.minCount, b.maxCount] })) : [],
-    lifetime: minMax(init.startLifetime),
-    speed: minMax(init.startSpeed),
-    size: minMax(init.startSize),
-    startColor: [start.r, start.g, start.b, start.a],
-    gradient: color.enabled && color.gradient.minMaxState === 1 ? gradientStops(color.gradient.maxGradient) : null,
-    shape: {
-      type: shape.enabled ? shape.type : -1,
-      radius: shape.radius.value, angle: shape.angle, length: shape.length,
-      box: [shape.boxX, shape.boxY, shape.boxZ],
-    },
-    maxParticles: init.maxNumParticles,
-  };
-}
 
 // Largest horizontal size of a battleboard part kept in the arena, and how far
 // from the origin its centre may be (world units, Unity metres).
