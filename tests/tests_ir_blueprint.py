@@ -32,3 +32,10 @@ def test_blueprint_parses_inquisition_and_refuses_bad_names():
     unused = INQUISITION.replace("Discard(Pick, Owner=Target)", "Discard(Target, Owner=Target)")
     with pytest.raises(bp.BlueprintError, match="never used"):
         bp.parse(unused)
+
+
+def test_every_inquisition_action_has_a_lowering_entry():
+    card = bp.parse(INQUISITION)
+    actions = {s.action for s in card.steps if isinstance(s, bp.Step)}
+    assert actions <= set(bp.ACTIONS), actions - set(bp.ACTIONS)
+    assert "local ability" in bp.ACTIONS["Choose"]["lowers_to"]

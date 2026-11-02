@@ -253,3 +253,22 @@ def parse(text: str) -> Card:
     card = _Parser(_tokenize(text)).card()
     _check(card)
     return card
+
+
+# The action table: what each Blueprint action lowers to in the Records' structure, and what is still missing.
+# Choose is a local ability (decided): the card defines it inside itself, as the Records do for Inquisition, where the
+# invoked ability has a revealed-card target and its own discard effect.
+ACTIONS: dict[str, dict[str, str]] = {
+    "Reveal": {
+        "lowers_to": "RevealCards effect (lookAt) on the clause's target (the target's hand)",
+        "helper": "shared('lookAt') + a binding for the hand; not yet in ir_surface",
+    },
+    "Choose": {
+        "lowers_to": "ActivateAbility clause invoking a local ability whose SourceRevealed target carries the filter",
+        "helper": "local ability with a revealed-card target; not yet in ir_surface",
+    },
+    "Discard": {
+        "lowers_to": "move-to-discard effect inside the invoked ability",
+        "helper": "move_card(text, id=, zone=) exists; Owner= argument is missing",
+    },
+}
