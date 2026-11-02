@@ -435,15 +435,9 @@ class CombatMixin:
             # The champion is the only attack target and it can't be attacked; troops only block, so no attack is legal.
             ready = []
             _hc.log_req("    Attack options withheld: opposing champion can't be attacked")
-        ev = game._make_event(_hc.game_engine.PlayerOptionListSessionEventArgs)
-        ev.player_id = pl_t
-        for scid in ready:
-            opt = game._make_event(_hc.game_engine.PlayerOptionSessionEventArgs)
-            opt.card = scid
-            opt.state = _hc.game_engine.ECardUsage.Attack
-            opt.instances = []
-            ev.options.append(opt)
-        game._push(ev)
+        from pickers import PickOption, present_options
+        present_options(game, pl_t, [PickOption(card_uid=int(scid.uid.uid64), state="Attack")
+                                     for scid in ready])
         game.push_player_updated(pl_t, champ_id=getattr(self, "_player_champ_scid", None))
         game.push_player_updated(ai_t, champ_id=getattr(self, "_ai_champ_scid", None))
         self._push_warzone_card_updates(game, session, pl_t, ai_t)
@@ -573,8 +567,6 @@ class CombatMixin:
         bstate = _be.load_state(session)
         self._current_bstate = bstate
         attackers = bstate.get("ai_attackers") or {}
-        attacker_scids = [_hc.game_engine.SessionCardId(_hc.game_engine.UID(int(u)))
-                          for u in attackers]
         # Use the same metadata-driven combat legality as resolution. This
         # includes conditional static rules such as Electroid's Dwarf/Robot
         # control threshold, which is not a persisted keyword bit.
@@ -583,40 +575,25 @@ class CombatMixin:
             session.session_id, self.user_profile["id"],
             _hc.game_engine.ECardStates.Tapped, conn=_hc._db)
         game = self._fresh_game(session, pl_t, ai_t, bstate)
-        ev = game._make_event(_hc.game_engine.PlayerOptionListSessionEventArgs)
-        ev.player_id = pl_t
-        blocking_id = _hc.game_engine.ResourceId.from_str(
-            "83659505-152d-4ddc-89df-7c29bdfba16d")
+        from pickers import BLOCK_DECLARATION_TEMPLATE as BLOCKING_TEMPLATE
+        from pickers import PickOption, PickTarget, present_options
+        options = []
         for uid, _battrs in rows:
             # This blocker's blockable targets: every attacker it may block.
-            blockable = []
-            for scid, u in zip(attacker_scids, attackers):
-                if can_block(_hc._db, session.session_id, bstate,
-                             int(u), int(uid)):
-                    blockable.append(scid)
+            blockable = tuple(int(u) for u in attackers
+                              if can_block(_hc._db, session.session_id, bstate, int(u), int(uid)))
             if not blockable:
                 continue
-            opt = game._make_event(_hc.game_engine.PlayerOptionSessionEventArgs)
-            opt.card = _hc.game_engine.SessionCardId(_hc.game_engine.UID(int(uid)))
-            opt.state = _hc.game_engine.ECardUsage.Defend
-            inst = game._make_event(_hc.game_engine.OptionInstanceSessionEventArgs)
-            inst.opt_id = blocking_id
-            inst.min_target_counts.append(0)
-            inst.max_target_counts.append(len(blockable))
-            inst.target_ids.append(blocking_id)
-            tgt = game._make_event(_hc.game_engine.TargetInstanceSessionEventArgs)
-            tgt.target_index = 0
-            tgt.target_id = blocking_id
-            tgt.targets = list(blockable)
-            inst.target_instances.append(tgt)
-            opt.instances.append(inst)
-            ev.options.append(opt)
-        game._push(ev)
+            options.append(PickOption(
+                card_uid=int(uid), state="Defend", prompt_ability=BLOCKING_TEMPLATE,
+                targets=(PickTarget(index=0, template_id=BLOCKING_TEMPLATE, candidates=blockable,
+                                    minimum=0, maximum=len(blockable)),)))
+        present_options(game, pl_t, options)
         game.push_player_updated(pl_t, champ_id=getattr(self, "_player_champ_scid", None))
         game.push_player_updated(ai_t, champ_id=getattr(self, "_ai_champ_scid", None))
         self._push_warzone_card_updates(game, session, pl_t, ai_t)
         self._send_battle_events(session, game, pl_t)
-        _hc.log_req(f"    Blockers options: {len(rows)} defender troop(s) for {len(attacker_scids)} AI attacker(s)")
+        _hc.log_req(f"    Blockers options: {len(rows)} defender troop(s) for {len(attackers)} AI attacker(s)")
         return True
 
     def _player_can_block(self, session):

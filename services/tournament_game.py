@@ -2922,15 +2922,8 @@ def pvp_push_attack_options(session, state):
     _pvp_populate_game_state(g, state, turn_pid, opp_pid)
     g.player_health = int(state.get(f"hp_{turn_pid}", 20))
     g.ai_health = int(state.get(f"hp_{opp_pid}", 20))
-    ev = g._make_event(_ge.PlayerOptionListSessionEventArgs)
-    ev.player_id = pl_t
-    for scid in ready:
-        opt = g._make_event(_ge.PlayerOptionSessionEventArgs)
-        opt.card = scid
-        opt.state = _ge.ECardUsage.Attack
-        opt.instances = []
-        ev.options.append(opt)
-    g._push(ev)
+    from pickers import PickOption, present_options
+    present_options(g, pl_t, [PickOption(card_uid=int(scid.uid.uid64), state="Attack") for scid in ready])
     # AttackDeclared + CardUpdated(state) + triggers + CombatListing for the
     # auto-declared ForceAttack troops — mirrored from PvE, on the SAME
     # objective stream so BOTH clients see the forced attack.
@@ -3025,7 +3018,6 @@ def pvp_push_blocker_options(session, state):
     attackers = {int(k): int(v) for k, v in (state.get("attackers") or {}).items()}
     if not attackers:
         return
-    attacker_scids = [_ge.SessionCardId(_ge.UID(int(u))) for u in attackers]
     from rules_port.combat_rules import can_block
     rows = db_warzone_blocker_uids(
         session.session_id, defender_pid, _ge.ECardStates.Tapped, conn=_db)
@@ -3043,37 +3035,21 @@ def pvp_push_blocker_options(session, state):
     g.ai_total_resources = int(state.get(f"res_total_{turn_pid}", 0))
     g.player_charges = int(state.get(f"chg_{defender_pid}", 0))
     g.ai_charges = int(state.get(f"chg_{turn_pid}", 0))
-    ev = g._make_event(_ge.PlayerOptionListSessionEventArgs)
-    ev.player_id = pl_t
-    blocking_id = _ge.ResourceId.from_str(
-        "83659505-152d-4ddc-89df-7c29bdfba16d")
-    blockable_count = 0
+    from pickers import BLOCK_DECLARATION_TEMPLATE, PickOption, PickTarget, present_options
+    options = []
     for (uid,) in rows:
-        blockable = []
-        for scid, u in zip(attacker_scids, attackers):
-            if can_block(_db, session.session_id,
-                         _pvp_fra_view(state, turn_pid, defender_pid),
-                         int(u), int(uid)):
-                blockable.append(scid)
+        blockable = tuple(int(u) for u in attackers
+                          if can_block(_db, session.session_id,
+                                       _pvp_fra_view(state, turn_pid, defender_pid),
+                                       int(u), int(uid)))
         if not blockable:
             continue
-        blockable_count += 1
-        opt = g._make_event(_ge.PlayerOptionSessionEventArgs)
-        opt.card = _ge.SessionCardId(_ge.UID(int(uid)))
-        opt.state = _ge.ECardUsage.Defend
-        inst = g._make_event(_ge.OptionInstanceSessionEventArgs)
-        inst.opt_id = blocking_id
-        inst.min_target_counts.append(0)
-        inst.max_target_counts.append(len(blockable))
-        inst.target_ids.append(blocking_id)
-        tgt = g._make_event(_ge.TargetInstanceSessionEventArgs)
-        tgt.target_index = 0
-        tgt.target_id = blocking_id
-        tgt.targets = list(blockable)
-        inst.target_instances.append(tgt)
-        opt.instances.append(inst)
-        ev.options.append(opt)
-    g._push(ev)
+        options.append(PickOption(
+            card_uid=int(uid), state="Defend", prompt_ability=BLOCK_DECLARATION_TEMPLATE,
+            targets=(PickTarget(index=0, template_id=BLOCK_DECLARATION_TEMPLATE, candidates=blockable,
+                                minimum=0, maximum=len(blockable)),)))
+    blockable_count = len(options)
+    present_options(g, pl_t, options)
     g.push_player_updated(pl_t, champ_id=_ge.SessionCardId(
         _ge.UID(int(state.get("champ_map", {}).get(str(defender_pid), 0)))))
     g.push_player_updated(opp_t, champ_id=_ge.SessionCardId(

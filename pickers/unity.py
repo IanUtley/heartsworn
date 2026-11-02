@@ -1,14 +1,17 @@
 """The Unity picker: the client's events for one choice (the behaviour the server has always sent).
 
-Order of events: an optional CardsRevealed (the revealed cards the client turns into a picker), PlayerOptionList (one
+A pick sends an optional CardsRevealed (the revealed cards the client turns into a picker), a PlayerOptionList (one
 option, with one target instance per slot and each slot's min/max), then the request that asks the client for the
 answer, then a GreenLight to the chooser. The request is class 39 (TriggeredAbilityActivationDataRequired) for a
 triggered ability, or class 23 (AbilityActivationDataRequired) for a DoubleChoice card choice or a revealed choice.
+
+An option list (present_options) sends only the PlayerOptionList: the declarations of attacks and blocks, where the caller
+pushes the rest of the window itself.
 """
 
 from __future__ import annotations
 
-from pickers.request import PickRequest
+from pickers.request import PickOption, PickRequest
 
 
 def _present_reveal(game, request: PickRequest, ge) -> None:
@@ -42,21 +45,19 @@ def _present_reveal(game, request: PickRequest, ge) -> None:
     reveal_event.ability_instance_id = int(request.instance_id)
 
 
-def present_pick(game, request: PickRequest) -> None:
-    import hconnect_server as _hc
-    ge = _hc.game_engine
-    _present_reveal(game, request, ge)
-    ev = game._make_event(ge.PlayerOptionListSessionEventArgs)
-    ev.player_id = request.player_id
+def _build_option(game, ge, option: PickOption):
+    """One PlayerOptionSessionEventArgs: the card and its state, with the instance when the option has one."""
     opt = game._make_event(ge.PlayerOptionSessionEventArgs)
-    opt.card = ge.SessionCardId(ge.UID(int(request.source_uid)))
-    opt.state = ge.ECardUsage.Activate
+    opt.card = ge.SessionCardId(ge.UID(int(option.card_uid)))
+    opt.state = getattr(ge.ECardUsage, option.state)
+    if option.prompt_ability is None:
+        return opt
     inst = game._make_event(ge.OptionInstanceSessionEventArgs)
-    inst.opt_id = ge.ResourceId.from_str(request.prompt_ability)
+    inst.opt_id = ge.ResourceId.from_str(option.prompt_ability)
     # ConfigureAbility matches target instances through this parallel target-template list (see HOWTO.md).
-    for parallel_id in request.option_target_ids():
+    for parallel_id in option.option_target_ids():
         inst.target_ids.append(ge.ResourceId.from_str(parallel_id))
-    for slot in request.targets:
+    for slot in option.targets:
         tgt = game._make_event(ge.TargetInstanceSessionEventArgs)
         tgt.target_index = slot.index
         tgt.target_id = ge.ResourceId.from_str(slot.template_id)
@@ -65,7 +66,28 @@ def present_pick(game, request: PickRequest) -> None:
         inst.min_target_counts.append(int(slot.minimum))
         inst.max_target_counts.append(int(slot.maximum))
     opt.instances.append(inst)
-    ev.options.append(opt)
+    return opt
+
+
+def present_options(game, player_id, options) -> None:
+    """Push one PlayerOptionList carrying ``options`` (possibly none). No request and no GreenLight: the caller owns the
+    rest of the window."""
+    import hconnect_server as _hc
+    ge = _hc.game_engine
+    ev = game._make_event(ge.PlayerOptionListSessionEventArgs)
+    ev.player_id = player_id
+    for option in options:
+        ev.options.append(_build_option(game, ge, option))
+    game._push(ev)
+
+
+def present_pick(game, request: PickRequest) -> None:
+    import hconnect_server as _hc
+    ge = _hc.game_engine
+    _present_reveal(game, request, ge)
+    ev = game._make_event(ge.PlayerOptionListSessionEventArgs)
+    ev.player_id = request.player_id
+    ev.options.append(_build_option(game, ge, request.as_option()))
     game._push(ev)
     if request.prompt_kind == "ability":
         # The class-23 request is UIBattle.OnAbilityActivationDataRequested's picker for one ability instance. For a

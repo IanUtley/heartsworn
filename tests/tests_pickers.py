@@ -56,3 +56,25 @@ def test_pvp_discard_prompt_sends_the_hand_as_candidates_only_to_its_controller(
                           "GreenLightSessionEventArgs"], names
     option = game.events[-3].options[0].instances[0]
     assert [int(c.uid.uid64) for c in option.target_instances[0].targets] == [0x301, 0x302]
+
+
+def test_option_list_declarations_carry_their_state_and_block_slots():
+    from pickers import BLOCK_DECLARATION_TEMPLATE, PickOption, PickTarget, present_options
+
+    pl_t = game_engine.UID.make(244, 5)
+    game = game_engine.Game(1, pl_t, game_engine.UID.make(244, 6))
+    present_options(game, pl_t, [
+        PickOption(card_uid=0x101, state="Defend", prompt_ability=BLOCK_DECLARATION_TEMPLATE,
+                   targets=(PickTarget(index=0, template_id=BLOCK_DECLARATION_TEMPLATE,
+                                       candidates=(0x201, 0x202), minimum=0, maximum=2),)),
+        PickOption(card_uid=0x102, state="Attack"),
+    ])
+    # A declaration is only the option list: no request and no GreenLight, the caller owns the rest of the window.
+    assert [event.__class__.__name__ for event in game.events] == ["PlayerOptionListSessionEventArgs"]
+    block, attack = game.events[0].options
+    assert block.state == game_engine.ECardUsage.Defend
+    assert list(block.instances[0].min_target_counts) == [0]
+    assert list(block.instances[0].max_target_counts) == [2]
+    assert [int(c.uid.uid64) for c in block.instances[0].target_instances[0].targets] == [0x201, 0x202]
+    assert attack.state == game_engine.ECardUsage.Attack
+    assert list(attack.instances) == []
