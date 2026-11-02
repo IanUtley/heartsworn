@@ -263,10 +263,15 @@ def grant(text: str, *, id: str, ability: str, name: str | None = None) -> Typed
     return _effect(T.GrantAbilityEffectTemplate, text, id, name, granted_ability_template_id=_ref(ability))
 
 
-def move_card(text: str, *, id: str, zone: str, name: str | None = None) -> Typed:
-    """Move the target cards into ``zone``."""
-    return _effect(T.MoveCardToZoneEffectTemplate, text, id, name, destination_collection=zone,
-                   destination_location="Unknown")
+def move_card(text: str, *, id: str, zone: str, owner: str | None = None, name: str | None = None) -> Typed:
+    """Move the target cards into ``zone``. ``owner`` names the player whose cards these are (Blueprint's ``Owner=``).
+
+    The Records' move effect has no owner field: the owner comes from the clause's target (the card is in that
+    player's hand). So ``owner`` is kept on the surface object, and the lowering checks it against the clause target."""
+    obj = _effect(T.MoveCardToZoneEffectTemplate, text, id, name, destination_collection=zone,
+                  destination_location="Unknown")
+    obj._surface_owner = owner
+    return obj
 
 
 def transform(text: str, *, id: str, card: str, name: str | None = None) -> Typed:

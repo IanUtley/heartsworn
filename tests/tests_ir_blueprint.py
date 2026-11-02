@@ -48,3 +48,13 @@ def test_non_resource_helper_round_trips_through_the_ir_text():
                     "[IsResource(is_basic_resource=False, threshold_color_flags='Any')]))")
     names = ir_python.loads("filter_ = " + text)
     assert ir_python.dumps(names["filter_"]) == text
+
+
+def test_move_card_keeps_its_owner_for_the_clause_target():
+    from gamedata import ir_surface
+    move = ir_surface.move_card("They discard that card.", id="00000000-0000-0000-0000-00000000d15c",
+                                zone="Discard", owner="Target")
+    assert move._surface_owner == "Target"
+    assert str(move.m_DestinationCollection) == "Discard"
+    plain = ir_surface.move_card("Discard it.", id="00000000-0000-0000-0000-00000000d15d", zone="Discard")
+    assert plain._surface_owner is None
