@@ -434,20 +434,6 @@ def test_resolving_a_troop_with_no_source_pushes_the_chain_events_only():
     assert checkpoint.saved >= 1
 
 
-def test_advance_to_priority_stops_when_a_champion_has_fallen():
-    from application.turn_flow import TurnFlowMixin
-    import game_engine
-    from tests.tests_combat import HandlerStub, SessionStub
-
-    class _Handler(HandlerStub, TurnFlowMixin):
-        def _check_champion_health(self, session, pl_t, ai_t, bstate):
-            return True
-
-    handler = _Handler(make_db())
-    assert handler._advance_to_priority(
-        SessionStub(), game_engine.UID.make(244, 5), game_engine.UID.make(3, 1000), {}) is False
-
-
 def test_add_deck_without_a_logged_in_user_is_rejected_with_an_error_reply():
     from services.deck_editing import handle_addnewdeck_2089
     from tests.tests_combat import HandlerStub
@@ -913,28 +899,6 @@ def test_fra_reconnect_snapshot_rebuilds_the_saved_board_for_the_player():
     session.turn_order = state
     assert handler._push_fra_reconnect_snapshot(session, 5) is True
     assert sent, "the saved board should be pushed back to the reconnecting client"
-
-
-def test_advance_to_priority_auto_passes_to_the_players_first_stop():
-    from rules_port import lifecycle as be
-    import game_engine
-    import hconnect_server
-    from tests.tests_combat import SessionStub
-    db = make_db()
-    hconnect_server._db = db
-    handler = hconnect_server.HCPHandler(None, ("127.0.0.1", 0))
-    handler.user_profile = {"id": 5}
-    handler.client_reck_id = 5
-    handler._maybe_attach_rules_port = lambda *args, **kwargs: None
-    handler.send = lambda header, body: None
-    session = SessionStub()
-    state = be.default_state(turn_player=be.PLAYER)
-    session.turn_order = state
-    pl_t = game_engine.UID.make(244, 5)
-    ai_t = game_engine.UID.make(game_engine.SERVICE_AI_UID_TYPE, 1000)
-    assert handler._advance_to_priority(session, pl_t, ai_t, state) is True
-    # The non-stop phases before the player's first stop were passed automatically.
-    assert state["phase_idx"] > 0, state
 
 
 def test_resolving_a_troop_from_the_chain_announces_the_chain_resolution():

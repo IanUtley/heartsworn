@@ -720,9 +720,6 @@ class CombatMixin:
         else:
             self._push_phase_options_empty(session, pl_t, ai_t)
 
-    def _ai_pass_declare_defense(self, session, pl_t, ai_t, bstate, game):
-        import ai
-        return ai.ai_pass_declare_defense(self, session, pl_t, ai_t, bstate, game)
 
     def _wire_combat_id_for_attacker(self, session, player_uid,
                                      attacker_uid, fallback_serial):
