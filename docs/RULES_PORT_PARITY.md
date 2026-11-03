@@ -1818,3 +1818,32 @@ before the framework copies can go:
 `ability_variable_value` is the one framework function production still reaches
 (through `bom_fields.effect_field`). Replacing it needs a differential over every
 Records variable kind, which is the next step.
+
+## Framework statics: native gaps closed, variable evaluator still framework
+
+Moving the statics tests to the native `effective_stats` and `effective_deltas`
+exposed three native bugs, now fixed:
+- A champion's health was never carried into the native champion stub (its
+  `defense` was 0), so `ChampionWith10OrLessHealth`-style counts saw every
+  champion at 0. `champion_stub` takes the health, read from the battle state.
+- The native static path imported `campaign_runtime` without putting `campaign/`
+  on the path; it now calls `campaign_source.ensure_campaign_path()` first.
+- A StoreName-backed filter (`HasName` with `UseStoredName`) looked up the
+  stored name only by the resolving ability or the source card's uid. It now
+  also checks the source card's own ability GUIDs, where StoreName records it.
+
+Te'talca's double damage is authored as a `damagemultiplier` rule. The native
+damage path reads that rule, so the test asserts the rule rather than a
+`controller_flags` entry that nothing consumes.
+
+`ability_variable_value` (reached in production through `bom_fields.effect_field`)
+still uses the framework evaluator. A differential of `statics._variable_value`
+against native `static_rules._expression_value` over every Records variable
+(37,140 checks over two battle-state shapes) found 1,575 differences, mostly:
+- `RandomNumber` (`AbilityVariable`): the framework returns `None`; native returns
+  `2147483647`. A native replacement must return `None` for values resolved at
+  activation.
+- `SourcePlayerThresholdAbilityVariable` and `ExpressionAbilityVariable` built on
+  it (for example `RubyDiamondYouHave` for the AI side).
+- `CardIntegerVariable`, `HighestCardAbilityVariable` and `CardSumAbilityVariable`.
+Those need case-by-case review before the framework evaluator can be removed.

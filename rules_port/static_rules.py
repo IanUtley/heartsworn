@@ -360,9 +360,12 @@ def _variable_card_candidates(db, session_id, battle_state, source_uid,
                 str(champion_uid), champion_counters.get(champion_uid, {}))
             counter_values = (counter_values if
                               isinstance(counter_values, dict) else {})
+            from .runtime_helpers import participant_value
+            health = participant_value(
+                battle_state, champion_owner, "hp", "health", 20)
             cards.append(CardView.champion_stub(
-                champion_uid, champion_owner, counter_values).as_shape(
-                    "champion_stub"))
+                champion_uid, champion_owner, counter_values,
+                health=health).as_shape("champion_stub"))
     spec = variable.get("m_CardFilter") or {}
     context = dict(battle_state or {}, cards=cards)
     return [card for card in cards if records_filter_matches(
@@ -1728,6 +1731,8 @@ def _scan_static_deltas(db, session_id, battle_state, card_uid, cache,
     if properties is None:
         # A dungeon run's "until the end of the dungeon" bonus is a continuous effect on the opposing troops: it reaches
         # every AI troop on the warzone, including one that enters later (campaign_runtime.dungeon_buffs).
+        from campaign_source import ensure_campaign_path
+        ensure_campaign_path()
         from campaign_runtime.dungeon_buffs import battle_bonus, is_opposing_troop_on_warzone
         bonus_atk, bonus_def = battle_bonus(battle_state)
         if (bonus_atk or bonus_def) and is_opposing_troop_on_warzone(

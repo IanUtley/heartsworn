@@ -19,7 +19,7 @@ SRC = fresh_database()
 
 import game_engine
 
-from abilities.framework.statics import effective_deltas, effective_stats
+from rules_port.static_rules import effective_deltas, effective_stats
 from rules_port.combat_rules import can_block
 from rules_port.static_rules import global_flags
 
@@ -401,8 +401,14 @@ def test_unblockable_except(db):
 def test_te_talca_double_damage_flag(db):
     card(db, 101, 5, "11111111-1111-1111-1111-111111111117", "warzone",
          json.dumps([TE_TALCA]))
-    from abilities.framework.statics import controller_flags
-    assert "double_damage" in controller_flags(db, 1, {}, 5)
+    # The native damage path reads the authored damage-multiplier rule, not a
+    # controller flag: Te'talca's "Your cards and effects deal double damage".
+    from rules_port.static_rules import rule_modifiers
+    rules = rule_modifiers(db, 1, {}, 101)
+    assert any(rule.get("property") == "damagemultiplier" and
+               int(rule.get("value", 0)) == 2 and
+               not rule.get("combatdamageonly") and
+               not rule.get("noncombatdamageonly") for rule in rules), rules
 
 
 def test_air_superiority_flight_aura(db):
@@ -442,7 +448,12 @@ def test_endbringer_scaled_rage(db):
     card(db, 101, 5, "11111111-1111-1111-1111-11111111111c", "warzone",
          json.dumps([ENDBRINGER]))
     card(db, 102, 5, "11111111-1111-1111-1111-11111111111d", "warzone")  # Orc
-    bstate = {"ai_health": 9, "player_health": 25}
+    # Live PvE battle states carry the champions in champ_map (owner 0 is the AI).
+    champ_map = {"0": game_engine.SessionCardId(
+        game_engine.UID.make(3, 1000)).uid.uid64,
+        "5": game_engine.SessionCardId(
+        game_engine.UID.make(244, 5)).uid.uid64}
+    bstate = {"ai_health": 9, "player_health": 25, "champ_map": champ_map}
     d = effective_deltas(db, 1, bstate, 102)
     assert d["rage"] == 2, d
     bstate["ai_health"] = 7
@@ -590,7 +601,7 @@ def test_end_of_turn_cleanup_clears_damage_before_buffs(db):
     """Cleanup removes marked combat damage before temporary DEF expires."""
     from rules_port.lifecycle import (
         clear_combat_damage, clear_expired_temporary_attributes)
-    from abilities.framework.statics import effective_stats
+    from rules_port.static_rules import effective_stats
 
     card(db, 101, 5, TPL_PLAIN, "warzone")
     db.execute(

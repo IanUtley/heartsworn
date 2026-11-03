@@ -1246,7 +1246,7 @@ def test_gem_rage_applies_as_static(db):
     statics layer (no game-text parsing)."""
     import hconnect_server as hcs
     import db as dbmod
-    from abilities.framework.statics import effective_stats
+    from rules_port.static_rules import effective_stats
     old_db = dbmod._db
     old_hcs_db = hcs._db
     dbmod._db = db
@@ -1444,7 +1444,7 @@ def test_deathcry_return_does_not_rejoin_the_combat(db):
     from rules_port.combat_damage import resolve as resolve_native
     from rules_port.context import EffectContext
     from rules_port.resolution import resolve_port_trigger
-    from abilities.framework.statics import effective_stats
+    from rules_port.static_rules import effective_stats
     from tests.tests_cards_fixes import _copy_card
 
     BONE_WARRIOR = "f4822b71-b1f5-448d-a7e6-b7caf5f11374"

@@ -1005,6 +1005,13 @@ class HasName:
             names = stored_names.get(ability_guid)
             if not names and source is not None:
                 names = stored_names.get(str(_id(source)))
+                if not names:
+                    # A StoreName trigger keys the name by the source's own ability GUID
+                    # (Oath of Valor's aura reads the name its trigger recorded).
+                    for guid in _v(source, "card_abilities", default=()) or ():
+                        names = stored_names.get(str(guid).lower())
+                        if names:
+                            break
             needle = (names[-1] if names else "")
             if source is not None and not needle:
                 # ``state["cards"]`` is a dict of per-card attr maps in battle

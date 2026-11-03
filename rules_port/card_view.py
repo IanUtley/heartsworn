@@ -542,11 +542,16 @@ class CardView:
                    shards=shards, attributes=attributes, rule_flags=rule_flags)
 
     @classmethod
-    def champion_stub(cls, card_uid: int, owner: Any, counters: dict) -> "CardView":
-        """A champion in the counter-bearing pool; its counter GUIDs are the lower-cased keys."""
+    def champion_stub(cls, card_uid: int, owner: Any, counters: dict,
+                      health: Any = 0) -> "CardView":
+        """A champion in the counter-bearing pool; its counter GUIDs are the lower-cased keys.
+
+        A champion's health is its defense, as in the other champion builders, so a health filter
+        (``ChampionWith10OrLessHealth``) reads the live value.
+        """
         return cls(card_uid=card_uid, card_type="Champion", location="champions", user_id=owner,
                    owner_id=owner, controller_id=owner, state=0, name="Champion", attack=0,
-                   defense=0, cost=0, subtype="", attributes=0, counters=counters,
+                   defense=int(health or 0), cost=0, subtype="", attributes=0, counters=counters,
                    counter_guids={str(guid).lower(): str(guid).lower() for guid in counters},
                    kind="champion")
 
