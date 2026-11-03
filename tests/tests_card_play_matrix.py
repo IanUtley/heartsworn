@@ -1358,7 +1358,7 @@ def _record_values(value):
 
 def _gain_threshold_color(graph):
     """Choose the shard required by a typed GainThreshold TAC condition."""
-    from abilities.framework.tac import _tac_attr_hash, decode_tac_tree
+    from gamedata.tac import attr_hash as _tac_attr_hash, decode_tac_tree
 
     def walk(value):
         if hasattr(value, "short_type"):

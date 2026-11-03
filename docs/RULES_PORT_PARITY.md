@@ -1872,3 +1872,10 @@ threshold and race cases.
 
 This changes live effect values for those kinds. Tests cover the paths they use,
 but no live game was run.
+
+## Framework leftovers removed
+
+`abilities/framework/tac.py` (a re-export of `gamedata.tac`), `resources.py` (wrappers
+over `rules_port.resources`), `deathcry.py` (no callers since the native trigger path
+took over) and `effects/utility.py` (no importers) are deleted. `ai.py` and the
+tests import from their real homes.

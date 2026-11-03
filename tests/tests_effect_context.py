@@ -771,7 +771,7 @@ def test_queue_surfaces_registers_the_native_chain_item():
 
 
 def test_resource_choice_ability_is_detected_from_metadata():
-    from abilities.framework.resources import printed_resource_choice_ability
+    from rules_port.resources import printed_resource_choice_ability
 
     assert printed_resource_choice_ability([
         "8dcbdee1-e1de-1acd-5b17-e8beaec808b4",

@@ -1910,7 +1910,7 @@ def test_resource_grant_columns_from_gamedata(db):
 
 def test_granted_resource_ability_adds_fruitful_forsight_resources(db):
     """A resource granted Gain [L1][R1] keeps the extra resource pool grant."""
-    from abilities.framework.resources import (
+    from rules_port.resources import (
         resolve_granted_resource_abilities)
 
     shard = "8554b2c8-cf48-467d-bf55-ab45e306ce43"

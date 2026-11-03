@@ -6,9 +6,6 @@ these modules resolve abilities; `rules_port` does (see `../README.md`).
 | Module | Owns |
 |---|---|
 | `_shared.py` | Logging, card-state masks, zone/collection mapping, champion-owner helpers |
-| `deathcry.py` | Deathcry filtering; resolution is delegated to `rules_port.resolution` |
-| `resources.py` | Resource-ability entry points over RulesPort |
-| `tac.py` | TAC v2 decoder (`tac_function`, `decode_tac`, ...) |
 | `effects/` | Counters, deck search, choice constants, visibility projection, zone-move projection |
 
 Several of these duplicate logic that also exists in `rules_port`

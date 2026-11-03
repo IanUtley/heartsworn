@@ -2824,7 +2824,7 @@ def _ai_csharp_manual_ability_decision(
     # ShiftAbility is a typed TAC operation. Port the C# keyword-pairing
     # decision using live attributes instead of matching the nested card text.
     if not useful and not champion:
-        from abilities.framework.tac import tac_function
+        from gamedata.tac import tac_function
         try:
             tac_shift = any(
                 tac_function(param) == "ShiftAbility"
