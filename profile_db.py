@@ -644,6 +644,12 @@ def db_get_unopened_chests(user_id, conn=None):
         "WHERE user_id=? AND opened=0", (user_id,)).fetchall()
 
 
+def db_get_unopened_chests_full(user_id, conn=None):
+    return _profile_connection(conn).execute(
+        "SELECT id, set_guid, chest_rarity, template_guid, wof_status, wof_spun "
+        "FROM treasure_chests WHERE user_id=? AND opened=0", (user_id,)).fetchall()
+
+
 def db_get_user_champions(user_id, conn=None):
     return _profile_connection(conn).execute(
         "SELECT id, champion_name, race, champion_class, gender, level, xp, "
