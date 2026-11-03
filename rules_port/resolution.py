@@ -103,7 +103,7 @@ def _list_target_values(battle_state, ability, kind, source_uid, target_spec,
         return record.field(name, default) if record is not None else default
 
     if kind == "SourceStoredTargetTemplate":
-        values = []
+        values: list[Any] = []
         if bool(field("m_StoredInAbility", True)):
             for key in ("stored_targets", "stored_targets_this_turn"):
                 store = state.get(key) or {}
@@ -768,7 +768,7 @@ class NativeEffectBackend:
                 secondary_target_index=-1,
                 output_variables={}, template=template)
             param = _effect_param(nested_spec)
-            bases = set()
+            bases: set[Any] = set()
             for entry in raw.get("_v", ()) or ():
                 if isinstance(entry, dict):
                     bases.update(str(name).rsplit(".", 1)[-1]
@@ -833,7 +833,7 @@ class NativeEffectBackend:
             # The first card each effect instance resolved, for the
             # ``resolving_secondary_target_uid`` alias a leaf such as a
             # damage-shield reads.
-            resolved_by_instance = {}
+            resolved_by_instance: dict[Any, Any] = {}
             for position, effect in enumerate(effects):
                 instance_id = int(field(effect, "effect_instance_id", position))
                 if position < start:

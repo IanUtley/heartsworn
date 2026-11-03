@@ -1,6 +1,7 @@
 """RulesPort-owned damage application and replacement lifecycle."""
 
 from __future__ import annotations
+from typing import Any
 
 import json
 import sqlite3
@@ -81,7 +82,7 @@ def _consume_shields(context, target, dealer, amount, combat):
 
     remaining = max(0, int(amount or 0))
     prevented = []
-    kept_by_store = {
+    kept_by_store: dict[Any, list[Any]] = {
         index: [] for index, _data in stores
     }
     changed_by_store = {

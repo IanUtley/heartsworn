@@ -1,6 +1,7 @@
 """RulesPort-owned underground Tunneling lifecycle."""
 
 from __future__ import annotations
+from typing import Any
 
 import base64
 import binascii
@@ -135,7 +136,7 @@ def queue_surfaces(context, owner_id):
     from pvp_db import db_underground_card_rows, db_card_mutation_field
 
     owner_id = int(owner_id or 0)
-    queued = []
+    queued: list[Any] = []
     if not chain.empty(context.bstate):
         return queued
     for card_uid, template_guid in db_underground_card_rows(

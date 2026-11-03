@@ -1,6 +1,7 @@
 """RulesPort attribute grants and their client projection."""
 
 from __future__ import annotations
+from typing import Any
 
 import json
 import re
@@ -121,7 +122,7 @@ def _boon_card_state(context, uid):
     if card_def is not None:
         attrs |= int(getattr(card_def, "attributes", 0) or 0)
 
-    int_attrs = {}
+    int_attrs: dict[Any, Any] = {}
     if card_def is not None:
         int_attrs.update(getattr(card_def, "int_attrs", {}) or {})
         if getattr(card_def, "lethal", False):

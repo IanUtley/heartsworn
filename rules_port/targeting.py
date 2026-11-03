@@ -848,7 +848,7 @@ def _legal_targets(db, session_id, controller_uid, template_id, source_uid,
     source = _source_card(db, session_id, source_uid, controller_uid)
     source_owner = int((source or {}).get("user_id", controller_uid) or 0)
     cards = []
-    by_owner = {}
+    by_owner: dict[Any, Any] = {}
     for row in rows:
         card = _card(row, battle_state, db, session_id)
         if kind not in {"TargetsAPlayerOrHisStuff",
@@ -905,7 +905,7 @@ def _legal_targets(db, session_id, controller_uid, template_id, source_uid,
     # Records filter tree per candidate dominated target/static evaluation.
     # Both key objects are call-local, and the predicate keeps its evaluation
     # context (including the pool) alive, so ids cannot be recycled here.
-    evaluators = {}
+    evaluators: dict[Any, Any] = {}
 
     def matches(card, spec, pool):
         key = (id(spec), id(pool))
@@ -1004,7 +1004,7 @@ def _legal_targets(db, session_id, controller_uid, template_id, source_uid,
             return []
         minimum, _maximum = _resolved_target_counts(
             template_id, template, state)
-        groups = {}
+        groups: dict[Any, Any] = {}
         for card in cards:
             uid = int(card["card_uid"])
             if uid in out:
@@ -1013,7 +1013,7 @@ def _legal_targets(db, session_id, controller_uid, template_id, source_uid,
                     for uid in group}
         return [uid for uid in out if uid in allowed]
     if kind == "DuplicateCardTargetTemplate":
-        matches_by_collection = {}
+        matches_by_collection: dict[Any, Any] = {}
         legal_by_uid = set(out)
         for card in cards:
             if int(card["card_uid"]) not in legal_by_uid:
@@ -1144,10 +1144,10 @@ def _chain_action_targets(db, session_id, controller_uid, template,
         elif isinstance(nested, (list, tuple)):
             activations.extend(value for value in nested
                                if isinstance(value, dict))
-        target_map = {}
+        target_map: dict[Any, Any] = {}
         for entry in activations:
             target_map.update(entry.get("target_map") or {})
-        target_values = []
+        target_values: list[Any] = []
         for selected in target_map.values():
             if isinstance(selected, dict):
                 selected = selected.get("value", selected.get("uid64", selected))

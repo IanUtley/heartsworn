@@ -215,7 +215,8 @@ def ability_starting_hand_size_modifier(db, ability_guid):
 
 def _target_filter_flags(value):
     """Return the typed card-type and exact-zone predicates in a filter."""
-    card_types, zones = set(), set()
+    card_types: set[Any] = set()
+    zones: set[Any] = set()
 
     def visit(node):
         node = _as_dict(node)
@@ -338,7 +339,7 @@ def pregame_modifiers(db, session, user_id, ability_guids,
 
         effect_params = list(_effect_params(db, str(guid)))
         charge_total = 0
-        rage_by_target = {}
+        rage_by_target: dict[Any, Any] = {}
         graph = None
         try:
             from gamedata import DEFAULT_RECORD_STORE, ability_graph

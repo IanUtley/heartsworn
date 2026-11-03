@@ -1,6 +1,7 @@
 """Native combat legality predicates for RulesPort."""
 
 from __future__ import annotations
+from typing import Any
 
 import json
 import game_engine
@@ -86,7 +87,7 @@ def _combat_card(db, session_id, battle_state, uid):
 
 def _rules(db, session_id, battle_state, uid):
     from pvp_db import db_card_mutation_field
-    values = []
+    values: list[Any] = []
     for column in ("permanent_buffs", "temporary_buffs"):
         try:
             data = json.loads(db_card_mutation_field(

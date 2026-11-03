@@ -1,3 +1,4 @@
+from typing import Any
 """Auditable inventory of the native HexClient rules conversion."""
 
 from pathlib import Path
@@ -180,7 +181,7 @@ NATIVE_EFFECT_SUBSETS: dict[str, frozenset[str]] = {
 }
 
 def coverage_summary():
-    counts = {}
+    counts: dict[Any, Any] = {}
     for status in TRANSACTION_COVERAGE.values():
         counts[status] = counts.get(status, 0) + 1
     return counts

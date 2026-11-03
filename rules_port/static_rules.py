@@ -7,6 +7,7 @@ evaluator, so an attached session cannot silently become hybrid.
 """
 
 from __future__ import annotations
+from typing import Any
 
 import ast
 import json
@@ -407,7 +408,7 @@ def _count_variable(db, session_id, battle_state, source_uid, owner, raw,
         # Client CardCountAbilityVariable walks ERace values and counts each
         # matching faction race once when that race name is a subtype of a
         # filtered card.  Card.HasSubType splits CurrentSubtype on spaces.
-        races = set()
+        races: set[Any] = set()
         for card in cards:
             subtype = str(card.get("subtype") or "").strip().lower()
             if not subtype:
@@ -736,7 +737,7 @@ def _source_player_shards(db, session_id, owner, variable):
                 "Choosing": "choosing", "Underground": "underground"}
     zones = [zone_map.get(value, str(value).lower()) for value in
              str(variable.get("m_Zone") or "Warzone").split("|") if value]
-    bits = set()
+    bits: set[Any] = set()
     for row in db_target_candidate_rows(
             session_id, zones, controller_uid=int(owner),
             both_players=False, conn=db):
@@ -1812,7 +1813,7 @@ def effective_card_properties(db, session_id, battle_state, card_uid):
     previous = state.get(marker)
     state[marker] = True
     try:
-        props = {}
+        props: dict[Any, Any] = {}
         with _projection_cache() as cache:
             row = _card_location_row(db, session_id, int(card_uid), cache)
             fields = _card_fields(db, session_id, int(card_uid), cache)

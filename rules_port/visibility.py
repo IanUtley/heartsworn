@@ -1,6 +1,7 @@
 """RulesPort-owned visibility projection for hidden-information effects."""
 
 from __future__ import annotations
+from typing import Any
 
 import json
 import game_engine
@@ -136,7 +137,7 @@ def project_visible_top_decks(db, session, handler, game, pl_t, ai_t, state):
     """Send the active top card only to players with the authored permission."""
     from pvp_db import db_deck_top_card_details
     from .static_rules import player_int_attributes
-    owners = set()
+    owners: set[Any] = set()
     if state.get("pvp"):
         owners.update(int(pid) for pid in state.get("pids", ()) or ())
     else:
@@ -196,7 +197,7 @@ def project_visible_underground(db, session, handler, game, pl_t, ai_t,
     """
     from pvp_db import db_underground_card_rows
     from .static_rules import player_int_attributes
-    owners = set()
+    owners: set[Any] = set()
     if state.get("pvp"):
         owners.update(int(pid) for pid in state.get("pids", ()) or ())
     else:
@@ -292,7 +293,7 @@ def apply_player_visibility_to_game(game, state):
 def refresh_player_visibility(db, session, handler, game, pl_t, ai_t, state):
     from pvp_db import db_visibility_underground_rows
     old = state.get("player_visibility") or {}
-    new = {}
+    new: dict[Any, Any] = {}
     for uid, owner, abilities in db_visibility_underground_rows(
             session.session_id, conn=db):
         for guid in _json_list(abilities):

@@ -247,7 +247,7 @@ def _hand_threshold_requirements(db, session_id, owner_id):
         "JOIN card_templates ct ON ct.guid=gc.template_guid "
         "WHERE gc.session_id=? AND gc.user_id=? AND gc.location='hand'",
         (int(session_id), int(owner_id))).fetchall()
-    requirements = {}
+    requirements: dict[Any, Any] = {}
     for (raw,) in rows:
         try:
             payload = json.loads(raw or "{}")
@@ -267,7 +267,7 @@ def _hand_threshold_requirements(db, session_id, owner_id):
                     requirements[flag] = max(
                         requirements.get(flag, 0), amount)
             continue
-        counts = {}
+        counts: dict[Any, Any] = {}
         for item in payload.get("list", ()) or ():
             try:
                 flag = _THRESHOLD_INDEX_FLAGS.get(int(item), int(item))

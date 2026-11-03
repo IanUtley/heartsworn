@@ -564,7 +564,7 @@ def _event_card(session, selector, *, source=None):
 
 def _stored_card_uids(session, source, *, list_name="StoredTargets"):
     state = _runtime_state(session)
-    values = []
+    values: list[Any] = []
     ability_lists = state.get("ability_lists") or {}
     for name in (list_name, list_name[0].lower() + list_name[1:]):
         values.extend(ability_lists.get(name, ()) or ())

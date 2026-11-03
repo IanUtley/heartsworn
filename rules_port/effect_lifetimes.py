@@ -367,7 +367,7 @@ def expire_temporary_intattrs(db, session_id, state, *, boundary=None,
                               handler=None):
     """Restore authored IntAttrs after their effect-instance duration."""
     with _LIFETIME_LOCK:
-        results = []
+        results: list[Any] = []
         for key in ("temporary_champion_int_attrs",
                     "temporary_card_int_attrs"):
             values = list(state.get(key) or ())

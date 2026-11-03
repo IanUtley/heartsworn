@@ -249,7 +249,7 @@ def _candidate_thresholds(threshold_data):
                     "color_flags": _SHARD_FLAGS.get(index, index),
                     "quantity": count})
         return requirements
-    counts = {}
+    counts: dict[Any, Any] = {}
     for color in threshold_data.get("list", []) or []:
         try:
             flag = _SHARD_FLAGS.get(int(color), int(color))
@@ -391,7 +391,7 @@ def _matching_template_candidates(context, card_filter, banned_guids=(),
     return candidates
 
 
-_FUSE_GUIDS = None
+_FUSE_GUIDS: list[str] | None = None
 _FUSE_LOCK = __import__("threading").RLock()
 
 
@@ -468,7 +468,7 @@ def _combined_cost_choices(context, candidates, count, total):
         return rng_choice(context.bstate, pool)
 
     remaining = int(total)
-    chosen = []
+    chosen: list[Any] = []
     for index in range(max(0, int(count))):
         if remaining <= 0:
             break
@@ -889,8 +889,8 @@ def summon_token(context, payload=None, *, target=None, owner=None):
                 json.dumps(buffs), conn=context.db)
             shard_names = {4: "Blood", 8: "Ruby", 16: "Sapphire",
                            32: "Wild", 64: "Diamond"}
-            previous_counts = {}
-            current_counts = {}
+            previous_counts: dict[Any, Any] = {}
+            current_counts: dict[Any, Any] = {}
             for value in previous_thresholds or ():
                 previous_counts[int(value)] = previous_counts.get(
                     int(value), 0) + 1
@@ -972,7 +972,7 @@ def flush_random_deck_placement(context):
     positions, so a batch costs one rewrite however many copies it places."""
     pending = context.bstate.pop("_deferred_random_deck", None) or []
     from pvp_db import db_randomly_insert_deck_cards
-    by_owner = {}
+    by_owner: dict[Any, Any] = {}
     for owner_id, uid in pending:
         by_owner.setdefault(owner_id, []).append(uid)
     for owner_id, uids in by_owner.items():
