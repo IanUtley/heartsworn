@@ -304,7 +304,7 @@ def pregame_modifiers(db, session, user_id, ability_guids,
     condition, while the BOM parameters contain the actual operation.  This
     keeps the campaign setup independent of individual talent names/cards.
     """
-    result = {
+    result: dict[str, Any] = {
         "health": 0,
         "charges": 0,
         "starting_hand": 0,
@@ -461,12 +461,12 @@ def apply_pregame_abilities(game, session, db, handler, player_uid, user_id,
     new_charges = old_charges + charge_delta
     if new_charges != old_charges:
         game.__dict__[charge_field] = new_charges
-        ev = game_engine.ChampionChargePointsChangedSessionEventArgs()
-        ev.player_id = player_uid
-        ev.operation = 1 if charge_delta >= 0 else 2
-        ev.delta = charge_delta
-        ev.new_value = new_charges
-        game._push(ev)
+        charge_event = game_engine.ChampionChargePointsChangedSessionEventArgs()
+        charge_event.player_id = player_uid
+        charge_event.operation = 1 if charge_delta >= 0 else 2
+        charge_event.delta = charge_delta
+        charge_event.new_value = new_charges
+        game._push(charge_event)
 
     # Native dispatch owns authored trigger/BOM effects in attached sessions.
     # The metadata-only pass above exists for abilities such as Fury whose

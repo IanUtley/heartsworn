@@ -8,7 +8,7 @@ RulesPort implementation.
 from __future__ import annotations
 
 import datetime
-from typing import Any, cast
+from typing import Any, Callable, cast
 
 
 _UNSUPPORTED = object()
@@ -255,10 +255,10 @@ def _requires_cards_count(ctx, source, owner, player_filter, zones,
             seen_costs.add(value)
             count += 1
         elif different_names:
-            value = str(card.get("name") or "")
-            if value in seen_names:
+            name = str(card.get("name") or "")
+            if name in seen_names:
                 continue
-            seen_names.add(value)
+            seen_names.add(name)
             count += 1
         elif _last(different_races).lower() not in {"", "unknown"}:
             for race in _different_races(card, different_races):
@@ -649,13 +649,13 @@ def _native_condition(node, ctx):
         return all(value >= required for value in values) if values else True
     if kind == "RequiresDateTime":
         now = datetime.datetime.now()
-        values = {"m_Year": now.year, "m_Month": now.month,
+        fields = {"m_Year": now.year, "m_Month": now.month,
                   "m_Day": now.day, "m_DayOfWeek": (now.weekday() + 1) % 7,
                   "m_DayOfYear": now.timetuple().tm_yday,
                   "m_Hour": now.hour, "m_Minute": now.minute,
                   "m_Second": now.second}
         op = node.get("m_ComparisonOp")
-        for field, actual in values.items():
+        for field, actual in fields.items():
             try:
                 expected = int(node.get(field, -1))
             except (TypeError, ValueError):
@@ -670,11 +670,11 @@ def _native_condition(node, ctx):
             return True
         from rules_port.tac import decode_tac_tree, _tac_attr_hash
         try:
-            required = decode_tac_tree(data)
+            required_tac = decode_tac_tree(data)
         except (TypeError, ValueError):
             return True
         actual = _event_tac(ctx)
-        conditions = required.get(_tac_attr_hash("Conditions")) or [required]
+        conditions = required_tac.get(_tac_attr_hash("Conditions")) or [required_tac]
         minimum = _tac_attr_hash("MinimumValues")
         subset = _tac_attr_hash("HasAsSubset")
         for condition in conditions:
@@ -764,11 +764,12 @@ def _native_condition(node, ctx):
                                    state.get("player_ids") or ())
             if not participant_ids:
                 participant_ids = list((state.get("champ_map") or {}).keys())
-            owner_key = (lambda player_id: int(player_id or 0)) if state.get(
+            # Keys are raw participant ids in PvP and the side name otherwise.
+            owner_key: Callable[[Any], Any] = (lambda player_id: int(player_id or 0)) if state.get(
                 "pvp") else _side
             # C# iterates each opponent's Player object, so an opponent with
             # no matching card rows still contributes a count of zero.
-            opposing_counts = {
+            opposing_counts: dict[Any, int] = {
                 owner_key(player_id): 0 for player_id in participant_ids
                 if not _same_player(ctx, player_id, source_owner)
             }

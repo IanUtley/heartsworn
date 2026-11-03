@@ -3946,7 +3946,7 @@ class EffectContext:
                     if hand_candidates and not forced:
                         hand_pick = (target.guid, [int(uid) for uid in hand_candidates])
                     break
-        if hand_pick is not None:
+        if hand_pick is not None and callable(prompt_targets):
             template_guid, hand_uids = hand_pick
             self.bstate["resolution_paused"] = True
             prompt_targets(

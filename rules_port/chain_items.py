@@ -294,6 +294,8 @@ def _activate_momentum(host, session, game, state, player_uid, ai_uid,
         granted.append(uid)
     if not granted:
         return []
+    if conn is None:
+        raise RuntimeError("no database connection for the Momentum pass")
     conn.commit()
     row_owner = int(info[3] or 0)
     for uid in granted:
