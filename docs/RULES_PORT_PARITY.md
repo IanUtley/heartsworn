@@ -1608,6 +1608,20 @@ a native acceptance test when its behavior is confirmed against the client:
 | `tests_combat`: AI X-cost spell kills its target | target survived |
 | `tests_deck_abilities`: Angel of Dawn plays free on first draw | card stayed in hand |
 
+## Card views: producer differences to check
+
+Static card filters now take a typed `CardView` (`rules_port/card_view.py`) built from
+the static query, whose output is unchanged. Other card producers still build their own
+dicts, and they disagree on what some keys mean:
+
+- `attack` and `defense` are the template's values in the static query
+  (`db_static_card_rows`, which ignores `card_attack_mod` and the buff records), but
+  the condition-context card (`db_condition_card_row`, used by
+  `rules_port/condition_context.py`) adds the instance modifiers. A filter that reads
+  the current attack therefore sees different values depending on the path. Which value
+  each filter should read is a rules question that has not been checked against the
+  client; decide it per filter before converting the other producers.
+
 ## Remaining work
 
 The scope of the complete original-client port is not complete. In addition to

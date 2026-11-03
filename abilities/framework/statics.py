@@ -29,6 +29,7 @@ from .targeting import (
 from ._shared import attribute_bits_from_flags, attribute_bits_from_text
 from .effects.counters import card_counters_full
 from .condition_engine import ConditionContext, evaluate_effect_condition
+from rules_port.card_view import CardView
 
 
 def _side_of(user_id):
@@ -44,17 +45,8 @@ def _opponent_id(db, session_id, owner):
 
 
 def _card_dict(row):
-    return {
-        "card_uid": int(row[0]), "card_type": row[1],
-        "location": row[2], "user_id": row[3],
-        "state": int(row[4] or 0), "attack": row[5],
-        "defense": row[6], "name": row[7] or "",
-        "cost": row[8] or 0, "subtype": row[9] or "",
-        "shards": shards_from_threshold(row[10]),
-        "attributes": int(row[11] or 0) | int(row[12] or 0),
-        "damaged_opponent_this_turn": [],
-        "src_owner_side": "player" if (row[3] or 0) else "ai",
-    }
+    """The static-filter mapping of one card row (see :class:`rules_port.card_view.CardView`)."""
+    return CardView.from_static_row(row).as_mapping()
 
 
 def _cards_in_zones(db, session_id, user_id, zones, bstate=None,
@@ -63,23 +55,14 @@ def _cards_in_zones(db, session_id, user_id, zones, bstate=None,
     rows = db_static_card_rows(session_id, zones, conn=db)
     if user_id is not None:
         rows = [r for r in rows if r[3] == user_id]
-    out = [_card_dict(r) for r in rows]
+    views = [CardView.from_static_row(r) for r in rows]
     # CardThresholdModifier/SubTypeModifier alter the instance context rather
     # than the immutable card template.  Static target filters must see those
     # current values in both the display and combat paths.
-    for card in out:
-        try:
-            buffs_value = db_card_mutation_field(
-                session_id, card["card_uid"], "permanent_buffs", conn=db)
-            buffs = json.loads(buffs_value or "{}") if buffs_value else {}
-            if isinstance(buffs, dict):
-                if isinstance(buffs.get("subtype"), str):
-                    card["subtype"] = buffs["subtype"]
-                if isinstance(buffs.get("thresholds"), list):
-                    card["shards"] = [int(value) for value in
-                                      buffs["thresholds"]]
-        except (TypeError, ValueError, json.JSONDecodeError):
-            pass
+    views = [view.with_permanent_buffs(db_card_mutation_field(
+                 session_id, view.card_uid, "permanent_buffs", conn=db))
+             for view in views]
+    out = [view.as_mapping() for view in views]
     if include_champions and bstate is not None:
         players = {}
         from pvp_db import db_session_user_ids
@@ -93,17 +76,7 @@ def _cards_in_zones(db, session_id, user_id, zones, bstate=None,
             champs.append((human[0], "player",
                            bstate.get("player_health", 20)))
         for c_uid, side, hp in champs:
-            out.append({
-                "card_uid": -1 if side == "ai" else -2,
-                "card_type": "Champion",
-                "location": "warzone",
-                "user_id": c_uid,
-                "state": 0, "attack": 0, "defense": hp,
-                "name": "Champion", "cost": 0, "subtype": "",
-                "shards": [], "attributes": 0,
-                "damaged_opponent_this_turn": [],
-                "src_owner_side": side,
-            })
+            out.append(CardView.champion(side, c_uid, hp).as_mapping())
     return out
 
 
