@@ -1634,6 +1634,10 @@ remain between the two paths, to decide per filter:
   (`_source_card`, shape "source") and the revealed card (`shape "revealed"`) take
   the template values. A target filter on attack therefore reads the current value in
   one path and the printed value in the other.
+- `rules_port/context.py` has the last card producers, for the bury filter and the
+  card-count variable. Both use template values (`cost` included), like the static
+  path; the bury candidate's `cost` is the template cost, not the effective cost the
+  condition layer uses for the same card.
 
 ## Remaining work
 

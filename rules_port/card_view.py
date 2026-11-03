@@ -81,6 +81,14 @@ SHAPES: dict[str, tuple[str, ...]] = {
                        "defense", "attack"),
     # A champion as a card candidate with its template identity (targeting.py:
     # _champion_filter_cards).
+    # The stub a bury effect's card filter is evaluated against (rules_port/context.py: bury).
+    "bury_source": ("card_uid", "user_id", "owner_id", "controller_id"),
+    # A card a bury effect's filter considers (rules_port/context.py: bury).
+    "bury_card": ("card_uid", "card_type", "location", "user_id", "state", "name", "cost",
+                  "subtype", "attributes"),
+    # A card counted by a card-count variable (rules_port/context.py: set_card_count_variable).
+    "count_card": ("card_uid", "card_type", "location", "user_id", "state", "attack", "defense",
+                   "name", "cost", "subtype"),
     "filter_champion": ("card_uid", "card_type", "location", "collection", "user_id", "owner_id",
                         "controller_id", "template_guid", "template_id", "name", "subtype",
                         "attack", "attributes", "defense", "counters", "counter_guids"),
@@ -405,6 +413,63 @@ class CardView:
             counters=counters,
             counter_guids={guid_: guid_ for guid_ in counters},
             kind="champion",
+        )
+
+    @classmethod
+    def bury_source(cls, card_uid: Any, owner: Any) -> "CardView":
+        """The stub a bury effect's filter is evaluated against: the source card and the deck owner."""
+        return cls(
+            card_uid=int(card_uid or 0),
+            card_type="",
+            location="",
+            user_id=int(owner or 0),
+            state=0,
+            attack=0,
+            defense=0,
+            name="",
+            cost=0,
+            subtype="",
+            owner_id=int(owner or 0),
+            controller_id=int(owner or 0),
+        )
+
+    @classmethod
+    def from_bury_row(cls, row: Sequence[Any]) -> "CardView":
+        """A deck card a bury effect's filter considers, from one ``db_condition_card_row``.
+
+        ``cost`` is the template's cost (the condition row's ``ct.cost``), not the effective cost.
+        """
+        return cls(
+            card_uid=int(row[0]),
+            card_type=row[1] or "",
+            location=row[2] or "",
+            user_id=int(row[3] or 0),
+            state=int(row[4] or 0),
+            attack=0,
+            defense=0,
+            name=row[8] or "",
+            cost=int(row[9] or 0),
+            subtype=row[10] or "",
+            attributes=int(row[12] or 0) | int(row[13] or 0),
+        )
+
+    @classmethod
+    def from_count_row(cls, row: Sequence[Any]) -> "CardView":
+        """A card a card-count variable counts, from one ``db_cards_for_filter`` row.
+
+        ``attack``, ``defense`` and ``cost`` are the template's values.
+        """
+        return cls(
+            card_uid=int(row[0]),
+            card_type=row[1] or "",
+            location=row[2] or "",
+            user_id=int(row[3] or 0),
+            state=int(row[4] or 0),
+            attack=int(row[5] or 0),
+            defense=int(row[6] or 0),
+            name=row[7] or "",
+            cost=int(row[8] or 0),
+            subtype=row[9] or "",
         )
 
     @classmethod

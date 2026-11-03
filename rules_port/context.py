@@ -12,6 +12,7 @@ import json
 from dataclasses import dataclass, replace
 from typing import Any
 from .damage_effects import assign_damage_shield_order, serialized_damage
+from rules_port.card_view import CardView
 
 
 def _opposing_owner_in(state, owner, handler):
@@ -569,10 +570,9 @@ class EffectContext:
         elif self.template_value("m_Filter", None):
             count = 0
             from rules_port.filters import records_filter_matches
-            source = {"card_uid": int(self.bstate.get("resolving_source_uid") or 0),
-                      "user_id": int(deck_owner or 0),
-                      "owner_id": int(deck_owner or 0),
-                      "controller_id": int(deck_owner or 0)}
+            source = CardView.bury_source(
+                self.bstate.get("resolving_source_uid"), deck_owner).as_shape(
+                    "bury_source")
             spec = self.template_value("m_Filter", {})
             deck_rows = self.db.execute(
                 "SELECT card_uid FROM game_cards WHERE session_id=? "
@@ -585,12 +585,7 @@ class EffectContext:
                     self.session.session_id, int(uid), conn=self.db)
                 if not row:
                     continue
-                card = {"card_uid": int(row[0]), "card_type": row[1] or "",
-                        "location": row[2] or "", "user_id": int(row[3] or 0),
-                        "state": int(row[4] or 0),
-                        "name": row[8] or "", "cost": int(row[9] or 0),
-                        "subtype": row[10] or "",
-                        "attributes": int(row[12] or 0) | int(row[13] or 0)}
+                card = CardView.from_bury_row(row).as_shape("bury_card")
                 if records_filter_matches(
                         card, spec, source=source,
                         context=dict(self.bstate or {})):
@@ -2134,11 +2129,7 @@ class EffectContext:
             self.session.session_id, owners, locations, conn=self.db)
         count = 0
         for row in rows:
-            card = {"card_uid": int(row[0]), "card_type": row[1] or "",
-                    "location": row[2] or "", "user_id": int(row[3] or 0),
-                    "state": int(row[4] or 0), "attack": int(row[5] or 0),
-                    "defense": int(row[6] or 0), "name": row[7] or "",
-                    "cost": int(row[8] or 0), "subtype": row[9] or ""}
+            card = CardView.from_count_row(row).as_shape("count_card")
             if evaluate_card_filter(card, card_filter, self.bstate.get(
                     "resolving_source_uid"), ability_state=self.bstate, db=self.db):
                 count += 1
