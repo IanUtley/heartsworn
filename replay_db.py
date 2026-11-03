@@ -217,13 +217,6 @@ def db_session_state_snapshot(session_id):
             capture_db.close()
 
 
-def db_session_state_hash(session_id):
-    snapshot = db_session_state_snapshot(session_id)
-    if not snapshot:
-        return ""
-    return hashlib.sha256(snapshot.encode("utf-8")).hexdigest()
-
-
 def db_rules_port_state_snapshot(session):
     """Serialize the in-memory RulesPort state attached to a live session."""
     port = getattr(session, "_rules_port_session", None)

@@ -27,7 +27,7 @@ Key files:
 - `rules_port/lifecycle.py` — battle checkpoint: phase cycle, stops, chain facade, load/save
 - `game_session.py` — Session state management
 - `static.py` — ALL DB DDL + seeded tables (fresh DBs; single source of truth)
-- `db.py` — Shared SQLite connection (`db._db`) + reusable `db_*` DML helpers
+- `db.py` — Shared SQLite connection (`db._db`), transactions and logging context; domain `db_*` helpers live in `pvp_db.py`, `profile_db.py`, `pve_db.py`, `tournament_db.py`, `replay_db.py` and `chat_db.py`
 - `rules_port/resolution.py` / `rules_port/effects.py` - ability resolution and effect dispatch
 - `AssetExtraction/extract_talents.py` — regenerates talent/ability-BOM seed snapshot
 - `migration.py` — run-and-delete one-off migrations (restart.sh)

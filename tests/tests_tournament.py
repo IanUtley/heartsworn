@@ -95,6 +95,7 @@ def test_pvp_disconnect_hands_priority_to_survivor():
 
 
 def test_tournament_session_pids_ignore_non_player_card_owners():
+    import pvp_db
     test_db = sqlite3.connect(":memory:")
     previous_db = db._db
     try:
@@ -115,7 +116,7 @@ def test_tournament_session_pids_ignore_non_player_card_owners():
                         (47629, 5176002727556651092))
         db._db = test_db
 
-        assert db.db_game_session_pids(47629) == [
+        assert pvp_db.db_game_session_pids(47629) == [
             1925190388022160, 2408558011085730]
     finally:
         db._db = previous_db

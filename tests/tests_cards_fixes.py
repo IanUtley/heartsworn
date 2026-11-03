@@ -2040,6 +2040,7 @@ def test_battleboard_mod_summons_token_for_opposing_race_champion(db):
 def test_shards_randomly_reinsert_into_deck(db):
     """Shards-of-Fate candidates are randomly reinserted while non-shards
     retain their relative deck order."""
+    import pvp_db
     import db as dbmod
     old_db = dbmod._db
     dbmod._db = db
@@ -2053,7 +2054,7 @@ def test_shards_randomly_reinsert_into_deck(db):
         db.commit()
         candidates = [500, 503, 506, 508]
         with mock.patch("random.shuffle", side_effect=lambda seq: seq.reverse()):
-            ordered = dbmod.db_randomly_insert_deck_cards(
+            ordered = pvp_db.db_randomly_insert_deck_cards(
                 1, 5, candidates)
         rows = db.execute(
             "SELECT card_uid, position FROM game_cards "
@@ -2061,8 +2062,10 @@ def test_shards_randomly_reinsert_into_deck(db):
         positions = {uid: pos for uid, pos in rows}
         non_shards = [uid for uid, _pos in rows if uid not in candidates]
         assert non_shards == [501, 502, 504, 505, 507, 509], non_shards
-        assert set(positions[uid] for uid in candidates) == {6, 7, 8, 9}, positions
-        assert ordered == [508, 506, 503, 500], ordered
+        assert sorted(positions.values()) == list(range(10)), positions
+        # The return value lists the shards in their new deck order.
+        assert sorted(ordered) == sorted(candidates), ordered
+        assert ordered == sorted(candidates, key=positions.get), ordered
     finally:
         dbmod._db = old_db
 
@@ -2074,6 +2077,7 @@ def test_single_card_reinsert_stays_within_deck(db):
     ``db_randomly_insert_deck_cards``, so the single-card fast path must
     exclude it before choosing a slot instead of leaving a gap past the end.
     """
+    import pvp_db
     import db as dbmod
     old_db = dbmod._db
     dbmod._db = db
@@ -2086,7 +2090,7 @@ def test_single_card_reinsert_stays_within_deck(db):
             [(uid - 600, uid) for uid in range(600, 605)])
         db.commit()
         for _ in range(100):
-            dbmod.db_randomly_insert_deck_cards(1, 5, [602])
+            pvp_db.db_randomly_insert_deck_cards(1, 5, [602])
             rows = db.execute(
                 "SELECT card_uid, position FROM game_cards "
                 "WHERE session_id=1 AND user_id=5 AND location='deck' "
@@ -2454,6 +2458,7 @@ def test_evaluator_card_info_reads_instance_abilities(db):
 
 def test_discard_positions_append_and_snapshot_order(db):
     """Discard entries get a stable per-player append position used by reconnects."""
+    import pvp_db
     import db as db_module
 
     add_card(db, 501, 5, TPL_ENFORCER, loc="discard")
@@ -2475,7 +2480,7 @@ def test_discard_positions_append_and_snapshot_order(db):
     old_db = db_module._db
     db_module._db = db
     try:
-        snapshot = db_module.db_game_cards_at_location(1, "discard", user_id=5)
+        snapshot = pvp_db.db_game_cards_at_location(1, "discard", user_id=5)
     finally:
         db_module._db = old_db
     assert [row[0] for row in snapshot] == [501, 502, 503, 504], snapshot

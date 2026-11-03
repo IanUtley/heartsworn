@@ -175,7 +175,7 @@ or display text.
 | `campaign_source.py` | adds the `campaign/` source root to Python's import path for server modules |
 | `gamemodes/` | mode-specific orchestration (PVP, FRA, tournament) |
 | `static.py` | all schema DDL and server-owned seed/configuration data |
-| `db.py` | one SQLite connection, transactions, and compatibility persistence facade |
+| `db.py` | one SQLite connection, transactions, logging context and a few shared helpers |
 | `profile_db.py` | profile, champion, deck, collection, inventory, mail, social, and store persistence API |
 | `pve_db.py` | campaign/FRA/encounter persistence API |
 | `pvp_db.py` | shared session, card, and battle persistence API used by PVE and PVP |

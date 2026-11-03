@@ -1498,7 +1498,7 @@ def test_fra_specs_carry_every_card_of_the_arena_decks(tmp_path):
 
 def test_opening_a_starter_pack_consumes_it_and_replies_to_the_client():
     import db as shared
-    from profile_db import db_add_inventory, db_inventory_item
+    from profile_db import db_inventory_item, db_upsert_inventory_item
     from services.chest_requests import handle_opencardpack_2127
     import hconnect_server
     db = make_db()
@@ -1509,7 +1509,7 @@ def test_opening_a_starter_pack_consumes_it_and_replies_to_the_client():
         pack = "0382f729-7710-432b-b761-13677982dcd2"
         db.execute("INSERT OR IGNORE INTO users (id, name, gold, platinum) VALUES (5, 'pack', 0, 0)")
         db.commit()
-        db_add_inventory(5, pack, 1, conn=db)
+        db_upsert_inventory_item(5, pack, 1, conn=db)
         db.commit()
         handler = hconnect_server.HCPHandler(None, ("127.0.0.1", 0))
         handler.user_profile = {"id": 5, "name": "pack"}

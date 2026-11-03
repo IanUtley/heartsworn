@@ -107,9 +107,12 @@ def test_session_logger_writes_bound_session_file():
         db_module.PLAYER_LOG_DIR = temp_dir
         db_module._log_req_file = capture
         try:
-            with db_module.log_session_context(
-                    77, player_id=5, participant_ids=(5, 6)):
+            db_module.set_log_context(
+                player_id=5, session_id=77, participant_ids=(5, 6))
+            try:
                 assert db_module.log_req("session diagnostic") is True
+            finally:
+                db_module.set_log_context()
             session_path = os.path.join(temp_dir, "session-77-p5-p6.log")
             player_path = os.path.join(temp_dir, "player-5.log")
             with open(session_path,

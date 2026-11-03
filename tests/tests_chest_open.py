@@ -24,7 +24,16 @@ from az1_pack import (AZ1_CAMPAIGN_PACK_GUID, AZ1_CARD_SET_GUID,
                       AZ2_PVE_CARD_SET_GUIDS, AZ2_PVP_COMMON_SET_GUIDS,
                       PVE_CARD_SET_GUIDS, PVP_COMMON_SET_GUIDS)
 from profile_db import (db_create_treasure_chest, db_get_chest_by_id,
-                        db_inventory_item, db_inventory_item_by_client_uid)
+                        db_inventory_item)
+
+
+def db_inventory_item_by_client_uid(user_id, client_item_uid):
+    """The inventory row a client addresses by its item UID (test lookup)."""
+    import db
+    return db._db.execute(
+        "SELECT id, template_guid, quantity, client_item_uid "
+        "FROM player_inventory WHERE user_id=? AND client_item_uid=? "
+        "ORDER BY id LIMIT 1", (user_id, int(client_item_uid))).fetchone()
 from services.store import apply_purchase
 from static import CRAYBURN_PACK_CARD_SEEDS
 

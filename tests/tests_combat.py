@@ -662,7 +662,7 @@ def test_basic_champion_power_is_not_activatable_on_chain(db):
                         side_effect=graph_for), \
                 mock.patch("db.db_talent_ability_costs", return_value=(
                     2, 0, 1 << game_engine.ETurnPhases.FirstMainPhase, 8)), \
-                mock.patch("db.db_champion_ability_costs", return_value=None):
+                mock.patch("pvp_db.db_champion_ability_costs", return_value=None):
             bstate = {
                 "player_charges": 2,
                 "player_spell_points": 0,

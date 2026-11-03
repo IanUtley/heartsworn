@@ -70,17 +70,6 @@ def db_get_player_champion_guid(deck_db_id, conn=None):
     return guid if guid and guid != "00000000-0000-0000-0000-000000000000" else None
 
 
-def db_get_champion_guid(pve_champion_id, conn=None):
-    """Return the champion template GUID for a PVE champion row."""
-    row = _connection(conn).execute(
-        "SELECT ct.guid FROM champion_templates ct "
-        "JOIN champions c ON ct.race=c.race "
-        "AND ct.champion_class=c.champion_class AND ct.gender=c.gender "
-        "AND ct.is_player=1 WHERE c.id=?",
-        (int(pve_champion_id),)).fetchone()
-    return row[0] if row else None
-
-
 def db_get_arena_state(user_id, initialize=True, conn=None):
     """Return one player's FRA state, optionally creating its row."""
     connection = _connection(conn)
@@ -798,8 +787,6 @@ def db_campaign_for_champion_template(champion_id, template_name, conn=None):
         (int(champion_id), str(template_name or ""))).fetchone()
 
 
-
-
 def db_campaign_user_id(champion_id, conn=None):
     row = _connection(conn).execute(
         "SELECT user_id FROM champions WHERE id=?", (champion_id,)).fetchone()
@@ -856,12 +843,6 @@ def db_campaign_set_zone(campaign_id, campaign_type, template_name,
          campaign_id))
 
 
-
-
-
-
-
-
 def db_campaign_owner_user_id(campaign_id, conn=None):
     """Return the profile id owning one campaign, or None."""
     row = _connection(conn).execute(
@@ -884,8 +865,6 @@ def db_campaign_forfeit_row(campaign_id, conn=None):
     return _connection(conn).execute(
         "SELECT champion_id, state_json, campaign_type FROM campaigns "
         "WHERE id=?", (campaign_id,)).fetchone()
-
-
 
 
 def db_campaign_delete_for_champion(champion_id, conn=None):
@@ -911,14 +890,6 @@ def _content():
     campaign_source.ensure_campaign_path()
     import campaign_content
     return campaign_content
-
-
-def _visible_node_rows(template, node=None):
-    """Enabled, visible campaign node conversations of one template (and node)."""
-    return [r for r in _content().node_conversations()
-            if str(r.get("campaign_template")) == str(template)
-            and (node is None or str(r.get("node_id")) == str(node))
-            and int(bool(r.get("enabled", 1)))]
 
 
 def _quest_rows(**where):
@@ -958,14 +929,6 @@ def db_az1_scene_rows(conn=None):
     rows = [r for r in _content().scenes() if _like(r.get("name"), "AZ 1 - NODE ")]
     rows.sort(key=lambda r: str(r.get("name") or ""))
     return [(r.get("guid"), r.get("name"), r.get("title")) for r in rows]
-
-
-
-
-
-
-
-
 
 
 def db_quest_template(script_name=None, campaign_group=None, conn=None):
@@ -1042,20 +1005,6 @@ def db_active_campaign_candidates(champion_id, campaign_type, template=None,
         "WHERE id=?", (row[0],)).fetchone()[0] is None]
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 def db_conversation_name(conversation_guid, conn=None):
     """Return the authored name of a catalogued campaign conversation."""
     guid = str(conversation_guid or "").lower()
@@ -1069,18 +1018,10 @@ def db_conversation_name(conversation_guid, conn=None):
     return None
 
 
-
-
-
-
-
-
 def db_encounter_scene_rewards(scene_guid, conn=None):
     """Return the authored serialized rewards for one encounter scene."""
     row = _content().scene(str(scene_guid))
     return row.get("rewards_json") if row else None
-
-
 
 
 def db_void_tamed_troop_rows(session_id, player_user_id, owner, conn=None):
@@ -1103,8 +1044,6 @@ def db_card_in_warzone(session_id, player_user_id, template_guid, owner="opponen
         "SELECT 1 FROM game_cards gc WHERE gc.session_id=? AND LOWER(COALESCE(gc.location,''))='warzone' "
         "AND LOWER(gc.template_guid)=? AND " + owner_sql + " LIMIT 1",
         (int(session_id), str(template_guid).lower(), int(player_user_id))).fetchone() is not None
-
-
 
 
 def db_campaign_progress_rows(champion_id, conn=None):
@@ -1208,8 +1147,6 @@ def db_campaign_talents(campaign_id, conn=None):
     return row[0] if row else None
 
 
-
-
 def db_starting_hand_size(race, champion_class, conn=None):
     """Return the authored starting hand size for a class identity."""
     row = _connection(conn).execute(
@@ -1241,33 +1178,6 @@ def db_champion_last_campaign_id(champion_id, conn=None):
         "SELECT last_campaign_id FROM champions WHERE id=?", (champion_id,)
     ).fetchone()
     return row[0] if row else None
-
-
-def db_quest_start_rows(conversation_guid, campaign_template, conn=None):
-    """Return eligible authored quest starts in their source order."""
-    content = _content()
-    templates = {r.get("script_name"): r for r in content.quest_templates()}
-    rows = []
-    for r in content.quest_conversations():
-        if (str(r.get("conversation_guid")) != str(conversation_guid)
-                or str(r.get("campaign_template")) != str(campaign_template)
-                or r.get("role") != "start" or not int(bool(r.get("enabled", 1)))):
-            continue
-        template = templates.get(r.get("quest_script")) or {}
-        start = template.get("start_hook") or r.get("start_hook") or ""
-        rows.append((r.get("priority") or 0, r.get("quest_script"), start, r.get("faction"),
-                     template.get("campaign_group") or "AREA"))
-    rows.sort(key=lambda row: (int(row[0]), str(row[1])))
-    return [row[1:] for row in rows]
-
-
-def db_quest_node_rows(node, conn=None):
-    """Return enabled AZ1 quest conversations for one node."""
-    rows = [r for r in _quest_rows(campaign_template="AZ1", node_id=str(node))
-            if int(bool(r.get("enabled", 1)))]
-    rows.sort(key=lambda r: (int(r.get("priority") or 0), str(r.get("conversation_guid") or "").lower()))
-    return [(r.get("quest_script"), r.get("conversation_guid"), r.get("role"), r.get("faction"),
-             r.get("conditions_json") or "{}") for r in rows]
 
 
 def db_conversation_reward(conversation_guid, conn=None):
@@ -1369,22 +1279,12 @@ def db_campaign_owner_user_id(campaign_id, conn=None):
     return row[0] if row else None
 
 
-
-
-
-
 def db_campaign_state(campaign_id, conn=None):
     """Return serialized state for one campaign."""
     row = _connection(conn).execute(
         "SELECT state_json FROM campaigns WHERE id=?", (campaign_id,)
     ).fetchone()
     return row[0] if row else None
-
-
-
-
-
-
 
 
 def db_encounter_deck_sleeve(deck_guid, conn=None):
