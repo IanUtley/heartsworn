@@ -1,6 +1,5 @@
 """Helpers for reading one isolated Unity headless coverage run."""
 
-import os
 import re
 
 

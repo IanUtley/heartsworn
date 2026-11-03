@@ -20,7 +20,6 @@ Example::
 """
 
 from dataclasses import dataclass, field
-from typing import Any
 
 _MODES: dict[str, type] = {}
 

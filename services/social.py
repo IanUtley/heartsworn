@@ -23,7 +23,7 @@ Event pushes (server → client):
     2204  FriendGoesOffline
 """
 
-import io, struct, time, traceback, sys
+import traceback, sys
 
 from db import log_req
 from profile_db import db_get_friends, db_get_pending_friend_requests, db_get_ignored_list

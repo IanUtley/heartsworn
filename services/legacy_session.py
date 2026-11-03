@@ -3,7 +3,6 @@
 Moved out of hconnect_server.HCPHandler._handle_service_request_legacy.
 """
 
-import game_session
 import hashlib
 import json
 import os

@@ -190,7 +190,6 @@ def from_declarations(enums):
 
 def record_versions():
     """Each class's version as the Records store it. Every class has one version there."""
-    import json
     found = {}
     for path in glob.glob(os.path.join(ROOT, "hex-private", "Records", "*.jsonl")):
         for line in open(path, encoding="utf-8", errors="replace"):

@@ -3,7 +3,6 @@
 All commands receive the handler instance (self) for DB access, event sending, etc.
 """
 import inspect
-import struct as _struct
 import json as _json
 import os as _os
 import re as _re
@@ -1386,7 +1385,6 @@ def _cmd_challenge(handler, args):
     room_id = int(session_id_fallback(session))
 
     # Push 25072 + 25060 to both players
-    from encoder import encode_objfmt_response
     _challenge_push_25072_25060(handler, room_id, sess_uid, session_name, my_deck_uid64, my_id, my_name)
     _challenge_push_25072_25060(opp_handler, room_id, sess_uid, session_name, opp_deck_uid64, opp_id, opp_name)
 

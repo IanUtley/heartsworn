@@ -765,8 +765,7 @@ class PendingChoicesMixin(_HostBase):
             _play_choice_card as play_choice_card,
             _resolve_choice_card_abilities as resolve_choice_card_abilities)
         from rules_port.resolution import (
-            resolve_port_ability,
-            resume_ability_continuation_parents)
+            resolve_port_ability)
         bstate = _be.load_state(session)
         pending = bstate.get("pending_choice")
         if not pending:
@@ -1157,7 +1156,6 @@ class PendingChoicesMixin(_HostBase):
         """
         import hconnect_server as _hc
         _be = self._checkpoint_engine(session)
-        from rules_port.runtime_helpers import owner_uid
         bstate = _be.load_state(session)
         self._current_bstate = bstate
         pend = bstate.get("pending_trigger")

@@ -6,7 +6,6 @@ handler by ``data_type`` through :data:`DECK_EDIT_HANDLERS`.
 
 from binascii import hexlify
 from binascii import unhexlify
-from domain.enums import EGemTypesNew
 import io
 import json
 import struct

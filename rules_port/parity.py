@@ -8,7 +8,6 @@ seed. It intentionally compares event *order*, not just final state.
 
 from __future__ import annotations
 
-import json
 from dataclasses import asdict, dataclass
 from typing import Any, Callable, Mapping
 

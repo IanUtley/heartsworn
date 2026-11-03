@@ -19,7 +19,7 @@ import random
 from contextvars import ContextVar
 
 from db import _db, log_req
-from domain.enums import ECardAttributes, ECardShards
+from domain.enums import ECardAttributes
 
 
 _ACTIVE_TARGET_CANDIDATE_CACHE = ContextVar(

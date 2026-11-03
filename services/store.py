@@ -1,6 +1,6 @@
 """Store / Escrow service handlers: GetStoreItems, PurchaseItem, RedeemCode."""
 
-import json, gzip, os
+import json, os
 
 from db import log_req
 from profile_db import (db_get_store_items, db_adjust_user_currency,

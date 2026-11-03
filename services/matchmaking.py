@@ -4,7 +4,7 @@ Also handles direct friend challenges via SendQuickMatchChallenge (4013)
 and SendChallengeResponse (4017).
 """
 
-import io, struct, uuid, threading, sys
+import struct, uuid, threading, sys
 from binascii import unhexlify
 
 from encoder import encode_objfmt_response, compress_gzip, encode_datawrapper, make_uid

@@ -1,6 +1,6 @@
 """Tournament PvP game setup — push initial battle events to both players."""
 
-import random, json, threading, re, time, struct
+import json, re, struct
 from types import SimpleNamespace
 from typing import Any
 
@@ -26,7 +26,7 @@ from rules_port.pvp_lifecycle import (phase_is_stop as port_phase_is_stop,
                                       skips_draw_phase as port_skips_draw_phase,
                                       turn_phase_list as port_turn_phase_list)
 from gamedata import DEFAULT_RECORD_STORE, ability_graph, PlayPlan
-from application.player_transactions import extract_ability_guid
+from application.player_transactions import extract_ability_guid  # noqa: F401  (re-exported for tests)
 from db import _db, log_req
 from pvp_db import (
     db_game_session_pids,
@@ -70,7 +70,6 @@ from pvp_db import (
     db_deck_top_card,
     db_hand_count,
     db_card_play_info,
-    db_card_chain_info,
     db_warzone_display_rows,
     db_template_name,
     db_target_template_info,
@@ -3117,7 +3116,6 @@ def pvp_advance_past_non_stops(session, state):
     player has a self-stop on it or the opponent has an opponent-stop on it —
     the player's configured stops are respected.  Returns True if it advanced
     at least one phase."""
-    from rules_port import lifecycle as _be
     pids = db_game_session_pids(session.session_id)
     if len(pids) < 2:
         return False
@@ -3230,7 +3228,7 @@ def _pvp_card_playable(session, state, card_uid, tpl_guid, ct_name, cost,
     Countermagic unplayable with nothing on the chain)."""
     from gamedata import PlayPlan
     from gamedata import ability_graph
-    from rules_port.costs import card_cost_targets, cost_type_for_kind
+    from rules_port.costs import card_cost_targets
     from rules_port.targeting import legal_targets_for
     pids = db_game_session_pids(session.session_id)
     if len(pids) < 2:
@@ -3791,7 +3789,6 @@ def _pvp_add_play_target_options(g, session, state, pl_t, opp_t, turn_pid):
     the client opens the target picker for played spells — mirrors PvE
     _add_play_target_options.  Without this a targeted spell (e.g. Bravery
     "+1/+1 target troop") is played with no target and no effect."""
-    import json as _js
     if not g.events:
         return
     # CardUpdated/PlayerUpdated events may be appended while the packet is
@@ -3802,7 +3799,7 @@ def _pvp_add_play_target_options(g, session, state, pl_t, opp_t, turn_pid):
          if isinstance(event, _ge.PlayerOptionListSessionEventArgs)), None)
     if last_ev is None:
         return
-    from gamedata import AbilityInstance, PlayPlan
+    from gamedata import PlayPlan
     from rules_port.targeting import legal_targets as _lt
     champ_map = state.get("champ_map") or {}
     champ_targets = []
@@ -4053,7 +4050,6 @@ def _pvp_affordable_troop_abilities(session, state, pid=None):
             if target_refs:
                 wants_attacking = False
                 has_target = False
-                from rules_port import lifecycle as _be
                 for target in target_refs:
                     target_filter = target.card_filter
                     if hasattr(target_filter, "to_dict"):
@@ -5263,7 +5259,6 @@ def route_pvp_pass(handler, session):
 
     # ── both players have passed ──────────────────────────────────────
     old_phase = state["phase"]
-    from rules_port import lifecycle as _be
     # Decide the phase list for this turn: combat steps only when the turn
     # player controls a ready troop (mirrors build_turn_phases).  CRITICAL:
     # once we are PAST the first combat phase (>= DeclareAttack=12) we must
@@ -6015,7 +6010,6 @@ def _ability_has_effects_from(ability_guid, order):
 def _pvp_resolve_choice(handler, session, inner_bytes, my_pid,
                         typed_payload=None):
     """Resolve a private ChooseAndPlay choice and resume its parent BOM."""
-    from rules_port import lifecycle as _be
     from rules_port.choice_effects import (
         extract_card_uids, _play_choice_card, _resolve_choice_card_abilities)
     state = pvp_load_state(session) or {}
@@ -8670,7 +8664,6 @@ def _pvp_play_troop(handler, session, played_card_uid, my_pid, inner_bytes,
                         ctype_num, template_id=tpl_guid, cost=cost2,
                         attack=atk, defense=def_, gems=gems)
     # Push the permanent onto the chain as a "troop" item.
-    from rules_port import lifecycle as _be
     inst_id = port_queue_stack_item(state, {
         "kind": "troop", "source_uid": int(played_card_uid),
         "ability_guids": [], "target_uid": None,
@@ -8846,7 +8839,6 @@ def _pvp_play_spell(handler, session, played_card_uid, my_pid, inner_bytes,
     the spell onto the chain, then resolve its BOM when the chain resolves and
     send CastSpells -> Discard.  A player may cast a QuickAction any time they
     hold priority and can pay the cost.  Pushes events to BOTH players."""
-    from rules_port import lifecycle as _be
     from gamedata import PlayPlan
     pids = db_game_session_pids(session.session_id)
     if len(pids) < 2:
@@ -9716,7 +9708,6 @@ def _pvp_advance_past_declare_defense(session, state):
     """Advance the PvP phase from DeclareDefense (14) to
     DeclareDefensePriorityWindow (15), pushing the phase to both players and
     handing priority to the turn (attacker) player.  Returns True on success."""
-    from rules_port import lifecycle as _be
     pids = db_game_session_pids(session.session_id)
     if len(pids) < 2:
         return False
@@ -9739,7 +9730,6 @@ def _pvp_advance_from_damage_step(session, state, just_resolved):
     AssignDamage=18), advance to the next phase and push it to both players.
     16 -> AssignDamage (18); 18 -> SecondMainPhase (19).  Resolves combat so
     the opponent doesn't get stuck in a dead BattleStateAssignDamage."""
-    from rules_port import lifecycle as _be
     pids = db_game_session_pids(session.session_id)
     if len(pids) < 2:
         return
@@ -9868,7 +9858,7 @@ def handle_ready_for_game_setup(handler, session, pvp_ready, player_handlers):
     """Post-process a 22027 response for tournament PvP sessions."""
     if not session or not (session.session_name or "").startswith("tourney-"):
         return None, False
-    import io, struct, hashlib
+    import struct, hashlib
     from binascii import hexlify as _hx
     pids = db_game_session_pids(session.session_id)
     my_pid = int(handler.client_reck_id) if hasattr(handler, 'client_reck_id') else 0

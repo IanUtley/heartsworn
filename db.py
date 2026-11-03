@@ -590,7 +590,6 @@ def db_backfill_ability_effect_meta(db=None):
     walks effects by group and gates them on conditions; without these columns
     the flat BOM walk cannot reproduce it."""
     import json as _j
-    import re as _re
     con = db or _db
     # Ensure the mapping columns exist (fresh DBs get them from static.DDL;
     # older DBs need ALTER TABLE before the backfill can write them).

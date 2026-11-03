@@ -3,7 +3,6 @@ import hashlib
 import http.server
 import json
 import sys
-import time
 import os
 import urllib.request
 from datetime import datetime

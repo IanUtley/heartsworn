@@ -9,7 +9,6 @@ folder supplies ``Data/gamedata``, and the browser builds the database from it
 with ``static.ensure_schema`` and the FRA populator, as the desktop server does.
 """
 import argparse
-import os
 import shutil
 import zipfile
 from pathlib import Path

@@ -1,6 +1,5 @@
 """ObjFmt encoders for inventory, card-instance, deck and champion bit fields."""
 
-import encoder
 
 
 def encode_inventory_item(buf, sizes, ft, template_guid, item_id, elem_idx, quantity=1, bound=True):

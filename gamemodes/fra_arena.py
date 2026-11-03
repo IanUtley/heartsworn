@@ -1,6 +1,5 @@
 """FRA arena setup values and session state data."""
 
-import game_engine
 
 
 def _fra_arena_setup_values(encounter_data):

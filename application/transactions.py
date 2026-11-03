@@ -463,7 +463,7 @@ class TransactionsMixin(_HostBase):
         if (session.session_name or "").startswith("tourney-"):
             from services.tournament_game import (
                 pvp_load_state, pvp_save_state,
-                pvp_mulligan_next, _pvp_push_mulligan_prompt,
+                pvp_mulligan_next,
                 db_game_session_pids)
             # Track which player kept
             state = pvp_load_state(session)
@@ -933,7 +933,6 @@ class TransactionsMixin(_HostBase):
             from services.tournament_game import (
                 db_game_session_pids, pvp_load_state, pvp_save_state,
                 pvp_session_lock)
-            import random as _rp
             my_pid = int(self.client_reck_id)
             pl_t = _hc.game_engine.UID.make(244, my_pid)
             pids = db_game_session_pids(session.session_id)
@@ -998,8 +997,6 @@ class TransactionsMixin(_HostBase):
         if not handled:
             pl_t = _hc.game_engine.UID.make(244, int(self.client_reck_id))
             ai_t = _hc.game_engine.UID.make(_hc.game_engine.SERVICE_AI_UID_TYPE, 1000)
-            import random as _random
-            import json as _redraw_json
             game2 = _hc.game_engine.Game(session.session_id, pl_t, ai_t)
 
             # Fetch deck's active_gems ONCE (not per card)

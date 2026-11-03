@@ -1,6 +1,5 @@
 """Practice/PvE mulligan and game-start pushes, and chain/UID helpers for the session path."""
 
-import game_engine
 
 
 def _push_pve_mulligan_start(game, player_uid, ai_uid,

@@ -32,7 +32,6 @@ without shared in-memory mutable state.
 
 import json
 import os
-import time
 
 import db as connection_db
 import pvp_db as db_layer
@@ -144,7 +143,6 @@ def _next_instance(conn=None):
 
 def create_encounter_session(session_name, encounter_data, player_uid, conn=None):
     """Create a new encounter session and persist it to the DB."""
-    import struct
     inst = _next_instance(conn=conn)
     session_id = make_uid(UID_TYPE["ServiceGameSession"], inst)
     server_id = make_uid(UID_TYPE["ServiceGameSession"], inst * 7)

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import struct
 import uuid
 from typing import Optional
 

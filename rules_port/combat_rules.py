@@ -161,7 +161,6 @@ def can_block(db, session_id, battle_state, attacker_uid, blocker_uid):
             blocker_attrs & int(game_engine.ECardAttributes.Flight | game_engine.ECardAttributes.SkyGuard)):
         return False
 
-    from pvp_db import db_card_mutation_field
     from rules_port.filters import records_filter_matches
     for rule in _rules(db, session_id, battle_state, attacker_uid):
         if rule.get("property") not in {"blockimmunity", "blockimmunityexception"}:

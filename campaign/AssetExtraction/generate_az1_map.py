@@ -12,7 +12,6 @@ import argparse
 from typing import Any, cast
 import html
 import json
-import math
 import re
 from dataclasses import dataclass
 from pathlib import Path

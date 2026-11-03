@@ -814,7 +814,6 @@ class TurnFlowMixin(_HostBase):
         """
         import hconnect_server as _hc
         from rules_port import lifecycle as _be
-        from rules_port.runtime_helpers import owner_uid
         bstate = _be.load_state(session)
         self._current_bstate = bstate
         # A card/resource mutation can arrive after the port session was

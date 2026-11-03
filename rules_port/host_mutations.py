@@ -34,7 +34,6 @@ def discard_card_to_owner(host, session, pl_t, ai_t, card_uid):
         attack=attack, defense=defense, cost=cost,
         template_id=tpl, gems=gems)
     game.push_card_discarded(scid, owner_player_uid)
-    from . import chain
     from .persistence import load_state
     bstate = load_state(session)
     host._current_bstate = bstate

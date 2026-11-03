@@ -1112,7 +1112,7 @@ def create_token_copy(context, count=None, target=None):
         if location == "deck":
             # The copy's place in the deck follows the authored m_CardLocation, as a move's does: Top or Bottom is
             # the end, and Unknown is a random slot (C# FinishMovingCard).
-            from pvp_db import db_insert_deck_card_at, db_randomly_insert_deck_cards
+            from pvp_db import db_insert_deck_card_at
             card_location = str(context.template_value(
                 "m_CardLocation", "") or "").rsplit(".", 1)[-1].lower()
             if card_location in ("top", "bottom"):

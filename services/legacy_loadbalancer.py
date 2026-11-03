@@ -5,12 +5,6 @@ Moved out of hconnect_server.HCPHandler._handle_service_request_legacy.
 
 from binascii import hexlify
 from binascii import unhexlify
-from pvp_db import db_ability_target_template_ids
-from pvp_db import db_deck_active_gems
-from services.reconnect import _reconnect_declined_for_pid
-import campaign
-import encoder
-import game_session
 import io
 import json
 import random
@@ -1035,7 +1029,6 @@ def handle_readytostartgame_22031(handler, target, instance, data_type, reqid, c
     _hc.log_req(f"    Pushed GameStarted (3053, {len(gs_dw)}b)")
 
     # Push 3055 game events AFTER 22027
-    import struct as _struct
     pl_uid_t = _hc.game_engine.UID.make(244, int(handler.client_reck_id))
     ai_uid_t = _hc.game_engine.UID.make(_hc.game_engine.SERVICE_AI_UID_TYPE, 1000)
     pl_uid_val = (int(handler.client_reck_id) << 8) | 244

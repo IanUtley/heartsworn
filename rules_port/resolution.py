@@ -321,7 +321,7 @@ def _match_secondary_values(db, session_id, ability, effect, target_spec,
 
     raw = _resolved_effect_target_values(
         ability, sec, battle_state, resolved_by_instance)
-    from .targeting import legal_targets, _source_card
+    from .targeting import legal_targets
     secondary = []
     for value in raw:
         if value is None:

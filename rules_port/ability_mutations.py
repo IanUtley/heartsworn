@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 
-import game_engine
 
 
 def _abilities(value):
