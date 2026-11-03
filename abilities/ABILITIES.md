@@ -232,7 +232,7 @@ See §11.
 | `m_Threshold[]` | `List<CardThreshold>` | Threshold requirements to activate (e.g. shard-colour counts). |
 | `m_AICustomAbilityEvaluator[]` | list | AI hints for evaluating whether to use the ability. |
 | `m_AIHints` | string | Free-text AI hints. |
-| `m_SerializedTAC` | `SerializableTAC` | Binary TAC blob; at runtime becomes the ability's `TAC` (template attribute collection). Overrides/extra rules live here (e.g. `Mobilize`, attribute ops). Decoder: `abilities/framework/tac.py`. |
+| `m_SerializedTAC` | `SerializableTAC` | Binary TAC blob; at runtime becomes the ability's `TAC` (template attribute collection). Overrides/extra rules live here (e.g. `Mobilize`, attribute ops). Decoder: `gamedata/tac.py`. |
 
 ---
 
@@ -340,7 +340,7 @@ unknown `_t` values as "needs a new leaf executor".
 - **`Battle2CardsAbilityEffectTemplate`** (48) — fight. Field: `m_FightBack` (default true).
 - **`PlayCardAbilityEffectTemplate`** (47) — play a card for free. Field: `m_JustActivate`.
 - **`TACAbilityEffectTemplate`** (66) — TAC-driven operation (Shift etc.).
-  Fields: `m_SerializedTAC` (decoder in `abilities/framework/tac.py`).
+  Fields: `m_SerializedTAC` (decoder in `gamedata/tac.py`).
 - **`VoidCardAbilityEffectTemplate`**, **`SacrificeCardAbilityEffectTemplate`**,
   **`DiscardCardAbilityEffectTemplate`**, **`CounterSpellAbilityEffectTemplate`**,
   **`InterruptSpellAbilityEffectTemplate`**, **`SwapHealthAbilityEffectTemplate`**,
@@ -824,7 +824,7 @@ event; the ability remains paused until the matching
 campaign/UI conversations separate from ordinary card-state effects while
 allowing metadata-defined records to invoke them in both game modes.
 
-### Triggered-ability handling (`abilities/framework/triggers.py`, `deathcry.py`)
+### Triggered-ability handling (`rules_port/triggers.py`)
 Live battle resolution uses `rules_port.triggers.NativeTriggerBackend` and
 `RecordsTriggerDiscovery`; the legacy `resolve_triggers` entry point is retained
 for direct compatibility callers. The native dispatcher matches the authored
@@ -1066,7 +1066,7 @@ those five (plus, where noted, the NumericModifier pair).
 | `m_CardFilter` / `m_Filter` | a **card-filter** type above, or a filter tree (`AndCardFilter`/`OrCardFilter`/`NotCardFilter` with `m_TargetFilters`/`m_TargetFilter`) |
 | `m_AmountField`, `m_InputValue`, `m_CombinedCost`, `m_LoopCount`, `m_MaxValueField` | a **value field** (`EffectConstant` / `EffectInputVariable`) |
 | `m_RepeatingEffect` | a nested effect record (Repeating only) |
-| `m_SerializedTAC` | a TAC binary blob decoded by `abilities/framework/tac.py` |
+| `m_SerializedTAC` | a TAC binary blob decoded by `gamedata/tac.py` |
 
 The counts are how often each `_t` appears in `AbilityEffectTemplate.jsonl`
 (top-level or nested). The full-qualified `_t` values live under the

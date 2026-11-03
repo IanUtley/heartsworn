@@ -219,7 +219,7 @@ class CombatMixin:
         # until the next full board refresh. Hand/deck events retain their
         # visibility projection semantics.
         try:
-            from abilities.framework._shared import owner_uid
+            from rules_port.runtime_helpers import owner_uid
             for event in game.events:
                 collection = getattr(event, "collection", None)
                 if collection not in (

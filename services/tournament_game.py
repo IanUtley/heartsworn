@@ -5151,8 +5151,8 @@ def push_pvp_game_start(handler, session, log_req=log_req):
                 "StartingDeckSize",
                 len(db_game_deck_cards(session.session_id, int(pid))))
         pvp_save_state(session, state)
-        # The shared ability framework (abilities/framework/bom.py _deal_damage,
-        # resolution.py _champion_uids, etc.) maps champion targets via the
+        # The native damage and target resolution (rules_port/damage_effects.py,
+        # rules_port/resolution.py _champion_uids, etc.) map champion targets via the
         # handler's _player_champ_scid / _ai_champ_scid — PvE sets these at
         # battle init, PvP never did, so champion-targeting effects (Burn on a
         # champion) resolved as "no card" and dealt no damage.  Set them here.

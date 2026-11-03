@@ -1902,3 +1902,13 @@ handler's champion ids when a PvP state has no `champ_map` entry for the champio
 live PvP always sets `champ_map`, and the fallback only covered headless fixtures.
 `counter_is_secret` has no production caller: native projection does not hide
 secret counters from opponents yet, so that is a gap to close.
+
+## Framework package removed
+
+`abilities/framework/` has no code left, so the package is deleted. Its last
+module, `_shared.py`, re-exported `owner_uid`, `card_collection_for_location`,
+`state_after_zone_exit` and `next_game_card_uid`; those callers now import the
+`rules_port` owners directly (`owner_uid` and `card_collection_for_location` from
+`rules_port.runtime_helpers`, `state_after_zone_exit` from `rules_port.zone_effects`).
+The other `_shared` helpers had no callers. Differentials showed the
+`owner_uid` and location-map behaviour matches.

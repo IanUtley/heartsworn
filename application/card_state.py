@@ -712,7 +712,7 @@ class CardStateMixin:
                 owner = _hc.game_engine.UID.make(244, int(row[1]))
             else:
                 owner = pl_t if int(row[1] or 0) != 0 else ai_t
-            from abilities.framework._shared import card_collection_for_location
+            from rules_port.runtime_helpers import card_collection_for_location
             game.push_card_updated(
                 scid, owner, card_collection_for_location(row[2]), ct,
                 template_id=_tpl, cost=cost, attack=atk, defense=defense,

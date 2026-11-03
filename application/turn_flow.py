@@ -807,7 +807,7 @@ class TurnFlowMixin:
         """
         import hconnect_server as _hc
         from rules_port import lifecycle as _be
-        from abilities.framework._shared import owner_uid
+        from rules_port.runtime_helpers import owner_uid
         bstate = _be.load_state(session)
         self._current_bstate = bstate
         # A card/resource mutation can arrive after the port session was
@@ -1170,7 +1170,7 @@ class TurnFlowMixin:
         """
         import hconnect_server as _hc
         _be = self._checkpoint_engine(session)
-        from abilities.framework._shared import owner_uid
+        from rules_port.runtime_helpers import owner_uid
         bstate = _be.load_state(session)
         self._current_bstate = bstate
         voided_by = (bstate or {}).get("voided_by") or {}
@@ -1550,7 +1550,7 @@ class TurnFlowMixin:
                         "warzone card(s)")
             return len(changed)
 
-        from abilities.framework._shared import owner_uid
+        from rules_port.runtime_helpers import owner_uid
 
         # Session.PrimeCard clears these transient flags for the active
         # player's warzone before the CameOut/Started pass.  Tapped is left

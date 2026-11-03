@@ -35,5 +35,3 @@ module it calls) and register the effect type in the dispatch table in
 `rules_port/effects.py`, then list it in `rules_port/coverage.py`
 (`NATIVE_EFFECTS`). Read typed `m_*` fields through `EffectContext.value` /
 `template_value`; never parse `game_text`.
-
-See `framework/README.md` for what each remaining helper module owns.

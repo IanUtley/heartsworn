@@ -253,7 +253,7 @@ debt covered by the same rule in the database section below.
 
 Ability leaves have a compatibility boundary while the framework is being
 refactored. Existing leaves may keep the historical positional ABI, but new
-simple leaves should use `abilities.framework.context.EffectContext` through
+simple leaves should use `rules_port.context.EffectContext` through
 the `@effect` decorator. `AbilityBuilder` must wrap the authoritative
 `AbilityGraph`/`AbilityInstance` and reuse its costs, target templates, typed
 fields, ordering, conditions, and continuation behavior; it must not introduce
@@ -372,8 +372,8 @@ controller's hand cards.
 the host must not decrement those counters directly after planning.
 Attached-session card display costs must use `rules_port.static_rules.effective_cost`
 as well, so the client-visible cost and the payment validator cannot be fed by
-different evaluators. The historical `abilities.framework.cost_mod` path is
-reserved for explicitly disabled rollback sessions.
+different evaluators. The former `abilities.framework.cost_mod` path has been removed;
+`rules_port.cost_mod` is the only implementation.
 
 Static projection is per card, so callers that need several projections of the
 same card must take them from one evaluation. `effective_option_projection`

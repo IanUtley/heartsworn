@@ -233,7 +233,7 @@ def test_generated_card_uid_is_independent_of_row_id(db):
     reproduces the live collision where a newly summoned Worker Bot was
     serialized with an existing Pack Raptor's UID.
     """
-    from abilities.framework._shared import next_game_card_uid
+    from rules_port.runtime_helpers import next_game_card_uid
 
     existing_uid = int(game_engine.UID.make(1, 45193).uid64)
     add_card(db, existing_uid, 0, TPL_SPAWN)

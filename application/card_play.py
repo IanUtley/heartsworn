@@ -683,7 +683,7 @@ class CardPlayMixin:
                 return
             scid = _hc.game_engine.SessionCardId(_hc.game_engine.UID(int(uid)))
             self._card_full_data(game, scid, row[0])
-            from abilities.framework._shared import owner_uid
+            from rules_port.runtime_helpers import owner_uid
             owner = owner_uid(owner_id, pl_t, ai_t, bstate)
             collection = {
                 "hand": _hc.game_engine.ECardCollections.Hand,

@@ -1149,7 +1149,7 @@ class PendingChoicesMixin:
         """
         import hconnect_server as _hc
         _be = self._checkpoint_engine(session)
-        from abilities.framework._shared import owner_uid
+        from rules_port.runtime_helpers import owner_uid
         bstate = _be.load_state(session)
         self._current_bstate = bstate
         pend = bstate.get("pending_trigger")
@@ -2047,7 +2047,7 @@ class PendingChoicesMixin:
             destination = str(pend.get("move_destination") or "hand").lower()
             location = str(pend.get("move_location") or "").lower()
             if destination == "deck" and location == "top":
-                from abilities.framework._shared import state_after_zone_exit
+                from rules_port.zone_effects import state_after_zone_exit
                 chosen = int(chosen_uid)
                 # Keep the card in the deck, but make it the next card drawn.
                 # Shift existing positions first so the ordering is unambiguous
@@ -2194,7 +2194,7 @@ class PendingChoicesMixin:
         CardUpdated without the CardMoved leaves the client's cache showing the
         cards face-up on top of the deck."""
         import hconnect_server as _hc
-        from abilities.framework._shared import state_after_zone_exit
+        from rules_port.zone_effects import state_after_zone_exit
         for cu in uids:
             c_scid = _hc.game_engine.SessionCardId(_hc.game_engine.UID(int(cu)))
             c_row = _hc.db_card_zone_details(

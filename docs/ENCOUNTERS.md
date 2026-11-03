@@ -176,6 +176,6 @@ server; check a full route before relying on it.
 | `set_flag(X)` / `clear_flag(X)` (scene and ending actions) | Scene actions and conversation endings | `campaign/campaign_rules.py` (`clear_flag(prefix*)` clears every matching flag) |
 | Tagged pre-battle conversation | Node conversation tags (`dungeons.json`) | `campaign/campaign_runtime/offers.py` (`build_offers`): the conversation is offered with its battle while its tags hold |
 | Mid-battle conversation (`ConversationAbilityEffect`) | Champion ability effect (Records) | `rules_port/context.py` (`conversation`) pauses the battle; `application/pending_choices.py` (`_queue_conversation_prompt`) queues the conversation and resumes after the client's answer |
-| Would-lose replacement (`ChampionWouldLoseEvent`) | Champion ability with that trigger (Records) | `rules_port/triggers.py`, `rules_port/death_effects.py`, `abilities/framework/triggers.py` |
+| Would-lose replacement (`ChampionWouldLoseEvent`) | Champion ability with that trigger (Records) | `rules_port/triggers.py`, `rules_port/death_effects.py` |
 | Triggered conversations (not pre-battle) | Derived from `ability_effects` (`ConversationAbilityEffectTemplate`) | `campaign/campaign_runtime/catalog_data.py` (`triggered_conversations`); excluded from node offers in `offers.py` |
 | Placed battle scenes | `PLACED_SCENE_NODES` (per template) | `campaign/campaign_runtime/catalog_data.py` (`placed_scene_nodes`) |
