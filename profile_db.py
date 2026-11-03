@@ -504,12 +504,6 @@ def db_get_user_by_client_auth_id(auth_id, conn=None):
             "flags": row[6]}
 
 
-def db_get_stardust(user_id, conn=None):
-    """Return stardust quantities keyed by rarity."""
-    return {row[0]: row[1] for row in _profile_connection(conn).execute(
-        "SELECT rarity, quantity FROM stardust WHERE user_id=?", (user_id,))}
-
-
 def db_update_resources(user_id, gold=None, platinum=None, conn=None):
     """Update selected user currencies in the caller's transaction."""
     connection = _profile_connection(conn)
@@ -619,12 +613,6 @@ def db_create_treasure_chest(user_id, set_guid, rarity, conn=None,
     return cur.lastrowid
 
 
-def db_get_unopened_chests_full(user_id, conn=None):
-    return _profile_connection(conn).execute(
-        "SELECT id, set_guid, chest_rarity, template_guid, wof_status, wof_spun "
-        "FROM treasure_chests WHERE user_id=? AND opened=0", (user_id,)).fetchall()
-
-
 def db_get_chest_by_id(chest_db_id, user_id, conn=None):
     return _profile_connection(conn).execute(
         "SELECT id, set_guid, chest_rarity, opened, template_guid "
@@ -650,8 +638,6 @@ def db_open_chest(chest_db_id, conn=None):
         connection.commit()
 
 
-
-
 def db_get_unopened_chests(user_id, conn=None):
     return _profile_connection(conn).execute(
         "SELECT id, template_guid FROM treasure_chests "
@@ -674,24 +660,6 @@ def db_get_champion_deck_match(user_id, conn=None):
 def db_add_card(user_id, template_id, conn=None):
     """Add one collection copy."""
     db_add_collection(user_id, template_id, 1, conn=conn)
-
-
-def db_add_inventory(user_id, template_guid, quantity=1, conn=None):
-    """Add inventory quantity in the caller's transaction."""
-    connection = _profile_connection(conn)
-    row = connection.execute(
-        "SELECT id FROM player_inventory WHERE user_id=? AND template_guid=?",
-        (user_id, template_guid)).fetchone()
-    if row:
-        connection.execute(
-            "UPDATE player_inventory SET quantity=quantity+? WHERE id=?",
-            (int(quantity), row[0]))
-    else:
-        connection.execute(
-            "INSERT INTO player_inventory (user_id, template_guid, quantity) "
-            "VALUES (?, ?, ?)", (user_id, template_guid, int(quantity)))
-    if conn is None:
-        connection.commit()
 
 
 def db_get_inventory(user_id, conn=None):
@@ -757,15 +725,6 @@ def db_consume_inventory(user_id, template_guid, quantity, conn=None):
     if conn is None:
         connection.commit()
     return _row_value(row, "client_item_uid", 2) or 0, remaining
-
-
-def db_inventory_item_by_client_uid(user_id, client_item_uid, conn=None):
-    """Return the inventory row a client addresses by its item UID."""
-    return _profile_connection(conn).execute(
-        "SELECT id, template_guid, quantity, client_item_uid "
-        "FROM player_inventory WHERE user_id=? AND client_item_uid=? "
-        "ORDER BY id LIMIT 1",
-        (user_id, int(client_item_uid))).fetchone()
 
 
 def db_consume_inventory_row(row_id, quantity=1, conn=None):
@@ -1110,13 +1069,6 @@ def db_delete_all_mail(user_id, conn=None):
         connection.commit()
 
 
-def db_get_mail_by_id(email_id, user_id, conn=None):
-    """Return delivery fields for one user's mail item."""
-    return _profile_connection(conn).execute(
-        "SELECT id, gold_delivered, platinum_delivered, claimed_at FROM emails "
-        "WHERE id=? AND user_id=?", (email_id, user_id)).fetchone()
-
-
 def db_mark_mail_read(user_id, conn=None):
     """Mark unread mail read in the caller's transaction."""
     _profile_connection(conn).execute(
@@ -1164,15 +1116,6 @@ def db_claim_mail_for_user(user_id, email_id, conn=None):
     if conn is None:
         connection.commit()
     return {"gold": gold, "platinum": platinum, "cards": cards}
-
-
-def db_claim_mail(email_id, conn=None):
-    """Mark one mail item claimed in the caller's transaction."""
-    connection = _profile_connection(conn)
-    connection.execute("UPDATE emails SET claimed_at=datetime('now') WHERE id=?",
-                       (email_id,))
-    if conn is None:
-        connection.commit()
 
 
 def db_campaign_deck_for_champion(user_id, champion_id, conn=None):
@@ -1374,8 +1317,6 @@ def db_set_auth_flags(user_id, flags_json, conn=None):
 def db_card_instance_for_encoded_deck(user_id, instance_id, conn=None):
     """Return template and extended-art state for encoded deck output."""
     return db_card_instance_art(user_id, instance_id, conn=conn)
-
-
 
 
 def db_get_user_currency(user_id, currency, conn=None):
@@ -1717,25 +1658,5 @@ def db_get_store_item(item_id, conn=None):
         "SELECT name, price, currency, template_guid, store_tab "
         "FROM store_items WHERE id=?", (int(item_id),)).fetchone()
 
-
-def db_store_item_name_for_template(template_guid, conn=None):
-    row = _profile_connection(conn).execute(
-        "SELECT name FROM store_items WHERE template_guid=?",
-        (template_guid,)).fetchone()
-    return _row_value(row, "name", 0) if row else None
-
-
-def db_primal_pack_for(pack_guid, conn=None):
-    connection = _profile_connection(conn)
-    row = connection.execute(
-        "SELECT set_guid, is_full_set, is_primal FROM pack_set_map "
-        "WHERE pack_guid=?", (pack_guid,)).fetchone()
-    if not row or _row_value(row, "is_full_set", 1) or _row_value(row, "is_primal", 2):
-        return None
-    primal = connection.execute(
-        "SELECT pack_guid FROM pack_set_map "
-        "WHERE set_guid=? AND is_primal=1 LIMIT 1",
-        (_row_value(row, "set_guid", 0),)).fetchone()
-    return _row_value(primal, "pack_guid", 0) if primal else None
 
 __all__ = [name for name in globals() if name.startswith("db_")]

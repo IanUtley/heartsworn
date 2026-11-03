@@ -17,7 +17,7 @@ import json
 import re
 import struct
 
-import battle_engine
+from rules_port import lifecycle
 import game_engine as _ge
 from db import _db, log_req
 from pvp_db import (
@@ -399,12 +399,12 @@ def _set_life(handler, session, state, pid, value, game):
     if native is not None:
         bstate = native
     else:
-        bstate = battle_engine.load_state(session)
+        bstate = lifecycle.load_state(session)
     bstate["player_health"] = max(0, int(value))
     if native is not None:
         _save_attached_practice_state(session, bstate)
     else:
-        battle_engine.save_state(session, bstate)
+        lifecycle.save_state(session, bstate)
     game.player_health = bstate["player_health"]
     game.push_player_updated(game.player_uid, champ_id=getattr(handler, "_player_champ_scid", None))
 
@@ -483,7 +483,7 @@ def _handle(handler, session, raw):
                     if state is not None and state.get("_rules_port_attached"):
                         bstate = state
                     else:
-                        bstate = battle_engine.load_state(session)
+                        bstate = lifecycle.load_state(session)
                     cost = int(tpl[3] or 0)
                     bstate["player_resources"] = max(
                         int(bstate.get("player_resources", 0)), cost)
@@ -507,7 +507,7 @@ def _handle(handler, session, raw):
                     if native_practice:
                         _save_attached_practice_state(session, bstate)
                     else:
-                        battle_engine.save_state(session, bstate)
+                        lifecycle.save_state(session, bstate)
                     game.player_resources = int(bstate["player_resources"])
                     game.player_total_resources = int(bstate["player_total_resources"])
                     game.player_threshold = dict(thresholds)
@@ -563,7 +563,7 @@ def _handle(handler, session, raw):
             if state is not None and state.get("_rules_port_attached"):
                 bstate = state
             else:
-                bstate = battle_engine.load_state(session)
+                bstate = lifecycle.load_state(session)
             key = {"res": "player_resources", "chg": "player_charges", "sp": "player_spell_points"}[field]
             bstate[key] = max(0, int(bstate.get(key, 0)) + count)
             if field == "res":
@@ -571,7 +571,7 @@ def _handle(handler, session, raw):
             if native_practice:
                 _save_attached_practice_state(session, bstate)
             else:
-                battle_engine.save_state(session, bstate)
+                lifecycle.save_state(session, bstate)
             game, me, _ = _game(handler, session, state, pid)
             game.player_resources = int(bstate.get("player_resources", 0))
             game.player_total_resources = int(bstate.get("player_total_resources", 0))
@@ -605,7 +605,7 @@ def _handle(handler, session, raw):
             if state is not None and state.get("_rules_port_attached"):
                 bstate = state
             else:
-                bstate = battle_engine.load_state(session)
+                bstate = lifecycle.load_state(session)
             if action == 5:
                 for key in ("player_resources", "player_total_resources",
                             "player_charges", "player_spell_points"):
@@ -620,7 +620,7 @@ def _handle(handler, session, raw):
             if native_practice:
                 _save_attached_practice_state(session, bstate)
             else:
-                battle_engine.save_state(session, bstate)
+                lifecycle.save_state(session, bstate)
             game, me, _ = _game(handler, session, state, pid)
             game.player_resources = int(bstate.get("player_resources", 0))
             game.player_total_resources = int(bstate.get("player_total_resources", 0))

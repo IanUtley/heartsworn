@@ -121,7 +121,8 @@ def test_shards_of_fate_offers_the_web_seat_a_threshold_pick():
     play is deterministic. The granted-ability resolver used to fail on its ``target_map`` keyword, which left the
     pick unopened.
     """
-    from db import _db, db_get_card_abilities
+    from db import _db
+    from pvp_db import db_get_card_abilities
     shards_of_fate = _db.execute(
         "SELECT guid FROM card_templates WHERE name='Shards of Fate' LIMIT 1").fetchone()[0].lower()
     decks = _ensure_two_decks()

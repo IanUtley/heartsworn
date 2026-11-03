@@ -263,8 +263,9 @@ if you open the editor by another hostname or IP, list it in
 `db.py` owns the shared SQLite connection while `profile_db.py`, `pve_db.py`,
 `pvp_db.py`, `tournament_db.py`, and `replay_db.py` expose domain persistence
 APIs. `static.py` owns schema creation and server-owned seeds;
-`battle_engine.py` owns turn/priority rules; `game_engine.py` serializes session
-events; and the `abilities/` framework resolves gamedata-driven effects.
+`rules_port/` owns turn/priority rules and ability resolution (its
+`lifecycle.py` holds the persisted battle checkpoint); `game_engine.py`
+serializes session events.
 
 ## Database capacity note
 

@@ -54,21 +54,6 @@ def test_original_csharp_rng_matches_python_port_for_multiple_seeds():
         assert [port.next() for _ in range(count)] == original
 
 
-def test_metadata_random_helpers_consume_the_same_session_rng():
-    from abilities.framework.resolution import _choice, _randint, _sample
-    state = {"_rules_rng": MultiplyWithCarryRng(12345, 67890)}
-    expected = MultiplyWithCarryRng(12345, 67890)
-    assert _randint(state, 2, 8) == expected.next_range(2, 9)
-    values = [10, 20, 30, 40]
-    assert _choice(state, values) == values[expected.next(len(values))]
-    expected_sample = []
-    remaining = list(values)
-    for _ in range(2):
-        index = expected.next(len(remaining))
-        expected_sample.append(remaining.pop(index))
-    assert _sample(state, values, 2) == expected_sample
-
-
 def test_extracted_effect_inventory_has_no_unhandled_concrete_templates():
     assert validate_effect_coverage() == ((), ())
 
@@ -151,7 +136,6 @@ def test_original_csharp_chain_stack_identity_matches_python_port():
 
 if __name__ == "__main__":
     test_original_csharp_rng_matches_python_port_for_multiple_seeds()
-    test_metadata_random_helpers_consume_the_same_session_rng()
     test_extracted_effect_inventory_has_no_unhandled_concrete_templates()
     test_python_phase_graph_matches_every_client_state_permit()
     test_original_csharp_combat_declaration_matches_python_port()

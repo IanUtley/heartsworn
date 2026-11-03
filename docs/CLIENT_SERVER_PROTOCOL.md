@@ -440,7 +440,7 @@ The gameplay phase values are:
 | 24 | EndGame |
 
 `GreenLight`, options, phase updates, and the resulting card/player events
-must be ordered consistently. The server's `battle_engine.py` is the rules
+must be ordered consistently. The server's `rules_port/` package is the rules
 owner for this state machine; `game_engine.py` serializes its view for the
 client.
 

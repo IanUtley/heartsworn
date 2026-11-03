@@ -28,7 +28,7 @@ from tests.tests_combat import (  # noqa: E402
 
 
 def test_ai_turn_resumes_from_native_phase_window_after_discard():
-    import battle_engine
+    from rules_port import lifecycle
     import db as dbmod
     import hconnect_server as hcs
     from rules_port import resolution as resolution_mod
@@ -66,7 +66,7 @@ def test_ai_turn_resumes_from_native_phase_window_after_discard():
 
     handler = HandlerStub(db)
     handler.client_reck_id = 5
-    handler._checkpoint_engine = lambda session: battle_engine
+    handler._checkpoint_engine = lambda session: lifecycle
     handler._send_battle_events = lambda *args, **kwargs: True
     handler._push_transaction_ack = lambda *args, **kwargs: None
     for name in ("_resolve_rules_port_discard_continuation",

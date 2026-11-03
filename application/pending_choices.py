@@ -19,10 +19,7 @@ class PendingChoicesMixin:
         deck and gains its threshold.  A HUMAN gets the class-39 choosing
         prompt (the shard stays in the deck); the AI auto-picks a random one."""
         import hconnect_server as _hc
-        if getattr(session, "_rules_port_session", None) is not None:
-            from rules_port import lifecycle as _be
-        else:
-            import battle_engine as _be
+        from rules_port import lifecycle as _be
         from rules_port.targeting import legal_targets as _lt
         candidates = _lt(_hc._db, session.session_id, owner_id, shard_tpl,
                          int(played_card_uid or 0), both_players=False,
@@ -1786,22 +1783,17 @@ class PendingChoicesMixin:
             return True
         if chosen_uid and chosen_uid in pend["candidates"]:
             g = self._fresh_game(session, pl_t, ai_t, bstate)
-            if bstate.get("_rules_port_attached"):
-                # A pending picker is a continuation of the original native
-                # ability.  Keep the actual zone mutation in RulesPort; this
-                # handler is only responsible for decoding the client's
-                # choice and projecting the resulting events.
-                from rules_port.context import EffectContext
-                from rules_port.deck_effects import move_deck_card_to_hand
-                native_context = EffectContext.from_rules_port(
-                    g, session, _hc._db, self, pl_t, ai_t, bstate,
-                    str(pend.get("ability_guid") or "").lower())
-                move_deck_card_to_hand(
-                    native_context, chosen_uid, pend["owner_id"])
-            else:
-                from abilities.framework.effects.search import move_deck_card_to_hand
-                move_deck_card_to_hand(g, session, _hc._db, self, pl_t, ai_t,
-                                       chosen_uid, pend["owner_id"], bstate)
+            # A pending picker is a continuation of the original native
+            # ability.  Keep the actual zone mutation in RulesPort; this
+            # handler is only responsible for decoding the client's
+            # choice and projecting the resulting events.
+            from rules_port.context import EffectContext
+            from rules_port.deck_effects import move_deck_card_to_hand
+            native_context = EffectContext.from_rules_port(
+                g, session, _hc._db, self, pl_t, ai_t, bstate,
+                str(pend.get("ability_guid") or "").lower())
+            move_deck_card_to_hand(
+                native_context, chosen_uid, pend["owner_id"])
             # Hide the unchosen candidates again (back to the face-down deck)
             # so the Choosing zone empties when the pick resolves.
             self._hide_candidates_to_deck(

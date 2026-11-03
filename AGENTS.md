@@ -24,11 +24,11 @@ Key files:
 - `campaign_editor/` — Campaign editor and authoring tools (edits `campaign`; see `campaign_editor/paths.py`)
 - `game_engine.py` — Game session event system (60+ SessionEventArgs)
 - `encoder.py` — ObjFmt binary encoder (19 encode functions)
-- `battle_engine.py` — DB-backed turn/priority engine (phase cycle, stops)
+- `rules_port/lifecycle.py` — battle checkpoint: phase cycle, stops, chain facade, load/save
 - `game_session.py` — Session state management
 - `static.py` — ALL DB DDL + seeded tables (fresh DBs; single source of truth)
-- `db.py` — Shared SQLite connection (`db._db`) + reusable `db_*` DML helpers
-- `ability.py` - Card ability implementation (BOM leaf executors)
+- `db.py` — Shared SQLite connection (`db._db`), transactions and logging context; domain `db_*` helpers live in `pvp_db.py`, `profile_db.py`, `pve_db.py`, `tournament_db.py`, `replay_db.py` and `chat_db.py`
+- `rules_port/resolution.py` / `rules_port/effects.py` - ability resolution and effect dispatch
 - `AssetExtraction/extract_talents.py` — regenerates talent/ability-BOM seed snapshot
 - `migration.py` — run-and-delete one-off migrations (restart.sh)
 - `hconnect.db` — SQLite database
@@ -59,7 +59,7 @@ full restart. The reloaded set is defined by `reload_runtime_modules()` in
 - Explicitly listed: `domain/constants.py`, `db.py`, `pvp_db.py`,
   `profile_db.py`, `pve_db.py`, `chat_db.py`, `replay_db.py`,
   `tournament_db.py`, `campaign/campaign_rules.py`,
-  `campaign_playtest.py`, `game_engine.py`, `game_session.py`, `battle_engine.py`, `campaign.py`,
+  `campaign_playtest.py`, `game_engine.py`, `game_session.py`, `campaign.py`,
   `ai_eval.py`,
   `application/dispatcher.py`, `application/player_transactions.py`,
   `rules_port/wire.py`, `rules_port/runtime_adapter.py`,
@@ -72,8 +72,7 @@ full restart. The reloaded set is defined by `reload_runtime_modules()` in
   `gamemodes/`, `campaign_runtime/`.
 
 Not reloaded: `hconnect_server.py` and `commands.py` (the reload driver itself), and `application/commands.py` (the command classes the dispatcher and server share; re-running it breaks their identity),
-so changes to them need `bash restart.sh`. Also not reloaded: `ability.py`
-(a facade named `ability`, not under `abilities/`), the `domain/` modules
+so changes to them need `bash restart.sh`. Also not reloaded: the `domain/` modules
 other than `domain/constants.py`, and everything under `gamedata/`. The Records
 store keeps objects built from the classes it was loaded with, so reloading
 `gamedata` mixes class generations and drops nested modifier inputs. Records

@@ -625,9 +625,9 @@ def _champion_keywords(session) -> list[str]:
     A champion's counters live in the battle state keyed by counter GUID.
     Burning is the only one a campaign keyword reads here.
     """
-    import battle_engine
+    from rules_port import lifecycle
     from rules_port.builtin_rules import BURNING_COUNTER_GUID
-    battle = battle_engine.load_state(session) or {}
+    battle = lifecycle.load_state(session) or {}
     keywords = []
     for owner, uid in (battle.get("champ_map") or {}).items():
         if str(owner) == "0":

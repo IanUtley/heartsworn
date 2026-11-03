@@ -1,9 +1,9 @@
 """Shared utilities used by abilities framework modules."""
 
-import json
-import re
-
 import game_engine
+# Single owners live in rules_port; re-exported for the framework callers.
+from rules_port.zone_effects import state_after_zone_exit  # noqa: F401
+from rules_port.runtime_helpers import next_game_card_uid  # noqa: F401
 
 
 # These flags describe the current battle/turn instance, not the card's
@@ -27,11 +27,6 @@ ZONE_EXIT_STATE_FLAGS = (
 )
 
 
-def state_after_zone_exit(state):
-    """Return card state with transient battle/turn flags removed."""
-    return int(state or 0) & ~int(ZONE_EXIT_STATE_FLAGS)
-
-
 def _log(msg):
     try:
         from db import log_req
@@ -49,18 +44,6 @@ def _card_state_of(db, session, card_uid):
         return 0
 
 
-def next_game_card_uid(db, session_id):
-    """Allocate a fresh SessionCardId instance for a generated card.
-
-    The database row id and the instance portion of a SessionCardId are
-    independent values.  Using MAX(game_cards.id) for both can reuse a UID
-    when cards were inserted or restored in a different order, causing the
-    client/server card cache to resolve a token as another card.
-    """
-    from pvp_db import db_next_card_uid
-    return db_next_card_uid(session_id, conn=db)
-
-
 def card_collection_for_location(location):
     """Map the authoritative DB location to the client's card collection."""
     return {
@@ -76,12 +59,6 @@ def card_collection_for_location(location):
     }.get(location, game_engine.ECardCollections.Warzone)
 
 
-def _stat_delta(game_text, stat):
-    """Parse +/-N[STAT] from an ability's game text (e.g. '+3[ATK]/+3[DEF]')."""
-    m = re.search(r'([+-]\d+)\s*\[' + re.escape(stat) + r'\]', game_text or "")
-    return int(m.group(1)) if m else 0
-
-
 def owner_uid(owner_id, pl_t, ai_t, bstate=None):
     """Map a card's DB user_id to the UID of its controlling player.
 
@@ -92,19 +69,6 @@ def owner_uid(owner_id, pl_t, ai_t, bstate=None):
     if bstate is not None and bstate.get("pvp"):
         return game_engine.UID.make(244, int(owner_id or 0))
     return pl_t if (owner_id or 0) != 0 else ai_t
-
-
-def pvp_champion_uid(bstate, owner_id):
-    """Return the authoritative champion SCID for a PvP player id."""
-    if not (bstate or {}).get("pvp"):
-        return None
-    for pid, uid in ((bstate or {}).get("champ_map") or {}).items():
-        try:
-            if int(pid) == int(owner_id):
-                return int(uid)
-        except (TypeError, ValueError):
-            continue
-    return None
 
 
 def pvp_opponent_pid(bstate, owner_id):
@@ -213,181 +177,6 @@ def attribute_bits_from_flags(flags):
 
 
 _TEMPORARY_ATTRIBUTE_EXPIRATIONS = "__attribute_expirations"
-
-
-def _temporary_attribute_expiry_boundary(duration):
-    """Translate gamedata duration names into turn-boundary names.
-
-    BeginningOfOwnersTurn is keyed to the ability source's controller, not
-    the controller of every affected card.  Keeping that source owner with
-    the temporary bit is what lets an opposing troop retain Defensive until
-    the Butterfly controller's next turn.
-    """
-    return {
-        "EndOfTurn": "end_turn",
-        "BeginningOfOwnersTurn": "start_turn",
-        "AfterCardsReadyOnPlayersTurn": "prep",
-    }.get(duration)
-
-
-def _temporary_buffs_json(raw):
-    try:
-        value = json.loads(raw or "{}")
-    except (TypeError, ValueError):
-        value = {}
-    return value if isinstance(value, dict) else {}
-
-
-def clear_combat_damage(db, session_id):
-    """Remove marked combat damage during the end-of-turn cleanup step.
-
-    Damage is cleared before temporary end-of-turn stat modifiers expire.
-    Otherwise a troop surviving only because of a temporary defense bonus can
-    be incorrectly killed when that bonus is removed (for example, a 2/3
-    troop with +3 DEF and 3 marked damage).
-    """
-    from pvp_db import db_clear_warzone_damage
-    db_clear_warzone_damage(session_id, conn=db)
-    db.commit()
-
-
-def clear_expired_temporary_attributes(db, session_id, owner_id, boundary,
-                                       clear_stat_buffs=False):
-    """Expire source-owned temporary attributes at one turn boundary.
-
-    Older rows without expiration metadata retain the previous owner-scoped
-    behavior.  The metadata is stored alongside temporary stat buffs so no
-    schema change is needed, and unrelated temporary grants can coexist.
-    """
-    from pvp_db import (db_temporary_attribute_rows,
-                        db_set_temporary_card_state)
-    rows = db_temporary_attribute_rows(session_id, conn=db)
-    changed = []
-    for card_uid, target_owner, attrs, raw_buffs in rows:
-        buffs = _temporary_buffs_json(raw_buffs)
-        metadata = buffs.get(_TEMPORARY_ATTRIBUTE_EXPIRATIONS) or {}
-        expired_bits = 0
-        remaining = {}
-        for bit_text, rule in metadata.items():
-            try:
-                bit = int(bit_text)
-            except (TypeError, ValueError):
-                continue
-            if (isinstance(rule, dict)
-                    and int(rule.get("owner", -1)) == int(owner_id)
-                    and rule.get("boundary") == boundary):
-                expired_bits |= bit
-            else:
-                remaining[bit_text] = rule
-
-        # Grants written before source-boundary metadata existed expire at the
-        # affected card's own boundary, preserving the old behavior.
-        if not metadata and int(target_owner or 0) == int(owner_id):
-            expired_bits = int(attrs or 0)
-
-        new_attrs = int(attrs or 0) & ~expired_bits
-        if remaining:
-            buffs[_TEMPORARY_ATTRIBUTE_EXPIRATIONS] = remaining
-        else:
-            buffs.pop(_TEMPORARY_ATTRIBUTE_EXPIRATIONS, None)
-        if clear_stat_buffs:
-            stat_buffs = {
-                key: value for key, value in buffs.items()
-                if key == _TEMPORARY_ATTRIBUTE_EXPIRATIONS
-            }
-            buffs = stat_buffs
-        new_buffs = json.dumps(buffs, separators=(",", ":"), sort_keys=True)
-        if new_attrs == int(attrs or 0) and new_buffs == (raw_buffs or "{}"):
-            continue
-        db_set_temporary_card_state(session_id, int(card_uid), new_attrs,
-                                    new_buffs, conn=db)
-        changed.append(int(card_uid))
-    if changed:
-        db.commit()
-    return changed
-
-
-def apply_attribute_grant(game, session, db, handler, pl_t, ai_t, target_uid,
-                          text, temporary=False, bstate=None, duration=None,
-                          source_owner_id=None, attribute_flags=None):
-    """OR the attribute bits found in *text* into the target card and push a
-    CardUpdated so the client renders the new attribute badge.  ``temporary``
-    ("until end of turn", e.g. Dimmid's Lifedrain charge power) writes to
-    game_cards.temporary_attributes, which the Ready step clears next turn."""
-    bits = (attribute_bits_from_flags(attribute_flags)
-            if attribute_flags is not None else attribute_bits_from_text(text))
-    if not bits or target_uid is None:
-        return bits
-    target_uid = int(target_uid)
-    # Defensive is a troop keyword.  Champion SessionCardIds are valid event
-    # targets in PvP, but they are not game_cards rows and must never receive
-    # a troop-only Defensive grant if an upstream target list is stale.
-    if bits & game_engine.ECardAttributes.Defensive:
-        champion_uids = set()
-        if (bstate or {}).get("pvp"):
-            champ_map = (bstate or {}).get("champ_map")
-            champion_values = (champ_map.values()
-                               if isinstance(champ_map, dict) else ())
-            champion_uids.update(
-                int(uid) for uid in champion_values if uid)
-        for attr in ("_player_champ_scid", "_ai_champ_scid"):
-            champ = getattr(handler, attr, None)
-            if champ is not None:
-                try:
-                    champion_uids.add(int(champ.uid.uid64))
-                except AttributeError:
-                    champion_uids.add(int(champ))
-        if target_uid in champion_uids:
-            bits &= ~game_engine.ECardAttributes.Defensive
-            if not bits:
-                return 0
-    col = "temporary_attributes" if temporary else "card_attributes"
-    from pvp_db import (db_card_attribute_value, db_set_card_attribute_value,
-                        db_card_owner_id, db_card_mutation_field,
-                        db_set_card_mutation_field, db_card_source_info)
-    cur = db_card_attribute_value(session.session_id, target_uid, col, conn=db)
-    db_set_card_attribute_value(session.session_id, target_uid, col,
-                                cur | bits, conn=db)
-    if temporary:
-        boundary = _temporary_attribute_expiry_boundary(duration)
-        if boundary:
-            if source_owner_id is None:
-                source_uid = (bstate or {}).get("resolving_source_uid")
-                if source_uid is not None:
-                    owner_row = db_card_owner_id(
-                        session.session_id, int(source_uid), conn=db)
-                    if owner_row is not None:
-                        source_owner_id = owner_row
-                if source_owner_id is None:
-                    source_owner_id = (bstate or {}).get("resolving_owner_id", 0)
-            source_owner_id = int(source_owner_id or 0)
-            meta_value = db_card_mutation_field(
-                session.session_id, target_uid, "temporary_buffs", conn=db)
-            buffs = _temporary_buffs_json(meta_value or "{}")
-            expirations = buffs.setdefault(_TEMPORARY_ATTRIBUTE_EXPIRATIONS, {})
-            for bit in (1 << n for n in range(bits.bit_length())):
-                if bits & bit:
-                    expirations[str(bit)] = {
-                        "owner": source_owner_id,
-                        "boundary": boundary,
-                    }
-            db_set_card_mutation_field(
-                session.session_id, target_uid, "temporary_buffs",
-                json.dumps(buffs, separators=(",", ":"), sort_keys=True),
-                conn=db)
-    db.commit()
-    trow = db_card_source_info(session.session_id, target_uid, conn=db)
-    if trow and trow[0]:
-        scid = game_engine.SessionCardId(game_engine.UID(target_uid))
-        _tpl, ct, _n, _c, atk, def_, _g = handler._card_full_data(game, scid, trow[0])
-        owner_id = db_card_owner_id(session.session_id, target_uid, conn=db)
-        owner = owner_uid(owner_id if owner_id is not None else 0,
-                          pl_t, ai_t, bstate)
-        game.push_card_updated(scid, owner, card_collection_for_location(trow[2]), ct,
-                               template_id=trow[0], attack=atk, defense=def_,
-                               attributes=cur | bits, nulling=(trow[2] == "deck"))
-    _log(f"    Attribute grant {hex(target_uid)}: +{bits:b}")
-    return bits
 
 
 # Compatibility exports.  Counter state is now implemented in the focused

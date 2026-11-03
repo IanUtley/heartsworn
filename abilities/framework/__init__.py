@@ -1,1 +1,1 @@
-"""Ability framework — BOM leaf executors, conditions, and shared utilities."""
+"""Helpers shared by the RulesPort runtime, the AI and the protocol host."""

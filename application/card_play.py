@@ -67,51 +67,6 @@ class CardPlayMixin:
                 pass
         return vals
 
-    def _card_troop_requirements(self, ability_guids):
-        """Set of troop-target requirements for a card's abilities, driven by
-        the gamedata target-template FILTER (not card text): {'friendly',
-        'enemy','any'}.  Champion (PlayerTargetTemplate / IsHero filter)
-        targets always exist and never gate playability."""
-        import hconnect_server as _hc
-        from pvp_db import db_ability_meta_targets
-        reqs = set()
-        for ag in (ability_guids or []):
-            meta = db_ability_meta_targets(ag)
-            if meta and meta[4]:  # is_manual — warzone activation, skip
-                continue
-            if not meta or not meta[0]:
-                continue
-            try:
-                tpl_ids = json.loads(meta[0])
-            except Exception:
-                continue
-            for tid in tpl_ids:
-                trow = _hc.db_target_template_definition(tid, conn=_hc._db)
-                if not trow:
-                    continue
-                kind = trow[1] or ""
-                fj = trow[0] or "{}"
-                if kind == "PlayerTargetTemplate":
-                    continue  # auto champion target — always available
-                if "IsHero" in fj:
-                    continue  # champion targets always exist in play
-                if "IsTroop" not in fj:
-                    continue
-                # A target such as Prophecy's "the next troop in your deck"
-                # is an automatic deck search, not a requirement for a troop
-                # already on the battlefield.  Only a Warzone-only target
-                # should make a card unplayable when the board is empty.
-                zones = {z.strip().lower() for z in (trow[2] or "").split("|")
-                         if z.strip()}
-                if zones != {"warzone"}:
-                    continue
-                if "IsControlledBy" in fj and "IsNotControlledBy" not in fj:
-                    reqs.add("friendly")
-                elif "IsNotControlledBy" in fj:
-                    reqs.add("enemy")
-                else:
-                    reqs.add("any")
-        return reqs
 
     def _card_target_requirements_met(self, session, play_plan,
                                       battle_state=None):
@@ -496,20 +451,6 @@ class CardPlayMixin:
                         inst.target_instances.append(ci)
                         break
 
-    def _cost_targets_available(self, session, tid, count):
-        """True if the player controls at least `count` cards that can pay a
-        cost targeting template `tid` (e.g. Abominate's "a troop you control").
-        Artifacts/other kinds are resolved from the template's game text."""
-        import hconnect_server as _hc
-        from pvp_db import db_target_template_text, db_warzone_troop_count
-        text = db_target_template_text(tid)
-        if "artifact" in text.lower():
-            n = _hc.db_zone_card_count(
-                session.session_id, self.user_profile["id"], "warzone",
-                "Artifact", conn=_hc._db)
-        else:
-            n = db_warzone_troop_count(session.session_id, self.user_profile["id"])
-        return n >= count
 
     def _card_play_cost_selections(self, session, play_plan, source_uid,
                                    selected_uids, client_cost_map=None):
@@ -904,16 +845,6 @@ class CardPlayMixin:
         return (int(graph.costs.variable_activation or 0),
                 int(graph.costs.variable_minimum or 0))
 
-    @staticmethod
-    def _template_has_x_cost(tpl_guid):
-        """True if a card template has a variable X cost — data-driven from the
-        gamedata card field m_VariableCost (card_templates.variable_cost), e.g.
-        Burn to the Ground "1X" = 1 base + X.  These cards must show the
-        client's X-cost dialog and the chosen X is paid as extra resources.
-        """
-        from gamedata import DEFAULT_RECORD_STORE
-        card = DEFAULT_RECORD_STORE.get("CardTemplate", str(tpl_guid).lower())
-        return bool(card and card.has_variable_cost)
 
     def _resolve_gem_abilities(self, active_gems):
         """Bake a deck's socketed gems into per-instance ability lists at DECK
@@ -1724,10 +1655,7 @@ class CardPlayMixin:
             (tracked in game_cards.card_uses)
         """
         import hconnect_server as _hc
-        if bstate.get("_rules_port_attached"):
-            from rules_port import lifecycle as _be
-        else:
-            import battle_engine as _be
+        from rules_port import lifecycle as _be
         # This helper is also used while rebuilding option lists after a
         # priority resync.  During the AI's own turn the human must not retain
         # activation options from the previous player stop; the AI-turn
@@ -1766,14 +1694,8 @@ class CardPlayMixin:
                 # RequiresSourcePassesFilterCondition(IsTapped) trigger
                 # condition — it is only activatable while the troop is tapped.
                 if graph.ability_condition or graph.trigger_condition:
-                    if bstate.get("_rules_port_attached"):
-                        from rules_port.condition_context import ConditionContext
-                        from rules_port.conditions import trigger_condition_met
-                    else:
-                        from abilities.framework.condition_engine import (
-                            ConditionContext,
-                            trigger_condition_met,
-                        )
+                    from rules_port.condition_context import ConditionContext
+                    from rules_port.conditions import trigger_condition_met
                     cond_ctx = ConditionContext(
                         _hc._db, session, bstate,
                         ability_source_uid=card_uid,
@@ -2067,10 +1989,7 @@ class CardPlayMixin:
         the client's picker will.
         """
         import hconnect_server as _hc
-        if bstate.get("_rules_port_attached"):
-            from rules_port import lifecycle as _be
-        else:
-            import battle_engine as _be
+        from rules_port import lifecycle as _be
         charges = bstate.get("player_charges", 0)
         sp = bstate.get("player_spell_points", 0)
         phase_bit = (1 << phase) if phase is not None else 0
@@ -2349,77 +2268,6 @@ class CardPlayMixin:
                      cost.minimum, cost.maximum))
         return out
 
-    def _select_champion_activation_targets(self, session, bstate,
-                                            ability_guid, champ_uid,
-                                            selected_uids):
-        """Separate champion card-payment targets from effect targets.
-
-        Champion powers use the same AbilityTargetTemplate contracts as card
-        abilities.  The client submits all selected cards in one TargetMap,
-        so a sacrifice target must be removed from the effect-target pool
-        before the chain item is created.
-        """
-        import hconnect_server as _hc
-        from rules_port.costs import (ability_cost_targets,
-                                      cost_type_for_kind,
-                                      validate_cost_target_selection)
-        from rules_port.targeting import legal_targets_for
-        graph = _hc._records_ability_graph(self, ability_guid)
-        if graph is None:
-            return None
-        selected_uids = [int(uid) for uid in (selected_uids or [])]
-        used = set()
-        sacrifices = []
-        for cost in ability_cost_targets(
-                graph, _hc._db, session.session_id, self.user_profile["id"],
-                int(champ_uid), champions=self._champion_targets(),
-                battle_state=bstate):
-            tid = cost.guid
-            cost_type = cost_type_for_kind(cost.kind)
-            minimum = cost.minimum
-            maximum = cost.maximum
-            if cost.is_source_auto_target:
-                candidates = [int(champ_uid)]
-                available = candidates
-            else:
-                candidates = cost.candidates
-                available = [uid for uid in selected_uids
-                             if uid in {int(c) for c in candidates}
-                             and uid not in used]
-            if len(available) < minimum:
-                return None
-            limit = len(available) if maximum < 0 else maximum
-            chosen = available[:limit]
-            chosen = validate_cost_target_selection(
-                _hc._db, session.session_id, self.user_profile["id"],
-                int(champ_uid), cost, chosen,
-                champions=self._champion_targets(), battle_state=bstate)
-            if chosen is None:
-                return None
-            used.update(chosen)
-            if int(cost_type) == 2:
-                sacrifices.extend(chosen)
-
-        effect_candidates = []
-        explicit_required = False
-        cost_tids = {str(guid).lower() for _kind, guid in
-                     graph.additional_cost_targets or ()}
-        for target in graph.targets:
-            if (not target.requires_input or
-                    str(target.guid).lower() in cost_tids):
-                continue
-            explicit_required = explicit_required or bool(
-                target.minimum if target.minimum is not None else 1)
-            effect_candidates.extend(int(uid) for uid in legal_targets_for(
-                _hc._db, session.session_id, self.user_profile["id"], target,
-                int(champ_uid), champions=self._champion_targets(),
-                battle_state=bstate))
-        legal_effects = set(effect_candidates)
-        effect_selected = [uid for uid in selected_uids
-                           if uid not in used and uid in legal_effects]
-        if explicit_required and not effect_selected:
-            return None
-        return (effect_selected[-1] if effect_selected else None, sacrifices)
 
     @staticmethod
     def _thresholds_met(thresh_json, player_threshold):

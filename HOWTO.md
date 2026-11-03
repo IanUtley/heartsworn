@@ -86,6 +86,13 @@ Use a full restart after changing `hconnect_server.py`, startup wiring,
 encoders, schema initialization, or process configuration. Do not run tests in
 parallel when they use SQLite or the shared runtime database.
 
+The generated mechanics classes are type-checked. After regenerating them with
+`python3 AssetExtraction/extract_mechanics.py`, run:
+
+```bash
+python3 -m mypy gamedata/mechanics_types.py gamedata/mechanics_base.py --follow-imports=silent --ignore-missing-imports
+```
+
 The repository includes a pre-commit hook for syntax checks and the quick core
 test set. Enable it once per checkout with:
 
@@ -165,19 +172,17 @@ or display text.
 | `services/*.py` | one client-request family per module; new handlers validate input and call domain APIs |
 | `services/auction.py` | retained Auction House API surface; currently an intentional stub |
 | `game_engine.py` | session event types, event construction, and event serialization |
-| `battle_engine.py` | legacy rollback implementation for turn phases, priority, auto-pass, chain state, and phase persistence; normal live gameplay uses `rules_port/` |
 | `rules_port/` | Semantic port of hex-private/HexClient/Game.Shared rules; owns C#-ordered session/action, phase, priority, chain, combat, transaction, ability, trigger, and target primitives |
 | `game_session.py` | session lifecycle and DB-backed session state |
 | `ai.py` | AI turn, card-choice, and combat decisions |
 | `hexai/` | offline self-play capture, training (numpy or optional PyTorch/CUDA), and the opt-in runtime policy/value agent; see `hexai/README.md` |
-| `abilities/` | metadata-driven ability parsing, targeting, conditions, effect leaves, and the shared `EffectContext`/`AbilityBuilder` adapters |
-| `ability.py` | compatibility facade for the `abilities/` package |
+| `abilities/` | helpers (targeting, statics, conditions, counters, damage, death) that the RulesPort runtime and protocol host call; ability resolution itself lives in `rules_port/` |
 | `campaign.py` | campaign protocol and authored campaign state; campaign SQL migration into `pve_db` remains work in progress |
 | `campaign/campaign_runtime/` | runs zones whose `campaign/campaign_rules/<zone>.json` says `"runtime": "rules"` from the campaign editor's rules (shared rules loader, projection, progress in `campaign_progress`); see `docs/CAMPAIGN.md` "Rules runtime" |
 | `campaign_source.py` | adds the `campaign/` source root to Python's import path for server modules |
 | `gamemodes/` | mode-specific orchestration (PVP, FRA, tournament) |
 | `static.py` | all schema DDL and server-owned seed/configuration data |
-| `db.py` | one SQLite connection, transactions, and compatibility persistence facade |
+| `db.py` | one SQLite connection, transactions, logging context and a few shared helpers |
 | `profile_db.py` | profile, champion, deck, collection, inventory, mail, social, and store persistence API |
 | `pve_db.py` | campaign/FRA/encounter persistence API |
 | `pvp_db.py` | shared session, card, and battle persistence API used by PVE and PVP |

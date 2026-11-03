@@ -28,7 +28,7 @@ from .targeting import (
 )
 from ._shared import attribute_bits_from_flags, attribute_bits_from_text
 from .effects.counters import card_counters_full
-from .condition_engine import ConditionContext, evaluate_effect_condition
+from rules_port.card_view import CardView
 
 
 def _side_of(user_id):
@@ -44,17 +44,8 @@ def _opponent_id(db, session_id, owner):
 
 
 def _card_dict(row):
-    return {
-        "card_uid": int(row[0]), "card_type": row[1],
-        "location": row[2], "user_id": row[3],
-        "state": int(row[4] or 0), "attack": row[5],
-        "defense": row[6], "name": row[7] or "",
-        "cost": row[8] or 0, "subtype": row[9] or "",
-        "shards": shards_from_threshold(row[10]),
-        "attributes": int(row[11] or 0) | int(row[12] or 0),
-        "damaged_opponent_this_turn": [],
-        "src_owner_side": "player" if (row[3] or 0) else "ai",
-    }
+    """The static-filter mapping of one card row (see :class:`rules_port.card_view.CardView`)."""
+    return CardView.from_static_row(row).as_mapping()
 
 
 def _cards_in_zones(db, session_id, user_id, zones, bstate=None,
@@ -63,23 +54,14 @@ def _cards_in_zones(db, session_id, user_id, zones, bstate=None,
     rows = db_static_card_rows(session_id, zones, conn=db)
     if user_id is not None:
         rows = [r for r in rows if r[3] == user_id]
-    out = [_card_dict(r) for r in rows]
+    views = [CardView.from_static_row(r) for r in rows]
     # CardThresholdModifier/SubTypeModifier alter the instance context rather
     # than the immutable card template.  Static target filters must see those
     # current values in both the display and combat paths.
-    for card in out:
-        try:
-            buffs_value = db_card_mutation_field(
-                session_id, card["card_uid"], "permanent_buffs", conn=db)
-            buffs = json.loads(buffs_value or "{}") if buffs_value else {}
-            if isinstance(buffs, dict):
-                if isinstance(buffs.get("subtype"), str):
-                    card["subtype"] = buffs["subtype"]
-                if isinstance(buffs.get("thresholds"), list):
-                    card["shards"] = [int(value) for value in
-                                      buffs["thresholds"]]
-        except (TypeError, ValueError, json.JSONDecodeError):
-            pass
+    views = [view.with_permanent_buffs(db_card_mutation_field(
+                 session_id, view.card_uid, "permanent_buffs", conn=db))
+             for view in views]
+    out = [view.as_mapping() for view in views]
     if include_champions and bstate is not None:
         players = {}
         from pvp_db import db_session_user_ids
@@ -93,17 +75,7 @@ def _cards_in_zones(db, session_id, user_id, zones, bstate=None,
             champs.append((human[0], "player",
                            bstate.get("player_health", 20)))
         for c_uid, side, hp in champs:
-            out.append({
-                "card_uid": -1 if side == "ai" else -2,
-                "card_type": "Champion",
-                "location": "warzone",
-                "user_id": c_uid,
-                "state": 0, "attack": 0, "defense": hp,
-                "name": "Champion", "cost": 0, "subtype": "",
-                "shards": [], "attributes": 0,
-                "damaged_opponent_this_turn": [],
-                "src_owner_side": side,
-            })
+            out.append(CardView.champion(side, c_uid, hp).as_mapping())
     return out
 
 
@@ -526,8 +498,11 @@ def _sum_variable(db, session_id, bstate, owner, var, source_uid, stat_prop):
 
 
 def _gate_condition(db, session_id, bstate, condition_id, source_uid, owner):
+    """Whether an authored effect condition holds, evaluated by the native condition layer."""
     if not condition_id:
         return True
+    from rules_port.condition_context import ConditionContext
+    from rules_port.conditions import evaluate_effect_condition
     ctx = ConditionContext(db, _SessionStub(session_id), bstate,
                            ability_source_uid=int(source_uid),
                            ability_source_owner_id=owner)
@@ -535,8 +510,7 @@ def _gate_condition(db, session_id, bstate, condition_id, source_uid, owner):
 
 
 class _SessionStub:
-    """Minimal session object for ConditionContext (only session_id is used
-    by the condition engine's DB queries)."""
+    """Minimal session object for the condition context (only session_id is read)."""
 
     def __init__(self, session_id):
         self.session_id = session_id
@@ -1159,17 +1133,6 @@ def effective_stats(db, session_id, bstate, card_uid):
     return atk, max(0, def_ - dmg), attrs, d["flags"], d["rage"]
 
 
-def effective_attributes(db, session_id, bstate, card_uid):
-    """Return the current combat keyword bits for one card instance.
-
-    Combat option generation must use the same continuous/static evaluation as
-    combat resolution.  In particular, conditional CardModifier abilities
-    (Electroid's Dwarf/Robot count is one example) are not persisted in
-    ``game_cards.card_attributes``.
-    """
-    return effective_stats(db, session_id, bstate, card_uid)[2]
-
-
 def effective_cost(db, session_id, bstate, card_uid):
     """Current play cost of a card instance (template cost + cost modifiers +
     continuous static cost reductions) — the X value for AbilityResourceXCost
@@ -1214,50 +1177,6 @@ def controller_flags(db, session_id, bstate, owner):
         d = self_deltas(db, session_id, bstate, uid)
         flags |= d["flags"]
     return flags
-
-
-def global_flags(db, session_id, bstate):
-    """Flags from every player's warzone statics (e.g. Emberspire Witch's
-    "Champions can't gain health" applies while she is in play)."""
-    flags = set()
-    from pvp_db import db_warzone_owner_ids
-    for (owner,) in db_warzone_owner_ids(session_id, conn=db):
-        flags |= controller_flags(db, session_id, bstate, owner)
-    return flags
-
-
-def health_gain_bonus(db, session_id, bstate, owner):
-    """Return the controller's continuous bonus to each health gain.
-
-    The client represents effects such as Lifeweaver Shaman's
-    ``LifeGainModifier`` as a static typed ``IntAttrModifier``.  It is not a
-    triggered ability, so it must be folded into the amount before the shared
-    health-gain event is emitted.  Iterate over card instances so identical
-    copies stack independently.
-    """
-    total = 0
-    from pvp_db import db_warzone_card_uids
-    rows = db_warzone_card_uids(session_id, owner, conn=db)
-    for (card_uid,) in rows:
-        for ability_guid, _raw in _card_static_abilities(
-                db, session_id, int(card_uid)):
-            for param, raw in _static_leaves(db, ability_guid):
-                if (param.get("property") != "intattr" or
-                        str(param.get("attribute") or "") !=
-                        "LifeGainModifier"):
-                    continue
-                if not _gate_condition(
-                        db, session_id, bstate, param.get("condition_id"),
-                        int(card_uid), owner):
-                    continue
-                try:
-                    value = int(param.get("amount") or 0)
-                except (TypeError, ValueError):
-                    value = 0
-                operation = str(param.get("operation") or "Add").lower()
-                if operation == "add":
-                    total += value
-    return total
 
 
 def can_block(db, session_id, bstate, attacker_uid, blocker_uid):

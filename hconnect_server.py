@@ -133,17 +133,15 @@ from db import (player_id_from_name, player_id_from_steam, display_name_from_ide
                 STARDUST_TEMPLATES, CHEST_TEMPLATE)
 from profile_db import (db_find_deck_owner, db_deck_champion_name,
                         db_deck_sleeve,
-                        db_get_or_create_user, db_get_stardust, db_update_resources,
+                        db_get_or_create_user, db_update_resources,
                         db_get_user, db_get_user_by_client_auth_id,
-                        db_add_card, db_record_purchase, db_add_inventory,
-                        db_get_inventory, db_get_store_item, db_send_email, db_save_deck,
+                        db_add_card, db_record_purchase, db_get_inventory, db_get_store_item, db_send_email, db_save_deck,
                         db_update_deck, db_get_decks, db_redeem_code,
                         db_get_store_items,
                         db_get_unopened_chests, db_get_unread_mail_count,
                         db_get_user_champions, db_get_mail_list,
                         db_get_champion_deck_match, db_mark_all_mail_read,
-                        db_delete_all_mail, db_primal_pack_for,
-                        db_get_chest_by_id, db_next_card_instance_id,
+                        db_delete_all_mail, db_get_chest_by_id, db_next_card_instance_id,
                         db_create_card_instance, db_open_chest,
                         db_consume_inventory_row,
                         db_set_champion_last_deck,
@@ -155,9 +153,7 @@ from profile_db import (db_find_deck_owner, db_deck_champion_name,
                         db_record_purchase, db_add_stardust,
                         db_claim_mail_for_user,
                         db_pack_set_info, db_chest_probabilities,
-                        db_create_treasure_chest, db_get_unopened_chests_full,
-                        db_store_item_name_for_template,
-                        db_campaign_deck_for_champion, db_insert_champion,
+                        db_create_treasure_chest, db_campaign_deck_for_champion, db_insert_champion,
                         db_purchase_exists,
                              db_update_champion_talents, db_champion_profile,
                              db_delete_champion,
@@ -207,7 +203,6 @@ from pvp_db import (db_clear_session_cards, db_game_session_pids,
                     db_ability_option_cards, db_card_uids_in_zone,
                     db_card_zone_details, db_card_play_info,
                     db_card_chain_info,
-                    db_cards_by_template_owner,
                     db_card_zone_projection, db_card_owner_zone_state,
                     db_card_owner_id, db_card_sacrifice_info,
                     db_card_location, db_set_card_location,
@@ -219,7 +214,7 @@ from pvp_db import (db_clear_session_cards, db_game_session_pids,
                     db_ability_effect_rows,
                     db_card_positions, db_move_card_to_deck_top,
                     db_move_card_to_deck, db_latest_deck_id_for_user,
-                    db_target_template_definition, db_zone_card_count,
+                    db_zone_card_count,
                     db_warzone_defender_rows, db_hand_card_uids,
                     db_warzone_blocker_uids,
                     db_warzone_troops_with_state, db_ability_is_triggered,
@@ -230,15 +225,13 @@ from pvp_db import (db_clear_session_cards, db_game_session_pids,
                     db_game_cards_at_location_scalar, db_hand_card_count,
                     db_warzone_troops_basic,
                     db_bulk_blocker_state, db_card_discard_spell,
-                    db_card_set_sacrifice_state, db_card_set_warzone_arrival,
+                    db_card_set_warzone_arrival,
                     db_set_card_resolved_at,
-                    db_hand_cards_raw, db_hand_cards_full,
-                    db_card_template_attrs_joined,
+                    db_hand_cards_raw, db_card_template_attrs_joined,
                     db_get_card_abilities, db_card_template_thresholds,
                     db_is_champion_template,
                     db_card_uses, db_bump_card_use,
                     db_card_basic, db_card_with_template,
-                    db_card_instance_full,
                     db_card_instance_dynamic_projection,
                     db_card_instance_dynamic_projections,
                     db_card_ability_list,
@@ -247,7 +240,7 @@ from pvp_db import (db_clear_session_cards, db_game_session_pids,
                     db_card_template_lethal,
                     db_card_sync_abilities,
                     db_warzone_card_state_attributes,
-                    db_card_activation_info, db_deck_top_card_details,
+                    db_deck_top_card_details,
                     db_move_card_row_to_hand, db_reset_warzone_troop,
                     db_session_turn_order, db_insert_game_cards,
                     db_update_game_card_abilities)
@@ -262,7 +255,6 @@ from pve_db import (db_campaign_user_id, db_campaign_identity_state,
                     db_encounter_deck_sleeve,
                     db_talent_data_ability_guid, db_campaign_runtime_row,
                     db_campaign_champion_race, db_campaign_state,
-                    db_quest_start_rows, db_quest_node_rows,
                     db_campaign_summary_row)
 from static import CRAYBURN_PACK_CARD_SEEDS
 from az1_pack import (CAMPAIGN_PACK_CONFIGS, STARDUST_REPLACEMENT_RATE,
@@ -496,19 +488,10 @@ class HCPHandler(RulesPortProjectionMixin, ProfileStreamMixin, CardPlayMixin, Ca
         return session
 
     def _checkpoint_engine(self, session):
-        """Select the checkpoint adapter for this session.
-
-        Native RulesPort sessions and compatibility sessions share the same
-        projection handlers, so those handlers must not unconditionally import
-        the legacy battle engine.  Keeping the selection here makes the
-        boundary explicit while preserving the rollback path for old sessions.
-        """
+        """Return the battle-checkpoint module (a seam tests replace)."""
         self._bind_log_session(session)
-        if getattr(session, "_rules_port_session", None) is not None:
-            from rules_port import lifecycle
-            return lifecycle
-        import battle_engine
-        return battle_engine
+        from rules_port import lifecycle
+        return lifecycle
 
     def _maybe_attach_rules_port(self, session, game, battle_state):
         """Attach the authoritative Python rules host for a live session."""

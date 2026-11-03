@@ -1577,6 +1577,88 @@ disassembly, plus typed `hex-private/Records/AbilityTemplate.jsonl` and
 `hex-private/Records/AbilityEffectTemplate.jsonl` fields. No card text was used to infer
 these behaviors.
 
+## Card fixtures that only passed on the removed legacy resolver
+
+The legacy ability resolver (`abilities/framework/resolution.py`, the BOM leaf
+table and `EffectContext.from_legacy`) was removed. Live sessions never used it:
+it refused any session with RulesPort attached, and attachment is unconditional.
+Some test fixtures still reached it, because their stub sessions were not
+attached. They were moved to the native entry points (`resolve_port_ability`,
+`resolve_port_trigger`, `resolve_port_played_spell`, `rules_port.effects.dispatch`).
+The fixtures below fail the same way on the pre-removal production code, so
+each one is either a native gap or a fixture that asserted the legacy log
+text. They were removed rather than kept as failing tests. Re-add each one as
+a native acceptance test when its behavior is confirmed against the client:
+
+| Former test | Native result when it was removed |
+|---|---|
+| `tests_cards_fixes`: Crazed Squirrel Titan respects Verdant Wyldeboar buff | wrong troop stats `[(warzone, 8), (warzone, 4)]` |
+| `tests_cards_fixes`: Oakhenge moves revealed troop to hand with its template | assertion failed |
+| `tests_cards_fixes`: Jadiim triggers for a one-cost permanent | no stat buff applied |
+| `tests_cards_fixes`: Verdant Wyldeboar deck move clears battle state | assertion failed |
+| `tests_cards_fixes`: Incubation Slave egg summon and sacrifice | fixture asserted the legacy log string |
+| `tests_cards_fixes`: Bun'jitsu charge power summon and buff | fixture asserted the legacy log string |
+| `tests_cards_fixes`: Chlorophyllia plays Wild Shard from deck | assertion failed |
+| `tests_cards_fixes`: Chlorophyllia PvP view persists resource state | assertion failed |
+| `tests_cards_fixes`: Malfunctioning War Bot hits a random champion at turn start | champion health unchanged in the PvP view |
+| `tests_chain_abilities`: Brood Creeper / Spawn of Othuyeg | `NotImplementedError: the event names no target player` |
+| `tests_chain_abilities`: Chronic Madness buries, escalates and returns to deck | resolver returned `COMPLETED` with no move |
+| `tests_chain_abilities`: Incubate puts eggs in the opposing deck | no eggs created |
+| `tests_combat`: Priestess Deathcry human picker | prompt advertises the invoked child ability, not the Deathcry |
+| `tests_combat`: AI X-cost spell kills its target | target survived |
+| `tests_deck_abilities`: Angel of Dawn plays free on first draw | card stayed in hand |
+
+## Card views: producer differences to check
+
+Both card producers in the rules port now build a typed `CardView`
+(`rules_port/card_view.py`): the static filters through `from_static_row` and the
+condition layer through `from_condition_row` / `from_condition_champion`. Each
+builder keeps its producer's values, so behaviour is unchanged. Differences that
+remain between the two paths, to decide per filter:
+
+- `attack` and `defense`: the static path uses the template's values only, and the
+  condition path adds the card's instance modifiers (`card_attack_mod`,
+  `card_defense_mod`). A filter that reads the current attack sees different values
+  depending on the path.
+- `cost`: the static path uses the template cost; the condition path uses the
+  effective cost (`db_game_card_effective_cost`).
+- Subtype and thresholds: the static path applies the `permanent_buffs` overrides
+  (`subtype`, `thresholds`); the condition path reads the template's subtype and
+  threshold JSON and does not apply them.
+- Thresholds parse differently when a record has both a `list` and a `values` key:
+  `shards_from_threshold` (static) takes the first non-empty list, `_shards`
+  (condition) takes `list` whenever the key exists.
+- The target-filter producers in `rules_port/targeting.py` follow the same split.
+  The projected card (`_project_card`, `shape "projected"`) takes the current attack,
+  defense, thresholds and subtype when it has a session. The source card
+  (`_source_card`, shape "source") and the revealed card (`shape "revealed"`) take
+  the template values. A target filter on attack therefore reads the current value in
+  one path and the printed value in the other.
+- `rules_port/context.py`'s card producers (the bury filter and the card-count
+  variable) build through `CardView`. Both use template values (`cost` included),
+  like the static path; the bury candidate's `cost` is the template cost, not the
+  effective cost the condition layer uses for the same card.
+- Card producers, status (scan: dict literals with a `card_uid` key). Converted since
+  the last correction: the rules-port combat, champion, token, fuse and transform
+  candidates, and the setup scene card. Still literal, and a card view in every case
+  except the last three:
+  - `abilities/framework/condition_engine.py`: lines 246, 285, 367, 390. A parallel
+    copy of the condition layer (`rules_port/condition_context.py`, converted), with
+    extra `faction` and `src_owner_id` keys and `src_owner_side` taken from the ability
+    source rather than the owner.
+  - `abilities/framework/cost_mod.py`: line 68 (the cost-modifier card).
+  - `abilities/framework/effects/damage.py`: lines 93, 102, 109 (the typed-immunity view).
+  - `abilities/framework/targeting.py`: lines 289, 328, 416, 570. A parallel copy of the
+    target projection (`rules_port/targeting.py`, converted), with `faction`, `gem_count`
+    and `src_owner_id`.
+  - Not card views, so they stay literal: `pvp_autoplay.py` lines 234 and 281 (hand-tracker
+    rows), `rules_port/session.py` line 1603 (a play-queue entry) and
+    `rules_port/trace.py` line 75 (an audit record).
+
+  The framework copies duplicate the `rules_port` modules. Converting them adds more
+  shapes; replacing them with the `rules_port` producers removes them, but changes which
+  values some filters see, so each needs a decision.
+
 ## Remaining work
 
 The scope of the complete original-client port is not complete. In addition to
@@ -1595,9 +1677,8 @@ the uncertified rows above, the inspected damage path still needs:
 - Consistent state-based death timing across effect groups and simultaneous
   damage, with real trigger and zone-event acceptance scenarios.
 
-Effect-field audit follow-ups (`tools/ir_coverage/audit_effect_leaves.py`
-reports no meaningful unread effect-template fields for the current snapshot;
-these are the remaining projection limits):
+Effect-field follow-ups (remaining projection limits; the old
+`audit_effect_leaves.py` leaf audit was removed with the legacy leaf registry):
 
 - Current Records contain no `GrantAbility.m_AllSocketedPowersOfMyMaster = 1`
   and no `CreateTokenCopy.m_CopyGems = 1` instances. The master equipment link
@@ -1624,3 +1705,36 @@ branch on it, so the no-op port is exact.
 Use `docs/PRIVATE_SERVER_FEATURES.md` for the other known setup, draw, hand-limit,
 metadata-interpreter and client acceptance gaps. A clean class inventory must
 not clear those items.
+
+## Condition gate: native vs framework engine
+
+`abilities/framework/statics.py` now gates effects with the native layer
+(`rules_port.conditions.evaluate_effect_condition`) instead of
+`abilities/framework/condition_engine.py`. A differential over all 538 Records
+conditions (12,912 contexts) found 2,872 disagreements across 130 conditions.
+By type: RequiresTargetPassesFilter (all), NotEffect (all), RequiresCardsControlled
+(864 framework ValueErrors), AndEffect (192 framework ValueErrors),
+SourceCardHasCounters, RequiresResourceThreshold, RequiresChampionHealth,
+ChampionCardsCast and RequiresSourcePassesFilter. A hand check of
+NotEffect(RequiresResourceThreshold) on an empty state gave the native answer as
+correct and the framework's inner result as wrong.
+
+RequiresChampionHealth now honours `m_PlayerFilter` in the native layer
+(Self, SingleOpponent, MultipleOpponents), matching the framework.
+Deathcry trigger checks also use the native layer. The first differential found
+79 disagreements, all from `TriggerPlayerControlsAbilitySource`: deathcry did not
+pass the dying card's controller as the trigger owner, so the native check
+rejected it. Deathcry now passes `trigger_owner_id`, and the 28,224-case
+differential over all CardEnteredZone triggers agrees. `condition_engine.py` is
+now deleted; its two test files use the native layer.
+
+Migrating its two test files exposed three native gaps, now fixed:
+- `TurnPhaseCondition` compared `str(phase)` with the phase name; phases are
+  `ETurnPhases` values, so a live turn never matched. It now compares numerically.
+- Warzone -> Discard triggers with `m_UsesPreviousState` ignored the pre-move
+  Dead bit, so a card buried from hand or deck could fire a death trigger.
+- Condition cards left out persistent `atk`/`def` buffs, so death-trigger
+  previous-state values missed them.
+Two fixtures were incomplete rather than wrong: trigger conditions need the
+event's player (`trigger_owner_id`), a nth-draw needs the draw index in the
+event data, and a threshold gain needs `GainThresholdEvent`.

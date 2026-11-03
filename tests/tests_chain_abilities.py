@@ -114,49 +114,6 @@ def _pl_ai():
     return pl_t, ai_t
 
 
-def test_cards_attacked_dispatch_uses_group_count_once(db):
-    """The attack-group event carries NumAttackers and is not replayed."""
-    from unittest import mock
-    from abilities.framework import triggers
-    pl_t, ai_t = _pl_ai()
-    game = game_engine.Game(1, pl_t, ai_t)
-    handler = HandlerStub(db)
-    bstate = {"turn_number": 4}
-    source_uid = int(handler._player_champ_scid.uid.uid64)
-    with mock.patch.object(triggers, "resolve_triggers",
-                           return_value="fired") as dispatch:
-        assert triggers.resolve_cards_attacked(
-            db, handler, game, SessionStub(), pl_t, ai_t, bstate,
-            source_uid, 5, [103, 101, 102]) == "fired"
-        assert triggers.resolve_cards_attacked(
-            db, handler, game, SessionStub(), pl_t, ai_t, bstate,
-            source_uid, 5, [101, 102, 103]) == ""
-    assert dispatch.call_count == 1
-    assert dispatch.call_args.args[7:9] == (
-        "CardsAttackedEvent", source_uid)
-    assert dispatch.call_args.kwargs["event_tac"]
-    from abilities.framework.tac import _tac_attr_hash
-    assert dispatch.call_args.kwargs["event_tac"][_tac_attr_hash(
-        "NumAttackers")] == 3
-
-
-def test_card_battled_dispatch_is_directional(db):
-    """A card battle gives each participant its own trigger perspective."""
-    from unittest import mock
-    from abilities.framework import triggers
-    pl_t, ai_t = _pl_ai()
-    game = game_engine.Game(1, pl_t, ai_t)
-    handler = HandlerStub(db)
-    with mock.patch.object(triggers, "resolve_triggers",
-                           return_value="fired") as dispatch:
-        assert triggers.resolve_card_battled(
-            db, handler, game, SessionStub(), pl_t, ai_t, {},
-            101, 5, 202, 0) == "fired"
-    assert dispatch.call_count == 1
-    assert dispatch.call_args.args[7:9] == ("CardBattledEvent", 101)
-    assert dispatch.call_args.kwargs["extra_target"] == 202
-
-
 def test_spell_finish_uses_the_effective_post_resolution_type(db):
     from unittest import mock
     from rules_port.chain_items import resolve_card_item
@@ -288,47 +245,6 @@ def test_generated_card_uid_is_independent_of_row_id(db):
     next_uid = next_game_card_uid(db, 1)
     assert next_uid != generated_uid
     assert game_engine.UID(next_uid).instance_id == 45195
-
-
-def test_brood_creeper_damage_to_opposing_champion_summons(db):
-    """Brood Creeper deals combat damage to the player's champion -> its
-    CardDealtDamageEvent trigger fires (source card == ability source, target
-    is an opposing hero) and summons a Spiderspawn under the AI."""
-    from abilities.framework.triggers import (
-        resolve_triggers, resolve_stack_trigger)
-    _copy_card(db, TPL_BROOD_CREEPER)
-    _copy_card(db, TPL_SPIDESPAWN)
-    add_card(db, 101, 0, TPL_BROOD_CREEPER)
-    db.execute(
-        "UPDATE game_cards SET card_abilities=? WHERE card_uid=101",
-        (json.dumps([AG_BROOD_DAMAGE]),))
-    db.commit()
-    pl_t, ai_t = _pl_ai()
-    game = game_engine.Game(1, pl_t, ai_t)
-    handler = HandlerStub(db)
-    bstate = {"player_health": 20, "ai_health": 20, "turn_number": 1}
-    player_champ_uid = int(handler._player_champ_scid.uid.uid64)
-    # The AI's Brood Creeper damaged the player's champion.
-    resolve_triggers(db, handler, game, SessionStub(), pl_t, ai_t, bstate,
-                     "CardDealtDamageEvent", 101, 0,
-                     extra_target=player_champ_uid)
-    # The trigger does not ignore the chain (m_IgnoresChain=0): resolve the
-    # pushed item the way the server's stack drain would.
-    items = list(bstate.get("stack") or [])
-    assert items, "Brood Creeper trigger should have fired"
-    for item in items:
-        bstate["stack"].remove(item)
-        resolve_stack_trigger(handler, game, SessionStub(), db, pl_t, ai_t,
-                              bstate, item)
-    spiders = db.execute(
-        "SELECT user_id, location FROM game_cards "
-        "WHERE template_guid=? AND card_uid != 101",
-        (TPL_SPIDESPAWN,)).fetchall()
-    assert spiders and spiders[0] == (0, "warzone"), spiders
-    # Serializing the pushed events must not crash: a token CardUpdated with
-    # state=None used to blow up the wire encoder mid-combat (the AI Brood
-    # Creeper crash) — the summoned token always carries CameOutThisTurn.
-    game.make_network_packet(pl_t)
 
 
 def test_brood_creeper_does_not_fire_on_own_champion(db):
@@ -603,61 +519,6 @@ def test_queued_trigger_source_projection_preserves_combat_state(db):
     assert bstate.get("stack"), "the trigger should be queued on the chain"
 
 
-def test_spawn_of_othuyeg_buries_one_or_five(db):
-    """Spawn of Othuyeg deals damage to an opposing champion: with fewer than
-    ten cards in opposing crypts it buries one top card of their deck; with ten
-    or more it buries five (data-driven gated branches — the effect list has
-    two StoreTargets leaves, so the backfill must not collapse them)."""
-    from abilities.framework.triggers import (
-        resolve_triggers, resolve_stack_trigger)
-    _copy_card(db, TPL_SPAWN)
-    for i, uid in enumerate((301, 302, 303, 304, 305)):
-        add_card(db, uid, 5, "14909185-1070-48df-9508-61d5a9650bd2",
-                 loc="deck")  # player deck cards to bury
-    add_card(db, 101, 0, TPL_SPAWN)
-    db.execute(
-        "UPDATE game_cards SET card_abilities=? WHERE card_uid=101",
-        (json.dumps([AG_SPAWN_DAMAGE]),))
-    db.commit()
-    pl_t, ai_t = _pl_ai()
-    handler = HandlerStub(db)
-
-    def fire(crypt_cards, deck_uids, crypt_uids):
-        # Reset the player's deck to exactly deck_uids so each call buries a
-        # fresh top set (the earlier call already buried its own cards).
-        db.execute(
-            "DELETE FROM game_cards WHERE session_id=1 AND user_id=5 "
-            "AND location='deck'")
-        db.commit()
-        for uid in deck_uids:
-            add_card(db, uid, 5, "14909185-1070-48df-9508-61d5a9650bd2",
-                     loc="deck")
-        game = game_engine.Game(1, pl_t, ai_t)
-        bstate = {"player_health": 20, "ai_health": 20, "turn_number": 1}
-        for i in range(crypt_cards):
-            add_card(db, crypt_uids[i], 5,
-                     "14909185-1070-48df-9508-61d5a9650bd2",
-                     loc="discard")  # player crypt filler
-        player_champ_uid = int(handler._player_champ_scid.uid.uid64)
-        resolve_triggers(db, handler, game, SessionStub(), pl_t, ai_t, bstate,
-                         "CardDealtDamageEvent", 101, 0,
-                         extra_target=player_champ_uid)
-        for item in list(bstate.get("stack") or []):
-            bstate["stack"].remove(item)
-            resolve_stack_trigger(handler, game, SessionStub(), db, pl_t, ai_t,
-                                  bstate, item)
-        return db.execute(
-            "SELECT COUNT(*) FROM game_cards WHERE session_id=1 "
-            "AND card_uid IN (%s) AND location='discard'"
-            % ",".join("?" * len(deck_uids)), deck_uids
-        ).fetchone()[0]
-
-    assert fire(0, [301, 302, 303, 304, 305],
-                list(range(401, 401))) == 1, "fewer than ten crypt cards buries one"
-    assert fire(10, [311, 312, 313, 314, 315],
-                list(range(501, 511))) == 5, "ten or more crypt cards buries five"
-
-
 def test_hand_incantation_trigger_does_not_fire(db):
     """Incantation of Ascendance drawn into the hand must NOT fire its
     CardDrawnEvent trigger from the hand (m_TriggerCollectionFlags =
@@ -888,102 +749,6 @@ def test_multi_target_play_card_keeps_all_target_instances(db):
         assert list(inst.max_target_counts) == [1, 1]
     finally:
         dbmod._db, hcs._db = old_db, old_hcs
-
-
-def test_chronic_madness_buries_escalates_and_returns_to_deck(db):
-    """Chronic Madness: "Bury the top ESC:4 cards of target champion's deck.
-    Escalation." — the first cast buries 4 (ESC starts at 1), each later cast
-    escalates by 4, the buried cards render face-up in the discard (CardUpdated
-    events), and the spell itself is put back into its owner's deck at a
-    random index on resolution."""
-    from abilities import resolve_played_spell
-    _copy_card(db, TPL_CHRONIC_MADNESS)
-    ai_deck = list(range(401, 421))  # 20 AI deck cards to bury
-    for uid in ai_deck:
-        add_card(db, uid, 0, "14909185-1070-48df-9508-61d5a9650bd2",
-                 loc="deck")
-    pl_t, ai_t = _pl_ai()
-    handler = HandlerStub(db)
-    bstate = {"player_health": 20, "ai_health": 20, "turn_number": 1}
-    ai_champ = int(handler._ai_champ_scid.uid.uid64)
-
-    for uid in (101, 102):
-        add_card(db, uid, 5, TPL_CHRONIC_MADNESS, loc="deck")
-        db.execute(
-            "UPDATE game_cards SET card_abilities=? WHERE card_uid=?",
-            (json.dumps([AG_CHRONIC_BURY, AG_CHRONIC_ESCALATE]), uid))
-    db.commit()
-
-    def cast(uid):
-        db.execute(
-            "UPDATE game_cards SET location='hand' WHERE session_id=1 "
-            "AND card_uid=?", (uid,))
-        db.commit()
-        game = game_engine.Game(1, pl_t, ai_t)
-        bstate["player_spell_target"] = ai_champ
-        bstate["resolving_source_uid"] = uid
-        bstate["resolving_owner_id"] = 5
-        out = resolve_played_spell(
-            game, SessionStub(), db, handler, pl_t, ai_t, bstate,
-            [AG_CHRONIC_BURY, AG_CHRONIC_ESCALATE])
-        bstate.pop("player_spell_target", None)
-        return game, out
-
-    game1, out1 = cast(101)
-    assert "bury 4 cards" in out1, out1
-    assert "escalate " in out1, out1
-    buried1 = db.execute(
-        "SELECT card_uid FROM game_cards WHERE session_id=1 AND card_uid IN (%s) "
-        "AND location='discard'" % ",".join("?" * len(ai_deck)),
-        ai_deck).fetchall()
-    assert len(buried1) == 4, buried1
-    # The buried cards each got a face-up CardUpdated into the Discard.
-    buried_uids = {int(r[0]) for r in buried1}
-    upd = [e for e in game1.events
-           if isinstance(e, game_engine.CardUpdatedSessionEventArgs)
-           and int(e.session_card_id.uid.uid64) in buried_uids]
-    assert len(upd) == 4, len(upd)
-    assert all(e.collection == game_engine.ECardCollections.Discard
-               for e in upd), [e.collection for e in upd]
-    # The spell itself returned to a uniformly selected deck-relative slot;
-    # position zero is valid when it lands on top.
-    loc, pos = db.execute(
-        "SELECT location, position FROM game_cards WHERE card_uid=101"
-    ).fetchone()
-    deck_count = db.execute(
-        "SELECT COUNT(*) FROM game_cards WHERE session_id=1 AND user_id=5 "
-        "AND location='deck'"
-    ).fetchone()[0]
-    assert loc == "deck" and 0 <= int(pos or 0) < int(deck_count), \
-        (loc, pos, deck_count)
-    for uid in (101, 102):
-        buffs = json.loads(db.execute(
-            "SELECT permanent_buffs FROM game_cards WHERE card_uid=?",
-            (uid,)).fetchone()[0])
-        assert buffs["escalation_count"] == 2, (uid, buffs)
-    escalated_events = {
-        int(event.session_card_id.uid.uid64): event.escalation
-        for event in game1.events
-        if isinstance(event, game_engine.CardUpdatedSessionEventArgs)
-        and int(event.session_card_id.uid.uid64) in {101, 102}
-        and event.escalation == 2
-    }
-    assert escalated_events == {101: 2, 102: 2}, escalated_events
-
-    # Second cast escalates: ESC*4 with count 2 buries 8.
-    for uid in range(421, 441):
-        add_card(db, uid, 0, "14909185-1070-48df-9508-61d5a9650bd2",
-                 loc="deck")
-    game2, out2 = cast(102)
-    assert "bury 8 cards" in out2, out2
-    for uid in (101, 102):
-        buffs = json.loads(db.execute(
-            "SELECT permanent_buffs FROM game_cards WHERE card_uid=?",
-            (uid,)).fetchone()[0])
-        assert buffs["escalation_count"] == 3, (uid, buffs)
-    loc2 = db.execute(
-        "SELECT location FROM game_cards WHERE card_uid=102").fetchone()[0]
-    assert loc2 == "deck", loc2
 
 
 def test_bunjitsu_void_cost_is_a_cost_instance(db):
@@ -1472,7 +1237,7 @@ def test_summon_zero_count_does_not_crash(db):
     """SummonToken with a count that resolves to 0 must not crash on an
     unbound `cname` (Xarlox the Brood Lord's trigger) — the return string
     uses a safe default name when no token was created."""
-    from abilities.framework.bom import _leaf_summon
+    from tests.native_leafs import LEAFS
     import db as dbmod
     from tests.tests_cards_fixes import _copy_card
     _copy_card(db, "a9ebe40e-ef30-4c9e-b4dd-1b414dc35d0c")  # Spiderspawn
@@ -1494,7 +1259,7 @@ def test_summon_zero_count_does_not_crash(db):
                   "resolving_ability": "00000000-0000-0000-0000-0000000000aa"}
         class _H:
             user_profile = {"id": 5}
-        out = _leaf_summon(
+        out = LEAFS["SummonTokenTroopAbilityEffectTemplate"](
             game_engine.Game(1, game_engine.UID.make(244, 5),
                              game_engine.UID.make(3, 1000)),
             SessionStub(), db, _H(), game_engine.UID.make(244, 5),
@@ -1561,42 +1326,6 @@ def test_worker_bot_creation_replacement_is_authored(db):
     assert summon(worker_bot) == [worker_bot]
 
 
-def test_incubate_puts_eggs_in_opposing_deck(db):
-    """Incubate's opposing-champion target controls the generated eggs.
-
-    The AI casts Incubate, so the three Spiderling Eggs must be inserted into
-    the player's deck, not the AI's deck.  The previous token leaf always used
-    resolving_owner_id (the caster) for deck-bound tokens.
-    """
-    from abilities.framework.triggers import resolve_stack_trigger
-    from tests.tests_cards_fixes import _copy_card
-
-    _copy_card(db, TPL_INCUBATE)
-    _copy_card(db, TPL_SPIDERLING_EGG)
-    add_card(db, 101, 0, TPL_INCUBATE, loc="CastSpells")
-    db.execute(
-        "UPDATE game_cards SET card_abilities=? WHERE card_uid=101",
-        (json.dumps(["edc225ee-3d7c-74e5-6fe1-01a85c974dcf"]),))
-    # Give both sides a few existing deck cards so insertion is tested against
-    # real deck owners rather than an empty-deck edge case.
-    add_card(db, 201, 5, TPL_INCUBATE, loc="deck")
-    add_card(db, 202, 0, TPL_INCUBATE, loc="deck")
-    db.commit()
-    pl_t, ai_t = _pl_ai()
-    game = game_engine.Game(1, pl_t, ai_t)
-    handler = HandlerStub(db)
-    bstate = {"player_health": 20, "ai_health": 20, "turn_number": 1}
-    resolve_stack_trigger(
-        handler, game, SessionStub(), db, pl_t, ai_t, bstate,
-        {"kind": "spell", "ability_guid":
-         "edc225ee-3d7c-74e5-6fe1-01a85c974dcf", "source_uid": 101})
-    eggs = db.execute(
-        "SELECT user_id, location, COUNT(*) FROM game_cards "
-        "WHERE template_guid=? GROUP BY user_id, location",
-        (TPL_SPIDERLING_EGG,)).fetchall()
-    assert eggs == [(5, "deck", 3)], eggs
-
-
 def test_word_of_xentoth_draws_for_caster_and_eggs_for_opponent(db):
     """Word of Xentoth's two abilities reach different players.
 
@@ -1605,7 +1334,7 @@ def test_word_of_xentoth_draws_for_caster_and_eggs_for_opponent(db):
     champion and put them into their decks" targets the opposing champion's owner,
     so the player's deck gains ten eggs and the AI's deck gains none.
     """
-    from abilities.framework.triggers import resolve_stack_trigger
+    from rules_port.resolution import resolve_port_trigger as resolve_stack_trigger
     _copy_card(db, TPL_WORD_OF_XENTOTH)
     _copy_card(db, TPL_SPIDERLING_EGG)
     _copy_card(db, TPL_INCUBATE)
@@ -1770,7 +1499,8 @@ def test_state_based_death_includes_static_defense(db):
     """High Tomb Lord ("+1/+1 for each card in all crypts") at 9/9 that took 4
     combat damage must NOT die to the state check — the continuous static
     defense (not stored in permanent/temporary buffs) counts toward survival."""
-    from abilities.framework.kill_troop import state_based_deaths
+    from rules_port.context import EffectContext
+    from rules_port.death_effects import state_based_deaths
     from tests.tests_cards_fixes import _copy_card, _copy_ability
     _copy_card(db, TPL_TOMB_LORD)
     for i, uid in enumerate(range(501, 510)):
@@ -1785,8 +1515,9 @@ def test_state_based_death_includes_static_defense(db):
     pl_t, ai_t = _pl_ai()
     handler = HandlerStub(db)
     bstate = {"player_health": 20, "ai_health": 20}
-    state_based_deaths(game_engine.Game(1, pl_t, ai_t), SessionStub(), db,
-                       handler, pl_t, ai_t, bstate)
+    state_based_deaths(EffectContext.from_rules_port(
+        game_engine.Game(1, pl_t, ai_t), SessionStub(), db, handler,
+        pl_t, ai_t, bstate, ""))
     loc = db.execute(
         "SELECT location FROM game_cards WHERE card_uid=101").fetchone()[0]
     assert loc == "warzone", loc  # 9 def - 4 damage = 5, survives
@@ -2377,12 +2108,8 @@ def test_native_chain_resolves_trigger_without_legacy_fallback(db):
     old_db, old_hcs = dbmod._db, hcs._db
     dbmod._db, hcs._db = db, db
     try:
-        with mock.patch(
-                "abilities.framework.resolution.resolve_ability",
-                side_effect=AssertionError(
-                    "native chain entered the legacy ability resolver")):
-            resolve_trigger_item(
-                handler, SessionStub(), db, game, bstate, item, pl_t, ai_t)
+        resolve_trigger_item(
+            handler, SessionStub(), db, game, bstate, item, pl_t, ai_t)
     finally:
         dbmod._db, hcs._db = old_db, old_hcs
     updates = [(int(ev.session_card_id.uid.uid64), ev.collection)
@@ -3843,9 +3570,6 @@ def _main():
              test_two_troop_exhaust_activation_keeps_both_troops,
              test_pterobot_costs_less_for_each_dwarf_and_robot_you_control,
              test_hand_card_shows_its_current_cost,
-             test_brood_creeper_damage_to_opposing_champion_summons,
-             test_cards_attacked_dispatch_uses_group_count_once,
-             test_card_battled_dispatch_is_directional,
              test_spell_finish_uses_the_effective_post_resolution_type,
              test_lose_life_modifier_is_not_damage,
              test_brood_creeper_does_not_fire_on_own_champion,
@@ -3854,13 +3578,11 @@ def _main():
              test_vampire_prince_rewards_buried_opponent_resource,
              test_queued_trigger_source_projection_preserves_combat_state,
              test_generated_card_uid_is_independent_of_row_id,
-             test_spawn_of_othuyeg_buries_one_or_five,
              test_hand_incantation_trigger_does_not_fire,
              test_countermagic_requires_castspells_target,
              test_countermagic_offered_in_ai_chain_window,
              test_strength_of_redwood_targets_combat_troop,
              test_multi_target_play_card_keeps_all_target_instances,
-             test_chronic_madness_buries_escalates_and_returns_to_deck,
              test_bunjitsu_void_cost_is_a_cost_instance,
              test_undying_weaver_offers_scrounge_cost_during_card_play,
              test_block_exception_reads_the_blockers_template_shards,
@@ -3871,7 +3593,6 @@ def _main():
              test_lightning_armada_counts_only_your_hand,
              test_summon_zero_count_does_not_crash,
              test_worker_bot_creation_replacement_is_authored,
-             test_incubate_puts_eggs_in_opposing_deck,
              test_ai_incubate_uses_play_card_ability_on_chain,
              test_spiderling_egg_summons_under_random_opponent,
              test_spiderling_egg_bane_copies_discard_destination,
@@ -4156,7 +3877,6 @@ def test_ravenous_zombies_exhausts_itself_after_voiding_a_crypt_troop(db):
     bstate["turn_number"] = 3
     assert ready_step_for_turn(db, 1, 0, bstate, "ai") is not None
     assert not zombie_state() & tapped
-
 
 
 TPL_TIME_RIPPLE = "222eb50a-09d1-4b22-b3d1-341be464c806"

@@ -21,19 +21,9 @@ def _resolve_deathcry_effect(game, session, db, handler, pl_t, ai_t, bstate,
     bstate = bstate or {}
     bstate["resolving_owner_id"] = owner_user_id
     bstate["resolving_source_uid"] = card_uid
-    if (getattr(session, "_rules_port_session", None) is not None or
-            (bstate or {}).get("_rules_port_attached")):
-        from rules_port.resolution import resolve_port_ability
-        def resolve(handler, game, session, db, pl_t, ai_t, bstate,
-                   ability_guid, source_uid, owner_id, target_map):
-            return resolve_port_ability(
-                handler, game, session, db, pl_t, ai_t, bstate,
-                ability_guid, source_uid, owner_id, target_map=target_map)
-    else:
-        from .resolution import resolve_ability
-        resolve = resolve_ability
-    out = resolve(handler, game, session, db, pl_t, ai_t, bstate,
-                  ag, card_uid, owner_user_id, {})
+    from rules_port.resolution import resolve_port_ability
+    out = resolve_port_ability(handler, game, session, db, pl_t, ai_t, bstate,
+                               ag, card_uid, owner_user_id, target_map={})
     _log(f"    Deathcry {ag[:8]} resolved from stack")
     return out
 
@@ -47,7 +37,8 @@ def resolve_deathcry(game, session, db, handler, pl_t, ai_t, card_uid, tpl_guid,
     condition actually holds for a death (source Warzone -> destination
     Discard), so a Deploy (enters-play) trigger never fires as a Deathcry.
     """
-    from .condition_engine import ConditionContext, trigger_condition_met
+    from rules_port.condition_context import ConditionContext
+    from rules_port.conditions import trigger_condition_met
 
     from pvp_db import (db_template_ability_payload, db_card_ability_payload,
                         db_card_owner_id, db_ability_trigger_metadata,
@@ -101,6 +92,9 @@ def resolve_deathcry(game, session, db, handler, pl_t, ai_t, card_uid, tpl_guid,
                     db, session, bstate or {}, event_type="CardEnteredZoneEvent",
                     ability_source_uid=int(card_uid),
                     ability_source_owner_id=owner_id,
+                    # The death is the event: its player is the dying card's
+                    # controller (client TriggerPlayerControlsAbilitySource).
+                    trigger_owner_id=owner_id,
                     trigger_uid=int(card_uid),
                     pl_t=pl_t, ai_t=ai_t,
                     event_source_collection="warzone",

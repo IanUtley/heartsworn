@@ -43,7 +43,7 @@ def test_skylak_uses_original_deck_size_for_both_talents():
     try:
         expected_zodiac = ZODIAC_BY_MONTH[datetime.now().month]
         from tests.tests_combat import HandlerStub, SessionStub
-        from abilities.framework.conditions import apply_pregame_abilities
+        from rules_port.pregame import apply_pregame_abilities
         from db import db_backfill_ability_effect_meta
         import game_engine
 
@@ -100,8 +100,8 @@ def test_expendable_lives_grants_and_resolves_one_shot_deathcry():
     """Shin'hare's Expendable Lives resolves through one GameStarted path."""
     db, path = _database_copy()
     try:
-        from abilities.framework.triggers import (
-            resolve_stack_trigger, resolve_triggers)
+        from abilities.framework.triggers import resolve_triggers
+        from rules_port.resolution import resolve_port_trigger as resolve_stack_trigger
         from abilities.framework.kill_troop import kill_troop
         from tests.tests_combat import HandlerStub, SessionStub
         import game_engine
@@ -168,7 +168,7 @@ def test_devoted_cost_talent_applies_once_via_trigger():
     """
     db, path = _database_copy()
     try:
-        from abilities.framework.conditions import pregame_modifiers
+        from rules_port.pregame import pregame_modifiers
         from rules_port.resolution import resolve_port_trigger
         from tests.tests_combat import HandlerStub, SessionStub
         import game_engine

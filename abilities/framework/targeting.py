@@ -74,114 +74,6 @@ def template_faction(template_guid):
     return _TEMPLATE_FACTIONS.get(guid, "")
 
 
-def template_is_mercenary(template_guid):
-    """Match IsMercenaryFilter against the extracted champion templates."""
-    guid = str(template_guid or "").lower()
-    if not guid:
-        return False
-    values = _RECORD_GUIDS.get("MercenaryTemplate")
-    if values is None:
-        values = set()
-        path = Path(__file__).resolve().parents[2] / "hex-private" / "Records" / \
-            "MercenaryTemplate.jsonl"
-        try:
-            with path.open(encoding="utf-8", errors="replace") as fh:
-                for line in fh:
-                    try:
-                        value = json.loads(line)
-                        if isinstance(value, str):
-                            value = json.loads(
-                                re.sub(r",\s*([}\]])", r"\1", value))
-                    except (TypeError, ValueError, json.JSONDecodeError):
-                        continue
-                    if not isinstance(value, dict):
-                        continue
-                    ident = value.get("m_Id") or {}
-                    if ident.get("m_Guid"):
-                        values.add(str(ident["m_Guid"]).lower())
-        except OSError:
-            pass
-        _RECORD_GUIDS["MercenaryTemplate"] = values
-    return guid in values
-
-
-def template_equipment_match(template_guid, equipment_type="None"):
-    """Match the client's IsEquippedCardFilter from CardTemplate TAC data."""
-    global _EQUIPMENT_CARD_INFO, _EQUIPMENT_TYPES
-    guid = str(template_guid or "").lower()
-    if not guid:
-        return False
-    if _EQUIPMENT_CARD_INFO is None:
-        from .tac import _tac_attr_hash, decode_tac_tree
-        _EQUIPMENT_CARD_INFO = {}
-        path = Path(__file__).resolve().parents[2] / "hex-private" / "Records" / \
-            "CardTemplate.jsonl"
-        required_hash = _tac_attr_hash("RequiredEquipment")
-        guid_hash = _tac_attr_hash("Guid")
-        try:
-            with path.open(encoding="utf-8", errors="replace") as fh:
-                for line in fh:
-                    try:
-                        value = json.loads(line)
-                        if isinstance(value, str):
-                            value = json.loads(
-                                re.sub(r",\s*([}\]])", r"\1", value))
-                    except (TypeError, ValueError, json.JSONDecodeError):
-                        continue
-                    if not isinstance(value, dict):
-                        continue
-                    ident = value.get("m_Id") or {}
-                    card_guid = str(ident.get("m_Guid") or "").lower()
-                    if not card_guid:
-                        continue
-                    if not value.get("m_EquipmentModifiedCard"):
-                        continue
-                    tac = value.get("m_SerializedTAC") or {}
-                    data = tac.get("data", "") if isinstance(tac, dict) else ""
-                    tree = decode_tac_tree(data)
-                    required = set()
-                    for entry in tree.get(required_hash, []) if isinstance(
-                            tree.get(required_hash), list) else []:
-                        if isinstance(entry, dict) and isinstance(
-                                entry.get(guid_hash), str):
-                            required.add(entry[guid_hash].lower())
-                    _EQUIPMENT_CARD_INFO[card_guid] = required
-        except OSError:
-            pass
-    required = _EQUIPMENT_CARD_INFO.get(guid)
-    if required is None:
-        return False
-    if str(equipment_type or "None").lower() == "none":
-        return True
-    if _EQUIPMENT_TYPES is None:
-        _EQUIPMENT_TYPES = {}
-        path = Path(__file__).resolve().parents[2] / "hex-private" / "Records" / \
-            "InventoryItemData.jsonl"
-        try:
-            with path.open(encoding="utf-8", errors="replace") as fh:
-                for line in fh:
-                    if "InventoryEquipmentData" not in line:
-                        continue
-                    try:
-                        value = json.loads(line)
-                        if isinstance(value, str):
-                            value = json.loads(
-                                re.sub(r",\s*([}\]])", r"\1", value))
-                    except (TypeError, ValueError, json.JSONDecodeError):
-                        continue
-                    if not isinstance(value, dict):
-                        continue
-                    ident = value.get("m_Id") or {}
-                    item_guid = str(ident.get("m_Guid") or "").lower()
-                    if item_guid and value.get("m_EquipmentType"):
-                        _EQUIPMENT_TYPES[item_guid] = str(
-                            value["m_EquipmentType"]).lower()
-        except OSError:
-            pass
-    wanted = str(equipment_type).lower()
-    return any(_EQUIPMENT_TYPES.get(item) == wanted for item in required)
-
-
 def shards_from_threshold(threshold_json):
     """Parse a template's threshold_json into ECardShards flags, e.g.
     {"list": [5]} -> [Diamond]."""
@@ -258,11 +150,6 @@ def _blocking_targets(battle_state, source_uid):
                     continue
             return result
     return set()
-
-
-def _filter_zones(collections):
-    return {ZONE_MAP.get(z, z.lower()) for z in
-            str(collections or "").split("|") if z}
 
 
 _OWNERSHIP_FILTERS = {"IsControlledBy", "IsNotControlledBy", "DifferentOwners"}
@@ -355,22 +242,6 @@ def target_template(db, template_id):
         "min_target_count": row[8], "max_target_count": row[9],
         "filter_json": row[10] or "{}",
         "target_kind": row[11] or "",
-    }
-
-
-def target_uses_both_players(db, template_id):
-    """Return whether a target template may draw candidates from both sides.
-
-    ``SinglePlayer`` describes cardinality, not ownership.  Ownership is
-    expressed by the template's player filter and/or card filter.  The PvP
-    option builders must therefore not turn every single-player target into a
-    self-only target; doing so hides valid opposing champions and troops.
-    """
-    tpl = target_template(db, template_id)
-    if not tpl:
-        return False
-    return (tpl.get("player_filter") or "").lower() not in {
-        "self", "you", "controller",
     }
 
 
@@ -725,51 +596,3 @@ def legal_targets(db, session_id, controller_uid, template_id, source_uid,
     return out
 
 
-def legal_targets_for(db, session_id, controller_uid, target, source_uid,
-                      *, both_players=None, champions=None,
-                      battle_state=None):
-    """Evaluate one ``AbilityBuilder`` target through the shared predicate.
-
-    Callers in PvE and PvP used to repeat the same conversion from a typed
-    target object to ``legal_targets`` arguments.  This helper centralizes
-    that boundary while keeping the actual filter evaluator above as the
-    single source of target legality.
-    """
-    template_id = getattr(target, "guid", target)
-    if both_players is None:
-        both_players = target_uses_both_players(db, template_id)
-    return legal_targets(
-        db, session_id, controller_uid, template_id, source_uid,
-        both_players=bool(both_players), champions=champions,
-        battle_state=battle_state)
-
-
-def validate_target_selection(db, session_id, controller_uid, template_id,
-                              source_uid, selected, both_players=False,
-                              champions=None, battle_state=None):
-    """Validate activation target IDs using the same metadata as auto-targets.
-
-    The client rejects incomplete/illegal TargetInstances before applying an
-    effect.  Server transaction data is untrusted, so explicit target maps
-    must pass this check too.  The caller decides whether an empty result
-    should open a prompt or make the effect a no-op.
-    """
-    tpl = target_template(db, template_id)
-    values = selected if isinstance(selected, (list, tuple)) else [selected]
-    values = [int(v) for v in values if v is not None]
-    if tpl is None:
-        return values
-    if len(values) > int(tpl.get("max_target_count") or 1):
-        return []
-    if not values and tpl.get("optional"):
-        return []
-    legal = set(legal_targets(
-        db, session_id, controller_uid, template_id, source_uid,
-        both_players=both_players, champions=champions or [],
-        battle_state=battle_state))
-    if not values or any(v not in legal for v in values):
-        return []
-    minimum = int(tpl.get("min_target_count") or 0)
-    if len(values) < minimum:
-        return []
-    return values

@@ -17,7 +17,7 @@ fresh_database()   # bind this process's database before ``db`` is imported
 import commands
 import db as db_module
 import game_engine
-import battle_engine
+from rules_port import lifecycle
 
 
 class SessionStub:
@@ -107,9 +107,12 @@ def test_session_logger_writes_bound_session_file():
         db_module.PLAYER_LOG_DIR = temp_dir
         db_module._log_req_file = capture
         try:
-            with db_module.log_session_context(
-                    77, player_id=5, participant_ids=(5, 6)):
+            db_module.set_log_context(
+                player_id=5, session_id=77, participant_ids=(5, 6))
+            try:
                 assert db_module.log_req("session diagnostic") is True
+            finally:
+                db_module.set_log_context()
             session_path = os.path.join(temp_dir, "session-77-p5-p6.log")
             player_path = os.path.join(temp_dir, "player-5.log")
             with open(session_path,
@@ -159,17 +162,17 @@ def test_issue_report_combines_player_and_latest_game_logs():
 
 def test_issue_command_reports_session_state_and_tail():
     session = SessionStub()
-    session.turn_order = battle_engine.default_state()
+    session.turn_order = lifecycle.default_state()
     session.turn_order["phase_idx"] = 1
     tail = [
         "[12:02:00] entering FirstMainPhase",
         "[12:02:01] Error resolving trigger: test failure",
     ]
     handler = HandlerStub()
-    handler._checkpoint_engine = lambda _session: battle_engine
+    handler._checkpoint_engine = lambda _session: lifecycle
     expected_phase = getattr(
-        battle_engine.current_phase(session.turn_order), "name",
-        str(battle_engine.current_phase(session.turn_order)))
+        lifecycle.current_phase(session.turn_order), "name",
+        str(lifecycle.current_phase(session.turn_order)))
     old_flags = commands.hconnect_server.PROFILE_FEATURE_FLAGS
     commands.hconnect_server.PROFILE_FEATURE_FLAGS = ()
     try:
@@ -257,7 +260,7 @@ def test_top_moves_named_hand_card_to_deck_position_zero():
 
 
 def test_resource_command_persists_authoritative_pools():
-    session = BattleSessionStub(battle_engine.default_state())
+    session = BattleSessionStub(lifecycle.default_state())
     session.turn_order["player_resources"] = 2
     session.turn_order["player_total_resources"] = 3
     old_send = commands._send_game_events
@@ -269,7 +272,7 @@ def test_resource_command_persists_authoritative_pools():
             game_engine.UID.make(244, 5), game_engine.UID.make(3, 1000),
             "", "")
         assert result == "Resources: 7/9 for me"
-        state = battle_engine.load_state(session)
+        state = lifecycle.load_state(session)
         assert state["player_resources"] == 7
         assert state["player_total_resources"] == 9
         events = packets[0].events
@@ -280,7 +283,7 @@ def test_resource_command_persists_authoritative_pools():
 
 
 def test_threshold_command_reports_delta_from_previous_value():
-    state = battle_engine.default_state()
+    state = lifecycle.default_state()
     state["player_threshold"] = {4: 1}
     session = BattleSessionStub(state)
     old_send = commands._send_game_events
@@ -291,7 +294,7 @@ def test_threshold_command_reports_delta_from_previous_value():
             HandlerStub(), "threshold", ["me", "0", "3", "0", "0", "0", "0"],
             session, game_engine.UID.make(244, 5), game_engine.UID.make(3, 1000),
             "", "")
-        assert battle_engine.load_state(session)["player_threshold"][4] == 3
+        assert lifecycle.load_state(session)["player_threshold"][4] == 3
         threshold_events = [
             event for event in packets[0].events
             if isinstance(event, game_engine.PlayerResourceThresholdChangedSessionEventArgs)

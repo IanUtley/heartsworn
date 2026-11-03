@@ -9,10 +9,10 @@ from __future__ import annotations
 
 import json
 
-import inspect
 from dataclasses import dataclass, replace
 from typing import Any
 from .damage_effects import assign_damage_shield_order, serialized_damage
+from rules_port.card_view import CardView
 
 
 def _opposing_owner_in(state, owner, handler):
@@ -35,12 +35,6 @@ def _opposing_owner_in(state, owner, handler):
         profile = getattr(handler, "user_profile", None) or {}
         return int(profile.get("id", 0) or 0)
     return 0
-
-
-def _rules_port_attached(session, bstate):
-    """Whether this effect context belongs to an authoritative port session."""
-    return (getattr(session, "_rules_port_session", None) is not None or
-            bool((bstate or {}).get("_rules_port_attached")))
 
 
 @dataclass
@@ -66,39 +60,10 @@ class EffectContext:
     # persisted by an effect (draw is one such path), so placing the builder
     # there makes a normal resolution non-serializable.
     runtime_ability: Any = None
-    native_context: bool = False
     effect_template_override: Any = None
     effect_duration_override: str | None = None
     effect_targets: tuple = ()
     nested_effect_dispatch: Any = None
-
-    def __post_init__(self):
-        if not self.native_context and _rules_port_attached(
-                self.session, self.bstate):
-            raise RuntimeError(
-                "legacy EffectContext bypassed RulesPort; use "
-                "EffectContext.from_rules_port")
-
-    @classmethod
-    def from_legacy(cls, game, session, db, handler, pl_t, ai_t, bstate,
-                    effect_guid, param="", *, ability=None) -> "EffectContext":
-        if _rules_port_attached(session, bstate):
-            raise RuntimeError(
-                "legacy EffectContext bypassed RulesPort; use "
-                "EffectContext.from_rules_port")
-        return cls(
-            game=game,
-            session=session,
-            db=db,
-            handler=handler,
-            player_uid=pl_t,
-            ai_uid=ai_t,
-            bstate=bstate if bstate is not None else {},
-            effect_guid=effect_guid,
-            param=param or "",
-            runtime_ability=ability,
-            native_context=False,
-        )
 
     @classmethod
     def from_rules_port(cls, game, session, db, handler, pl_t, ai_t,
@@ -115,7 +80,7 @@ class EffectContext:
             player_uid=pl_t, ai_uid=ai_t,
             bstate=bstate if bstate is not None else {},
             effect_guid=effect_guid, param=param or "", runtime_ability=ability,
-            native_context=True, effect_targets=tuple(effect_targets or ()),
+            effect_targets=tuple(effect_targets or ()),
             nested_effect_dispatch=nested_effect_dispatch)
 
     @property
@@ -191,24 +156,11 @@ class EffectContext:
     def _emit_trigger(self, event_type, source_card_id, source_owner_id=None,
                       target_card_id=None, target_player_id=None, **data):
         """Emit one event through the active RulesPort trigger boundary."""
-        if self.native_context or self.bstate.get("_rules_port_native_effect"):
-            from rules_port.triggers import dispatch_trigger
-            return dispatch_trigger(
-                self, str(event_type).rsplit(".", 1)[-1], source_card_id,
-                source_owner_id, target_card_id,
-                target_player_id=target_player_id, data=data)
-        from abilities.framework.triggers import resolve_triggers
-        return resolve_triggers(
-            self.db, self.handler, self.game, self.session,
-            self.player_uid, self.ai_uid, self.bstate,
-            str(event_type).rsplit(".", 1)[-1], source_card_id,
-            source_owner_uid=source_owner_id,
-            extra_target=target_card_id,
-            event_source_collection=data.get("event_source_collection"),
-            event_destination_collection=data.get("event_destination_collection"),
-            event_previous_state=data.get("event_previous_state"),
-            event_int_attribute=data.get("event_int_attribute"),
-            event_tac=dict(data.get("event_tac") or {}))
+        from rules_port.triggers import dispatch_trigger
+        return dispatch_trigger(
+            self, str(event_type).rsplit(".", 1)[-1], source_card_id,
+            source_owner_id, target_card_id,
+            target_player_id=target_player_id, data=data)
 
     def emit_gain_charge_triggers(self, amount, owner_id=None):
         """Emit one ``GainChargeEvent`` for every gained charge point.
@@ -283,15 +235,10 @@ class EffectContext:
             return self.ability.value(
                 self.db, self.bstate, field_name,
                 effect=self.effect_guid, default=default)
-        if self.native_context or self.bstate.get("_rules_port_native_effect"):
-            from rules_port.fields import effect_field
-            return effect_field(
-                self.ability, self.db, self.bstate, self.effect_guid,
-                field_name, default)
-        from abilities.framework.fields import effect_field
-
+        from rules_port.fields import effect_field
         return effect_field(
-            self.db, self.bstate, self.effect_guid, field_name, default)
+            self.ability, self.db, self.bstate, self.effect_guid,
+            field_name, default)
 
     def template_value(self, field_name: str, default: Any = None) -> Any:
         """Read a non-numeric typed field from the effect template."""
@@ -306,14 +253,9 @@ class EffectContext:
             return self.ability.template_value(
                 self.db, self.bstate, field_name,
                 effect=self.effect_guid, default=default)
-        if self.native_context or self.bstate.get("_rules_port_native_effect"):
-            from rules_port.fields import effect_template_value
-            return effect_template_value(
-                self.ability, self.effect_guid, field_name, default)
-        from abilities.framework.fields import effect_template_value
-
+        from rules_port.fields import effect_template_value
         return effect_template_value(
-            self.db, self.bstate, self.effect_guid, field_name, default)
+            self.ability, self.effect_guid, field_name, default)
 
     def apply_repeating_effect(self, template, loop_count: int) -> str:
         """Apply a child template over the parent's target instance."""
@@ -448,29 +390,8 @@ class EffectContext:
         target_owner = self.target_owner(default=None)
         if owner is None:
             owner = target_owner
-        if self.native_context or self.bstate.get("_rules_port_native_effect"):
-            from rules_port.draw_effects import draw_cards
-            return draw_cards(self, count, owner=owner)
-        for _ in range(count):
-            if owner == 0:
-                import ai
-                ai.ai_draw_card(self.handler, self.game, self.session,
-                                self.ai_uid, self.bstate)
-                continue
-            from rules_port.runtime_helpers import owner_uid
-
-            draw_uid = (self.player_uid if owner is None else owner_uid(
-                owner, self.player_uid, self.ai_uid, self.bstate))
-            draw_fn = self.handler._player_draw_card
-            try:
-                accepts_owner = len(inspect.signature(draw_fn).parameters) >= 4
-            except (TypeError, ValueError):
-                accepts_owner = True
-            if accepts_owner:
-                draw_fn(self.game, self.session, draw_uid, owner)
-            else:
-                draw_fn(self.game, self.session, draw_uid)
-        return f"draw {count} for owner {owner}"
+        from rules_port.draw_effects import draw_cards
+        return draw_cards(self, count, owner=owner)
 
     def draw_effect(self) -> str:
         """Draw using the effect's typed count and resolved target owner."""
@@ -523,10 +444,7 @@ class EffectContext:
     def continuation(self, *, resume_effect_order: int | None = None,
                      **overrides) -> dict[str, Any]:
         """Return a JSON-safe snapshot for an authored pause/resume point."""
-        if self.native_context:
-            from rules_port.abilities import AbilityContinuation
-        else:
-            from rules_port.builder import AbilityContinuation
+        from rules_port.abilities import AbilityContinuation
 
         if resume_effect_order is None:
             resume_effect_order = int(
@@ -546,14 +464,13 @@ class EffectContext:
             # ``activation`` object.  Effect continuations are consumed by
             # the host's generic target-map/variables boundary, so flatten
             # that wrapper here while keeping the persisted shape typed.
-            if self.native_context:
-                activation = value.pop("activation", None)
-                if isinstance(activation, dict):
-                    value["target_map"] = dict(
-                        activation.get("target_map") or {})
-                    value["variables"] = dict(
-                        activation.get("variables") or
-                        value.get("variables") or {})
+            activation = value.pop("activation", None)
+            if isinstance(activation, dict):
+                value["target_map"] = dict(
+                    activation.get("target_map") or {})
+                value["variables"] = dict(
+                    activation.get("variables") or
+                    value.get("variables") or {})
         else:
             value = AbilityContinuation.from_state(
                 self.bstate, resume_effect_order=resume_effect_order,
@@ -571,14 +488,8 @@ class EffectContext:
 
         count = self.value("m_InputValue", default=1)
         target = self.resolved_target() if target is None else target
-        if self.native_context or self.bstate.get("_rules_port_native_effect"):
-            deck_owner = self.target_owner(
-                target, default=self.bstate.get("resolving_owner_id", 0))
-        else:
-            from abilities.framework.bom import _deck_owner_for_target
-            deck_owner = (_deck_owner_for_target(
-                self.db, self.handler, self.session, self.bstate, target)
-                if target is not None else None)
+        deck_owner = self.target_owner(
+            target, default=self.bstate.get("resolving_owner_id", 0))
         if deck_owner is None:
             deck_owner = 0
         # C# defaults the receiving player to the deck's controller; the
@@ -643,14 +554,8 @@ class EffectContext:
         from pvp_db import db_discard_card
         from rules_port.runtime_helpers import owner_uid
         target = self.resolved_target() if target is None else target
-        if self.native_context or self.bstate.get("_rules_port_native_effect"):
-            deck_owner = self.target_owner(
-                target, default=self.bstate.get("resolving_owner_id", 0))
-        else:
-            from abilities.framework.bom import _deck_owner_for_target
-            deck_owner = (_deck_owner_for_target(
-                self.db, self.handler, self.session, self.bstate, target)
-                if target is not None else None)
+        deck_owner = self.target_owner(
+            target, default=self.bstate.get("resolving_owner_id", 0))
         if deck_owner is None:
             deck_owner = 0
         discard_owner = owner_uid(deck_owner, self.player_uid, self.ai_uid,
@@ -665,10 +570,9 @@ class EffectContext:
         elif self.template_value("m_Filter", None):
             count = 0
             from rules_port.filters import records_filter_matches
-            source = {"card_uid": int(self.bstate.get("resolving_source_uid") or 0),
-                      "user_id": int(deck_owner or 0),
-                      "owner_id": int(deck_owner or 0),
-                      "controller_id": int(deck_owner or 0)}
+            source = CardView.bury_source(
+                self.bstate.get("resolving_source_uid"), deck_owner).as_shape(
+                    "bury_source")
             spec = self.template_value("m_Filter", {})
             deck_rows = self.db.execute(
                 "SELECT card_uid FROM game_cards WHERE session_id=? "
@@ -681,12 +585,7 @@ class EffectContext:
                     self.session.session_id, int(uid), conn=self.db)
                 if not row:
                     continue
-                card = {"card_uid": int(row[0]), "card_type": row[1] or "",
-                        "location": row[2] or "", "user_id": int(row[3] or 0),
-                        "state": int(row[4] or 0),
-                        "name": row[8] or "", "cost": int(row[9] or 0),
-                        "subtype": row[10] or "",
-                        "attributes": int(row[12] or 0) | int(row[13] or 0)}
+                card = CardView.from_bury_row(row).as_shape("bury_card")
                 if records_filter_matches(
                         card, spec, source=source,
                         context=dict(self.bstate or {})):
@@ -840,14 +739,8 @@ class EffectContext:
         """Apply damage using the shared damage/death/replacement path."""
         if target is None:
             return "damage: no target"
-        if self.native_context or self.bstate.get("_rules_port_native_effect"):
-            from rules_port.damage_effects import deal_damage
-            return deal_damage(self, target, int(amount))
-        from abilities.framework.effects.damage import deal_damage
-
-        return deal_damage(
-            self.game, self.session, self.db, self.handler,
-            self.player_uid, self.ai_uid, self.bstate, target, int(amount))
+        from rules_port.damage_effects import deal_damage
+        return deal_damage(self, target, int(amount))
 
     def lose_life(self, target: int | None, amount: int,
                   metadata: dict | None = None) -> str:
@@ -1409,46 +1302,45 @@ class EffectContext:
             # dispatching the leaf; native resolution must create the same
             # typed continuation so the parent AbilityInstance can resume at
             # the following effect after the client picks a card.
-            if self.native_context:
-                prompt = getattr(self.handler, "_push_discard_prompt", None)
-                if callable(prompt):
-                    # Resume *at* this effect, not after it: the first pass
-                    # stopped before its mutation, so the continuation must
-                    # re-enter the same effect with the player's card now
-                    # bound as the resolved target.
-                    resume_order = int(
-                        self.bstate.get("resolving_effect_order", 0) or 0)
-                    self.bstate["rules_port_resume_effect_order"] = resume_order
-                    pending = self.continuation(
-                        resume_effect_order=resume_order)
-                    pending["instance_id"] = int(
-                        getattr(self.ability, "instance_id", 1) or 1)
-                    self.bstate["pending_discard_continuation"] = pending
-                    if discarder is not None:
-                        self.bstate["discard_controller"] = discarder
-                    try:
-                        result = prompt(
-                            self.game, self.session, self.player_uid,
-                            self.ai_uid, self.bstate,
-                            ability_guid=self.bstate.get("resolving_ability", ""))
-                    finally:
-                        self.bstate.pop("discard_controller", None)
-                    # AI discard is completed synchronously by the host
-                    # projection; a human discard leaves the port paused.
-                    # A best-effort target with no legal cards is a resolved
-                    # no-op, however.  Do not leave the continuation marker
-                    # behind or pause the chain for a picker that has no
-                    # selectable target (Bloatcap with an empty hand).
-                    if ("ai_discarded_uid" not in self.bstate and
-                            not self.bstate.get("pending_discard_ability")):
-                        self.bstate.pop("pending_discard_continuation", None)
-                        self.bstate.pop("pending_discard_continuation_instance_id",
-                                        None)
-                        self.bstate.pop("rules_port_resume_effect_order", None)
-                        return "discard: no legal target"
-                    if "ai_discarded_uid" not in self.bstate:
-                        self.bstate["resolution_paused"] = True
-                    return str(result or "discard: awaiting target")
+            prompt = getattr(self.handler, "_push_discard_prompt", None)
+            if callable(prompt):
+                # Resume *at* this effect, not after it: the first pass
+                # stopped before its mutation, so the continuation must
+                # re-enter the same effect with the player's card now
+                # bound as the resolved target.
+                resume_order = int(
+                    self.bstate.get("resolving_effect_order", 0) or 0)
+                self.bstate["rules_port_resume_effect_order"] = resume_order
+                pending = self.continuation(
+                    resume_effect_order=resume_order)
+                pending["instance_id"] = int(
+                    getattr(self.ability, "instance_id", 1) or 1)
+                self.bstate["pending_discard_continuation"] = pending
+                if discarder is not None:
+                    self.bstate["discard_controller"] = discarder
+                try:
+                    result = prompt(
+                        self.game, self.session, self.player_uid,
+                        self.ai_uid, self.bstate,
+                        ability_guid=self.bstate.get("resolving_ability", ""))
+                finally:
+                    self.bstate.pop("discard_controller", None)
+                # AI discard is completed synchronously by the host
+                # projection; a human discard leaves the port paused.
+                # A best-effort target with no legal cards is a resolved
+                # no-op, however.  Do not leave the continuation marker
+                # behind or pause the chain for a picker that has no
+                # selectable target (Bloatcap with an empty hand).
+                if ("ai_discarded_uid" not in self.bstate and
+                        not self.bstate.get("pending_discard_ability")):
+                    self.bstate.pop("pending_discard_continuation", None)
+                    self.bstate.pop("pending_discard_continuation_instance_id",
+                                    None)
+                    self.bstate.pop("rules_port_resume_effect_order", None)
+                    return "discard: no legal target"
+                if "ai_discarded_uid" not in self.bstate:
+                    self.bstate["resolution_paused"] = True
+                return str(result or "discard: awaiting target")
             return "discard: no target"
         from pvp_db import db_card_zone_details, db_card_state_value
         details = db_card_zone_details(
@@ -1593,17 +1485,10 @@ class EffectContext:
         # the client implements as a random slot (shuffled into the deck).
         deck_location = str(self.template_value(
             "m_CardLocation", "") or "").rsplit(".", 1)[-1].lower()
-        if self.native_context or self.bstate.get("_rules_port_native_effect"):
-            from rules_port.token_effects import create_matching_target
-            # C# CreateTokenMatchingTarget: a typed zero creates nothing.
-            made = create_matching_target(
-                self, int(target), int(count), collection, deck_location)
-        else:
-            from abilities.framework.effects.utility import _create_matching_target
-            made = _create_matching_target(
-                self.game, self.session, self.db, self.handler,
-                self.player_uid, self.ai_uid, self.bstate, int(target),
-                int(count), collection, deck_location)
+        from rules_port.token_effects import create_matching_target
+        # C# CreateTokenMatchingTarget: a typed zero creates nothing.
+        made = create_matching_target(
+            self, int(target), int(count), collection, deck_location)
         return f"created {made} matching token(s)"
 
     def transform_replica(self) -> str:
@@ -1708,14 +1593,8 @@ class EffectContext:
 
     def transform_card_random(self) -> str:
         """Run the authored random-filter transform through RulesPort."""
-        if self.native_context or self.bstate.get("_rules_port_native_effect"):
-            from rules_port.transform_effects import transform_card_at_random
-            return transform_card_at_random(self)
-        from abilities.framework.bom import _transform_card_at_random_legacy
-        return _transform_card_at_random_legacy(
-            self.game, self.session, self.db, self.handler,
-            self.player_uid, self.ai_uid, self.bstate,
-            self.effect_guid, self.param)
+        from rules_port.transform_effects import transform_card_at_random
+        return transform_card_at_random(self)
 
     def _portal_template_for(self, target) -> str:
         """Return the Portal template matching one card's rarity.
@@ -1733,116 +1612,82 @@ class EffectContext:
 
     def transform_card(self) -> str:
         """Run the authored direct-template transform operation."""
-        if self.native_context or self.bstate.get("_rules_port_native_effect"):
-            import game_engine
+        import game_engine
 
-            if self.bstate.get("_skip_transform"):
-                return "transform skipped (gate not met)"
-            from rules_port.transform_effects import irreversible_original, transform_instance
-            portal = bool(self.template_value("m_Portal", False))
-            template = self.template_value("m_CardTemplateId", "")
-            serialized = self.template_value("m_SerializedTAC", None)
-            if isinstance(serialized, dict):
-                serialized = serialized.get("data", "")
-            from rules_port.tac import tac_int
-            if tac_int(serialized, "UseStoredTarget", 0):
-                # TransformCardAbilityEffectTemplate uses a zero
-                # m_CardTemplateId for the authored "stored target becomes a
-                # copy of [resolved target]" operation.  The destination is
-                # the effect's resolved target; the source card(s) come from
-                # the StoreTargets effect earlier in this ability instance.
-                # Do not infer either side from localized game text.
-                from rules_port.transform_effects import transform_into_stored_copy
-                return transform_into_stored_copy(self, serialized)
-            event_gems = game_engine.EGemTypesNew.Unknown
-            source_uid = self.bstate.get("resolving_source_uid")
-            if tac_int(serialized, "CopyGems", 0) and source_uid is not None:
-                from pvp_db import db_card_gem_type
-                event_gems = db_card_gem_type(
-                    self.session.session_id, int(source_uid),
-                    conn=self.db) or game_engine.EGemTypesNew.Unknown
-            if not portal and (not template or
-                               str(template).lower() == "0" * 36):
-                raise RuntimeError(
-                    "RulesPort TransformCard effect is missing typed target template")
-            pending = list(self.bstate.pop("pending_transform_cards", []) or [])
-            if pending:
-                for value in pending:
-                    target = value[0] if isinstance(value, (tuple, list)) else value
-                    new_template = (self._portal_template_for(target)
-                                    if portal else str(template))
-                    if not new_template:
-                        continue
-                    transform_instance(self, int(target), new_template,
-                                       keep_zone=True, event_gems=event_gems,
-                                       original_template_guid=irreversible_original(
-                                           serialized, template))
-                return f"transform {len(pending)} card(s)"
-            # The effect's own resolved target (e.g. a TriggerSource card) comes
-            # before the ability source, which is only the fallback.
-            target = (self.bstate.get("player_transform_target") or
-                      self.bstate.get("player_mod_target") or
-                      self.bstate.get("player_shift_source") or
-                      self.target(default=None) or
-                      self.bstate.get("resolving_source_uid"))
-            if target is None:
-                return "transform: no target"
-            if portal:
-                new_template = self._portal_template_for(target)
+        if self.bstate.get("_skip_transform"):
+            return "transform skipped (gate not met)"
+        from rules_port.transform_effects import irreversible_original, transform_instance
+        portal = bool(self.template_value("m_Portal", False))
+        template = self.template_value("m_CardTemplateId", "")
+        serialized = self.template_value("m_SerializedTAC", None)
+        if isinstance(serialized, dict):
+            serialized = serialized.get("data", "")
+        from rules_port.tac import tac_int
+        if tac_int(serialized, "UseStoredTarget", 0):
+            # TransformCardAbilityEffectTemplate uses a zero
+            # m_CardTemplateId for the authored "stored target becomes a
+            # copy of [resolved target]" operation.  The destination is
+            # the effect's resolved target; the source card(s) come from
+            # the StoreTargets effect earlier in this ability instance.
+            # Do not infer either side from localized game text.
+            from rules_port.transform_effects import transform_into_stored_copy
+            return transform_into_stored_copy(self, serialized)
+        event_gems = game_engine.EGemTypesNew.Unknown
+        source_uid = self.bstate.get("resolving_source_uid")
+        if tac_int(serialized, "CopyGems", 0) and source_uid is not None:
+            from pvp_db import db_card_gem_type
+            event_gems = db_card_gem_type(
+                self.session.session_id, int(source_uid),
+                conn=self.db) or game_engine.EGemTypesNew.Unknown
+        if not portal and (not template or
+                           str(template).lower() == "0" * 36):
+            raise RuntimeError(
+                "RulesPort TransformCard effect is missing typed target template")
+        pending = list(self.bstate.pop("pending_transform_cards", []) or [])
+        if pending:
+            for value in pending:
+                target = value[0] if isinstance(value, (tuple, list)) else value
+                new_template = (self._portal_template_for(target)
+                                if portal else str(template))
                 if not new_template:
-                    return "transform: no portal template"
-            else:
-                new_template = str(template)
-            result = transform_instance(self, int(target), new_template,
-                                        keep_zone=True, event_gems=event_gems,
-                                        original_template_guid=irreversible_original(
-                                            serialized, template))
-            if isinstance(result, str):
-                return result
-            return f"transformed {hex(int(target))} -> {new_template[:8]}"
-        from abilities.framework.bom import _transform_card_legacy
-
-        return _transform_card_legacy(
-            self.game, self.session, self.db, self.handler,
-            self.player_uid, self.ai_uid, self.bstate,
-            self.effect_guid, self.param)
+                    continue
+                transform_instance(self, int(target), new_template,
+                                   keep_zone=True, event_gems=event_gems,
+                                   original_template_guid=irreversible_original(
+                                       serialized, template))
+            return f"transform {len(pending)} card(s)"
+        # The effect's own resolved target (e.g. a TriggerSource card) comes
+        # before the ability source, which is only the fallback.
+        target = (self.bstate.get("player_transform_target") or
+                  self.bstate.get("player_mod_target") or
+                  self.bstate.get("player_shift_source") or
+                  self.target(default=None) or
+                  self.bstate.get("resolving_source_uid"))
+        if target is None:
+            return "transform: no target"
+        if portal:
+            new_template = self._portal_template_for(target)
+            if not new_template:
+                return "transform: no portal template"
+        else:
+            new_template = str(template)
+        result = transform_instance(self, int(target), new_template,
+                                    keep_zone=True, event_gems=event_gems,
+                                    original_template_guid=irreversible_original(
+                                        serialized, template))
+        if isinstance(result, str):
+            return result
+        return f"transformed {hex(int(target))} -> {new_template[:8]}"
 
     def create_token_copy(self) -> str:
         """Run the authored token-copy operation through RulesPort."""
-        if self.native_context or self.bstate.get("_rules_port_native_effect"):
-            from rules_port.token_effects import create_token_copy
-            return create_token_copy(self)
-        from abilities.framework.bom import _create_token_copy_legacy
-
-        return _create_token_copy_legacy(
-            self.game, self.session, self.db, self.handler,
-            self.player_uid, self.ai_uid, self.bstate,
-            self.effect_guid, self.param)
+        from rules_port.token_effects import create_token_copy
+        return create_token_copy(self)
 
     def destroy_by_defense(self) -> str:
         """Destroy warzone troops that fail the authored defense survival roll."""
-        if self.native_context or self.bstate.get("_rules_port_native_effect"):
-            from rules_port.destruction_effects import destroy_by_defense
-            return destroy_by_defense(self)
-
-        from abilities.framework.kill_troop import kill_troop
-
-        from pvp_db import db_warzone_troop_uids, db_card_effective_defense
-        rows = db_warzone_troop_uids(self.session.session_id, conn=self.db)
-        destroyed = 0
-        for (uid,) in rows:
-            stat_row = db_card_effective_defense(
-                self.session.session_id, int(uid), conn=self.db)
-            defense = ((stat_row[0] or 0) + (stat_row[1] or 0)
-                       if stat_row else 0)
-            from .runtime_helpers import rng_below
-            if rng_below(self.bstate, 10) >= defense:
-                kill_troop(
-                    self.game, self.session, self.db, self.handler,
-                    self.player_uid, self.ai_uid, int(uid), self.bstate,
-                    cause="effect")
-                destroyed += 1
-        return f"destroyed {destroyed}/{len(rows)}"
+        from rules_port.destruction_effects import destroy_by_defense
+        return destroy_by_defense(self)
 
     def _resolving_raw_json(self) -> str:
         """Return the active ability's authored raw JSON, preferring Records.
@@ -1926,60 +1771,51 @@ class EffectContext:
                 if literal:
                     payload["amount"] = literal
                     break
-        if self.native_context:
-            # Native effects must resolve operands through the RulesPort
-            # variable evaluator.  Calling the historical leaf evaluator here
-            # would make the effect state hybrid even when its outer resolver
-            # is native.
-            from rules_port.static_rules import _native_leaf_value
-            raw = self._resolving_raw_json()
-            if not raw:
-                from pvp_db import db_ability_raw_json
-                raw = db_ability_raw_json(self.ability_guid, conn=self.db) or "{}"
-            value = _native_leaf_value(
-                self.db, self.session.session_id, self.bstate,
-                int(self.bstate.get("resolving_source_uid") or 0),
-                int(self.bstate.get("resolving_owner_id", 0) or 0),
-                payload, raw,
-                allow_life_loss_modifier=(property_name.lower() == "loselife"))
-            if value is None or int(value[1] or 0) == 0:
-                # AbilityConstants are immutable literals on the typed
-                # ability graph. Some native effect paths have an empty or
-                # incomplete raw-JSON view even though the graph still carries
-                # the constant (for example ChargePointsModifier's input
-                # variable ``A`` on Inductocopter Bot). Keep the graph as the
-                # authority for that operand so a failed raw lookup does not
-                # turn an authored +1 into a zero-delta resource event.
-                graph = self._ability_graph()
-                wanted = str(payload.get("input_variable") or "")
-                for variable in getattr(graph, "variables", ()) or ():
-                    to_dict = getattr(variable, "to_dict", None)
-                    record = to_dict() if callable(to_dict) else {}
-                    if not isinstance(record, dict):
-                        continue
-                    if (str(record.get("m_Name") or "") != wanted or
-                            str(record.get("_t") or "").rsplit(".", 1)[-1]
-                            != "AbilityConstant"):
-                        continue
-                    try:
-                        constant = int(record.get("m_DefaultValue", 0) or 0)
-                        multiplier = int(payload.get("amount") or 0)
-                    except (TypeError, ValueError):
-                        break
-                    value = ("", constant * multiplier if multiplier
-                             else constant)
-                    break
-            if value is None:
-                return 0
-            return int(value[1] or 0)
-        from abilities.framework.fields import ability_record
-        from abilities.framework.statics import _leaf_numeric_value
-        raw = json.dumps(ability_record(self.db, self.ability_guid))
-        return int(_leaf_numeric_value(
-            self.db, self.session.session_id, self.bstate, payload, raw,
-            self.bstate.get("resolving_owner_id", 0),
+        # Native effects must resolve operands through the RulesPort
+        # variable evaluator.  Calling the historical leaf evaluator here
+        # would make the effect state hybrid even when its outer resolver
+        # is native.
+        from rules_port.static_rules import _native_leaf_value
+        raw = self._resolving_raw_json()
+        if not raw:
+            from pvp_db import db_ability_raw_json
+            raw = db_ability_raw_json(self.ability_guid, conn=self.db) or "{}"
+        value = _native_leaf_value(
+            self.db, self.session.session_id, self.bstate,
             int(self.bstate.get("resolving_source_uid") or 0),
-            property_name) or 0)
+            int(self.bstate.get("resolving_owner_id", 0) or 0),
+            payload, raw,
+            allow_life_loss_modifier=(property_name.lower() == "loselife"))
+        if value is None or int(value[1] or 0) == 0:
+            # AbilityConstants are immutable literals on the typed
+            # ability graph. Some native effect paths have an empty or
+            # incomplete raw-JSON view even though the graph still carries
+            # the constant (for example ChargePointsModifier's input
+            # variable ``A`` on Inductocopter Bot). Keep the graph as the
+            # authority for that operand so a failed raw lookup does not
+            # turn an authored +1 into a zero-delta resource event.
+            graph = self._ability_graph()
+            wanted = str(payload.get("input_variable") or "")
+            for variable in getattr(graph, "variables", ()) or ():
+                to_dict = getattr(variable, "to_dict", None)
+                record = to_dict() if callable(to_dict) else {}
+                if not isinstance(record, dict):
+                    continue
+                if (str(record.get("m_Name") or "") != wanted or
+                        str(record.get("_t") or "").rsplit(".", 1)[-1]
+                        != "AbilityConstant"):
+                    continue
+                try:
+                    constant = int(record.get("m_DefaultValue", 0) or 0)
+                    multiplier = int(payload.get("amount") or 0)
+                except (TypeError, ValueError):
+                    break
+                value = ("", constant * multiplier if multiplier
+                         else constant)
+                break
+        if value is None:
+            return 0
+        return int(value[1] or 0)
 
     def damage_modifier(self, param: dict | None,
                         metadata: dict | None = None) -> str:
@@ -1995,24 +1831,14 @@ class EffectContext:
         text = str(param.get("text") or "")
         target = self.modifier_target()
         if target is None:
-            if self.native_context:
-                from rules_port.targeting import implicit_champion_target
-                target = implicit_champion_target(
-                    self.db, self.session, self.handler, self.bstate)
-            else:
-                from abilities.framework.bom import _champion_target_uid
-                target = _champion_target_uid(
-                    self.handler, self.bstate, self.db, self.session)
+            from rules_port.targeting import implicit_champion_target
+            target = implicit_champion_target(
+                self.db, self.session, self.handler, self.bstate)
         if target is None:
-            if self.native_context:
-                from rules_port.targeting import implicit_champion_target
-                target = implicit_champion_target(
-                    self.db, self.session, self.handler, self.bstate,
-                    opposing=True)
-            else:
-                from abilities.framework.bom import _opposing_champion_uid
-                target = _opposing_champion_uid(
-                    self.handler, self.bstate, self.db, self.session)
+            from rules_port.targeting import implicit_champion_target
+            target = implicit_champion_target(
+                self.db, self.session, self.handler, self.bstate,
+                opposing=True)
         if target is None:
             return "damage: no target"
 
@@ -2136,17 +1962,10 @@ class EffectContext:
     def stat_mod(self, target: int, attack: int = 0, defense: int = 0,
                  this_turn: bool = False):
         """Apply a card stat modifier through the shared event path."""
-        if self.native_context or self.bstate.get("_rules_port_native_effect"):
-            from rules_port.stat_effects import apply_stat_mod
-            return apply_stat_mod(
-                self, int(target), int(attack), int(defense),
-                this_turn=this_turn)
-        from abilities.framework.stat_mod import apply_card_stat_mod
-
-        return apply_card_stat_mod(
-            self.game, self.session, self.db, self.handler,
-            self.player_uid, self.ai_uid, int(target), int(attack),
-            int(defense), this_turn=this_turn, bstate=self.bstate)
+        from rules_port.stat_effects import apply_stat_mod
+        return apply_stat_mod(
+            self, int(target), int(attack), int(defense),
+            this_turn=this_turn)
 
     def card_modifier(self) -> str:
         """Run the metadata CardModifier operation behind the context ABI.
@@ -2156,37 +1975,11 @@ class EffectContext:
         single primitive. Keep its compatibility-heavy orchestration in one
         implementation while exposing only the context-shaped leaf boundary.
         """
-        if self.native_context or self.bstate.get("_rules_port_native_effect"):
-            # Keep direct context callers on the same typed implementation as
-            # the RulesPort effect dispatcher.  The old BOM helper is only a
-            # compatibility path for legacy callers.
-            from rules_port.effects import _card_modifier
-            return _card_modifier(self, {"param": self.param})
-
-        from abilities.framework.bom import _card_modifier_legacy
-
-        return _card_modifier_legacy(
-            self.game, self.session, self.db, self.handler,
-            self.player_uid, self.ai_uid, self.bstate,
-            self.effect_guid, self.param)
-
-    def move_card_to_zone_legacy(self) -> str:
-        """Run the metadata zone transition and its client-event contract."""
-        from abilities.framework.bom import _move_card_to_zone_legacy
-
-        return _move_card_to_zone_legacy(
-            self.game, self.session, self.db, self.handler,
-            self.player_uid, self.ai_uid, self.bstate,
-            self.effect_guid, self.param)
+        from rules_port.effects import _card_modifier
+        return _card_modifier(self, {"param": self.param})
 
     def return_to_hand(self) -> str:
         """Return the resolved card through the typed hand transition."""
-        if not (self.native_context or self.bstate.get("_rules_port_native_effect")):
-            from abilities.framework.bom import _move_card_to_zone_legacy
-            return _move_card_to_zone_legacy(
-                self.game, self.session, self.db, self.handler,
-                self.player_uid, self.ai_uid, self.bstate,
-                self.effect_guid, '{"destination":"hand"}')
         target = self.resolved_target()
         if target is None:
             target = self.bstate.get("resolving_source_uid")
@@ -2214,9 +2007,7 @@ class EffectContext:
             self.session.session_id, target, conn=self.db)
         if not details:
             return "return to hand: target disappeared"
-        from rules_port.runtime_helpers import (owner_uid,
-                                                 card_collection_for_location,
-                                                 raw_uid)
+        from rules_port.runtime_helpers import owner_uid, raw_uid
         import game_engine
         scid = game_engine.SessionCardId(game_engine.UID(target))
         tpl, ct, _name, cost, attack, defense, gem = self.handler._card_full_data(
@@ -2338,11 +2129,7 @@ class EffectContext:
             self.session.session_id, owners, locations, conn=self.db)
         count = 0
         for row in rows:
-            card = {"card_uid": int(row[0]), "card_type": row[1] or "",
-                    "location": row[2] or "", "user_id": int(row[3] or 0),
-                    "state": int(row[4] or 0), "attack": int(row[5] or 0),
-                    "defense": int(row[6] or 0), "name": row[7] or "",
-                    "cost": int(row[8] or 0), "subtype": row[9] or ""}
+            card = CardView.from_count_row(row).as_shape("count_card")
             if evaluate_card_filter(card, card_filter, self.bstate.get(
                     "resolving_source_uid"), ability_state=self.bstate, db=self.db):
                 count += 1
@@ -2411,29 +2198,12 @@ class EffectContext:
 
     def finish_moving_to_warzone(self) -> str:
         """Complete a deferred move into Warzone through the typed path."""
-        if not (self.native_context or self.bstate.get("_rules_port_native_effect")):
-            from abilities.framework.bom import _move_card_to_zone_legacy
-            return _move_card_to_zone_legacy(
-                self.game, self.session, self.db, self.handler,
-                self.player_uid, self.ai_uid, self.bstate,
-                self.effect_guid, '{"destination":"warzone"}')
         target = self.resolved_target() or self.bstate.get(
             "resolving_source_uid")
         return self._move_simple_zone(target, "warzone")
 
     def finish_resolving_card(self) -> str:
         """Finish a spell in the zone required by its current card type."""
-        if not (self.native_context or self.bstate.get("_rules_port_native_effect")):
-            target = self.resolved_target()
-            if target is None:
-                target = self.bstate.get("resolving_source_uid")
-            if target is None:
-                return "finish resolving: no card"
-            from abilities.framework.bom import _move_card_to_zone_legacy
-            return _move_card_to_zone_legacy(
-                self.game, self.session, self.db, self.handler,
-                self.player_uid, self.ai_uid, self.bstate,
-                self.effect_guid, '{"destination":"discard"}')
         target = self.resolved_target()
         if target is None:
             target = self.bstate.get("resolving_source_uid")
@@ -2586,8 +2356,6 @@ class EffectContext:
         The native RulesPort resolver turns a ``None`` result into an explicit
         error; it never falls through to the legacy leaf dispatcher.
         """
-        if not (self.native_context or self.bstate.get("_rules_port_native_effect")):
-            return self.move_card_to_zone_legacy()
         destination = self.template_value("m_DestinationCollection", "")
         if not destination and self.param:
             try:
@@ -2905,15 +2673,9 @@ class EffectContext:
         guid = self.template_value("m_CardTemplateId", "")
         if not guid:
             return "zombie plague: voided (token metadata missing)"
-        if self.native_context or self.bstate.get("_rules_port_native_effect"):
-            from rules_port.token_effects import summon_token
-            return summon_token(self, {"token_guid": str(guid).lower(),
-                                        "amount": 1, "collection": "Warzone"})
-        from abilities.framework.effects.tokens import summon_token
-        return summon_token(self.game, self.session, self.db, self.handler,
-                            self.player_uid, self.ai_uid, self.bstate,
-                            self.effect_guid, json.dumps({"token_guid": str(guid).lower(),
-                                                         "amount": 1, "collection": "Warzone"}))
+        from rules_port.token_effects import summon_token
+        return summon_token(self, {"token_guid": str(guid).lower(),
+                                    "amount": 1, "collection": "Warzone"})
 
     def xarlox(self) -> str:
         """Mill three typed deck cards, summoning one token per milled troop."""
@@ -2923,20 +2685,12 @@ class EffectContext:
             return "xarlox: no owner"
         token_guid = self.template_value("m_CardTemplateId", "")
         milled = troops = 0
-        native = self.native_context or self.bstate.get(
-            "_rules_port_native_effect")
 
         def summon(guid):
             payload = {"token_guid": str(guid).lower(), "amount": 1,
                        "collection": "Warzone"}
-            if native:
-                from rules_port.token_effects import summon_token
-                return summon_token(self, payload)
-            from abilities.framework.effects.tokens import summon_token
-            return summon_token(
-                self.game, self.session, self.db, self.handler,
-                self.player_uid, self.ai_uid, self.bstate, self.effect_guid,
-                json.dumps(payload))
+            from rules_port.token_effects import summon_token
+            return summon_token(self, payload)
         from pvp_db import db_deck_top_card_type, db_move_card_to_discard_reset
         for _ in range(3):
             row = db_deck_top_card_type(
@@ -2947,14 +2701,8 @@ class EffectContext:
             db_move_card_to_discard_reset(
                 self.session.session_id, uid, conn=self.db)
             self.db.commit()
-            if native:
-                from rules_port.zone_effects import project_card
-                project_card(self, uid, "discard")
-            else:
-                from abilities.framework.effects.utility import _push_card_in_zone
-                _push_card_in_zone(self.game, self.session, self.db, self.handler,
-                                   self.player_uid, self.ai_uid, self.bstate,
-                                   uid, "discard")
+            from rules_port.zone_effects import project_card
+            project_card(self, uid, "discard")
             milled += 1
             if "troop" in card_type.lower():
                 troops += 1
@@ -2964,9 +2712,6 @@ class EffectContext:
 
     def plan_c(self) -> str:
         """Execute the temporary client Plan C resource-to-token effect."""
-        import json
-        native = self.native_context or self.bstate.get(
-            "_rules_port_native_effect")
         owner = self.target_owner(self.resolved_target(), default=
                                   self.bstate.get("resolving_owner_id", 0))
         if owner is None:
@@ -2985,13 +2730,8 @@ class EffectContext:
         collection = self.template_value("m_CardCollection", "Warzone")
         payload = {"token_guid": str(guid).lower(), "amount": amount,
                    "collection": str(collection).rsplit(".", 1)[-1]}
-        if native:
-            from rules_port.token_effects import summon_token
-            return summon_token(self, payload)
-        from abilities.framework.effects.tokens import summon_token
-        return summon_token(self.game, self.session, self.db, self.handler,
-                            self.player_uid, self.ai_uid, self.bstate,
-                            self.effect_guid, json.dumps(payload))
+        from rules_port.token_effects import summon_token
+        return summon_token(self, payload)
 
     def merge_card_collections(self) -> str:
         """Merge typed source collection into destination for target owner."""
@@ -3038,27 +2778,13 @@ class EffectContext:
 
     def reveal_cards(self) -> str:
         """Run the metadata reveal through RulesPort."""
-        if self.native_context or self.bstate.get("_rules_port_native_effect"):
-            from rules_port.reveal_effects import reveal_cards
-            return reveal_cards(self)
-        from abilities.framework.bom import _reveal_cards_legacy
-
-        return _reveal_cards_legacy(
-            self.game, self.session, self.db, self.handler,
-            self.player_uid, self.ai_uid, self.bstate,
-            self.effect_guid, self.param)
+        from rules_port.reveal_effects import reveal_cards
+        return reveal_cards(self)
 
     def battle_cards(self, effect=None) -> str:
         """Resolve the metadata Battle2Cards operation through RulesPort."""
-        if self.native_context or self.bstate.get("_rules_port_native_effect"):
-            from rules_port.battle_effects import battle_cards
-            return battle_cards(self, effect)
-        from abilities.framework.bom import _battle_cards_legacy
-
-        return _battle_cards_legacy(
-            self.game, self.session, self.db, self.handler,
-            self.player_uid, self.ai_uid, self.bstate,
-            self.effect_guid, self.param)
+        from rules_port.battle_effects import battle_cards
+        return battle_cards(self, effect)
 
 
     def counter(self, target: int | None, name: str,
@@ -3074,73 +2800,9 @@ class EffectContext:
         """
         if target is None:
             return 0, 0
-        if self.native_context or self.bstate.get("_rules_port_native_effect"):
-            from rules_port.counter_effects import change_counter
-            return change_counter(self, target, name, counter_guid, amount,
-                                  str(operation or "add").lower())
-        from abilities.framework.effects.counters import (
-            add_card_counter, card_counters, change_champion_counter,
-            is_champion_target, push_card_counters, push_champion_counter,
-            remove_card_counters,
-        )
-
-        target = int(target)
-        name = str(name or "counter").lower()
-        guid = str(counter_guid or "").lower()
-        operation = str(operation or "add").lower()
-        amount = int(amount or 0)
-
-        def emit_counter_added(old_value, new_value, owner_id):
-            if int(new_value or 0) <= int(old_value or 0):
-                return
-            from rules_port.tac import _tac_attr_hash
-            from abilities.framework.triggers import resolve_triggers
-
-            resolve_triggers(
-                self.db, self.handler, self.game, self.session,
-                self.player_uid, self.ai_uid, self.bstate,
-                "CounterAddedToCardEvent", target,
-                source_owner_uid=int(owner_id or 0),
-                event_tac={_tac_attr_hash("GainedCounterType"): name})
-
-        if is_champion_target(self.handler, self.bstate, target):
-            old, new = change_champion_counter(
-                self.bstate, target, guid, amount,
-                "set" if operation in ("clear", "removeall")
-                else operation)
-            if operation in ("clear", "removeall"):
-                new = 0
-            if guid:
-                push_champion_counter(
-                    self.game, self.session, self.handler,
-                    self.player_uid, self.ai_uid, self.bstate,
-                    target, guid, old, new)
-            emit_counter_added(old, new, self.target_owner(target, 0))
-            return old, new
-
-        old = card_counters(self.db, self.session.session_id, target).get(
-            name, 0)
-        if operation in ("remove", "subtract"):
-            new = max(0, old - amount)
-            remove_card_counters(self.db, self.session.session_id, target, name)
-            if new:
-                add_card_counter(
-                    self.db, self.session.session_id, target, name, new)
-        elif operation in ("set", "clear", "removeall"):
-            new = max(0, amount) if operation == "set" else 0
-            remove_card_counters(self.db, self.session.session_id, target, name)
-            if new:
-                add_card_counter(
-                    self.db, self.session.session_id, target, name, new)
-        else:
-            new = add_card_counter(
-                self.db, self.session.session_id, target, name, amount)
-        push_card_counters(
-            self.game, self.session, self.db, self.handler,
-            self.player_uid, self.ai_uid, target, bstate=self.bstate,
-            changed_counter=name, old_value=old)
-        emit_counter_added(old, new, self.target_owner(target, 0))
-        return old, new
+        from rules_port.counter_effects import change_counter
+        return change_counter(self, target, name, counter_guid, amount,
+                              str(operation or "add").lower())
 
     def store_target(self, target: int | None = None) -> str:
         """Remember one resolved target for later effects in this ability."""
@@ -3221,30 +2883,18 @@ class EffectContext:
             return "remember powers: no target"
         keyword = self.template_value("m_Keyword", "") or ""
         all_powers = bool(self.template_value("m_AllPowers", False))
-        if self.native_context or self.bstate.get("_rules_port_native_effect"):
-            from pvp_db import db_card_ability_payload
-            from rules_port.trigger_discovery import ability_matches_keyword
-            try:
-                card_abilities = json.loads(db_card_ability_payload(
-                    self.session.session_id, int(target), conn=self.db) or "[]")
-            except (TypeError, ValueError, json.JSONDecodeError):
-                card_abilities = []
-        else:
-            from abilities.framework.triggers import _card_ability_guids
-            card_abilities = _card_ability_guids(
-                self.db, self.session.session_id, int(target))
+        from pvp_db import db_card_ability_payload
+        from rules_port.trigger_discovery import ability_matches_keyword
+        try:
+            card_abilities = json.loads(db_card_ability_payload(
+                self.session.session_id, int(target), conn=self.db) or "[]")
+        except (TypeError, ValueError, json.JSONDecodeError):
+            card_abilities = []
 
         remembered = self.bstate.setdefault(
             "remembered_powers", {}).setdefault(self.ability_guid, [])
         for ability_guid in card_abilities:
-            if (self.native_context or self.bstate.get(
-                    "_rules_port_native_effect")):
-                from rules_port.trigger_discovery import ability_matches_keyword
-                matches = ability_matches_keyword(ability_guid, keyword)
-            else:
-                from abilities.framework.triggers import ability_matches_keyword
-                matches = ability_matches_keyword(
-                    self.db, ability_guid, keyword)
+            matches = ability_matches_keyword(ability_guid, keyword)
             if all_powers or matches:
                 if ability_guid not in remembered:
                     remembered.append(ability_guid)
@@ -3292,18 +2942,10 @@ class EffectContext:
                 self.session.session_id, int(target), json.dumps(abilities),
                 conn=self.db)
             self.db.commit()
-        if self.native_context or self.bstate.get("_rules_port_native_effect"):
-            from rules_port.card_projection import push_card_state
-            push_card_state(self.game, self.session, self.db, self.handler,
-                            self.player_uid, self.ai_uid, int(target),
-                            int(row[1] or 0), self.bstate)
-            return f"revoked {revoked[:8]} from {hex(int(target))}"
-        from abilities.framework.bom import _push_card_state
-
-        _push_card_state(
-            self.game, self.session, self.db, self.handler,
-            self.player_uid, self.ai_uid, int(target), int(row[1] or 0),
-            self.bstate)
+        from rules_port.card_projection import push_card_state
+        push_card_state(self.game, self.session, self.db, self.handler,
+                        self.player_uid, self.ai_uid, int(target),
+                        int(row[1] or 0), self.bstate)
         return f"revoked {revoked[:8]} from {hex(int(target))}"
 
     def revert_modifications(self, target: int | None = None) -> str:
@@ -3402,18 +3044,10 @@ class EffectContext:
             self.game.push_card_reverted(
                 game_engine.SessionCardId(game_engine.UID(int(target))),
                 str(template_row[1]))
-        if self.native_context or self.bstate.get("_rules_port_native_effect"):
-            from rules_port.card_projection import push_card_state
-            push_card_state(self.game, self.session, self.db, self.handler,
-                            self.player_uid, self.ai_uid, int(target),
-                            int(row[1] or 0) if row else 0, self.bstate)
-            return f"reverted {hex(int(target))}"
-        from abilities.framework.bom import _push_card_state
-
-        _push_card_state(
-            self.game, self.session, self.db, self.handler,
-            self.player_uid, self.ai_uid, int(target),
-            int(row[1] or 0) if row else 0, self.bstate)
+        from rules_port.card_projection import push_card_state
+        push_card_state(self.game, self.session, self.db, self.handler,
+                        self.player_uid, self.ai_uid, int(target),
+                        int(row[1] or 0) if row else 0, self.bstate)
         return f"reverted {hex(int(target))}"
 
     def remove_from_combat(self, target: int | None = None) -> str:
@@ -3440,17 +3074,10 @@ class EffectContext:
         db_set_card_state_exact(
             self.session.session_id, target, state, conn=self.db)
         self.db.commit()
-        if self.native_context or self.bstate.get("_rules_port_native_effect"):
-            from rules_port.card_projection import push_card_state
-            push_card_state(self.game, self.session, self.db, self.handler,
-                            self.player_uid, self.ai_uid, target, state,
-                            self.bstate)
-            return f"removed {hex(target)} from combat"
-        from abilities.framework.bom import _push_card_state
-
-        _push_card_state(
-            self.game, self.session, self.db, self.handler,
-            self.player_uid, self.ai_uid, target, state, self.bstate)
+        from rules_port.card_projection import push_card_state
+        push_card_state(self.game, self.session, self.db, self.handler,
+                        self.player_uid, self.ai_uid, target, state,
+                        self.bstate)
         return f"removed {hex(target)} from combat"
 
     def update_card_state(self, target: int, *, add: int = 0,
@@ -3481,23 +3108,10 @@ class EffectContext:
             self.session.session_id, target, state, conn=self.db)
         if commit:
             self.db.commit()
-        if self.native_context or self.bstate.get("_rules_port_native_effect"):
-            from rules_port.card_projection import push_card_state
-            push_card_state(self.game, self.session, self.db, self.handler,
-                            self.player_uid, self.ai_uid, target, state,
-                            self.bstate)
-            if trigger:
-                self._emit_trigger(trigger, target, int(row_owner or 0))
-            elif (int(remove or 0) & int(game_engine.ECardStates.Tapped)
-                  and previous_state & int(game_engine.ECardStates.Tapped)):
-                self._emit_trigger("CardReadiedEvent", target,
-                                   int(row_owner or 0))
-            return state
-        from abilities.framework.bom import _push_card_state
-
-        _push_card_state(
-            self.game, self.session, self.db, self.handler,
-            self.player_uid, self.ai_uid, target, state, self.bstate)
+        from rules_port.card_projection import push_card_state
+        push_card_state(self.game, self.session, self.db, self.handler,
+                        self.player_uid, self.ai_uid, target, state,
+                        self.bstate)
         if trigger:
             self._emit_trigger(trigger, target, int(row_owner or 0))
         elif (int(remove or 0) & int(game_engine.ECardStates.Tapped)
@@ -3556,113 +3170,66 @@ class EffectContext:
                   if target is None else target)
         if target is None:
             return "sacrifice: no target"
-        if self.native_context or self.bstate.get("_rules_port_native_effect"):
-            from rules_port.death_effects import kill_troop
-            return kill_troop(self, target, cause="sacrifice")
-        from abilities.framework.bom import _record_ability_list_target
-        from abilities.framework.kill_troop import kill_troop
-
-        kill_troop(
-            self.game, self.session, self.db, self.handler,
-            self.player_uid, self.ai_uid, int(target), self.bstate,
-            cause="sacrifice")
-        _record_ability_list_target(self.db, self.bstate, int(target))
-        return f"sacrificed {hex(int(target))}"
+        from rules_port.death_effects import kill_troop
+        return kill_troop(self, target, cause="sacrifice")
 
     def summon_token(self) -> str:
         """Create tokens through the metadata token-operation helper."""
-        if self.native_context or self.bstate.get("_rules_port_native_effect"):
-            from rules_port.token_effects import summon_token
-            return summon_token(self)
-        from abilities.framework.effects.tokens import summon_token
-
-        return summon_token(
-            self.game, self.session, self.db, self.handler,
-            self.player_uid, self.ai_uid, self.bstate,
-            self.effect_guid, self.param)
+        from rules_port.token_effects import summon_token
+        return summon_token(self)
 
     def summon_x_tokens(self) -> str:
         """Port SummonXTokenTroops: base amount plus source counters."""
-        if self.native_context or self.bstate.get("_rules_port_native_effect"):
-            from rules_port.token_effects import summon_token as native_summon_token
-            count = int(self.template_value("m_BaseAmount", 0) or 0)
-            source = self.bstate.get("resolving_source_uid")
-            if source is not None:
-                from pvp_db import db_card_mutation_field
-                try:
-                    buffs = json.loads(db_card_mutation_field(
-                        self.session.session_id, int(source),
-                        "permanent_buffs", conn=self.db) or "{}")
-                except (TypeError, ValueError, json.JSONDecodeError):
-                    buffs = {}
-                count += sum(int(value or 0) for value in
-                             (buffs.get("counters", {}) if isinstance(buffs, dict) else {}).values())
-            payload = {"amount": max(0, count),
-                       "token_guid": self.template_value("m_CardTemplateId", ""),
-                       "collection": self.template_value("m_CardCollection", "Warzone")}
-            return native_summon_token(self, payload)
-        from abilities.framework.effects.tokens import (
-            summon_token as legacy_summon_token)
-        from abilities.framework.effects.counters import card_counters
+        from rules_port.token_effects import summon_token as native_summon_token
+        count = int(self.template_value("m_BaseAmount", 0) or 0)
         source = self.bstate.get("resolving_source_uid")
-        base = int(self.template_value("m_BaseAmount", 0) or 0)
-        counters = card_counters(self.db, self.session.session_id, source) if source else {}
-        amount = max(0, base + sum(int(value or 0) for value in counters.values()))
-        guid = self.template_value("m_CardTemplateId", "")
-        collection = self.template_value("m_CardCollection", "Warzone")
-        payload = {"amount": amount, "token_guid": str(guid or "").lower(),
-                   "collection": str(collection).rsplit(".", 1)[-1]}
-        return legacy_summon_token(
-            self.game, self.session, self.db, self.handler,
-            self.player_uid, self.ai_uid, self.bstate,
-            self.effect_guid, json.dumps(payload))
+        if source is not None:
+            from pvp_db import db_card_mutation_field
+            try:
+                buffs = json.loads(db_card_mutation_field(
+                    self.session.session_id, int(source),
+                    "permanent_buffs", conn=self.db) or "{}")
+            except (TypeError, ValueError, json.JSONDecodeError):
+                buffs = {}
+            count += sum(int(value or 0) for value in
+                         (buffs.get("counters", {}) if isinstance(buffs, dict) else {}).values())
+        payload = {"amount": max(0, count),
+                   "token_guid": self.template_value("m_CardTemplateId", ""),
+                   "collection": self.template_value("m_CardCollection", "Warzone")}
+        return native_summon_token(self, payload)
 
     def conscript(self) -> str:
         """Conscript cards through the shared token/zone helper."""
-        if self.native_context or self.bstate.get("_rules_port_native_effect"):
-            from rules_port.token_effects import summon_token
+        from rules_port.token_effects import summon_token
+        try:
+            amount = int(self.value("m_Amount", 1) or 0)
+        except (TypeError, ValueError):
+            amount = 1
+        faction = self.template_value("m_Faction", "None")
+        target = self.resolved_target(source_fallback=False)
+        if (target is not None and
+                str(faction).rsplit(".", 1)[-1].lower() == "underworld"):
+            owner = int(self.target_owner(
+                int(target), default=self.bstate.get(
+                    "resolving_owner_id", 0)) or 0)
             try:
-                amount = int(self.value("m_Amount", 1) or 0)
-            except (TypeError, ValueError):
-                amount = 1
-            faction = self.template_value("m_Faction", "None")
-            target = self.resolved_target(source_fallback=False)
-            if (target is not None and
-                    str(faction).rsplit(".", 1)[-1].lower() == "underworld"):
-                owner = int(self.target_owner(
-                    int(target), default=self.bstate.get(
-                        "resolving_owner_id", 0)) or 0)
-                try:
-                    from rules_port.static_rules import player_int_attributes
-                    amount += int(player_int_attributes(
-                        self.db, self.session.session_id, self.bstate,
-                        owner).get("ConscriptUnderworldBonus", 0) or 0)
-                except (ImportError, TypeError, ValueError):
-                    pass
-            return summon_token(self, {
-                "collection": "Hand", "amount": amount,
-                "card_filter": self.template_value("m_CardFilter", {}),
-                "random_with_replacement": True,
-                "conscript_event": True,
-                "conscript_faction": str(faction).rsplit(".", 1)[-1]})
-        from abilities.framework.effects.tokens import conscript_cards
-
-        return conscript_cards(
-            self.game, self.session, self.db, self.handler,
-            self.player_uid, self.ai_uid, self.bstate,
-            self.effect_guid, self.param)
+                from rules_port.static_rules import player_int_attributes
+                amount += int(player_int_attributes(
+                    self.db, self.session.session_id, self.bstate,
+                    owner).get("ConscriptUnderworldBonus", 0) or 0)
+            except (ImportError, TypeError, ValueError):
+                pass
+        return summon_token(self, {
+            "collection": "Hand", "amount": amount,
+            "card_filter": self.template_value("m_CardFilter", {}),
+            "random_with_replacement": True,
+            "conscript_event": True,
+            "conscript_faction": str(faction).rsplit(".", 1)[-1]})
 
     def load_player_deck(self) -> str:
         """Load authored player-deck cards through the shared helper."""
-        if self.native_context or self.bstate.get("_rules_port_native_effect"):
-            from rules_port.deck_effects import load_player_deck
-            return load_player_deck(self)
-        from abilities.framework.effects.tokens import load_player_deck
-
-        return load_player_deck(
-            self.game, self.session, self.db, self.handler,
-            self.player_uid, self.ai_uid, self.bstate,
-            self.effect_guid, self.param)
+        from rules_port.deck_effects import load_player_deck
+        return load_player_deck(self)
 
     def activate_triggered(self) -> str:
         """Activate a typed keyword trigger on the resolved target."""
@@ -3670,68 +3237,53 @@ class EffectContext:
         target = self.resolved_target()
         if target is None:
             return "activate triggered: no target"
-        if self.native_context or self.bstate.get("_rules_port_native_effect"):
-            from pvp_db import db_card_ability_payload, db_card_owner_id
-            from rules_port.resolution import resolve_port_ability
-            from rules_port.trigger_discovery import ability_matches_keyword
-            try:
-                abilities = json.loads(db_card_ability_payload(
-                    self.session.session_id, int(target), conn=self.db) or "[]")
-            except (TypeError, ValueError, json.JSONDecodeError):
-                abilities = []
-            owner = int(db_card_owner_id(
-                self.session.session_id, int(target), conn=self.db) or
-                self.target_owner(target, default=0) or 0)
-            # Session.ManuallyTriggerAbilities guards: an opposing
-            # OpposingDeploysCantTrigger/OpposingDeathcriesCantTrigger lockout
-            # suppresses the manual keyword activation, and a Deathcry that
-            # also carries Rebirth is skipped (the card is returning, not
-            # dying).  Darkspire Enforcer/Elite is the FRA user of this leaf.
-            from .triggers import (_opponents_block_deathcries,
-                                   opponents_have_int_attr)
-            keyword_key = str(keyword or "").rsplit(".", 1)[-1].lower()
+        from pvp_db import db_card_ability_payload, db_card_owner_id
+        from rules_port.resolution import resolve_port_ability
+        from rules_port.trigger_discovery import ability_matches_keyword
+        try:
+            abilities = json.loads(db_card_ability_payload(
+                self.session.session_id, int(target), conn=self.db) or "[]")
+        except (TypeError, ValueError, json.JSONDecodeError):
+            abilities = []
+        owner = int(db_card_owner_id(
+            self.session.session_id, int(target), conn=self.db) or
+            self.target_owner(target, default=0) or 0)
+        # Session.ManuallyTriggerAbilities guards: an opposing
+        # OpposingDeploysCantTrigger/OpposingDeathcriesCantTrigger lockout
+        # suppresses the manual keyword activation, and a Deathcry that
+        # also carries Rebirth is skipped (the card is returning, not
+        # dying).  Darkspire Enforcer/Elite is the FRA user of this leaf.
+        from .triggers import (_opponents_block_deathcries,
+                               opponents_have_int_attr)
+        keyword_key = str(keyword or "").rsplit(".", 1)[-1].lower()
+        if (keyword_key == "deathcry" and
+                _opponents_block_deathcries(self.bstate, owner)):
+            return "activated deathcry: blocked by opposing champion"
+        if (keyword_key == "deploy" and
+                opponents_have_int_attr(
+                    self.bstate, owner, "OpposingDeploysCantTrigger")):
+            return "activated deploy: blocked by opposing champion"
+        results = []
+        for ability_guid in abilities:
+            if not ability_matches_keyword(ability_guid, keyword):
+                continue
             if (keyword_key == "deathcry" and
-                    _opponents_block_deathcries(self.bstate, owner)):
-                return "activated deathcry: blocked by opposing champion"
-            if (keyword_key == "deploy" and
-                    opponents_have_int_attr(
-                        self.bstate, owner, "OpposingDeploysCantTrigger")):
-                return "activated deploy: blocked by opposing champion"
-            results = []
-            for ability_guid in abilities:
-                if not ability_matches_keyword(ability_guid, keyword):
-                    continue
-                if (keyword_key == "deathcry" and
-                        self._ability_has_keyword(ability_guid, "Rebirth")):
-                    continue
-                results.append(resolve_port_ability(
-                    self.handler, self.game, self.session, self.db,
-                    self.player_uid, self.ai_uid, self.bstate,
-                    str(ability_guid).lower(), int(target), owner,
-                    target_map={}))
-            result = "; ".join(str(value) for value in results if value)
-            return (f"activated {keyword} on {hex(int(target))}: {result}"
-                    if result else
-                    f"activated {keyword}: no matching ability")
-        from abilities.framework.triggers import manually_trigger_abilities
-        result = manually_trigger_abilities(
-            self.db, self.handler, self.game, self.session,
-            self.player_uid, self.ai_uid, self.bstate,
-            int(target), keyword)
+                    self._ability_has_keyword(ability_guid, "Rebirth")):
+                continue
+            results.append(resolve_port_ability(
+                self.handler, self.game, self.session, self.db,
+                self.player_uid, self.ai_uid, self.bstate,
+                str(ability_guid).lower(), int(target), owner,
+                target_map={}))
+        result = "; ".join(str(value) for value in results if value)
         return (f"activated {keyword} on {hex(int(target))}: {result}"
-                if result else f"activated {keyword}: no matching ability")
+                if result else
+                f"activated {keyword}: no matching ability")
 
     def counter_spell(self) -> str:
         """Resolve a counter-spell operation through the trigger boundary."""
-        if self.native_context or self.bstate.get("_rules_port_native_effect"):
-            from rules_port.counter_effects import counter_spell
-            return counter_spell(self)
-        from abilities.framework.triggers import _resolve_counter_spell
-
-        return _resolve_counter_spell(
-            self.db, self.handler, self.game, self.session,
-            self.player_uid, self.ai_uid, self.bstate,
-            self.effect_guid, self.param, "")
+        from rules_port.counter_effects import counter_spell
+        return counter_spell(self)
 
     def destroy(self, target: int | None = None) -> str:
         """Destroy a resolved card or champion through the normal death path."""
@@ -3813,15 +3365,8 @@ class EffectContext:
                         winners=[winner_uid], losers=[loser_uid])
                     return f"destroyed champion {hex(target)}"
 
-        if self.native_context or self.bstate.get("_rules_port_native_effect"):
-            from rules_port.death_effects import kill_troop
-            return kill_troop(self, target, cause="effect")
-        from abilities.framework.kill_troop import kill_troop
-
-        kill_troop(
-            self.game, self.session, self.db, self.handler,
-            self.player_uid, self.ai_uid, target, self.bstate, cause="effect")
-        return f"destroyed {hex(target)}"
+        from rules_port.death_effects import kill_troop
+        return kill_troop(self, target, cause="effect")
 
     def lose_thresholds(self, names) -> str:
         """Remove authored shard thresholds from the target controller."""
@@ -3910,26 +3455,6 @@ class EffectContext:
             self.game._push(event)
         return "swapped champion health"
 
-    def _legacy(self, function_name: str):
-        """Invoke one transitional orchestration implementation.
-
-        Complex effects keep their established behavior in ``bom.py`` while
-        the resolver and simple leaves move to a typed context.  Importing at
-        call time avoids the context/BOM registration cycle and makes the
-        boundary explicit in each named operation below.
-        """
-        if (self.native_context or
-                _rules_port_attached(self.session, self.bstate)):
-            raise RuntimeError(
-                "RulesPort effect called legacy helper "
-                f"{function_name}; add a native implementation")
-        from abilities.framework import bom
-
-        return getattr(bom, function_name)(
-            self.game, self.session, self.db, self.handler,
-            self.player_uid, self.ai_uid, self.bstate,
-            self.effect_guid, self.param)
-
     def _emit_authored_event(self, event_type: str,
                              target: int | None = None) -> str:
         """Dispatch one metadata-defined ability event.
@@ -3955,8 +3480,6 @@ class EffectContext:
             f": {result}" if result else "")
 
     def create_and_cast_spell(self):
-        if not (self.native_context or self.bstate.get("_rules_port_native_effect")):
-            return self._legacy("_create_and_cast_spell_legacy")
         from rules_port.effects import create_and_cast_spell
         return create_and_cast_spell(self)
 
@@ -4097,8 +3620,6 @@ class EffectContext:
         return "verdict: reveal and play"
 
     def grant_ability(self):
-        if not (self.native_context or self.bstate.get("_rules_port_native_effect")):
-            return self._legacy("_grant_ability_legacy")
         target = self.bstate.get("grant_target")
         if target is None:
             return "grant: no target"
@@ -4106,14 +3627,10 @@ class EffectContext:
         return grant_ability(self)
 
     def copy_ability(self):
-        if self.native_context or self.bstate.get("_rules_port_native_effect"):
-            from rules_port.effects import _copy_ability
-            return _copy_ability(self)
-        return self._legacy("_copy_ability_legacy")
+        from rules_port.effects import _copy_ability
+        return _copy_ability(self)
 
     def play_card(self):
-        if not (self.native_context or self.bstate.get("_rules_port_native_effect")):
-            return self._legacy("_play_card_legacy")
         target = self.resolved_target()
         if target is None:
             target = self.bstate.get("resolving_source_uid")
@@ -4320,51 +3837,97 @@ class EffectContext:
         log_req(f"    ACTIVATE child {child_guid[:8]} owner={owner_id} "
                 f"target={self.resolved_target()} source={source_uid} "
                 f"parent={self.bstate.get('resolving_ability') or '-'}")
-        if self.native_context or self.bstate.get("_rules_port_native_effect"):
-            self.inherit_child_lists(child_guid)
-            # A number of Records abilities materialize several temporary
-            # cards in Choosing and then ActivateAbility a typed child whose
-            # target is "a card in the choice zone".  The summons are not
-            # individual pauses; the child target is the single client picker
-            # boundary.  Detect that contract from the child graph so every
-            # such effect gets one picker containing all authored options.
-            from gamedata import DEFAULT_RECORD_STORE, ability_graph
-            from rules_port.targeting import (filter_restricts_to_zone,
-                                              legal_targets)
-            from rules_port.resolution import resolve_port_ability
-            child = ability_graph(DEFAULT_RECORD_STORE, child_guid)
-            choice_target = None
-            if child is not None:
-                for index, target in enumerate(child.targets):
-                    card_filter = getattr(target, "card_filter", None)
-                    to_dict = getattr(card_filter, "to_dict", None)
-                    if callable(to_dict):
-                        card_filter = to_dict()
-                    # Only an authored ``InZone`` filter identifies a picker
-                    # target: the child's cards come from the choice zone, or
-                    # from the deck (the class-39 search prompt).  The
-                    # ``m_CollectionFlags`` visibility mask is a union of
-                    # every collection a card could occupy, so testing it
-                    # made an ordinary "a card from your hand" child
-                    # (Bloatcap's Deathcry, Giant Corpse Fly's Deploy) look
-                    # like a choice-zone picker and the discard never reached
-                    # its class-23 hand picker.
-                    from_choosing = filter_restricts_to_zone(
-                        card_filter, "Choosing")
-                    from_deck = filter_restricts_to_zone(card_filter, "Deck")
-                    # A match-secondary target ("search target opponent's deck for a card") names its zones on the
-                    # template, not on a card filter: a chosen pick from a deck is the same deck pick.
-                    match_secondary = str(target.target_kind or "").endswith(
-                        "MatchSecondaryTargetTemplate")
-                    if match_secondary:
-                        from_choosing = False
-                        from_deck = "deck" in str(target.collection_flags or "").lower()
-                    if (not target.requires_input or
-                            not (match_secondary or str(target.target_kind or "").endswith(
-                                "AbilityTargetTemplate")) or
-                            not (from_choosing or from_deck)):
-                        continue
-                    candidates = legal_targets(
+        self.inherit_child_lists(child_guid)
+        # A number of Records abilities materialize several temporary
+        # cards in Choosing and then ActivateAbility a typed child whose
+        # target is "a card in the choice zone".  The summons are not
+        # individual pauses; the child target is the single client picker
+        # boundary.  Detect that contract from the child graph so every
+        # such effect gets one picker containing all authored options.
+        from gamedata import DEFAULT_RECORD_STORE, ability_graph
+        from rules_port.targeting import (filter_restricts_to_zone,
+                                          legal_targets)
+        child = ability_graph(DEFAULT_RECORD_STORE, child_guid)
+        choice_target = None
+        if child is not None:
+            for index, target in enumerate(child.targets):
+                card_filter = getattr(target, "card_filter", None)
+                to_dict = getattr(card_filter, "to_dict", None)
+                if callable(to_dict):
+                    card_filter = to_dict()
+                # Only an authored ``InZone`` filter identifies a picker
+                # target: the child's cards come from the choice zone, or
+                # from the deck (the class-39 search prompt).  The
+                # ``m_CollectionFlags`` visibility mask is a union of
+                # every collection a card could occupy, so testing it
+                # made an ordinary "a card from your hand" child
+                # (Bloatcap's Deathcry, Giant Corpse Fly's Deploy) look
+                # like a choice-zone picker and the discard never reached
+                # its class-23 hand picker.
+                from_choosing = filter_restricts_to_zone(
+                    card_filter, "Choosing")
+                from_deck = filter_restricts_to_zone(card_filter, "Deck")
+                # A match-secondary target ("search target opponent's deck for a card") names its zones on the
+                # template, not on a card filter: a chosen pick from a deck is the same deck pick.
+                match_secondary = str(target.target_kind or "").endswith(
+                    "MatchSecondaryTargetTemplate")
+                if match_secondary:
+                    from_choosing = False
+                    from_deck = "deck" in str(target.collection_flags or "").lower()
+                if (not target.requires_input or
+                        not (match_secondary or str(target.target_kind or "").endswith(
+                            "AbilityTargetTemplate")) or
+                        not (from_choosing or from_deck)):
+                    continue
+                candidates = legal_targets(
+                    self.db, self.session.session_id, int(owner_id or 0),
+                    target.guid, source_uid,
+                    both_players=str(target.player_filter or "").lower()
+                    not in {"self", "you", "controller"},
+                    champions=(getattr(
+                        self.handler, "_champion_targets", lambda: [])()
+                               or []),
+                    battle_state=self.bstate)
+                if match_secondary and candidates:
+                    # "Search target opposing champion's deck": only the deck of the champion the ability stored
+                    # (its owner), not every deck the template's player filter names.
+                    stored = set()
+                    for key in ("stored_targets", "stored_targets_this_turn", "stored_targets_by_card",
+                                "stored_targets_by_card_this_turn"):
+                        for values in (self.bstate.get(key) or {}).values():
+                            for uid in (values if isinstance(values, (list, tuple)) else [values]):
+                                if uid is not None:
+                                    stored.add(int(uid))
+                    champion_owner = {int(uid): int(owner) for owner, uid in
+                                      (self.bstate.get("champ_map") or {}).items()}
+                    owners = {champion_owner[uid] for uid in stored if uid in champion_owner}
+                    if owners:
+                        owner_rows = dict(self.db.execute(
+                            "SELECT card_uid, user_id FROM game_cards WHERE session_id=? AND card_uid IN (%s)"
+                            % ",".join("?" * len(candidates)),
+                            (self.session.session_id, *[int(uid) for uid in candidates])).fetchall())
+                        candidates = [uid for uid in candidates
+                                      if int(owner_rows.get(int(uid), -1) or 0) in owners]
+                if candidates:
+                    choice_target = (
+                        index, [int(uid) for uid in candidates], from_deck)
+                break
+        # A human player's child that picks a card ("target an action in your hand", "sacrifice a troop") is the
+        # player's choice, not an automatic pick: prompt them with the same target prompt a triggered ability uses.
+        # A choice zone or deck pick has its own picker below. A single candidate is not a question.
+        hand_pick = None
+        prompt_targets = getattr(self.handler, "_prompt_trigger_targets", None)
+        if child is not None and int(owner_id or 0) != 0 and callable(prompt_targets):
+            for target in child.targets:
+                card_filter = getattr(target, "card_filter", None)
+                to_dict = getattr(card_filter, "to_dict", None)
+                if callable(to_dict):
+                    card_filter = to_dict()
+                if (target.requires_input and
+                        str(target.target_kind or "").endswith("AbilityTargetTemplate") and
+                        not filter_restricts_to_zone(card_filter, "Choosing") and
+                        not filter_restricts_to_zone(card_filter, "Deck")):
+                    hand_candidates = legal_targets(
                         self.db, self.session.session_id, int(owner_id or 0),
                         target.guid, source_uid,
                         both_players=str(target.player_filter or "").lower()
@@ -4373,154 +3936,96 @@ class EffectContext:
                             self.handler, "_champion_targets", lambda: [])()
                                    or []),
                         battle_state=self.bstate)
-                    if match_secondary and candidates:
-                        # "Search target opposing champion's deck": only the deck of the champion the ability stored
-                        # (its owner), not every deck the template's player filter names.
-                        stored = set()
-                        for key in ("stored_targets", "stored_targets_this_turn", "stored_targets_by_card",
-                                    "stored_targets_by_card_this_turn"):
-                            for values in (self.bstate.get(key) or {}).values():
-                                for uid in (values if isinstance(values, (list, tuple)) else [values]):
-                                    if uid is not None:
-                                        stored.add(int(uid))
-                        champion_owner = {int(uid): int(owner) for owner, uid in
-                                          (self.bstate.get("champ_map") or {}).items()}
-                        owners = {champion_owner[uid] for uid in stored if uid in champion_owner}
-                        if owners:
-                            owner_rows = dict(self.db.execute(
-                                "SELECT card_uid, user_id FROM game_cards WHERE session_id=? AND card_uid IN (%s)"
-                                % ",".join("?" * len(candidates)),
-                                (self.session.session_id, *[int(uid) for uid in candidates])).fetchall())
-                            candidates = [uid for uid in candidates
-                                          if int(owner_rows.get(int(uid), -1) or 0) in owners]
-                    if candidates:
-                        choice_target = (
-                            index, [int(uid) for uid in candidates], from_deck)
+                    forced = (len(hand_candidates) == 1 and not target.optional and
+                              not filter_restricts_to_zone(card_filter, "Hand"))
+                    if hand_candidates and not forced:
+                        hand_pick = (target.guid, [int(uid) for uid in hand_candidates])
                     break
-            # A human player's child that picks a card ("target an action in your hand", "sacrifice a troop") is the
-            # player's choice, not an automatic pick: prompt them with the same target prompt a triggered ability uses.
-            # A choice zone or deck pick has its own picker below. A single candidate is not a question.
-            hand_pick = None
-            prompt_targets = getattr(self.handler, "_prompt_trigger_targets", None)
-            if child is not None and int(owner_id or 0) != 0 and callable(prompt_targets):
-                for target in child.targets:
-                    card_filter = getattr(target, "card_filter", None)
-                    to_dict = getattr(card_filter, "to_dict", None)
-                    if callable(to_dict):
-                        card_filter = to_dict()
-                    if (target.requires_input and
-                            str(target.target_kind or "").endswith("AbilityTargetTemplate") and
-                            not filter_restricts_to_zone(card_filter, "Choosing") and
-                            not filter_restricts_to_zone(card_filter, "Deck")):
-                        hand_candidates = legal_targets(
-                            self.db, self.session.session_id, int(owner_id or 0),
-                            target.guid, source_uid,
-                            both_players=str(target.player_filter or "").lower()
-                            not in {"self", "you", "controller"},
-                            champions=(getattr(
-                                self.handler, "_champion_targets", lambda: [])()
-                                       or []),
-                            battle_state=self.bstate)
-                        forced = (len(hand_candidates) == 1 and not target.optional and
-                                  not filter_restricts_to_zone(card_filter, "Hand"))
-                        if hand_candidates and not forced:
-                            hand_pick = (target.guid, [int(uid) for uid in hand_candidates])
-                        break
-            if hand_pick is not None:
-                template_guid, hand_uids = hand_pick
-                self.bstate["resolution_paused"] = True
-                prompt_targets(
-                    self.game, self.player_uid, self.ai_uid, self.session,
-                    self.bstate, int(source_uid or 0), child_guid,
-                    (template_guid,), hand_uids, owner_id=int(owner_id or 0))
-                return "activate ability: awaiting target from hand"
-            if choice_target is not None and int(owner_id or 0) != 0:
-                target_index, choice_uids, from_deck = choice_target
-                # The chosen card can live in a hidden collection rather than
-                # in the choice zone the parent materialized: Scheme's "choose
-                # an action in your deck" keeps the card in the deck.  The
-                # ChooseAndPlay picker only lists cards the client already
-                # holds in Choosing, which left that prompt empty.  The deck
-                # search prompt projects the candidates into Choosing for the
-                # pick and puts them back untouched afterwards.
-                deck_prompt = getattr(self.handler, "_prompt_deck_search", None)
-                if from_deck and callable(deck_prompt):
-                    continuation = {
-                        "ability_guid": child_guid,
-                        "source_uid": int(source_uid or 0),
-                        "owner_id": int(owner_id or 0),
-                        "target_map": {},
-                        "variables": {},
-                        "resume_effect_order": 0,
-                        "target_index": int(target_index),
-                        "parent": self._mark_paused_target(self.continuation()),
-                    }
-                    # The deck is hidden, so its current order must not leak
-                    # through the picker arrangement.
-                    import random as _rnd
-                    _rnd.shuffle(choice_uids)
-                    self.bstate["resolution_paused"] = True
-                    deck_prompt(
-                        self.game, self.session, self.player_uid, self.ai_uid,
-                        self.bstate, child_guid, int(source_uid or 0),
-                        int(owner_id or 0), choice_uids, kind="matching_target",
-                        continuation=continuation)
-                    return (f"activate ability: awaiting choice of "
-                            f"{len(choice_uids)} card(s)")
-                parent = self._mark_paused_target(self.continuation())
-                pending = {
-                    "kind": "choice_zone_target",
-                    "choice_uids": choice_uids,
+        if hand_pick is not None:
+            template_guid, hand_uids = hand_pick
+            self.bstate["resolution_paused"] = True
+            prompt_targets(
+                self.game, self.player_uid, self.ai_uid, self.session,
+                self.bstate, int(source_uid or 0), child_guid,
+                (template_guid,), hand_uids, owner_id=int(owner_id or 0))
+            return "activate ability: awaiting target from hand"
+        if choice_target is not None and int(owner_id or 0) != 0:
+            target_index, choice_uids, from_deck = choice_target
+            # The chosen card can live in a hidden collection rather than
+            # in the choice zone the parent materialized: Scheme's "choose
+            # an action in your deck" keeps the card in the deck.  The
+            # ChooseAndPlay picker only lists cards the client already
+            # holds in Choosing, which left that prompt empty.  The deck
+            # search prompt projects the candidates into Choosing for the
+            # pick and puts them back untouched afterwards.
+            deck_prompt = getattr(self.handler, "_prompt_deck_search", None)
+            if from_deck and callable(deck_prompt):
+                continuation = {
+                    "ability_guid": child_guid,
                     "source_uid": int(source_uid or 0),
                     "owner_id": int(owner_id or 0),
-                    "instance_id": int(getattr(
-                        self.ability, "instance_id", 1) or 1),
-                    "ability_guid": child_guid,
-                    "continuation": {
-                        "ability_guid": child_guid,
-                        "source_uid": int(source_uid or 0),
-                        "owner_id": int(owner_id or 0),
-                        "target_map": {},
-                        "variables": {},
-                        "resume_effect_order": 0,
-                        "target_index": int(target_index),
-                    },
-                    "parent": parent,
+                    "target_map": {},
+                    "variables": {},
+                    "resume_effect_order": 0,
+                    "target_index": int(target_index),
+                    "parent": self._mark_paused_target(self.continuation()),
                 }
-                self.bstate["pending_choice"] = pending
+                # The deck is hidden, so its current order must not leak
+                # through the picker arrangement.
+                import random as _rnd
+                _rnd.shuffle(choice_uids)
                 self.bstate["resolution_paused"] = True
-                prompt = getattr(self.handler, "_prompt_choice_cards", None)
-                if callable(prompt):
-                    prompt(self.game, self.session, self.player_uid,
-                           self.ai_uid, self.bstate, pending)
+                deck_prompt(
+                    self.game, self.session, self.player_uid, self.ai_uid,
+                    self.bstate, child_guid, int(source_uid or 0),
+                    int(owner_id or 0), choice_uids, kind="matching_target",
+                    continuation=continuation)
                 return (f"activate ability: awaiting choice of "
                         f"{len(choice_uids)} card(s)")
-            if choice_target is not None and int(owner_id or 0) == 0:
-                # AI choice is still resolved through the same child graph;
-                # only the client-facing picker is omitted.
-                target_index, choice_uids, _from_deck = choice_target
-                target_map = {int(target_index): (int(choice_uids[0]),)}
-                return self._resolve_child_ability(
-                    child_guid, source_uid, owner_id, target_map)
-            # Child abilities must re-enter the RulesPort lifecycle so their
-            # instance/continuation state and native effect dispatch are not
-            # lost at this nested boundary.
-            target_map = {}
-            selected = self.bstate.get("selected_choice_uid")
-            if selected is not None:
-                target_map[0] = (int(selected),)
+            parent = self._mark_paused_target(self.continuation())
+            pending = {
+                "kind": "choice_zone_target",
+                "choice_uids": choice_uids,
+                "source_uid": int(source_uid or 0),
+                "owner_id": int(owner_id or 0),
+                "instance_id": int(getattr(
+                    self.ability, "instance_id", 1) or 1),
+                "ability_guid": child_guid,
+                "continuation": {
+                    "ability_guid": child_guid,
+                    "source_uid": int(source_uid or 0),
+                    "owner_id": int(owner_id or 0),
+                    "target_map": {},
+                    "variables": {},
+                    "resume_effect_order": 0,
+                    "target_index": int(target_index),
+                },
+                "parent": parent,
+            }
+            self.bstate["pending_choice"] = pending
+            self.bstate["resolution_paused"] = True
+            prompt = getattr(self.handler, "_prompt_choice_cards", None)
+            if callable(prompt):
+                prompt(self.game, self.session, self.player_uid,
+                       self.ai_uid, self.bstate, pending)
+            return (f"activate ability: awaiting choice of "
+                    f"{len(choice_uids)} card(s)")
+        if choice_target is not None and int(owner_id or 0) == 0:
+            # AI choice is still resolved through the same child graph;
+            # only the client-facing picker is omitted.
+            target_index, choice_uids, _from_deck = choice_target
+            target_map = {int(target_index): (int(choice_uids[0]),)}
             return self._resolve_child_ability(
                 child_guid, source_uid, owner_id, target_map)
-        if _rules_port_attached(self.session, self.bstate):
-            raise RuntimeError(
-                "legacy child ability resolver bypassed RulesPort; use "
-                "EffectContext.from_rules_port")
-        from abilities.framework.resolution import resolve_ability
-        return resolve_ability(
-            self.handler, self.game, self.session, self.db,
-            self.player_uid, self.ai_uid, self.bstate, child_guid,
-            source_uid, owner_id, target_map={},
-            variables={})
+        # Child abilities must re-enter the RulesPort lifecycle so their
+        # instance/continuation state and native effect dispatch are not
+        # lost at this nested boundary.
+        target_map = {}
+        selected = self.bstate.get("selected_choice_uid")
+        if selected is not None:
+            target_map[0] = (int(selected),)
+        return self._resolve_child_ability(
+            child_guid, source_uid, owner_id, target_map)
 
     def tac(self):
         """Apply one metadata-defined TAC operation.
@@ -4782,38 +4287,16 @@ class EffectContext:
             self.bstate["player_mod_target"] = int(target)
             payload = {"property": "intattr", "attribute": "Tamed",
                        "amount": 1}
-            if self.native_context or self.bstate.get(
-                    "_rules_port_native_effect"):
-                from rules_port.effects import _card_modifier
-                return _card_modifier(self, {"param": json.dumps(payload)})
-                from abilities.framework.bom import _card_modifier_legacy
-                return _card_modifier_legacy(
-                self.game, self.session, self.db, self.handler,
-                self.player_uid, self.ai_uid, self.bstate, self.effect_guid,
-                json.dumps(payload))
+            from rules_port.effects import _card_modifier
+            return _card_modifier(self, {"param": json.dumps(payload)})
 
-        if self.native_context or self.bstate.get("_rules_port_native_effect"):
-            raise RuntimeError(
-                "RulesPort TAC has no native handler: " + str(function))
-        return self._legacy("_tac_legacy")
+        raise RuntimeError(
+            "RulesPort TAC has no native handler: " + str(function))
 
     def block(self):
-        if not (self.native_context or self.bstate.get("_rules_port_native_effect")):
-            from abilities.framework.effects.combat import _block_legacy
-            return _block_legacy(
-                self.game, self.session, self.db, self.handler,
-                self.player_uid, self.ai_uid, self.bstate,
-                self.effect_guid, self.param)
         from rules_port.combat_effects import block
         return block(self)
 
     def double_choice(self):
-        if self.native_context or self.bstate.get("_rules_port_native_effect"):
-            from rules_port.choice_effects import double_choice
-            return double_choice(self)
-        from abilities.framework.effects.choices import _double_choice_legacy
-
-        return _double_choice_legacy(
-            self.game, self.session, self.db, self.handler,
-            self.player_uid, self.ai_uid, self.bstate,
-            self.effect_guid, self.param)
+        from rules_port.choice_effects import double_choice
+        return double_choice(self)

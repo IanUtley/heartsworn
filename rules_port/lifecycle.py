@@ -1,15 +1,24 @@
-"""Native RulesPort turn-boundary state transitions."""
+"""Native RulesPort turn-boundary state transitions and the battle checkpoint.
+
+This is the single home of the persisted battle-state (``bstate``) helpers:
+phase lists and cursor, phase stops, the chain facade, checkpoint load/save
+and the turn-boundary card updates.  (It absorbed the former
+``battle_engine`` module.)
+"""
 
 from __future__ import annotations
 
 import json
 
 import game_engine
-from .chain import (empty as stack_empty, pop as stack_pop,
-                    set_pass as stack_set_pass,
-                    both_passed as stack_both_passed,
-                    reset_passes as stack_reset_passes)
-from .persistence import (current_phase, load_state, save_state)
+# Chain facade and checkpoint persistence, re-exported so callers only need
+# this module for the whole battle checkpoint.
+from .chain import (  # noqa: F401
+    push as stack_push, pop as stack_pop, top as stack_top,
+    empty as stack_empty, clear as stack_clear, set_pass as stack_set_pass,
+    both_passed as stack_both_passed, reset_passes as stack_reset_passes)
+from . import persistence
+from .persistence import persistence_state, save_state  # noqa: F401 (re-export)
 
 
 PLAYER = "player"
@@ -74,14 +83,6 @@ OPP_DEFAULT_STOPS = {
     game_engine.ETurnPhases.DeclareAttackPriorityWindow,
     game_engine.ETurnPhases.DeclareDefensePriorityWindow,
 }
-
-# Compatibility names for the tournament projection's separately persisted
-# PvP state.  They are state-neutral mutations and do not load the legacy
-# battle engine.
-from .chain import (push as stack_push, pop as stack_pop,
-                    empty as stack_empty, top as stack_top,
-                    clear as stack_clear)
-
 
 def default_state(turn_player=PLAYER):
     """Create the shared checkpoint used when a native game starts."""
@@ -188,37 +189,22 @@ def skip_to_phase(state, phase):
     return True
 
 
+def _configured_stops(configured, defaults):
+    """A stop list the player saved replaces the defaults, even when empty
+    (the client's "no optional stops"); ``None`` means never configured."""
+    return defaults if configured is None else set(configured)
+
+
 def is_self_stop(state, phase):
-    always = {
-        game_engine.ETurnPhases.PickGoesFirst,
-        game_engine.ETurnPhases.Mulligan,
-        game_engine.ETurnPhases.StartGame,
-        game_engine.ETurnPhases.DeclareAttack,
-        game_engine.ETurnPhases.AssignDamage,
-        game_engine.ETurnPhases.AssignFirstStrikeDamage,
-    }
-    defaults = {
-        game_engine.ETurnPhases.FirstMainPhase,
-        game_engine.ETurnPhases.SecondMainPhase,
-        game_engine.ETurnPhases.DeclareAttackPriorityWindow,
-        game_engine.ETurnPhases.DeclareDefensePriorityWindow,
-    }
-    configured = state.get("player_self_stops")
-    stops = defaults if configured is None else set(configured)
-    return phase in always or phase in stops
+    """Whether the human stops at ``phase`` on their own turn."""
+    return (phase in SELF_ALWAYS_STOPS or phase in _configured_stops(
+        state.get("player_self_stops"), SELF_DEFAULT_STOPS))
 
 
 def is_opp_stop(state, phase):
-    """Return whether the human configured an opponent-turn stop."""
-    always = {game_engine.ETurnPhases.DeclareDefense}
-    defaults = {
-        game_engine.ETurnPhases.SecondMainPhase,
-        game_engine.ETurnPhases.DeclareAttackPriorityWindow,
-        game_engine.ETurnPhases.DeclareDefensePriorityWindow,
-    }
-    configured = state.get("player_opp_stops")
-    stops = defaults if configured is None else set(configured)
-    return phase in always or phase in stops
+    """Whether the human stops at ``phase`` on the opponent's turn."""
+    return (phase in OPP_ALWAYS_STOPS or phase in _configured_stops(
+        state.get("player_opp_stops"), OPP_DEFAULT_STOPS))
 
 
 def practice_priority_players(state, phase, *, active_is_player):
@@ -282,48 +268,82 @@ def practice_phase_priority(state, phase, *, active_player_id,
 
 
 def ai_held_phase_context(state):
-    """Return the native phase represented by a paused AI resume cursor."""
+    """Return ``(phase, index, phases)`` for a paused AI opponent stop.
+
+    ``ai_turn_phase_idx`` is the resume cursor written just before the AI
+    hands priority to the human.  Prefer the persisted phase list, but fall
+    back to the combat/base lists when a stale list cannot contain the cursor.
+    """
     if not isinstance(state, dict) or state.get("ai_turn_phase_idx") is None:
         return None
     try:
-        index = int(state["ai_turn_phase_idx"]) - 1
+        resume_idx = int(state["ai_turn_phase_idx"])
     except (TypeError, ValueError):
         return None
-    phases = state.get("turn_phases") or ()
-    if 0 <= index < len(phases):
-        return phases[index], index, phases
+    candidates = []
+    stored = state.get("turn_phases")
+    if isinstance(stored, (list, tuple)):
+        candidates.append(stored)
+    candidates.extend((COMBAT_TURN_PHASES, BASE_TURN_PHASES))
+    for phases in candidates:
+        if 0 < resume_idx <= len(phases):
+            return phases[resume_idx - 1], resume_idx - 1, phases
     return None
+
+
+def load_state(session):
+    """Load the session's battle checkpoint, or a fresh default state."""
+    try:
+        return persistence.load_state(session, default=default_state)
+    except (TypeError, ValueError):
+        return default_state()
+
+
+def current_phase(state):
+    """The phase at the checkpoint's cursor.
+
+    Uses the persisted phase list; a projection that only records ``phase``
+    returns it; otherwise the turn's list is built (and cached) first.
+    """
+    if isinstance(state, dict) and not state.get("turn_phases") and \
+            "phase" in state:
+        return state["phase"]
+    phases = turn_phases(state)
+    try:
+        index = int(state.get("phase_idx", 0) or 0) % len(phases)
+    except (TypeError, ValueError):
+        index = 0
+    return phases[index]
 
 
 _EXPIRATIONS = "__attribute_expirations"
 
 
-def advance_checkpoint_phase(state):
-    """Advance the shared phase cursor for a native live-session projection.
+def advance_phase(state):
+    """Advance the checkpoint's phase cursor; past EndTurn, start the next turn.
 
-    The scheduler owns the typed phase graph; this small adapter updates the
-    legacy-compatible checkpoint consumed by the host's event projection.
+    The next turn belongs to the opponent unless a GiveBonusTurn marker keeps
+    the current player (``next_turn_player``); its phase list is rebuilt from
+    the combat facts (the caller sets ``player_has_ready_troop`` first).
     """
     if not isinstance(state, dict):
         return None
     state["player_passed"] = False
     state["ai_passed"] = False
-    phases = state.get("turn_phases") or ()
-    if not phases:
-        return state.get("phase")
+    phases = turn_phases(state)
     try:
         index = int(state.get("phase_idx", 0) or 0) + 1
     except (TypeError, ValueError):
         index = 1
     if index >= len(phases):
-        current = state.get("turn_player", "player")
-        state["turn_player"] = "ai" if current == "player" else "player"
+        state["turn_player"] = next_turn_player(state)
         state["turn_number"] = int(state.get("turn_number", 1) or 1) + 1
         state["phase_idx"] = 0
         state.pop("extra_combats_this_turn", None)
+        state["turn_phases"] = build_turn_phases(state)
     else:
         state["phase_idx"] = index
-    return phases[int(state["phase_idx"])]
+    return current_phase(state)
 
 
 def should_draw_for_turn(state, side):
@@ -332,11 +352,6 @@ def should_draw_for_turn(state, side):
         return True
     first_player_draws = bool((state or {}).get("player_draws_first_turn"))
     return first_player_draws if str(side).lower() == "player" else not first_player_draws
-
-
-# Names match the old checkpoint helper so host projection code can select
-# this module for attached sessions without changing its control-flow shape.
-advance_phase = advance_checkpoint_phase
 
 
 def prime_cards_for_turn(db, session_id, active_owner_id):

@@ -177,21 +177,6 @@ def test_legal_targets_for_an_unknown_template_offers_nothing():
                          both_players=True) == []
 
 
-def test_legacy_card_modifier_with_no_authored_effect_changes_nothing():
-    from abilities.framework import bom
-    import game_engine
-    from tests.tests_combat import HandlerStub, SessionStub
-    db = make_db()
-    pl_t = game_engine.UID.make(244, 5)
-    ai_t = game_engine.UID.make(3, 1000)
-    game = game_engine.Game(1, pl_t, ai_t)
-    result = bom._card_modifier_legacy(
-        game, SessionStub(), db, HandlerStub(db), pl_t, ai_t,
-        {"player_health": 20, "ai_health": 20},
-        "00000000-0000-0000-0000-00000000cafe", "{}")
-    assert result == "card modifier: "
-
-
 def test_tac_without_an_operation_is_rejected_in_native_play():
     import pytest
     from types import SimpleNamespace
@@ -408,7 +393,7 @@ def test_fra_battle_setup_saves_the_starting_state_for_reconnect():
 
 
 class _CheckpointStub:
-    """The real battle_engine helpers, with state saves counted instead of stored."""
+    """The real checkpoint helpers, with state saves counted instead of stored."""
 
     def __init__(self):
         self.saved = 0
@@ -417,8 +402,8 @@ class _CheckpointStub:
         self.saved += 1
 
     def __getattr__(self, name):
-        import battle_engine
-        return getattr(battle_engine, name)
+        from rules_port import lifecycle
+        return getattr(lifecycle, name)
 
 
 def test_resolving_a_troop_with_no_source_pushes_the_chain_events_only():
@@ -447,20 +432,6 @@ def test_resolving_a_troop_with_no_source_pushes_the_chain_events_only():
                          "RemovedTopOfChainSessionEventArgs"], names
     assert game.events[0].ability_instance_id == 7
     assert checkpoint.saved >= 1
-
-
-def test_advance_to_priority_stops_when_a_champion_has_fallen():
-    from application.turn_flow import TurnFlowMixin
-    import game_engine
-    from tests.tests_combat import HandlerStub, SessionStub
-
-    class _Handler(HandlerStub, TurnFlowMixin):
-        def _check_champion_health(self, session, pl_t, ai_t, bstate):
-            return True
-
-    handler = _Handler(make_db())
-    assert handler._advance_to_priority(
-        SessionStub(), game_engine.UID.make(244, 5), game_engine.UID.make(3, 1000), {}) is False
 
 
 def test_add_deck_without_a_logged_in_user_is_rejected_with_an_error_reply():
@@ -513,45 +484,6 @@ def test_card_play_without_a_user_profile_is_refused():
     transaction = type("Play", (), {"payload": {"card_id": 1}, "kind": "troop"})()
     assert CardPlayMixin._handle_rules_port_card_play(
         _Handler(make_db()), SessionStub(), transaction) is False
-
-
-def test_generic_transaction_refuses_its_own_rules_port_command():
-    from application.transactions import TransactionsMixin
-    from tests.tests_combat import HandlerStub, SessionStub
-
-    class _Handler(HandlerStub, TransactionsMixin):
-        pass
-
-    transaction = type("Txn", (), {"inner_bytes": b"", "typed_payload": None,
-                                   "fields": {}, "is_pass_priority": False})()
-    session = SessionStub()
-    session._rules_port_dispatch_command = transaction
-    assert TransactionsMixin._handle_generic_player_transaction(
-        _Handler(make_db()), session, transaction, 1, 0, None) is False
-
-
-def test_ability_activation_with_no_ability_guid_is_acknowledged_once():
-    from application.transactions import TransactionsMixin
-    from tests.tests_combat import HandlerStub, SessionStub
-
-    class _Handler(HandlerStub, TransactionsMixin):
-        def __init__(self, db):
-            super().__init__(db)
-            self.acks = 0
-
-        def _checkpoint_engine(self, session):
-            return _CheckpointStub()
-
-        def _push_transaction_ack(self, session):
-            self.acks += 1
-
-    transaction = type("Txn", (), {"inner_bytes": b"", "is_set_ability_data": False,
-                                   "is_ability_activate": True})()
-    handler = _Handler(make_db())
-    assert TransactionsMixin._handle_ability_activate_transaction(
-        handler, SessionStub(), transaction) is True
-    # The empty ack keeps the client's next transaction from being dropped.
-    assert handler.acks == 1
 
 
 def test_duplicate_tournament_keep_is_acknowledged_without_a_second_keep():
@@ -700,7 +632,7 @@ def test_debug_draw_cheat_is_applied_and_consumed():
 
 def test_ai_turn_advances_through_its_phases_and_stops_at_a_player_stop():
     import ai
-    import battle_engine as be
+    from rules_port import lifecycle as be
     import game_engine
     import hconnect_server
     from tests.tests_combat import SessionStub
@@ -813,7 +745,7 @@ def test_add_deck_saves_the_named_deck_and_replies_with_it():
 
 
 def test_hand_troop_play_through_the_rules_port_seam_moves_it_to_cast_spells():
-    import battle_engine as be
+    from rules_port import lifecycle as be
     import db as shared
     import game_engine
     import hconnect_server
@@ -907,7 +839,7 @@ def test_encounter_extraction_reads_the_ai_deck_and_champion_of_a_scene():
 
 
 def test_fra_reconnect_snapshot_rebuilds_the_saved_board_for_the_player():
-    import battle_engine as be
+    from rules_port import lifecycle as be
     import hconnect_server
     from tests.tests_combat import SessionStub, add_card
     db = make_db()
@@ -930,30 +862,8 @@ def test_fra_reconnect_snapshot_rebuilds_the_saved_board_for_the_player():
     assert sent, "the saved board should be pushed back to the reconnecting client"
 
 
-def test_advance_to_priority_auto_passes_to_the_players_first_stop():
-    import battle_engine as be
-    import game_engine
-    import hconnect_server
-    from tests.tests_combat import SessionStub
-    db = make_db()
-    hconnect_server._db = db
-    handler = hconnect_server.HCPHandler(None, ("127.0.0.1", 0))
-    handler.user_profile = {"id": 5}
-    handler.client_reck_id = 5
-    handler._maybe_attach_rules_port = lambda *args, **kwargs: None
-    handler.send = lambda header, body: None
-    session = SessionStub()
-    state = be.default_state(turn_player=be.PLAYER)
-    session.turn_order = state
-    pl_t = game_engine.UID.make(244, 5)
-    ai_t = game_engine.UID.make(game_engine.SERVICE_AI_UID_TYPE, 1000)
-    assert handler._advance_to_priority(session, pl_t, ai_t, state) is True
-    # The non-stop phases before the player's first stop were passed automatically.
-    assert state["phase_idx"] > 0, state
-
-
 def test_resolving_a_troop_from_the_chain_announces_the_chain_resolution():
-    import battle_engine as be
+    from rules_port import lifecycle as be
     import game_engine
     import hconnect_server
     from application.chain import ChainMixin
@@ -991,71 +901,6 @@ def test_starter_playthrough_explores_on_to_the_first_campaign_area():
         shared._db = previous          # the playthrough binds a copy; restore ours
     assert ok, route
     assert any(step.startswith("reached AZ1") for step in route), route
-
-
-def test_quit_transaction_in_a_tournament_game_is_handled_and_acknowledged():
-    from types import SimpleNamespace
-    from unittest import mock
-    import hconnect_server
-    from tests.tests_combat import SessionStub
-    db = make_db()
-    hconnect_server._db = db
-    handler = hconnect_server.HCPHandler(None, ("127.0.0.1", 0))
-    handler.user_profile = {"id": 5}
-    handler.client_reck_id = 5
-    handler.send = lambda header, body: None
-    acks = []
-    handler._push_transaction_ack = lambda session: acks.append(session)
-    session = SessionStub()
-    session.session_name = "tourney-1"
-    quit_txn = SimpleNamespace(inner_bytes=b"", typed_payload=None,
-                               fields={"m_QuitEntireSeries": True},
-                               is_pass_priority=False)
-    with mock.patch("services.tournament_game.pvp_concede", return_value=True):
-        assert handler._handle_generic_player_transaction(
-            session, quit_txn, 1, 0, None) is True
-    assert acks == [session]
-
-
-def test_troop_ability_activation_taps_the_chosen_opposing_troop():
-    import battle_engine as be
-    import db as shared
-    import game_engine
-    import hconnect_server
-    import ai
-    import struct
-    from types import SimpleNamespace
-    from tests.tests_combat import SessionStub, add_card
-    db = make_db()
-    previous = shared._db
-    shared._db = db
-    hconnect_server._db = db
-    ai._db = db
-    try:
-        # Field Tactician (player-owned, manual Warzone tap) and one AI troop with card uid 257.
-        add_card(db, 300, 5, "8305c05f-8355-4740-8599-2cf4a85c2c79", "warzone")
-        add_card(db, 257, 0, "11111111-1111-1111-1111-111111111111", "warzone")
-        handler = hconnect_server.HCPHandler(None, ("127.0.0.1", 0))
-        handler.user_profile = {"id": 5}
-        handler.client_reck_id = 5
-        handler._maybe_attach_rules_port = lambda *args, **kwargs: None
-        handler.send = lambda header, body: None
-        session = SessionStub()
-        state = be.default_state(turn_player=be.PLAYER)
-        state["player_resources"] = 5
-        state["player_total_resources"] = 5
-        session.turn_order = state
-        target = struct.pack("<Q", 257).hex().encode()
-        raw = (b"AbilityTemplateId;0;1;1;m_Guid;0;3;0;36;"
-               b"1c6d0fdf-9be0-27b3-186e-e139d1f71544;"
-               b"m_UID64;0;1;1;" + target + b";")
-        activation = SimpleNamespace(inner_bytes=raw, is_set_ability_data=False,
-                                     is_ability_activate=True)
-        assert handler._handle_ability_activate_transaction(session, activation) is True
-        tapped = db.execute("SELECT card_state FROM game_cards WHERE card_uid=257").fetchone()[0]
-        assert tapped & game_engine.ECardStates.Tapped, tapped
-    finally:
-        shared._db = previous
 
 
 def _pvp_session(db):
@@ -1121,51 +966,9 @@ def test_dungeon_import_dry_run_reports_each_dungeon_without_writing(capsys):
     assert "Devonshire Keep:" in out, out[:400]
 
 
-def test_legacy_card_modifier_applies_a_permanent_attack_bonus_to_its_target():
-    import json
-    import game_engine
-    import hconnect_server
-    import battle_engine as be
-    import db as shared
-    from abilities.framework import bom
-    from tests.tests_combat import SessionStub, add_card
-    db = make_db()
-    previous = shared._db
-    shared._db = db
-    hconnect_server._db = db
-    try:
-        add_card(db, 300, 5, "8305c05f-8355-4740-8599-2cf4a85c2c79", "warzone")
-        handler = hconnect_server.HCPHandler(None, ("127.0.0.1", 0))
-        handler.user_profile = {"id": 5}
-        handler.client_reck_id = 5
-        handler._maybe_attach_rules_port = lambda *args, **kwargs: None
-        handler.send = lambda header, body: None
-        session = SessionStub()
-        bstate = be.default_state(turn_player=be.PLAYER)
-        bstate["resolving_source_uid"] = 300
-        bstate["player_mod_target"] = 300
-        session.turn_order = bstate
-        pl_t = game_engine.UID.make(244, 5)
-        ai_t = game_engine.UID.make(game_engine.SERVICE_AI_UID_TYPE, 1000)
-        game = game_engine.Game(1, pl_t, ai_t)
-        # Authored +1[ATK] Permanent effect (a Records effect row).
-        param = json.dumps({"text": "+1[ATK]", "property": "attack", "amount": 1,
-                            "duration": "Permanent", "target_index": 0,
-                            "condition_id": "", "replaceexistingvalue": 0,
-                            "input_variable": "P1"})
-        result = bom._card_modifier_legacy(
-            game, session, db, handler, pl_t, ai_t, bstate,
-            "139ca40e-8cae-e3d9-e42a-01f59c0c6501", param)
-        assert result == "mod 0x12c +1/+0", result
-        assert any(type(ev).__name__ == "CardUpdatedSessionEventArgs"
-                   for ev in game.events), [type(ev).__name__ for ev in game.events]
-    finally:
-        shared._db = previous
-
-
 def test_practice_mulligan_keep_accepts_the_hand_and_replies_to_the_client():
     from types import SimpleNamespace
-    import battle_engine as be
+    from rules_port import lifecycle as be
     import hconnect_server
     from tests.tests_combat import SessionStub, add_card
     db = make_db()
@@ -1188,7 +991,7 @@ def test_practice_mulligan_keep_accepts_the_hand_and_replies_to_the_client():
 
 
 def test_fra_champion_health_modification_sets_the_player_start_value():
-    import battle_engine as be
+    from rules_port import lifecycle as be
     import hconnect_server
     import game_engine
     from gamemodes.fra_battle import FraBattleMixin
@@ -1224,7 +1027,7 @@ def test_fra_champion_health_modification_sets_the_player_start_value():
 
 
 def test_resolving_a_spell_from_the_chain_sends_it_to_the_discard_pile():
-    import battle_engine as be
+    from rules_port import lifecycle as be
     import game_engine
     import hconnect_server
     from application.chain import ChainMixin
@@ -1406,31 +1209,6 @@ def test_panorama_extraction_reads_the_camera_and_npc_anchors_of_a_level(tmp_pat
         ("Guard", [3.0, 0.0, 4.0])], level["npcs"]
 
 
-def test_tournament_gameplay_without_a_rules_port_host_is_refused_and_acknowledged():
-    from types import SimpleNamespace
-    from unittest import mock
-    import hconnect_server
-    from tests.tests_combat import SessionStub
-    db = make_db()
-    hconnect_server._db = db
-    handler = hconnect_server.HCPHandler(None, ("127.0.0.1", 0))
-    handler.user_profile = {"id": 5}
-    handler.client_reck_id = 5
-    handler.send = lambda header, body: None
-    acks = []
-    handler._push_transaction_ack = lambda session: acks.append(session)
-    session = SessionStub()
-    session.session_name = "tourney-1"
-    session._rules_port_session = None
-    play = SimpleNamespace(inner_bytes=b"", typed_payload=None, fields={},
-                           is_pass_priority=False)
-    with mock.patch("services.tournament_game.pvp_concede") as concede:
-        assert handler._handle_generic_player_transaction(session, play, 1, 0, None) is True
-    concede.assert_not_called()
-    assert acks == [session]
-
-
-
 def test_tutorial_script_parses_draw_and_hell_to_freeze_commands(tmp_path):
     from domain.game import parse_tutorial_script
     script = tmp_path / "tutorial.txt"
@@ -1440,7 +1218,7 @@ def test_tutorial_script_parses_draw_and_hell_to_freeze_commands(tmp_path):
 
 
 def test_condition_combinators_fold_their_children():
-    from abilities.framework.condition_engine import evaluate_condition
+    from rules_port.conditions import evaluate_condition
     always = {"_t": "AndTriggerCondition", "m_Conditions": []}
     never = {"_t": "OrTriggerCondition", "m_Conditions": []}
     assert evaluate_condition(always, None) is True
@@ -1720,7 +1498,7 @@ def test_fra_specs_carry_every_card_of_the_arena_decks(tmp_path):
 
 def test_opening_a_starter_pack_consumes_it_and_replies_to_the_client():
     import db as shared
-    from profile_db import db_add_inventory, db_inventory_item
+    from profile_db import db_inventory_item, db_upsert_inventory_item
     from services.chest_requests import handle_opencardpack_2127
     import hconnect_server
     db = make_db()
@@ -1731,7 +1509,7 @@ def test_opening_a_starter_pack_consumes_it_and_replies_to_the_client():
         pack = "0382f729-7710-432b-b761-13677982dcd2"
         db.execute("INSERT OR IGNORE INTO users (id, name, gold, platinum) VALUES (5, 'pack', 0, 0)")
         db.commit()
-        db_add_inventory(5, pack, 1, conn=db)
+        db_upsert_inventory_item(5, pack, 1, conn=db)
         db.commit()
         handler = hconnect_server.HCPHandler(None, ("127.0.0.1", 0))
         handler.user_profile = {"id": 5, "name": "pack"}
@@ -1749,7 +1527,7 @@ def test_opening_a_starter_pack_consumes_it_and_replies_to_the_client():
 
 def test_pending_choice_answer_plays_the_chosen_choice_token():
     import struct
-    import battle_engine as be
+    from rules_port import lifecycle as be
     import db as shared
     import hconnect_server
     import game_engine
@@ -1906,7 +1684,7 @@ def test_reconnect_request_with_no_game_is_answered_once():
 
 
 def test_resource_from_hand_is_played_into_the_played_resources_zone():
-    import battle_engine as be
+    from rules_port import lifecycle as be
     import game_engine
     import hconnect_server
     from types import SimpleNamespace
@@ -2029,7 +1807,7 @@ def test_declining_an_optional_trigger_cancels_it_for_the_table():
 
 def test_ai_hand_action_targets_the_opposing_troop_it_can_tap():
     import ai_eval
-    import battle_engine as be
+    from rules_port import lifecycle as be
     import db as shared
     import game_engine
     import hconnect_server
@@ -2090,47 +1868,6 @@ def test_champion_bom_extraction_regenerates_both_seed_blocks_in_static(tmp_path
     text = static.read_text()
     assert text.startswith("keep = 1\n"), text[:40]
     assert "CHAMPION_ABILITY_EFFECTS = [" in text, text
-
-
-def test_legacy_block_effect_assigns_the_created_troop_as_a_blocker():
-    import battle_engine as be
-    import db as shared
-    import game_engine
-    import hconnect_server
-    from abilities.framework.effects.combat import _block_legacy
-    from tests.tests_combat import SessionStub, add_card
-    db = make_db()
-    previous = shared._db
-    shared._db = db
-    hconnect_server._db = db
-    try:
-        add_card(db, 100, 5, "8305c05f-8355-4740-8599-2cf4a85c2c79", "warzone")
-        add_card(db, 201, 0, "8305c05f-8355-4740-8599-2cf4a85c2c79", "warzone")
-        db.execute("UPDATE game_cards SET card_state=? WHERE card_uid=100",
-                   (int(game_engine.ECardStates.StartedATurnOnYourSide),))
-        db.commit()
-        handler = hconnect_server.HCPHandler(None, ("127.0.0.1", 0))
-        handler.user_profile = {"id": 5}
-        handler.client_reck_id = 5
-        handler._maybe_attach_rules_port = lambda *args, **kwargs: None
-        handler.send = lambda header, body: None
-        handler._player_champ_scid = game_engine.SessionCardId(game_engine.UID.make(1, 9001))
-        handler._ai_champ_scid = game_engine.SessionCardId(game_engine.UID.make(1, 9002))
-        session = SessionStub()
-        session.session_name = "practice-1"
-        state = be.default_state(turn_player=be.PLAYER)
-        state["player_attackers"] = {"100": 0}
-        state["player_spell_target"] = 100
-        state["resolving_secondary_target_uid"] = 201
-        session.turn_order = state
-        player = game_engine.UID.make(244, 5)
-        ai = game_engine.UID.make(game_engine.SERVICE_AI_UID_TYPE, 1000)
-        game = game_engine.Game(1, player, ai)
-        result = _block_legacy(game, session, db, handler, player, ai, state, "effect", "{}")
-        assert result.startswith("blocked "), result
-        assert state["ai_blockers"] == {"100": ["201"]}, state.get("ai_blockers")
-    finally:
-        shared._db = previous
 
 
 def test_campaign_state_maps_visits_completion_and_flags_for_the_rules_engine():
@@ -2207,11 +1944,11 @@ def test_audit_reports_a_heal_claim_that_no_effect_implements():
 
 
 def test_resolving_a_tap_ability_taps_its_chosen_target():
-    import battle_engine as be
+    from rules_port import lifecycle as be
     import db as shared
     import game_engine
     import hconnect_server
-    from abilities.framework.resolution import resolve_ability
+    from rules_port.resolution import resolve_port_ability
     from tests.tests_combat import SessionStub, add_card
     db = make_db()
     previous = shared._db
@@ -2235,9 +1972,10 @@ def test_resolving_a_tap_ability_taps_its_chosen_target():
         player = game_engine.UID.make(244, 5)
         ai = game_engine.UID.make(game_engine.SERVICE_AI_UID_TYPE, 1000)
         game = game_engine.Game(1, player, ai)
-        result = resolve_ability(handler, game, session, db, player, ai, state,
-                                 "1c6d0fdf-9be0-27b3-186e-e139d1f71544", 300, 5,
-                                 target_map={0: [257]})
+        result = resolve_port_ability(
+            handler, game, session, db, player, ai, state,
+            "1c6d0fdf-9be0-27b3-186e-e139d1f71544", 300, 5,
+            target_map={0: [257]})
         assert result.startswith("tapped"), result
         state_row = db.execute("SELECT card_state FROM game_cards WHERE card_uid=257").fetchone()[0]
         assert state_row & int(game_engine.ECardStates.Tapped), state_row
@@ -2267,12 +2005,6 @@ def test_card_count_variable_counts_the_owners_cards_in_the_default_zones():
     # The owner has two troops in the warzone; the opponent's troop is not counted.
     assert context.set_card_count_variable() == "counted Cards=2"
     assert bstate["ability_variables"] == {"Cards": 2}, bstate
-
-
-def test_equipment_filter_matches_a_card_that_requires_equipment_only():
-    from abilities.framework.targeting import template_equipment_match
-    assert template_equipment_match("aa2bab91-2ec8-f8e5-395c-7283371426f8") is True
-    assert template_equipment_match("00000000-0000-0000-0000-000000000000") is False
 
 
 def test_adding_a_champion_saves_it_for_the_user_and_replies():
@@ -2397,7 +2129,7 @@ def test_saving_conversation_actions_records_them_for_the_ending(tmp_path, monke
 
 
 def test_affordable_troop_ability_becomes_an_activate_option_on_its_card():
-    import battle_engine as be
+    from rules_port import lifecycle as be
     import db as shared
     import game_engine
     import hconnect_server
@@ -2476,17 +2208,6 @@ def test_az1_node_details_come_from_its_encounter_scene_row(tmp_path):
     assert node.pre_conversations == ("Feralroot Bear",), node
 
 
-def test_set_one_coverage_sweep_reports_the_non_resource_cards(monkeypatch, capsys):
-    from tests.test_db import fresh_database
-    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "tools", "ir_coverage"))
-    import sweep_set1_coverage
-    monkeypatch.setattr(sweep_set1_coverage, "DB", fresh_database())
-    sweep_set1_coverage.main()
-    first_line = capsys.readouterr().out.splitlines()[0]
-    assert first_line.startswith("Set 1 cards (non-resource): "), first_line
-    assert int(first_line.rsplit(": ", 1)[1]) > 0, first_line
-
-
 def test_tac_list_read_returns_the_cards_stored_for_the_resolving_ability():
     from rules_port.static_rules import _list_card_uids
     state = {"resolving_ability": "ab1",
@@ -2506,7 +2227,7 @@ def test_version_command_reports_the_release_version():
 
 
 def test_practice_session_attaches_an_authoritative_rules_host():
-    import battle_engine as be
+    from rules_port import lifecycle as be
     import db as shared
     import game_engine
     import game_session as gs
@@ -2534,20 +2255,6 @@ def test_practice_session_attaches_an_authoritative_rules_host():
         assert port is not None and session._rules_port_session is port
     finally:
         shared._db = previous
-
-
-def test_ai_choice_picks_one_of_the_offered_choice_cards():
-    import pytest
-    from abilities.framework.effects.choices import ai_choice_prefer_missing
-    from tests.tests_combat import add_card
-    from types import SimpleNamespace
-    db = make_db()
-    add_card(db, 257, 0, "02dd3c6f-dbcb-4803-9514-b340290084a1", "choosing")
-    add_card(db, 258, 0, "00a36f11-1c46-4b57-9e61-6bce9be591a1", "choosing")
-    session = SimpleNamespace(session_id=1)
-    assert ai_choice_prefer_missing(db, session, {"ai_threshold": {}}, [257, 258]) in (257, 258)
-    with pytest.raises(IndexError):
-        ai_choice_prefer_missing(db, session, {}, [])
 
 
 def _rulesport_duel(db, attacker_state, monkeypatch):
@@ -2743,18 +2450,6 @@ def test_panorama_importer_dry_run_reports_every_template_and_writes_nothing(tmp
     import_az1_panoramas.main()
     out = capsys.readouterr().out
     assert "cavein:" in out and "amblingmesa:" in out and "rows moved" in out, out[:300]
-
-
-def test_effect_leaf_audit_writes_a_report_for_every_effect_class(tmp_path, monkeypatch, capsys):
-    import json as _json
-    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "tools", "ir_coverage"))
-    import audit_effect_leaves
-    report = tmp_path / "effect_leaf_audit.json"
-    monkeypatch.setattr(sys, "argv", ["audit_effect_leaves.py", "--json", str(report)])
-    audit_effect_leaves.main()
-    data = _json.loads(report.read_text(encoding="utf-8"))
-    assert "ActivateAbilityEffectTemplate" in data, sorted(data)[:5]
-    assert "effect classes in Records" in capsys.readouterr().out
 
 
 def test_profile_stream_pushes_the_account_profile_to_the_client():
@@ -3007,48 +2702,6 @@ def test_legal_targets_for_a_self_target_template_offers_the_source_card():
         "1c6d0fdf-9be0-27b3-186e-e139d1f71544", conn=db))[0]
     assert list(_legal_targets(db, 1, 0, template, 100, both_players=False,
                                champions=[], battle_state={})) == [100]
-
-
-def test_generic_resource_play_moves_the_shard_out_of_hand_and_counts_it():
-    import struct
-    from types import SimpleNamespace
-    import battle_engine as be
-    import db as shared
-    import hconnect_server
-    from tests.tests_combat import SessionStub, add_card
-    db = make_db()
-    previous = shared._db
-    shared._db = db
-    hconnect_server._db = db
-    try:
-        # Diamond Shard: a basic Resource in the player's hand.
-        add_card(db, 320, 5, "0432f128-c106-4e66-bf22-9bcacad692ef", "hand")
-        handler = hconnect_server.HCPHandler(None, ("127.0.0.1", 0))
-        handler.user_profile = {"id": 5}
-        handler.client_reck_id = 5
-        handler._maybe_attach_rules_port = lambda *args, **kwargs: None
-        handler.send = lambda header, body: None
-        handler._push_transaction_ack = lambda session: None
-        session = SessionStub()
-        session.session_name = "practice-320"
-        state = be.default_state(turn_player=be.PLAYER)
-        state["player_resources"] = 5
-        state["player_total_resources"] = 5
-        session.turn_order = state
-        uid_hex = struct.pack("<Q", 320).hex().encode()
-        raw = (b"PlayCardTransaction;m_SessionCardId;0;1;1;m_UID64;0;1;1;"
-               + uid_hex + b";")
-        transaction = SimpleNamespace(
-            inner_bytes=raw, is_pass_priority=False, fields={},
-            typed_payload=None)
-        assert handler._handle_generic_player_transaction(
-            session, transaction, "11111111-1111-1111-1111-111111111111", 0, 0) is True
-    finally:
-        shared._db = previous
-    location = db.execute("SELECT location FROM game_cards WHERE card_uid=320").fetchone()[0]
-    assert location == "PlayedResources", location
-    saved = be.load_state(session)
-    assert saved["player_resource_plays_this_turn"] == 1, saved
 
 
 def test_explore_of_a_new_champion_walks_the_campaign_route_to_a_stop():

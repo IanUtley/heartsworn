@@ -1,6 +1,5 @@
 """Kill a troop (Dead state, move to graveyard, resolve Deathcry)."""
 
-import json
 import game_engine as _ge
 
 
@@ -81,36 +80,3 @@ def kill_troop(game, session, db, handler, pl_t, ai_t, card_uid, bstate=None,
                          tpl_guid, bstate)
 
 
-def state_based_deaths(game, session, db, handler, pl_t, ai_t, bstate):
-    """State-based deaths: warzone troops with effective defense <= 0 die.
-
-    The defense must include CONTINUOUS static bonuses (e.g. High Tomb Lord's
-    "+1/+1 for each card in all crypts") — a troop displayed as 9/9 that took
-    combat damage must not die because the static layer's delta was missing
-    from the stored buffs.
-    """
-    from pvp_db import db_warzone_troop_state_rows
-    rows = db_warzone_troop_state_rows(session.session_id, conn=db)
-    dead = []
-    for card_uid, tpl_guid, base_def, def_mod, dmg, perm_json, temp_json in rows:
-        def_ = base_def + (def_mod or 0)
-        for col in (perm_json, temp_json):
-            try:
-                b = json.loads(col or "{}")
-                def_ += int(b.get("def", 0))
-            except (ValueError, TypeError, json.JSONDecodeError):
-                pass
-        def_ -= (dmg or 0)
-        # Continuous static deltas (WhileCardInPlay / Permanent) count toward
-        # the troop's real defense — e.g. High Tomb Lord / Lightning Armada.
-        try:
-            from .statics import effective_deltas
-            deltas = effective_deltas(db, session.session_id, bstate or {},
-                                      int(card_uid))
-            def_ += int(deltas.get("def", 0) or 0)
-        except Exception:
-            pass
-        if def_ <= 0:
-            kill_troop(game, session, db, handler, pl_t, ai_t, card_uid, bstate, cause="state")
-            dead.append(card_uid)
-    return dead

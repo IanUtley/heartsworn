@@ -1,6 +1,6 @@
 """Regression tests for the ported trigger/ability condition layer
-(abilities/framework/condition_engine.py) — data-driven evaluation of the
-gamedata m_TriggerCondition / m_AbilityCondition / effect-condition trees."""
+(rules_port/conditions.py) — data-driven evaluation of the gamedata
+m_TriggerCondition / m_AbilityCondition / effect-condition trees."""
 
 import os
 import json
@@ -18,11 +18,8 @@ SRC = fresh_database()
 
 import game_engine
 
-from abilities.framework.condition_engine import (
-    ConditionContext,
-    evaluate_effect_condition,
-    trigger_condition_met,
-)
+from rules_port.condition_context import ConditionContext
+from rules_port.conditions import evaluate_effect_condition, trigger_condition_met
 from abilities.framework.targeting import evaluate_card_filter
 
 
@@ -114,6 +111,13 @@ def run(name, fn):
 
 
 def ctx(db, **kw):
+    """Build a native condition context.
+
+    Production callers always pass the event's player as ``trigger_owner_id``.
+    These fixtures describe events the source's own controller causes, so the
+    event player defaults to the source owner unless a test names one.
+    """
+    kw.setdefault("trigger_owner_id", kw.get("ability_source_owner_id"))
     return ConditionContext(db, SessionStub(), kw.pop("bstate", {}), **kw)
 
 
@@ -139,7 +143,8 @@ def test_angel_first_draw_threshold(db):
               "player_threshold": {game_engine.ECardShards.Diamond: 1}}
     c = ctx(db, event_type="CardDrawnEvent",
             ability_source_uid=100, ability_source_owner_id=5,
-            trigger_uid=100, bstate=bstate)
+            trigger_uid=100, bstate=bstate,
+            event_data={"nth_card_drawn_this_turn_by_this_player": 1})
     assert trigger_condition_met(raw(db, ANGEL), c)
 
 
@@ -149,7 +154,8 @@ def test_angel_second_draw_blocked(db):
               "player_threshold": {game_engine.ECardShards.Diamond: 1}}
     c = ctx(db, event_type="CardDrawnEvent",
             ability_source_uid=100, ability_source_owner_id=5,
-            trigger_uid=100, bstate=bstate)
+            trigger_uid=100, bstate=bstate,
+            event_data={"nth_card_drawn_this_turn_by_this_player": 2})
     assert not trigger_condition_met(raw(db, ANGEL), c)
 
 
@@ -400,10 +406,10 @@ def test_tac_trigger_condition_matches_threshold_event_tac(db):
             "_t": "TACTriggerCondition",
             "m_Conditions": {
                 "data": "AgBAsJ4iBQga/hhxdo8BAAAAAAAAAAAAAAAAAAAA"}}}
-    matching = ctx(db, bstate={
+    matching = ctx(db, event_type="GainThresholdEvent", bstate={
         "gain_threshold_color": game_engine.ECardShards.Diamond})
     assert trigger_condition_met(condition, matching)
-    wrong_color = ctx(db, bstate={
+    wrong_color = ctx(db, event_type="GainThresholdEvent", bstate={
         "gain_threshold_color": game_engine.ECardShards.Ruby})
     assert not trigger_condition_met(condition, wrong_color)
 

@@ -119,6 +119,26 @@ def _participant_thresholds(state, owner):
     return value if isinstance(value, dict) else {}
 
 
+def _participant_ids(state, source_owner):
+    """Every participant of a battle state, the source owner included."""
+    participants = list(state.get("pids") or ())
+    if not participants:
+        participants = list((state.get("champ_map") or {}).keys())
+    try:
+        participants = list(dict.fromkeys(int(pid) for pid in participants))
+    except (TypeError, ValueError):
+        participants = []
+    if not participants:
+        participants = [source_owner, 0 if source_owner else 1]
+    return participants
+
+
+def _opponents_of(ctx, source_owner):
+    state = getattr(ctx, "bstate", {}) or {}
+    return [pid for pid in _participant_ids(state, source_owner)
+            if pid != source_owner]
+
+
 def _is_active(ctx, owner):
     from .runtime_helpers import is_active_participant
     return is_active_participant(ctx.bstate or {}, owner)
@@ -383,12 +403,23 @@ def _native_condition(node, ctx):
             return False
         return drawn_index == required_index
     if kind == "TurnPhaseCondition":
+        # Phases are ETurnPhases values. Compare numerically: an IntEnum's
+        # str() is its number, so comparing text against the phase name never
+        # matched a live turn.
+        import game_engine
         wanted = str(node.get("m_TurnPhase") or "")
+        try:
+            wanted_value = int(getattr(game_engine.ETurnPhases, wanted))
+        except (AttributeError, TypeError, ValueError):
+            return False
         current = ctx.bstate.get("phase")
         if current is None:
             from .persistence import current_phase
             current = current_phase(ctx.bstate)
-        return str(current) == wanted
+        try:
+            return int(current) == wanted_value
+        except (TypeError, ValueError):
+            return False
     if kind == "CardsDiscardedThisTurn":
         owner = int(ctx.ability_source_owner_id or 0)
         key = (f"cards_discarded_this_turn_{owner}"
@@ -548,13 +579,26 @@ def _native_condition(node, ctx):
             node.get("m_RequiredQuantity", 1) or 1)
     if kind == "RequiresChampionHealth":
         owner = int(ctx.ability_source_owner_id or 0)
-        health = getattr(ctx, "_champion_health", None)
-        if not callable(health):
-            value = _participant_int(ctx.bstate, owner, "hp", "health", 20)
-        else:
-            value = int(cast(Any, health(owner)) or 0)
+        provider = getattr(ctx, "_champion_health", None)
+
+        def health_of(pid):
+            if callable(provider):
+                return int(cast(Any, provider(pid)) or 0)
+            return _participant_int(ctx.bstate, pid, "hp", "health", 20)
+
+        operation = node.get("m_ComparisonOp")
         required = int(node.get("m_RequiredQuantity", 0) or 0)
-        return _compare(value, node.get("m_ComparisonOp"), required)
+
+        def holds(pid):
+            return _compare(health_of(pid), operation, required)
+
+        player_filter = _last(node.get("m_PlayerFilter") or "Self").lower()
+        if player_filter == "singleopponent":
+            return any(holds(pid) for pid in _opponents_of(ctx, owner))
+        if player_filter == "multipleopponents":
+            opponents = _opponents_of(ctx, owner)
+            return bool(opponents) and all(holds(pid) for pid in opponents)
+        return holds(owner)
     if kind == "RequiresChampionCharges":
         return _compare(
             _participant_int(
@@ -565,17 +609,7 @@ def _native_condition(node, ctx):
         state = getattr(ctx, "bstate", {}) or {}
         source_owner = int(ctx.ability_source_owner_id or 0)
         player_filter = _last(node.get("m_PlayerFilter") or "Self").lower()
-        participants = list(state.get("pids") or ())
-        if not participants:
-            participants = list((state.get("champ_map") or {}).keys())
-        try:
-            participants = list(dict.fromkeys(int(pid) for pid in participants))
-        except (TypeError, ValueError):
-            participants = []
-        if not participants:
-            participants = [source_owner,
-                            0 if source_owner else 1]
-        opponents = [pid for pid in participants if pid != source_owner]
+        opponents = _opponents_of(ctx, source_owner)
         quantity = int(node.get(
             "m_RequiredQuantity", node.get("m_Value", 0)) or 0)
         temporary = bool(node.get("m_UseTemporaryResources"))
@@ -797,6 +831,21 @@ def _native_condition(node, ctx):
         source_zones = ctx._zones(node.get("m_SourceCollection", ""))
         if source_zones and source is not None and source not in source_zones:
             return False
+        # m_UsesPreviousState marks Warzone -> Discard triggers whose meaning
+        # is a troop dying. Require the pre-move Dead bit, so a card buried from
+        # hand or deck cannot pass as a death. A transition without its source
+        # cannot be proven, so it fails closed.
+        import game_engine
+        if ctx.uses_previous_state and source_zones and source is None:
+            return False
+        if (ctx.uses_previous_state and source_zones
+                and source in ctx._zones("Warzone")
+                and destination in ctx._zones("Discard")):
+            previous_state = ctx.event_previous_state
+            if previous_state is None:
+                previous_state = card.get("state", 0)
+            if not (int(previous_state or 0) & game_engine.ECardStates.Dead):
+                return False
         friendly = _same_player(
             ctx, card.get("user_id"), ctx.ability_source_owner_id)
         if int(node.get("m_Your", 0) or 0):

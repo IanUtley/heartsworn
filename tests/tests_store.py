@@ -11,7 +11,6 @@ from tests.test_db import fresh_database
 fresh_database()   # bind this process's database before ``db`` is imported
 
 import hconnect_server
-from db import db_primal_pack_for
 
 
 def run(name, fn):
@@ -43,28 +42,6 @@ def test_roll_just_under_threshold_upgrades():
 def test_roll_mixed_quantity():
     seq = iter([0.5, 0.01])
     assert hconnect_server._roll_primal_upgrade(2, rng=lambda: next(seq)) == (1, 1)
-
-
-def test_primal_mapping_core_sets():
-    # Set 1 booster -> Primal Pack: Set 1
-    assert db_primal_pack_for(
-        "a8b78207-686a-4994-b6cd-4548d1349841"
-    ) == "8d20082a-4163-4f42-8fce-d4c056f9da04"
-    # Set 2 booster -> Primal Pack: Set 2
-    assert db_primal_pack_for(
-        "f37fc1bc-4d7b-4bab-a2a2-770957d9a7b1"
-    ) == "653f153b-8288-4ece-a304-2804c1e2ffb9"
-
-
-def test_no_primal_for_later_sets_or_primals():
-    # Sets 5-9 have no Primal version -> no upgrade.
-    assert db_primal_pack_for(
-        "84c65d9b-779b-4128-879d-b0779e6e6edc") is None  # Set 5
-    assert db_primal_pack_for(
-        "3dacd91b-84f1-4ff9-99df-dae3f7740702") is None  # Set 9
-    # Purchasing a Primal pack itself never re-upgrades.
-    assert db_primal_pack_for(
-        "8d20082a-4163-4f42-8fce-d4c056f9da04") is None
 
 
 def test_full_set_excludes_alternate_art_rarities():
@@ -172,8 +149,6 @@ if __name__ == "__main__":
     run("roll never upgrades", test_roll_never_upgrades)
     run("roll just under threshold", test_roll_just_under_threshold_upgrades)
     run("roll mixed quantity", test_roll_mixed_quantity)
-    run("primal mapping for core sets", test_primal_mapping_core_sets)
-    run("no primal for later sets/primals", test_no_primal_for_later_sets_or_primals)
     run("full set excludes alternate art rarities", test_full_set_excludes_alternate_art_rarities)
     run("booster stays in requested set", test_booster_stays_in_requested_set_and_excludes_generated_lands)
     run("pack map uses canonical set GUIDs", test_pack_map_uses_canonical_core_set_guids)

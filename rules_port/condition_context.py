@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 
-from .targeting import _shards
+from rules_port.card_view import CardView
 
 
 _COLLECTION_CANONICAL = {
@@ -170,14 +170,9 @@ class ConditionContext:
                     guids[str(guid)] = str(guid)
             int_attrs = dict((self.bstate.get("champion_int_attrs") or {}).get(
                 str(uid), {}) or {})
-            return {"card_uid": uid, "card_type": "Champion",
-                    "location": "champions", "user_id": owner,
-                    "owner_id": owner, "controller_id": owner,
-                    "attack": 0, "defense": int(health or 0),
-                    "name": name or "Champion", "cost": 0,
-                    "shards": [], "attributes": 0,
-                    "counters": counters, "counter_guids": guids,
-                    "int_attrs": int_attrs}
+            return CardView.from_condition_champion(
+                uid, owner, name, health, counters, guids,
+                int_attrs).as_condition_mapping()
         if uid in self._cards:
             return self._cards[uid]
         from pvp_db import db_condition_card_row
@@ -201,33 +196,12 @@ class ConditionContext:
         from pvp_db import db_game_card_effective_cost
         effective_cost = db_game_card_effective_cost(
             self.session.session_id, uid, self.bstate, conn=self.db)
-        card = {"card_uid": int(row[0]), "card_type": row[1] or "",
-                "location": row[2] or "", "user_id": row[3],
-                "owner_id": row[3], "controller_id": row[3],
-                "state": int(row[4] or 0),
-                "attack": int(row[5] or 0) + int(row[14] or 0),
-                "defense": int(row[6] or 0) + int(row[15] or 0),
-                "template_guid": row[7] or "", "name": row[8] or "",
-                "original_template_guid": row[19] or "",
-                # Socketed gems feed IsSocketed and shared-gem filters (C#
-                # reads Card.ActiveGem); without them every card looked
-                # unsocketed to conditions.
-                "gems": int(row[20] or 0) if len(row) > 20 else 0,
-                # IsSocketable reads the template's socket count (C# Card.m_CardTemplate.m_SocketCount).
-                "socket_count": int(row[22] or 0) if len(row) > 22 else 0,
-                # The template's rarity: IsRarity (and the shared-rarity filter) read it from this view.
-                "rarity": row[21] if len(row) > 21 else "",
-                "cost": int(effective_cost or 0),
-                "subtype": row[10] or "",
-                "shards": _shards(row[11]),
-                "attributes": int(row[12] or 0) | int(row[13] or 0),
-                "int_attrs": buffs.get("int_attrs", {}),
-                "card_abilities": card_abilities,
-                "counters": counters, "counter_guids": guids,
-                "position": int(row[18] or 0),
-                "tags": buffs.get("tags", {}) or {},
-                "damaged_opponent_this_turn": list(
-                    self.bstate.get("damaged_opponent_this_turn") or [])}
+        card = CardView.from_condition_row(
+            row, buffs=buffs, card_abilities=card_abilities,
+            counters=counters, counter_guids=guids,
+            effective_cost=effective_cost,
+            damaged_opponent_this_turn=self.bstate.get(
+                "damaged_opponent_this_turn") or []).as_condition_mapping()
         self._cards[uid] = card
         return card
 

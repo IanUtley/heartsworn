@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import game_engine
+from rules_port.card_view import CardView
 from domain.constants import LEGACY_AI_PLAYER_UID_TYPE, SERVICE_AI_UID_TYPE
 
 
@@ -76,13 +77,11 @@ def _combat_card(db, session_id, battle_state, uid):
     # colorless and the native phase graph skips DeclareDefense entirely.
     shards = shards_from_threshold(db_card_template_field(
         info[0], "threshold_json", conn=db))
-    return {"card_uid": int(uid), "card_type": info[2] or "",
-            "location": db_card_location(session_id, int(uid), conn=db)
-            or "warzone",
-            "user_id": owner, "owner_id": owner, "controller_id": owner,
-            "template_guid": info[0], "shards": shards,
-            "attack": attack, "defense": defense,
-            "attributes": attrs, "rule_flags": flags}, attrs, int(damage or 0)
+    view = CardView.combat_rule(
+        int(uid), info[2] or "",
+        db_card_location(session_id, int(uid), conn=db) or "warzone",
+        owner, info[0], shards, attack, defense, attrs, flags)
+    return view.as_shape("combat_rule"), attrs, int(damage or 0)
 
 
 def _rules(db, session_id, battle_state, uid):

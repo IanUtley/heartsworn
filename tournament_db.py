@@ -203,12 +203,6 @@ def db_tournament_set_status(tid, status, session_id=None, conn=None):
         raise
 
 
-def db_tournament_count_by_status(status, conn=None):
-    row = (conn or _db_layer._db).execute(
-        "SELECT COUNT(*) AS count FROM tournaments WHERE status=?", (status,)).fetchone()
-    return int(row["count"] if hasattr(row, "keys") else row[0]) if row else 0
-
-
 def db_tournament_count_active_by_type(type_id, conn=None):
     row = (conn or _db_layer._db).execute(
         "SELECT COUNT(*) AS count FROM tournaments "
@@ -230,15 +224,6 @@ def db_tournament_deck_create(tournament_id, player_uid, cards_json, conn=None):
         "VALUES (?, ?, ?)", (tournament_id, player_uid, cards_json))
     if conn is None:
         connection.commit()
-
-
-def db_tournament_deck_by_player(tournament_id, player_uid, conn=None):
-    row = (conn or _db_layer._db).execute(
-        "SELECT id, tournament_id, player_uid, cards_json, created_at "
-        "FROM tournament_decks WHERE tournament_id=? AND player_uid=?",
-        (tournament_id, player_uid)).fetchone()
-    return dict(zip(("id", "tournament_id", "player_uid", "cards_json",
-                     "created_at"), row)) if row else None
 
 
 _SIGNUP_KEYS = ("id", "tournament_id", "player_uid", "player_name", "deck_id",
@@ -530,8 +515,6 @@ def db_tournament_finalize_player_run(tid, player_uid, result="quit",
         "run_number": run_number, "wins": wins, "losses": losses,
         "result": str(result), "final_match_id": final_match_id,
     }
-
-
 
 
 def db_tournament_match_result(tid, session_id, winner_uid, loser_uid,

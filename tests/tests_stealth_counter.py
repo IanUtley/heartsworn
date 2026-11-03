@@ -211,8 +211,13 @@ def test_one_shot_champion_ability_is_consumed_on_activation():
     from hconnect_server import HCPHandler
     from types import SimpleNamespace
 
+    from rules_port.runtime_adapter import PvpRuntimeFacts
+
     handler = HCPHandler.__new__(HCPHandler)
     handler.user_profile = {"id": 5}
+    handler._player_champ_scid = game_engine.SessionCardId(
+        game_engine.UID.make(244, 5))
+    champion_uid = int(handler._player_champ_scid.uid.uid64)
     state = {"turn_player": "player", "player_charges": 0,
              "player_spell_points": 0, "_rules_port_attached": True}
     graph = ability_graph(DEFAULT_RECORD_STORE, GOOD_AT_HIDING_ABILITY)
@@ -225,7 +230,11 @@ def test_one_shot_champion_ability_is_consumed_on_activation():
         [power], state,
         phase=game_engine.ETurnPhases.FirstMainPhase) == [power]
 
-    handler._consume_champion_ability_use(state, GOOD_AT_HIDING_ABILITY)
+    # RulesPort records the activation; the host's offer check must honour it.
+    facts = SimpleNamespace(
+        battle_state=state,
+        _champion_power_key=lambda _source, _graph: GOOD_AT_HIDING_ABILITY.lower())
+    PvpRuntimeFacts.consume_champion_ability_use(facts, champion_uid, graph)
     assert not handler._champion_ability_available(
         state, GOOD_AT_HIDING_ABILITY, graph)
     # The spent ONE-SHOT no longer lights up the champion card.
