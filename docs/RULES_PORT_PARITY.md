@@ -1889,3 +1889,16 @@ the move to the client, as the death path does. `effects/choices.py` moved its
 constants and `choice_prompt_ability` into `rules_port/choice_effects.py`.
 Its `extract_card_uids` was replaced by the native parser, which agrees on every
 payload tested except a nested `value` wrapper, which only the native parser reads.
+
+## Framework counters module removed
+
+`abilities/framework/effects/counters.py` is deleted. `card_counters_full` and
+`counter_is_secret` move into `rules_port/counter_effects.py`; the callers use the
+native `champion_owner_id` (for `is_champion_target`) and `rules_port.tunneling`.
+Six re-exported helpers had no callers and are gone.
+
+Two behaviour notes. The native champion resolver does not fall back to the
+handler's champion ids when a PvP state has no `champ_map` entry for the champion;
+live PvP always sets `champ_map`, and the fallback only covered headless fixtures.
+`counter_is_secret` has no production caller: native projection does not hide
+secret counters from opponents yet, so that is a gap to close.

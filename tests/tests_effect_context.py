@@ -245,7 +245,8 @@ def test_surface_queues_the_buried_card_for_free_with_speed():
 
 
 def test_tunneling_metadata_and_underground_visibility_are_data_driven():
-    from abilities.framework.effects.counters import counter_is_secret, tunneling_value
+    from rules_port.counter_effects import counter_is_secret
+    from rules_port.tunneling import tunneling_value
     from domain.game import Game
     from domain.types import UID, SessionCardId
     import game_engine

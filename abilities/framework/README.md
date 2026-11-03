@@ -6,7 +6,6 @@ these modules resolve abilities; `rules_port` does (see `../README.md`).
 | Module | Owns |
 |---|---|
 | `_shared.py` | Logging, card-state masks, zone/collection mapping, champion-owner helpers |
-| `effects/` | Counter helpers (`counters.py`) |
 
 Several of these duplicate logic that also exists in `rules_port`
 (`rules_port/conditions.py` now covers condition evaluation; `rules_port/targeting.py` now holds target and filter evaluation). Prefer

@@ -181,8 +181,3 @@ _TEMPORARY_ATTRIBUTE_EXPIRATIONS = "__attribute_expirations"
 
 # Compatibility exports.  Counter state is now implemented in the focused
 # effects module, while older callers may continue importing from _shared.
-from .effects.counters import (  # noqa: E402,F401
-    _counters_payload, counter_guid_for_name, card_counters, card_counters_full,
-    add_card_counter, push_card_counters, remove_card_counters,
-    counter_name_from_text,
-)

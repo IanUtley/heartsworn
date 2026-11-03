@@ -606,8 +606,8 @@ def _resource_modifier(context, effect):
         # player's charge pool and emit GainChargeEvent. Routing every target
         # through the player pool made cards such as Eternal Drifter trigger
         # their own "when you gain a charge" ability indefinitely.
-        from abilities.framework.effects.counters import is_champion_target
-        if not is_champion_target(context.handler, context.bstate, target):
+        from .runtime_helpers import champion_owner_id
+        if champion_owner_id(context.handler, context.bstate, target) is None:
             old, new = context.counter(
                 int(target), "charge",
                 counter_guid=param.get("counter_template_guid"),

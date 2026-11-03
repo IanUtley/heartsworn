@@ -511,7 +511,7 @@ class CardStateMixin:
         # CardUpdated, so carry them on the CardDef (push_card_updated reads
         # them by default).
         try:
-            from abilities.framework.effects.counters import card_counters_full
+            from rules_port.counter_effects import card_counters_full
             c_counts, c_guids = card_counters_full(
                 _hc._db, game.session_id.uid64, scid.uid.uid64)
             if c_counts:

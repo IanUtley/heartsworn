@@ -13,6 +13,37 @@ TUNNELING_COUNTER_GUID = "def75520-0b8b-447f-8705-b34e71043890"
 TUNNELING_ABILITY_GUID = "a4fc4440-4f02-4f40-b786-214ad0205dad"
 
 
+def card_counters_full(db, session_id, card_uid):
+    """A card's persisted ``(counters, counter_guids)`` from its permanent buffs."""
+    from pvp_db import db_card_permanent_buffs
+    try:
+        data = json.loads(db_card_permanent_buffs(
+            session_id, int(card_uid), conn=db) or "{}")
+    except (TypeError, ValueError, json.JSONDecodeError):
+        data = {}
+    if not isinstance(data, dict):
+        data = {}
+    counters = data.get("counters")
+    guids = data.get("counter_guids")
+    return (dict(counters) if isinstance(counters, dict) else {},
+            dict(guids) if isinstance(guids, dict) else {})
+
+
+def counter_is_secret(counter_guid):
+    """Whether the client CardCounterTemplate hides this counter from opponents."""
+    # Tunneling progress is public game information even though the card's
+    # identity remains hidden while it is Underground.
+    if str(counter_guid or "").lower() == TUNNELING_COUNTER_GUID:
+        return False
+    try:
+        from gamedata import DEFAULT_RECORD_STORE
+        record = DEFAULT_RECORD_STORE.get(
+            "CardCounterTemplate", str(counter_guid or "").lower())
+        return bool(record and int(record.field("m_Secret", 0) or 0))
+    except (AttributeError, TypeError, ValueError):
+        return False
+
+
 def _counter_guid(db, name):
     from pvp_db import db_counter_template_id
     return (str(db_counter_template_id(name, conn=db) or
