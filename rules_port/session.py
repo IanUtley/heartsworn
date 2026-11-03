@@ -2437,7 +2437,7 @@ class AuthoritativeSession:
             instance_id = 0
         if instance_id <= 0:
             raise ValueError("projected chain item needs an instance id")
-        descriptors = getattr(self, "_projected_chain_descriptors", None)
+        descriptors: dict[int, Any] | None = getattr(self, "_projected_chain_descriptors", None)
         if descriptors is None:
             descriptors = self._projected_chain_descriptors = {}
         if instance_id in descriptors and self.chain.contains_ability(instance_id):

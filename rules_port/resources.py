@@ -512,14 +512,14 @@ def play_resource_for_player(state: MutableMapping, player_id,
             thresholds[color] = new
             return ResourceChange(str(pid), property_name, amount, old, new,
                                   int(color))
-        key = {"currentresource": f"res_{pid}",
+        state_key = {"currentresource": f"res_{pid}",
                "totalresource": f"res_total_{pid}",
                "chargepoints": f"chg_{pid}"}.get(property_name)
-        if key is None:
+        if state_key is None:
             raise ValueError(f"unsupported resource property: {property_name}")
-        old = int(state.get(key, 0) or 0)
+        old = int(state.get(state_key, 0) or 0)
         new = max(0, old + amount)
-        state[key] = new
+        state[state_key] = new
         return ResourceChange(str(pid), property_name, amount, old, new)
 
     current = change("currentresource", current_amount)

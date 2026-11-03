@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from .runtime_helpers import raw_uid
+
 import json
 import random
 import game_engine
@@ -897,7 +899,7 @@ def dispatch_card_activated(*, db, handler, game, session, player_uid, ai_uid,
         values = selected if isinstance(selected, (tuple, list, set)) else (selected,)
         for value in values:
             try:
-                target_uid = int(getattr(value, "uid64", value))
+                target_uid = raw_uid(value)
                 break
             except (TypeError, ValueError):
                 continue

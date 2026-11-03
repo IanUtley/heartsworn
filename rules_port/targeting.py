@@ -7,6 +7,8 @@ framework's static, cost and damage paths share.
 """
 
 from __future__ import annotations
+
+from .runtime_helpers import raw_uid
 from typing import Any
 
 import copy
@@ -1018,20 +1020,20 @@ def _legal_targets(db, session_id, controller_uid, template_id, source_uid,
         for card in cards:
             if int(card["card_uid"]) not in legal_by_uid:
                 continue
-            key = (int(card.get("user_id") or 0),
+            card_key = (int(card.get("user_id") or 0),
                    str(card.get("location") or "").lower(),
                    str(card.get("name") or ""))
-            matches_by_collection[key] = matches_by_collection.get(key, 0) + 1
+            matches_by_collection[card_key] = matches_by_collection.get(card_key, 0) + 1
         duplicate_uids = []
         for uid in out:
             card = next((candidate for candidate in cards
                          if int(candidate["card_uid"]) == uid), None)
             if card is None:
                 continue
-            key = (int(card.get("user_id") or 0),
+            card_key = (int(card.get("user_id") or 0),
                    str(card.get("location") or "").lower(),
                    str(card.get("name") or ""))
-            if matches_by_collection.get(key, 0) > 1:
+            if matches_by_collection.get(card_key, 0) > 1:
                 duplicate_uids.append(uid)
         return duplicate_uids
     return out
@@ -1311,7 +1313,7 @@ def validate_target_selection(db, session_id, controller_uid, template_id,
     template = target_template(db, template_id)
     values = selected if isinstance(selected, (list, tuple, set)) else [selected]
     try:
-        values = [int(getattr(v, "uid64", v)) for v in values if v is not None]
+        values = [raw_uid(v) for v in values if v is not None]
     except (TypeError, ValueError):
         return []
     if not template:

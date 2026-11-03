@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+from typing import Any, cast
 import random
 import threading
 
@@ -117,7 +118,8 @@ def is_active_participant(battle_state, owner_id):
     state = battle_state if isinstance(battle_state, dict) else {}
     if state.get("pvp") and state.get("turn_pid") is not None:
         try:
-            return int(state.get("turn_pid")) == int(owner_id or 0)
+            turn_pid = state.get("turn_pid")
+            return as_int(turn_pid) == int(owner_id or 0)
         except (TypeError, ValueError):
             return False
     side = participant_side(state, owner_id)
@@ -184,6 +186,14 @@ def _log_health_change(health_key, owner_id, before, after, battle_state):
     log_req(f"    HEALTH {health_key} owner={owner_id} {before} -> {after} ({change}) by {caller} "
             f"ability={state.get('resolving_ability') or '-'} "
             f"source={state.get('resolving_source_uid') or '-'} turn={state.get('turn_player') or '-'}")
+
+
+def as_int(value: object) -> int:
+    """``int(value)`` for a value the type checker sees as optional.
+
+    Raises TypeError for None and ValueError for non-numeric input, exactly as ``int`` does.
+    """
+    return int(cast(Any, value))
 
 
 def raw_uid(value):

@@ -7,6 +7,8 @@ through the typed EffectContext without entering the legacy BOM leaf.
 
 from __future__ import annotations
 
+from .runtime_helpers import raw_uid
+
 import json
 from typing import Any, cast
 
@@ -182,7 +184,7 @@ def _copy_ability(context):
             selected = selected if isinstance(selected, (tuple, list, set)) else (selected,)
             for value in selected:
                 try:
-                    target_ids.append(int(getattr(value, "uid64", value)))
+                    target_ids.append(raw_uid(value))
                 except (TypeError, ValueError):
                     continue
         context.game.push_ability_on_chain(

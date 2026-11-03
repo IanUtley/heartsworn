@@ -4,6 +4,8 @@ Filters receive the same context shape as the C# engine but use duck-typed
 runtime cards, keeping hex-private/Records/metadata outside the rules kernel.
 """
 from __future__ import annotations
+
+from .runtime_helpers import raw_uid
 from dataclasses import dataclass
 from collections.abc import Iterable
 import inspect
@@ -467,7 +469,7 @@ def _tac_path_value(tree, parts):
     if not isinstance(tree, dict) or not parts:
         return None
     from .tac import _tac_attr_hash
-    value = tree
+    value: Any = tree
     for name in parts:
         if not isinstance(value, dict):
             return None
@@ -1659,8 +1661,8 @@ class DamagedOpponentThisTurn:
             if uid is None:
                 return False
             try:
-                return int(getattr(uid, "uid64", uid)) in {
-                    int(getattr(entry, "uid64", entry)) for entry in flagged}
+                return raw_uid(uid) in {
+                    raw_uid(entry) for entry in flagged}
             except (TypeError, ValueError):
                 return False
         return int(flagged or 0) > 0
@@ -2596,7 +2598,7 @@ def _records_filter_spec(spec):
                 "StaticOrCardFilter"):
         return {"type": kind, "filters": [
             _records_filter_spec(value)
-            for value in spec.get("m_TargetFilters", spec.get("filters", ()))
+            for value in cast(Any, spec.get("m_TargetFilters", spec.get("filters", ())))
         ]}
     if kind in ("NotCardFilter", "StaticNotCardFilter"):
         child = spec.get("m_TargetFilter", spec.get("filter", {}))

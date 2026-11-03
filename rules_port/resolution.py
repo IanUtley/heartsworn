@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from .runtime_helpers import as_int, raw_uid
+
 import json
 from typing import Any
 
@@ -417,7 +419,7 @@ def _referenced_effect_target_index(ability, instance_id):
                 getattr(candidate, "instance_id", -1))
             target_index = getattr(candidate, "target_index", -1)
         try:
-            if int(candidate_id) != wanted:
+            if as_int(candidate_id) != wanted:
                 continue
             target_index = int(target_index)
         except (TypeError, ValueError):
@@ -554,7 +556,7 @@ def _exhausted_cost_cards(ability, kind="exhaust"):
             selected = (selected,)
         for value in selected:
             try:
-                uid = int(getattr(value, "uid64", value))
+                uid = raw_uid(value)
             except (TypeError, ValueError):
                 continue
             if uid not in out:
@@ -697,7 +699,7 @@ class NativeEffectBackend:
                 effect_value, "secondary_target_index", -1)
             secondary_index = int(
                 -1 if secondary_value is None else secondary_value)
-            secondary_target_uids = ()
+            secondary_target_uids: tuple[int, ...] = ()
             if secondary_index >= 0:
                 secondary_target_uids = tuple(
                     resolved_by_instance.get(secondary_index, ()) or ())
@@ -979,11 +981,11 @@ class NativeEffectBackend:
                                 target_spec.guid, "m_TriggerSelector",
                                 "TriggerSource") or "TriggerSource").rsplit(
                                     ".", 1)[-1]
-                            key = ("resolving_trigger_target_uid"
+                            selector_key = ("resolving_trigger_target_uid"
                                    if selector == "TriggerTarget" else
                                    "resolving_trigger_source_uid"
                                    if selector == "TriggerSource" else None)
-                            selected = battle_state.get(key) if key else None
+                            selected = battle_state.get(selector_key) if selector_key else None
                             if selected is None:
                                 # Some event classes carry only one of the
                                 # trigger cards; the legacy resolver's
@@ -1907,7 +1909,7 @@ def resume_ability_continuation_parents(
             cursor = continuation
             while isinstance(cursor, dict):
                 try:
-                    resumed_ids.add(int(cursor.get(
+                    resumed_ids.add(as_int(cursor.get(
                         "ability_instance_id", cursor.get("instance_id"))))
                 except (TypeError, ValueError):
                     pass

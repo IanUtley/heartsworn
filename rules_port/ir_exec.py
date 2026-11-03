@@ -1379,9 +1379,9 @@ def _finish_activation(scope: Scope) -> None:
         bstate.pop("ability_runtime_state", None)
 
 
-def run_ability(guid: str, event_type: str, *, context: Any, source_uid: int,
+def run_ability(guid: str, event_type: str | None, *, context: Any, source_uid: int,
                 owner_uid: int, event: dict[str, Any] | None = None,
-                answers: dict[int, int | None] | None = None,
+                answers: dict[int, int | list[int] | None] | None = None,
                 instance_id: int | None = None) -> bool:
     """Run one ability for an event. Returns whether its trigger fired.
 

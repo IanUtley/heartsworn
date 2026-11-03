@@ -243,11 +243,11 @@ def play_free_resource_card(host, game, session, db, player_uid, ai_uid,
         event.new_value = value
         game._push(event)
     for flag, amount in threshold_grants:
-        event = game_engine.PlayerResourceThresholdChangedSessionEventArgs()
-        event.player_id = owner
-        event.color = flag
-        event.operation = 1
-        event.delta = int(amount)
-        event.new_value = state[f"{side}_threshold"][flag]
-        game._push(event)
+        threshold_event = game_engine.PlayerResourceThresholdChangedSessionEventArgs()
+        threshold_event.player_id = owner
+        threshold_event.color = flag
+        threshold_event.operation = 1
+        threshold_event.delta = int(amount)
+        threshold_event.new_value = state[f"{side}_threshold"][flag]
+        game._push(threshold_event)
     return f"played resource {int(card_uid)} for free"

@@ -429,13 +429,13 @@ def _fuse_template_candidates(context, card_filter):
                       "controller_id": int(row[2])}
     out = []
     for guid in _FUSE_GUIDS:
-        card = DEFAULT_RECORD_STORE.get("CardTemplate", guid)
-        if card is None:
+        template = DEFAULT_RECORD_STORE.get("CardTemplate", guid)
+        if template is None:
             continue
-        cost = int(card.field("m_ResourceCost", 0) or 0)
+        cost = int(template.field("m_ResourceCost", 0) or 0)
         candidate = CardView.fuse_candidate(
-            guid, card.field("m_Name", ""), card.field("m_CardType", ""), cost,
-            card.field("m_CardRarity", ""), card.field("m_CardSubtype", ""),
+            guid, template.field("m_Name", ""), template.field("m_CardType", ""), cost,
+            template.field("m_CardRarity", ""), template.field("m_CardSubtype", ""),
             owner).as_shape("fuse_candidate")
         if records_filter_matches(candidate, card_filter, source=source,
                                   context=context,

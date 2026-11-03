@@ -7,6 +7,8 @@ evaluator, so an attached session cannot silently become hybrid.
 """
 
 from __future__ import annotations
+
+from .runtime_helpers import as_int
 from typing import Any
 
 import ast
@@ -127,13 +129,13 @@ def _static_abilities(db, session_id, card_uid, cache=None):
         values = json.loads(payload or "[]")
     except (TypeError, ValueError, json.JSONDecodeError):
         values = []
-    result = []
+    collected = []
     for value in values:
         guid = str(value).lower()
         metadata = db_ability_static_metadata(guid, conn=db)
         if _is_continuous_source_ability(metadata):
-            result.append(guid)
-    result = tuple(result)
+            collected.append(guid)
+    result = tuple(collected)
     if cache is not None:
         cache.source_abilities[key] = result
     return result
@@ -148,7 +150,7 @@ def _static_leaves(db, ability_guid, cache=None):
         cached = cache.ability_leaves.get(cache_key)
         if cached is not None:
             return cached
-    leaves = []
+    collected = []
     for effect_guid, effect_type, raw_param in db_ability_effect_rows(
             ability_guid, conn=db):
         if effect_type != "CardModifierAbilityEffectTemplate":
@@ -170,8 +172,8 @@ def _static_leaves(db, ability_guid, cache=None):
                     else:
                         param.setdefault(key, value)
         from pvp_db import db_ability_raw_json
-        leaves.append((param, db_ability_raw_json(ability_guid, conn=db) or ""))
-    leaves = tuple(leaves)
+        collected.append((param, db_ability_raw_json(ability_guid, conn=db) or ""))
+    leaves = tuple(collected)
     if cache is not None:
         cache.ability_leaves[cache_key] = leaves
     return leaves
@@ -519,7 +521,7 @@ def _list_card_uids(db, session_id, state, list_name, source_uid,
         champion_map = state.get("champ_map") or {}
         if path[0].lower().startswith("you"):
             champion_uid = _champion_uid(state, owner)
-            champion_uids = (champion_uid,) if champion_uid is not None else ()
+            champion_uids: tuple[int, ...] = (champion_uid,) if champion_uid is not None else ()
         else:
             champion_uids = tuple(dict.fromkeys(
                 int(uid) for uid in champion_map.values() if uid is not None))
@@ -596,7 +598,7 @@ def _list_card_uids(db, session_id, state, list_name, source_uid,
                         else:
                             value = item
                         try:
-                            value = int(value)
+                            value = as_int(value)
                         except (TypeError, ValueError):
                             continue
                         # Card TAC stores SessionCardId.InstanceId, while
@@ -1305,7 +1307,7 @@ def _ability_target_entries(db, ability_guid, cache):
         template_ids = json.loads(payload or "[]")
     except (TypeError, ValueError, json.JSONDecodeError):
         template_ids = []
-    entries = []
+    collected = []
     for template_id in template_ids:
         row = db_static_target_template(template_id, conn=db)
         if not row:
@@ -1323,13 +1325,13 @@ def _ability_target_entries(db, ability_guid, cache):
                     "filter_json": row[2] or "{}",
                     "game_text": row[3] or "",
                     "target_kind": target_kind}
-        entries.append((template_id,
+        collected.append((template_id,
                         target_kind == "AbilitySourceCardTargetTemplate" or
                         "#self#" in text or text in {"this", "you"},
                         player_filter in {"multipleplayers", "allplayers",
                                           "multipleopponents"},
                         template_targets_champions(template)))
-    entries = tuple(entries)
+    entries = tuple(collected)
     cache.ability_targets[key] = entries
     return entries
 
@@ -1439,7 +1441,7 @@ def _all_static_sources(db, session_id, cache, battle_state=None):
         from pvp_db import (db_ability_static_metadata,
                             db_all_cards_in_zones_with_abilities,
                             db_get_champion_ability_guids)
-        sources = [
+        sources: list[tuple[int, int, tuple[str, ...] | None]] = [
             (int(uid), int(owner or 0), None)
             for uid, owner, _abilities in db_all_cards_in_zones_with_abilities(
                 session_id, ("warzone", "underground"), conn=db)]

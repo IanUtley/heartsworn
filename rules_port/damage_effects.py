@@ -48,14 +48,14 @@ def _consume_shields(context, target, dealer, amount, combat):
     from pvp_db import db_card_damage_shield_fields, db_set_card_mutation_field
     row = db_card_damage_shield_fields(
         context.session.session_id, int(target), conn=context.db)
-    stores = []
-    for index, raw in enumerate(row or ()):
+    stores: list[tuple[int | None, dict[Any, Any]]] = []
+    for slot, raw in enumerate(row or ()):
         try:
             data = json.loads(raw or "{}")
         except (TypeError, ValueError, json.JSONDecodeError):
             data = {}
         if isinstance(data, dict) and isinstance(data.get("damage_shields"), list):
-            stores.append((index, data))
+            stores.append((slot, data))
     champion_shields = context.bstate.get("damage_shields", {})
     if str(target) in champion_shields:
         stores.append((None, {"damage_shields": champion_shields[str(target)]}))

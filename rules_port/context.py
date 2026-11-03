@@ -7,6 +7,8 @@ typed fields, target ownership, and common operations in one place.
 
 from __future__ import annotations
 
+from .runtime_helpers import as_int
+
 import json
 
 from dataclasses import dataclass, replace
@@ -1004,7 +1006,7 @@ class EffectContext:
             health = getattr(card_def, "defense", None)
             _side, health_key = self._side_keys(int(owner))
             try:
-                health = int(self.bstate.get(
+                health = as_int(self.bstate.get(
                     health_key, getattr(self.game, health_key, health)))
             except (TypeError, ValueError):
                 pass
@@ -4110,13 +4112,13 @@ class EffectContext:
                 self.game.ai_resources = 0
             if current:
                 from rules_port.runtime_helpers import owner_uid
-                event = game_engine.PlayerCurrentResourcePoolChangedSessionEventArgs()
-                event.player_id = owner_uid(owner, self.player_uid,
+                current_event = game_engine.PlayerCurrentResourcePoolChangedSessionEventArgs()
+                current_event.player_id = owner_uid(owner, self.player_uid,
                                             self.ai_uid, self.bstate)
-                event.operation = 2
-                event.delta = current
-                event.new_value = 0
-                self.game._push(event)
+                current_event.operation = 2
+                current_event.delta = current
+                current_event.new_value = 0
+                self.game._push(current_event)
             return f"depleted {owner} resources ({current})"
 
         if function == "Escalate":
@@ -4184,14 +4186,14 @@ class EffectContext:
                 values[color] = old + int(amount)
                 side = "player" if owner else "ai"
                 setattr(self.game, f"{side}_threshold", dict(values))
-                event = game_engine.PlayerResourceThresholdChangedSessionEventArgs()
-                event.player_id = owner_uid(owner, self.player_uid,
+                threshold_event = game_engine.PlayerResourceThresholdChangedSessionEventArgs()
+                threshold_event.player_id = owner_uid(owner, self.player_uid,
                                             self.ai_uid, self.bstate)
-                event.color = color
-                event.operation = 1
-                event.delta = int(amount)
-                event.new_value = values[color]
-                self.game._push(event)
+                threshold_event.color = color
+                threshold_event.operation = 1
+                threshold_event.delta = int(amount)
+                threshold_event.new_value = values[color]
+                self.game._push(threshold_event)
                 from rules_port.runtime_helpers import champion_uid_for_owner
                 champion = champion_uid_for_owner(
                     self.handler, self.bstate, owner)
