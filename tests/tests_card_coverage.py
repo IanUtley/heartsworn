@@ -21,7 +21,7 @@ SRC = fresh_database()
 import db as dbmod
 
 from rules_port.coverage import NATIVE_EFFECTS
-from abilities.framework.fields import effect_template
+from rules_port.bom_fields import effect_template
 from rules_port.context import EffectContext
 from rules_port.deck_effects import load_player_deck
 from rules_port.trigger_discovery import ability_matches_keyword

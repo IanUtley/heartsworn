@@ -12,7 +12,7 @@ import game_engine
 from gamedata import DEFAULT_RECORD_STORE, ability_graph
 
 from .._shared import owner_uid
-from ..fields import modifier_metadata
+from rules_port.bom_fields import modifier_metadata
 
 
 _HAND_VISIBILITY_ATTR = "canseeopponentshand"

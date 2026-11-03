@@ -1738,3 +1738,12 @@ Migrating its two test files exposed three native gaps, now fixed:
 Two fixtures were incomplete rather than wrong: trigger conditions need the
 event's player (`trigger_owner_id`), a nth-draw needs the draw index in the
 event data, and a threshold gain needs `GainThresholdEvent`.
+
+## Framework fields module removed
+
+`abilities/framework/fields.py` is deleted; its callers use `rules_port.bom_fields`.
+A differential over all 5,850 Records effect templates (101,748 field reads)
+found `effect_field` identical. `modifier_metadata` differed only by the
+`double` key (m_Double), which the framework dropped and the native doubling
+path reads. The framework's own merge in `statics.py` copies a fixed key list,
+so its behaviour is unchanged.

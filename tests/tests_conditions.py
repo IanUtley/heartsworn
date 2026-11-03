@@ -90,7 +90,7 @@ def raw(db, ag):
     # Champion-granted abilities are seeded in champion_abilities rather than
     # card_abilities_meta. The runtime field loader has the same Records
     # fallback used by live trigger resolution.
-    from abilities.framework.fields import ability_record
+    from rules_port.bom_fields import ability_record
     import json
     return json.dumps(ability_record(db, ag))
 

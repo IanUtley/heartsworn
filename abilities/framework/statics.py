@@ -326,8 +326,8 @@ def ability_variable_value(db, session_id, bstate, ability_guid, var_name,
     from pvp_db import db_any_ability_raw_json
     raw = db_any_ability_raw_json(ability_guid, conn=db)
     if raw is None:
-        from .fields import _raw_ability
-        raw = json.dumps(_raw_ability(db, ability_guid))
+        from rules_port.bom_fields import ability_record
+        raw = json.dumps(ability_record(db, ability_guid))
     return _variable_value(db, session_id, bstate, raw, var_name, owner,
                            source_uid, stat_prop=stat_prop)
 
@@ -741,7 +741,7 @@ def _static_leaves(db, ability_guid):
         # Parent params retain duration/target compatibility data. Modifier
         # operation, attribute flags, and counter identity come from the
         # typed child effect template and are authoritative.
-        from .fields import modifier_metadata
+        from rules_port.bom_fields import modifier_metadata
         typed = modifier_metadata(effect_guid)
         if typed:
             pm = dict(pm)
