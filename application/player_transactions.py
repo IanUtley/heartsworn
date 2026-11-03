@@ -7,7 +7,7 @@ from typing import Mapping, Any
 
 
 def _transaction_fields(inner_bytes):
-    fields = {}
+    fields: dict[str, Any] = {}
     if not isinstance(inner_bytes, bytes):
         return fields
     try:
@@ -316,7 +316,7 @@ def typed_payload_from_decoded(command, decoded):
         raw = raw.tobytes()
     elif isinstance(raw, bytearray):
         raw = bytes(raw)
-    raw_payload = {}
+    raw_payload: dict[str, Any] = {}
     if isinstance(raw, bytes):
         # Nested SessionCardId values in AbilityTargetInstance can be
         # wrapped as ``value`` by the Mono client.  Use the shared typed-UID

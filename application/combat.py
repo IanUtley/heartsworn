@@ -20,6 +20,8 @@ else:
 
 class CombatMixin(_HostBase):
     """Methods of HCPHandler, mixed into it (see hconnect_server)."""
+    scnt: int
+    _game_scnt: int
 
     def _clear_combat_damage(self, session, bstate):
         import hconnect_server as _hc
@@ -615,7 +617,8 @@ class CombatMixin(_HostBase):
         import game_engine as _ge
         from rules_port.persistence import load_state
         bstate = load_state(session)
-        attackers = [int(uid) for uid in (bstate.get("ai_attackers") or {})]
+        attackers: list[int] | None = [
+            int(uid) for uid in (bstate.get("ai_attackers") or {})]
         if not attackers:
             # Keep the broad board check for callers that ask before attacker
             # declarations are persisted; the DeclareDefense path itself has

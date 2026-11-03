@@ -324,10 +324,10 @@ class PendingChoicesMixin(_HostBase):
             "resume_effect_order",
             int(bstate.get("resolving_effect_order", 0)) + 1))
         if bstate.get("_rules_port_attached"):
-            from rules_port.abilities import AbilityContinuation
+            from rules_port.abilities import AbilityContinuation as continuation_cls
         else:
-            from rules_port.builder import AbilityContinuation
-        pending = AbilityContinuation.from_state(
+            from rules_port.builder import AbilityContinuation as continuation_cls
+        pending = continuation_cls.from_state(
             bstate, ability_guid=ability_guid, source_uid=source_uid,
             owner_id=answer_owner_id,
             target_map=(parent.get("target_map") or

@@ -1222,9 +1222,10 @@ class TurnFlowMixin(_HostBase):
             return
         from pvp_db import db_hand_cards_with_templates
         from rules_port.static_rules import effective_cost
-        sent = getattr(self, "_hand_cost_sent", None)
+        sent: dict[Any, Any] | None = getattr(self, "_hand_cost_sent", None)
         if sent is None or sent.get("_session") != session.session_id:
-            sent = self._hand_cost_sent = {"_session": session.session_id}
+            sent = {"_session": session.session_id}
+            self._hand_cost_sent = sent
         rows = db_hand_cards_with_templates(
             session.session_id, self.user_profile["id"])
         in_hand = set()

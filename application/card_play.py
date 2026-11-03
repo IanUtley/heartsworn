@@ -1792,14 +1792,14 @@ class CardPlayMixin(_HostBase):
                         graph.costs.variable_minimum or 0):
                     continue
                 payment_unavailable = False
-                for cost in ability_cost_targets(
+                for cost_target in ability_cost_targets(
                         graph, _hc._db, session.session_id,
                         self.user_profile["id"], card_uid,
                         champions=self._champion_targets(),
                         battle_state=bstate):
-                    if cost.is_source_auto_target:
+                    if cost_target.is_source_auto_target:
                         continue
-                    if len(cost.candidates) < cost.minimum:
+                    if len(cost_target.candidates) < cost_target.minimum:
                         payment_unavailable = True
                         break
                 if payment_unavailable:

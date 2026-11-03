@@ -1,6 +1,7 @@
 """Player transaction handlers (mulligan, choose, pass priority, attack, defend, ability activation and more)."""
 
 from typing import TYPE_CHECKING
+from typing import Any
 import re
 import struct
 
@@ -13,6 +14,9 @@ else:
 
 class TransactionsMixin(_HostBase):
     """Methods of HCPHandler, mixed into it (see hconnect_server)."""
+    scnt: int
+    _game_scnt: int
+    _pending_player_stops: Any
 
     def _handle_priority_sync_transaction(self, session, transaction):
         """Reconcile a client's lost priority state without changing game state."""

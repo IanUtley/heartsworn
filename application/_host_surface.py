@@ -18,6 +18,9 @@ class HostSurface(Protocol):
     _event_q: list[Any]
     _player_champ_scid: Any
     client_auth_id: Any
+    scnt: int
+    _game_scnt: int
+    _pending_player_stops: Any
     client_reck_id: str
     client_uid: Any
     sid: str | None

@@ -11,6 +11,8 @@ else:
 
 class ChainMixin(_HostBase):
     """Methods of HCPHandler, mixed into it (see hconnect_server)."""
+    scnt: int
+    _game_scnt: int
 
     def _is_choice_card(self, session, card_uid):
         """Whether a chain card is a generated Choice card.
@@ -763,9 +765,10 @@ class ChainMixin(_HostBase):
         player_uid = _hc.game_engine.UID.make(244, int(self.client_reck_id))
         ai_uid = _hc.game_engine.UID.make(
             _hc.game_engine.SERVICE_AI_UID_TYPE, 1000)
-        priority_uid = (player_uid if _hc._same_uid(priority, player_uid)
-                        else ai_uid if _hc._same_uid(priority, ai_uid) else None)
-        if priority_uid is None:
+        sync_priority_uid = (player_uid if _hc._same_uid(priority, player_uid)
+                             else ai_uid if _hc._same_uid(priority, ai_uid)
+                             else None)
+        if sync_priority_uid is None:
             _hc.log_req(
                 "    RequestPrioritySync: unknown Practice native chain owner")
             return False
@@ -777,9 +780,9 @@ class ChainMixin(_HostBase):
                       else ai_uid if _hc._same_uid(active_owner, ai_uid)
                       else player_uid)
         game.push_green_light(
-            priority_uid, _hc.game_engine.EPriorityContext.ResolveTopOfChain)
-        game.push_turn_phase(port.current_turn_phase, active_uid, priority_uid)
-        if _hc._same_uid(priority_uid, player_uid):
+            sync_priority_uid, _hc.game_engine.EPriorityContext.ResolveTopOfChain)
+        game.push_turn_phase(port.current_turn_phase, active_uid, sync_priority_uid)
+        if _hc._same_uid(sync_priority_uid, player_uid):
             # The human is the response player; restore the legal quick actions
             # and champion powers alongside the ResolveTopOfChain button.  They
             # go after the green light in the same packet: sent before it, the
@@ -790,5 +793,5 @@ class ChainMixin(_HostBase):
         self._send_battle_events(session, game, player_uid)
         _hc.log_req(
             "    RequestPrioritySync: restored Practice native chain window "
-            f"priority={priority_uid!r} phase={port.current_turn_phase}")
+            f"priority={sync_priority_uid!r} phase={port.current_turn_phase}")
         return True
