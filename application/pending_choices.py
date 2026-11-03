@@ -667,7 +667,7 @@ class PendingChoicesMixin:
         """
         import hconnect_server as _hc
         _be = self._checkpoint_engine(session)
-        from abilities.framework.effects.choices import (
+        from rules_port.choice_effects import (
             CHOICE_TARGET_TEMPLATE, choice_prompt_ability)
         # The client titles the picker from the advertised ability's text, so
         # advertise the ability being resolved (not a fixed copy ability).
@@ -751,7 +751,7 @@ class PendingChoicesMixin:
         """Play a selected Choice token and resume its parent BOM."""
         import hconnect_server as _hc
         _be = self._checkpoint_engine(session)
-        from abilities.framework.effects.choices import (
+        from rules_port.choice_effects import (
             CHOOSE_AND_PLAY_ABILITY, CHOICE_COPY_ABILITY, extract_card_uids)
         from rules_port.choice_effects import (
             _play_choice_card as play_choice_card,
@@ -2070,9 +2070,12 @@ class PendingChoicesMixin:
                 _hc.log_req(f"    Revealed choice: {hex(chosen)} -> deck top "
                         f"(owner {pend['owner_id']})")
             else:
-                from abilities.framework.effects.search import move_deck_card_to_hand
-                move_deck_card_to_hand(g, session, _hc._db, self, pl_t, ai_t,
-                                       int(chosen_uid), pend["owner_id"], bstate)
+                from rules_port.context import EffectContext
+                from rules_port.deck_effects import move_deck_card_to_hand
+                move_deck_card_to_hand(
+                    EffectContext.from_rules_port(
+                        g, session, _hc._db, self, pl_t, ai_t, bstate, ""),
+                    int(chosen_uid), pend["owner_id"])
                 _hc.log_req(f"    Revealed choice: {hex(int(chosen_uid))} -> hand "
                         f"(owner {pend['owner_id']})")
             remaining = [cu for cu in revealed if cu != int(chosen_uid)]

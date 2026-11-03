@@ -1879,3 +1879,13 @@ but no live game was run.
 over `rules_port.resources`), `deathcry.py` (no callers since the native trigger path
 took over) and `effects/utility.py` (no importers) are deleted. `ai.py` and the
 tests import from their real homes.
+
+## Framework effect helpers removed (visibility, search, choices)
+
+`abilities/framework/effects/visibility.py` had no importers. `effects/search.py`
+callers now use `rules_port.deck_effects.move_deck_card_to_hand` through an
+`EffectContext`; the native version sends CardUpdated and CardDrawn, and leaves
+the move to the client, as the death path does. `effects/choices.py` moved its
+constants and `choice_prompt_ability` into `rules_port/choice_effects.py`.
+Its `extract_card_uids` was replaced by the native parser, which agrees on every
+payload tested except a nested `value` wrapper, which only the native parser reads.

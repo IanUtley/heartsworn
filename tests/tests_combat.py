@@ -169,12 +169,14 @@ class HandlerStub:
         """Harness: auto-pick a random candidate and move it to hand (the real
         fallback used when no interactive prompt exists)."""
         import random as _rnd
-        from abilities.framework.effects.search import move_deck_card_to_hand
+        from rules_port.context import EffectContext
+        from rules_port.deck_effects import move_deck_card_to_hand
         if not candidates:
             return "deck search: no candidates"
         chosen = _rnd.choice(list(candidates))
-        return move_deck_card_to_hand(game, session, self._db, self, pl_t, ai_t,
-                                      chosen, owner_id, bstate)
+        context = EffectContext.from_rules_port(
+            game, session, self._db, self, pl_t, ai_t, bstate, "")
+        return move_deck_card_to_hand(context, chosen, owner_id)
 
     def _push_discard_prompt(self, *a, **k):
         return None

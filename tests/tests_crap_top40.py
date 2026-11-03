@@ -1531,7 +1531,7 @@ def test_pending_choice_answer_plays_the_chosen_choice_token():
     import db as shared
     import hconnect_server
     import game_engine
-    from abilities.framework.effects.choices import CHOOSE_AND_PLAY_ABILITY
+    from rules_port.choice_effects import CHOOSE_AND_PLAY_ABILITY
     from tests.tests_combat import SessionStub, add_card
     db = make_db()
     previous = shared._db

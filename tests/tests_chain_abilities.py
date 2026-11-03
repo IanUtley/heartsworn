@@ -3990,7 +3990,7 @@ def test_choice_picker_advertises_the_authored_child_ability():
     zone for free"); advertising Iconoclast's copy ability made the client
     title it "Create a copy of a card in the choice zone ...".
     """
-    from abilities.framework.effects.choices import (
+    from rules_port.choice_effects import (
         CHOICE_COPY_ABILITY, CHOOSE_AND_PLAY_ABILITY, choice_prompt_ability)
 
     child = {"kind": "choice_zone_target",
