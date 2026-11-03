@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from types import SimpleNamespace
 import game_engine
+from rules_port.card_view import CardView
 
 
 def linked_template_guids(db, ability_guid):
@@ -515,23 +516,11 @@ def transform_card_at_random(context):
         return "transform random: target not found"
 
     def card_record(row, uid):
-        data = {
-            "card_uid": int(uid), "template_guid": row[0],
-            "name": row[6] or "", "card_type": row[1] or "",
-            "location": row[2] or "", "user_id": int(row[3] or 0),
-            "state": int(row[4] or 0), "cost": int(row[7] or 0),
-            "rarity": row[8] or "", "shards": shards_from_threshold(row[9]),
-            "subtype": row[10] or "", "attributes": int(row[11] or 0) |
-            int(row[12] or 0),
-        }
         try:
             saved = json.loads(row[5] or "{}")
         except (TypeError, ValueError, json.JSONDecodeError):
             saved = {}
-        data["counters"] = saved.get("counters") or {}
-        data["counter_guids"] = saved.get("counter_guids") or {}
-        data["tags"] = saved.get("tags") or {}
-        return data
+        return CardView.transform_card(uid, row, saved).as_shape("transform_card")
 
     source_card = card_record(target_row, target)
     # HasSourceCastingCostFilter compares against the card being transformed.
@@ -583,13 +572,8 @@ def transform_card_at_random(context):
                 type_union = categories
                 break
     for row in rows:
-        candidate = {
-            "card_uid": 0, "template_guid": row[0], "name": row[1] or "",
-            "card_type": row[2] or "", "cost": int(row[3] or 0),
-            "rarity": row[4] or "", "shards": shards_from_threshold(row[5]),
-            "subtype": row[6] or "", "attributes": int(row[7] or 0),
-            "location": "", "user_id": owner,
-        }
+        candidate = CardView.transform_candidate(row, owner).as_shape(
+            "transform_candidate")
         if cant_same and row[0].lower() == source_card["template_guid"].lower():
             continue
         candidate_types = {part.strip() for part in candidate["card_type"].split("|")

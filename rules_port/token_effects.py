@@ -6,6 +6,7 @@ import json
 from collections.abc import Iterable
 from typing import Any
 import game_engine
+from rules_port.card_view import CardView
 from .runtime_helpers import rng_choice
 
 
@@ -370,23 +371,18 @@ def _matching_template_candidates(context, card_filter, banned_guids=(),
         # intentionally lightweight, so add that derived view here rather than
         # making the filter depend on SQLite rows.
         candidate_thresholds = _candidate_thresholds(threshold_data)
-        candidate = {"card_uid": 0, "template_guid": row[0],
-                     "name": row[1] or "", "card_type": row[2] or "",
-                     "cost": int(row[3] or 0), "rarity": row[4] or "",
-                     "shards": [
-                         _SHARD_FLAGS.get(int(item), int(item))
-                         for item in (threshold_data.get("list")
-                                      or threshold_data.get("values") or [])],
-                     "thresholds": candidate_thresholds,
-                     "subtype": row[6] or "",
-                     # IsSocketable reads the template's socket count (row[8]); without it a socket filter never matches.
-                     "socket_count": int(row[8] or 0) if len(row) > 8 else 0,
-                     "attributes": int(row[7] or 0), "user_id": owner,
-                     # Printed stats for HasAttackValue/HasDefenseValue
-                     # pools (Tashi One-Horn's random 1/1 troop).
-                     "attack": int(row[9] or 0) if len(row) > 9 else 0,
-                     "defense": int(row[10] or 0) if len(row) > 10 else 0,
-                     "_card_template_candidate": True}
+        # IsSocketable reads the template's socket count (row[8]); without it a socket filter never matches.
+        # The printed stats feed HasAttackValue/HasDefenseValue pools (Tashi One-Horn's random 1/1 troop).
+        candidate = CardView.token_candidate(
+            row[0], row[1] or "", row[2] or "", int(row[3] or 0), row[4] or "",
+            [_SHARD_FLAGS.get(int(item), int(item))
+             for item in (threshold_data.get("list")
+                          or threshold_data.get("values") or [])],
+            candidate_thresholds, row[6] or "",
+            int(row[8] or 0) if len(row) > 8 else 0,
+            int(row[7] or 0), owner,
+            int(row[9] or 0) if len(row) > 9 else 0,
+            int(row[10] or 0) if len(row) > 10 else 0).as_shape("token_candidate")
         if records_filter_matches(candidate, card_filter,
                                   source=source, context=context,
                                   player={"resource_thresholds":
@@ -437,15 +433,10 @@ def _fuse_template_candidates(context, card_filter):
         if card is None:
             continue
         cost = int(card.field("m_ResourceCost", 0) or 0)
-        candidate = {
-            "card_uid": 0, "template_guid": guid,
-            "name": card.field("m_Name", ""),
-            "card_type": card.field("m_CardType", ""),
-            "cost": cost,
-            "rarity": card.field("m_CardRarity", ""),
-            "subtype": card.field("m_CardSubtype", ""),
-            "attributes": 0, "user_id": owner, "shards": [],
-        }
+        candidate = CardView.fuse_candidate(
+            guid, card.field("m_Name", ""), card.field("m_CardType", ""), cost,
+            card.field("m_CardRarity", ""), card.field("m_CardSubtype", ""),
+            owner).as_shape("fuse_candidate")
         if records_filter_matches(candidate, card_filter, source=source,
                                   context=context,
                                   player={"resource_thresholds": {}}):

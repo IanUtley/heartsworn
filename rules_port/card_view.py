@@ -89,6 +89,27 @@ SHAPES: dict[str, tuple[str, ...]] = {
     # A card counted by a card-count variable (rules_port/context.py: set_card_count_variable).
     "count_card": ("card_uid", "card_type", "location", "user_id", "state", "attack", "defense",
                    "name", "cost", "subtype"),
+    # Combat-rule evaluation of a battlefield card (rules_port/combat_rules.py).
+    "combat_rule": ("card_uid", "card_type", "location", "user_id", "owner_id", "controller_id",
+                    "template_guid", "shards", "attack", "defense", "attributes", "rule_flags"),
+    # A champion as a counter-bearing candidate (rules_port/static_rules.py: champion pool).
+    "champion_stub": ("card_uid", "card_type", "location", "user_id", "owner_id", "controller_id",
+                      "name", "attack", "defense", "cost", "attributes", "counters",
+                      "counter_guids"),
+    # A template as a token-creation candidate (rules_port/token_effects.py: template pool).
+    "token_candidate": ("card_uid", "template_guid", "name", "card_type", "cost", "rarity",
+                        "shards", "thresholds", "subtype", "socket_count", "attributes",
+                        "user_id", "attack", "defense", "_card_template_candidate"),
+    # A template in the fused-card pool (rules_port/token_effects.py: fuse candidates).
+    "fuse_candidate": ("card_uid", "template_guid", "name", "card_type", "cost", "rarity",
+                       "subtype", "attributes", "user_id", "shards"),
+    # A card a random transform considers, in its current place (rules_port/transform_effects.py).
+    "transform_card": ("card_uid", "template_guid", "name", "card_type", "location", "user_id",
+                       "state", "cost", "rarity", "shards", "subtype", "attributes", "counters",
+                       "counter_guids", "tags"),
+    # A template a random transform may turn a card into (rules_port/transform_effects.py).
+    "transform_candidate": ("card_uid", "template_guid", "name", "card_type", "cost", "rarity",
+                            "shards", "subtype", "attributes", "location", "user_id"),
     "filter_champion": ("card_uid", "card_type", "location", "collection", "user_id", "owner_id",
                         "controller_id", "template_guid", "template_id", "name", "subtype",
                         "attack", "attributes", "defense", "counters", "counter_guids"),
@@ -134,6 +155,8 @@ class CardView:
     parent_uid: int | None = None
     collection: str | None = None
     thresholds: list[int] | None = None
+    template_candidate: bool = False
+    rule_flags: Any = None
 
     # --- builders -------------------------------------------------------------------------
 
@@ -473,6 +496,67 @@ class CardView:
         )
 
     @classmethod
+    def combat_rule(cls, card_uid: int, card_type: str, location: str, owner: Any,
+                    template_guid: str, shards: list[int], attack: int, defense: int,
+                    attributes: int, rule_flags: Any) -> "CardView":
+        """A battlefield card as the combat rules see it (values as the producer computed them)."""
+        return cls(card_uid=card_uid, card_type=card_type, location=location, user_id=owner,
+                   owner_id=owner, controller_id=owner, template_guid=template_guid,
+                   state=0, attack=attack, defense=defense, name="", cost=0, subtype="",
+                   shards=shards, attributes=attributes, rule_flags=rule_flags)
+
+    @classmethod
+    def champion_stub(cls, card_uid: int, owner: Any, counters: dict) -> "CardView":
+        """A champion in the counter-bearing pool; its counter GUIDs are the lower-cased keys."""
+        return cls(card_uid=card_uid, card_type="Champion", location="champions", user_id=owner,
+                   owner_id=owner, controller_id=owner, state=0, name="Champion", attack=0,
+                   defense=0, cost=0, subtype="", attributes=0, counters=counters,
+                   counter_guids={str(guid).lower(): str(guid).lower() for guid in counters},
+                   kind="champion")
+
+    @classmethod
+    def token_candidate(cls, template_guid: str, name: str, card_type: str, cost: int,
+                        rarity: str, shards: list[int], thresholds: Any, subtype: str,
+                        socket_count: int, attributes: int, owner: Any, attack: int,
+                        defense: int) -> "CardView":
+        """A template as a token-creation candidate (``card_uid`` is 0: it is not a card yet)."""
+        return cls(card_uid=0, card_type=card_type, location="", user_id=owner, state=0,
+                   attack=attack, defense=defense, name=name, cost=cost, subtype=subtype,
+                   shards=shards, attributes=attributes, template_guid=template_guid,
+                   rarity=rarity, socket_count=socket_count, thresholds=thresholds,
+                   template_candidate=True)
+
+    @classmethod
+    def fuse_candidate(cls, template_guid: str, name: Any, card_type: Any, cost: int,
+                       rarity: Any, subtype: Any, owner: Any) -> "CardView":
+        """A template in the fused-card pool (values as read from the template record)."""
+        return cls(card_uid=0, card_type=card_type, location="", user_id=owner, state=0,
+                   attack=0, defense=0, name=name, cost=cost, subtype=subtype, shards=[],
+                   attributes=0, template_guid=template_guid, rarity=rarity)
+
+    @classmethod
+    def transform_card(cls, uid: int, row: Sequence[Any], saved: dict) -> "CardView":
+        """A card a random transform considers (``card_record``): its row and parsed buffs."""
+        return cls(card_uid=int(uid), template_guid=row[0], name=row[6] or "",
+                   card_type=row[1] or "", location=row[2] or "", user_id=int(row[3] or 0),
+                   state=int(row[4] or 0), attack=0, defense=0, cost=int(row[7] or 0),
+                   rarity=row[8] or "", shards=shards_from_threshold(row[9]),
+                   subtype=row[10] or "",
+                   attributes=int(row[11] or 0) | int(row[12] or 0),
+                   counters=saved.get("counters") or {},
+                   counter_guids=saved.get("counter_guids") or {},
+                   tags=saved.get("tags") or {})
+
+    @classmethod
+    def transform_candidate(cls, row: Sequence[Any], owner: Any) -> "CardView":
+        """A template a random transform may become (candidate rows: guid, name, type, ...)."""
+        return cls(card_uid=0, template_guid=row[0], name=row[1] or "", card_type=row[2] or "",
+                   cost=int(row[3] or 0), rarity=row[4] or "",
+                   shards=shards_from_threshold(row[5]), subtype=row[6] or "",
+                   attributes=int(row[7] or 0), location="", user_id=owner, state=0,
+                   attack=0, defense=0)
+
+    @classmethod
     def champion(cls, side: str, user_id: int, health: int) -> "CardView":
         """The synthetic champion entry the static filters see for ``side`` ("ai" or "player")."""
         return cls(
@@ -520,7 +604,7 @@ class CardView:
         keys = SHAPES[shape]
         out: dict[str, Any] = {}
         for key in keys:
-            value = getattr(self, key)
+            value = getattr(self, _FIELD_OF_KEY.get(key, key))
             if key in ("shards", "damaged_opponent_this_turn"):
                 value = list(value)
             out[key] = value
@@ -536,6 +620,10 @@ class CardView:
         """The condition layer's mapping: a champion entry, or a card."""
         return self.as_shape("condition_champion" if self.kind == "champion"
                              else "condition_card")
+
+
+# Shape keys that are not field names. The template-candidate marker is a key the filters read.
+_FIELD_OF_KEY = {"_card_template_candidate": "template_candidate"}
 
 
 def _json_object(raw: Any) -> dict:

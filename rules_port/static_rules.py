@@ -15,6 +15,7 @@ import threading
 from contextlib import contextmanager
 
 import game_engine
+from rules_port.card_view import CardView
 
 
 def _empty_deltas():
@@ -359,23 +360,9 @@ def _variable_card_candidates(db, session_id, battle_state, source_uid,
                 str(champion_uid), champion_counters.get(champion_uid, {}))
             counter_values = (counter_values if
                               isinstance(counter_values, dict) else {})
-            cards.append({
-                "card_uid": champion_uid,
-                "card_type": "Champion",
-                "location": "champions",
-                "user_id": champion_owner,
-                "owner_id": champion_owner,
-                "controller_id": champion_owner,
-                "name": "Champion",
-                "attack": 0,
-                "defense": 0,
-                "cost": 0,
-                "attributes": 0,
-                "counters": counter_values,
-                "counter_guids": {
-                    str(guid).lower(): str(guid).lower()
-                    for guid in counter_values},
-            })
+            cards.append(CardView.champion_stub(
+                champion_uid, champion_owner, counter_values).as_shape(
+                    "champion_stub"))
     spec = variable.get("m_CardFilter") or {}
     context = dict(battle_state or {}, cards=cards)
     return [card for card in cards if records_filter_matches(
@@ -2360,19 +2347,8 @@ def player_int_attributes(db, session_id, battle_state, owner_id, *,
             return False
 
         source_card = _source_card(db, session_id, source_uid, source_owner)
-        target_card = {
-            "card_uid": int(target_uid),
-            "card_type": "Champion",
-            "location": "champions",
-            "user_id": owner,
-            "owner_id": owner,
-            "controller_id": owner,
-            "name": "Champion",
-            "attack": 0,
-            "defense": 0,
-            "attributes": 0,
-            "int_attrs": {},
-        }
+        target_card = CardView.special_champion(
+            int(target_uid), owner, "Champion", 0).as_shape("special_champion")
         return records_filter_matches(
             target_card,
             filter_json,
