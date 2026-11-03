@@ -11,6 +11,7 @@ import sqlite3
 import sys as _sys
 import threading
 from collections import OrderedDict
+from typing import Any
 from contextlib import contextmanager
 from domain.constants import DEFAULT_STARTING_HEALTH, PLAYED_CARD_POSITION
 from domain.enums import ECardStates, ECardTypes, ETurnPhases
@@ -47,11 +48,11 @@ _DAMAGED_STATE_BIT = 16  # ECardStates.Damaged
 # temporary connection and must continue to observe their fixture mutations.
 _STATIC_METADATA_LOCK = threading.RLock()
 _STATIC_METADATA_DB = None
-_STATIC_METADATA_CACHE = OrderedDict()
+_STATIC_METADATA_CACHE: OrderedDict[Any, Any] = OrderedDict()
 _STATIC_METADATA_CACHE_LIMIT = 16384
 _STATIC_CACHE_MISS = object()
 _TARGET_PROJECTION_LOCK = threading.RLock()
-_TARGET_PROJECTION_CACHE = OrderedDict()
+_TARGET_PROJECTION_CACHE: OrderedDict[Any, Any] = OrderedDict()
 _TARGET_PROJECTION_CACHE_LIMIT = 32
 
 # The client uses the format bit even when a socketable card has no gems in

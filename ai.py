@@ -25,10 +25,8 @@ from pvp_db import (
     db_set_card_row_positions,
     db_warzone_attack_candidates,
     db_card_location,
-    db_card_basic,
     db_card_state_value,
     db_hand_card_count,
-    db_card_state_value,
     db_card_owner_id,
     db_warzone_cards_with_state,
     db_warzone_card_state_attributes,
@@ -244,7 +242,6 @@ def ai_pass_declare_defense(handler, session, pl_t, ai_t, bstate, game):
         return bstate
     # The AI's eligible blockers: untapped warzone troops it controls (any
     # untapped troop may block, summoning sickness only affects attacking).
-    from rules_port.combat_rules import can_block
     from rules_port.static_rules import effective_stats
     blockers = [
         (uid, template_guid)
@@ -548,7 +545,7 @@ def ai_discard_card(handler, game, session, pl_t, ai_t):
     except Exception:
         shards = [r for r in rows if r[3] == 'Resource']
         pick = shards[0] if shards else random.choice(rows)
-    row_id, card_uid, tpl_guid = pick[0], pick[1], pick[2]
+    card_uid, tpl_guid = pick[1], pick[2]
     db_discard_card(session.session_id, card_uid, connection=_db)
     scid = game_engine.SessionCardId(game_engine.UID(card_uid))
     _tpl, ct, name, cost, atk, def_, gem = handler._card_full_data(game, scid, tpl_guid, None)
@@ -1366,7 +1363,6 @@ def run_ai_turn(handler, session, pl_t, ai_t, battle_state, start_idx=0):
                 handler._card_full_data(game, scid, wzr[1])
                 tpl = handler._template_by_guid(wzr[1])
                 ct = game_engine.card_type_from_db(tpl[1]) if tpl else game_engine.ECardTypes.Troop
-                from pvp_db import db_card_state_value
                 pstate = db_card_state_value(
                     session.session_id, int(wzr[0]), conn=_db)
                 game.push_card_updated(scid, ai_t, game_engine.ECardCollections.Warzone, ct,
@@ -2099,7 +2095,6 @@ def ai_play_hand_card(handler, game, session, ai_t, battle_state, card,
     window (countermagic etc.)."""
     if ai_hand_locked(handler, session, battle_state):
         return False
-    import json as _j
     _be = _checkpoint_engine(session, battle_state)
     native_mode = getattr(session, "_rules_port_session", None) is not None
     if (not native_mode and not _be.stack_empty(battle_state)):
@@ -2440,7 +2435,6 @@ def ai_choose_attackers(handler, evaluator, eligible, blockers, *,
     blocker snapshots, then use this same grouping, lethal, and individual
     combat-value policy.
     """
-    import ai_eval as _aieval
 
     eligible = list(eligible or ())
     blockers = list(blockers or ())
@@ -2851,7 +2845,6 @@ def _ai_csharp_manual_ability_decision(
             source_attrs = int(source_stats[2] or 0) if source_stats else 0
             source_flags = set(source_stats[3] or ()) if source_stats else set()
             a = game_engine.ECardAttributes
-            source_state = int((stats.get(int(source_uid)) or (0, 0, 0, 0, 0, 0))[5] or 0)
             candidates = []
             for uid in friendly:
                 if uid == int(source_uid) or uid not in stats:
@@ -2860,9 +2853,6 @@ def _ai_csharp_manual_ability_decision(
                     effective_stats(_db, session.session_id, battle_state, uid)
                 other_flags = set(other_flags or ())
                 other_state = int(stats[uid][5] or 0)
-                source_sick = not bool(
-                    source_state & game_engine.ECardStates.StartedATurnOnYourSide
-                ) and not bool(source_attrs & int(a.Speed))
                 other_sick = not bool(
                     other_state & game_engine.ECardStates.StartedATurnOnYourSide
                 ) and not bool(int(other_attrs) & int(a.Speed))
@@ -3174,7 +3164,7 @@ def ai_use_champion_ability(handler, game, session, ai_t, pl_t, battle_state,
     if not ags:
         return None if decision_only else False
     charges = int(battle_state.get("ai_charges", 0))
-    from pvp_db import db_champion_ability_costs, db_champion_ability_thresholds
+    from pvp_db import db_champion_ability_costs
     from pve_db import db_talent_ability_costs
     from gamedata import DEFAULT_RECORD_STORE, ability_graph
     ai_champ_scid = getattr(handler, "_ai_champ_scid", None)
@@ -3900,8 +3890,6 @@ def ai_use_warzone_ability(handler, game, session, ai_t, pl_t, battle_state,
             _be.current_phase(battle_state) != game_engine.ETurnPhases.SecondMainPhase):
         return None if decision_only else False
     resources = int(battle_state.get("ai_resources", 0))
-    permanent_filter = ("" if include_non_troops else
-                        "AND gc.card_type LIKE '%Troop%'\n        ")
     troops = db_warzone_ability_cards(
         session.session_id, include_non_troops=include_non_troops, conn=_db,
         owner_id=ai_owner_id)
@@ -3964,7 +3952,7 @@ def ai_use_warzone_ability(handler, game, session, ai_t, pl_t, battle_state,
             text = _j.dumps(params).lower()
             source_stats = effective_stats(_db, session.session_id,
                                            battle_state, int(uid))
-            s_atk, s_def = source_stats[0], source_stats[1]
+            s_atk = source_stats[0]
             target_uid = None
             worth = False
             requires_blocking_target = False
