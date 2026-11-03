@@ -13,6 +13,7 @@ import json
 import threading
 from typing import Any, cast
 
+from rules_port.card_view import CardView, threshold_shards as _shards
 from rules_port.filters import (records_filter_evaluator,
                                 records_filter_matches)
 
@@ -142,11 +143,8 @@ def _special_target_card(db, session_id, uid, controller_uid, state,
                          if int(row[0]) == int(uid)), None)
         name = matching[2] if matching and len(matching) > 2 else "Champion"
         health = matching[3] if matching and len(matching) > 3 else 0
-        return {"card_uid": int(uid), "card_type": "Champion",
-                "location": "champions", "user_id": owner,
-                "owner_id": owner, "controller_id": owner,
-                "name": name or "Champion", "defense": int(health or 0),
-                "attack": 0, "attributes": 0, "int_attrs": {}}
+        return CardView.special_champion(uid, owner, name, health).as_shape(
+            "special_champion")
     return card
 
 
@@ -217,16 +215,6 @@ def filter_restricts_to_zone(node, zone):
     if isinstance(node, list):
         return any(filter_restricts_to_zone(value, zone) for value in node)
     return False
-
-
-def _shards(value):
-    try:
-        data = json.loads(value or "{}")
-    except (TypeError, ValueError, json.JSONDecodeError):
-        return []
-    values = data if isinstance(data, list) else data.get("list", data.get("values", []))
-    return [{0: 0, 1: 4, 2: 8, 3: 16, 4: 32, 5: 64}.get(int(item), 0)
-            for item in (values or [])]
 
 
 def shards_from_threshold(value):
@@ -486,92 +474,38 @@ def _card(row, battle_state=None, db=None, session_id=None):
 
 
 def _project_card(row, battle_state=None, db=None, session_id=None):
-    row_data: Any = tuple(row)
-    if len(row_data) >= 19:
-        (uid, card_type, location, owner, template_guid, state, attack, defense,
-         name, cost, subtype, threshold, abilities, buffs, rarity, sockets, gems,
-         original_guid, card_attributes) = row_data[:19]
-    else:
-        (uid, card_type, location, owner, template_guid, state, attack, defense,
-         name, cost, subtype, threshold, abilities, buffs, rarity, sockets, gems,
-         original_guid) = row_data[:18]
-        card_attributes = 0
-    try:
-        saved = json.loads(buffs or "{}")
-    except (TypeError, ValueError, json.JSONDecodeError):
-        saved = {}
-    if not isinstance(saved, dict):
-        saved = {}
-    attrs = saved.get("int_attrs") if isinstance(saved.get("int_attrs"), dict) else {}
-    card = {"card_uid": int(uid), "card_type": card_type or "",
-            "location": location or "", "user_id": int(owner or 0),
-            "owner_id": int(owner or 0), "controller_id": int(owner or 0),
-            "template_guid": template_guid or "", "state": int(state or 0),
-            "attack": int(attack or 0), "defense": int(defense or 0),
-            "name": name or "", "cost": int(cost or 0),
-            "subtype": saved.get("subtype", subtype or ""),
-            "attributes": int(saved.get("attributes", 0) or 0)
-            | int(card_attributes or 0),
-            "int_attrs": attrs, "shards": _shards(threshold),
-            "rarity": rarity or "", "socket_count": int(sockets or 0),
-            "gems": int(gems or 0), "card_abilities": json.loads(abilities or "[]")
-            if isinstance(abilities, str) else (abilities or []),
-            "counters": saved.get("counters", {}),
-            "counter_guids": saved.get("counter_guids", {}),
-            "tags": saved.get("tags", {}) or {},
-            "parent_uid": int(saved.get("parent_uid", 0) or 0),
-            "original_template_guid": original_guid or ""}
+    """The card a projection row describes, in the ``projected`` shape.
+
+    Without a session the template's values stand. With one, the card's current thresholds,
+    subtype, attack and defense (buffs and statics included) replace them, as C# filters read the
+    current values rather than the printed column.
+    """
+    view = CardView.from_projected_row(row)
     if (db is not None and session_id is not None and
             not (battle_state or {}).get("_rules_port_suppress_card_properties")):
         from .static_rules import effective_card_properties, effective_stats
         thresholds, current_subtype = effective_card_properties(
-            db, session_id, battle_state or {}, int(uid))
-        card["shards"] = thresholds
-        card["subtype"] = current_subtype
-        card["thresholds"] = thresholds
-        # C# filters read a card's current attack and defense (buffs and statics included), not the printed column.
+            db, session_id, battle_state or {}, int(view.card_uid))
         try:
-            card["attack"], card["defense"] = (int(value) for value in
-                                               effective_stats(db, session_id, battle_state or {}, int(uid))[:2])
+            stats = effective_stats(db, session_id, battle_state or {},
+                                    int(view.card_uid))[:2]
         except RuntimeError:
-            pass
-    return card
+            stats = None
+        view = view.with_effective(thresholds, current_subtype, stats)
+    return view.as_shape("projected")
 
 
 def _source_card(db, session_id, source_uid, controller_uid):
+    """The source card of an ability or event, in the ``source`` shape.
+
+    With no card row it is the controlling champion, in the ``source_champion`` shape.
+    """
     if source_uid is not None:
         from pvp_db import db_target_source_row
         row = db_target_source_row(session_id, int(source_uid), conn=db)
         if row:
-            (uid, card_type, location, owner, state, attack, defense,
-             template_guid, name, cost, subtype, threshold, attributes,
-             rarity, sockets, gems, original_guid, abilities, buffs) = row
-            try:
-                saved = json.loads(buffs or "{}")
-            except (TypeError, ValueError, json.JSONDecodeError):
-                saved = {}
-            if not isinstance(saved, dict):
-                saved = {}
-            return {"card_uid": int(uid), "card_type": card_type or "",
-                    "location": location or "", "user_id": int(owner or 0),
-                    "owner_id": int(owner or 0), "controller_id": int(owner or 0),
-                    "template_guid": template_guid or "", "state": int(state or 0),
-                    "attack": int(attack or 0), "defense": int(defense or 0),
-                    "name": name or "", "cost": int(cost or 0),
-                    "subtype": subtype or "", "attributes": int(attributes or 0),
-                    "shards": _shards(threshold), "rarity": rarity or "",
-                    "socket_count": int(sockets or 0), "gems": int(gems or 0),
-                    "original_template_guid": original_guid or "",
-                    "int_attrs": saved.get("int_attrs", {}) or {},
-                    "card_integer_variables": saved.get(
-                        "card_integer_variables", {}) or {},
-                    "card_abilities": json.loads(abilities or "[]")
-                    if isinstance(abilities, str) else (abilities or []),
-                    "parent_uid": _parent_uid(buffs)}
-    return {"card_uid": int(source_uid or 0), "location": "champions",
-            "user_id": int(controller_uid or 0),
-            "owner_id": int(controller_uid or 0), "controller_id": int(controller_uid or 0),
-            "card_type": "Champion", "attack": 0, "defense": 0}
+            return CardView.from_source_row(row).as_shape("source")
+    return CardView.source_champion(source_uid, controller_uid).as_shape("source_champion")
 
 
 def _champion_filter_cards(champions, battle_state=None):
@@ -607,22 +541,14 @@ def _champion_filter_cards(champions, battle_state=None):
         counter_values = persisted_counters.get(str(uid)) or {}
         counters = {str(k): int(v or 0) for k, v in counter_values.items()
                     if isinstance(counter_values, dict)}
-        cards.append({
-            "card_uid": uid, "card_type": "Champion",
-            "location": "champions", "collection": "champions",
-            "user_id": owner, "owner_id": owner,
-            "controller_id": owner, "template_guid": guid,
-            "template_id": guid,
-            "name": champion[2] if len(champion) > 2 else "Champion",
-            "subtype": _champion_subtype(guid),
-            "attack": 0,
+        cards.append(CardView.filter_champion(
+            uid, owner,
+            champion[2] if len(champion) > 2 else "Champion",
+            guid, _champion_subtype(guid),
             # Ability-granted attributes (see CardPlayMixin._champion_targets).
-            "attributes": attributes.get(uid, 0),
-            "defense": int(champion[3] or 0)
-            if len(champion) > 3 else 0,
-            "counters": counters,
-            "counter_guids": {guid_: guid_ for guid_ in counters},
-        })
+            attributes.get(uid, 0),
+            int(champion[3] or 0) if len(champion) > 3 else 0,
+            counters).as_shape("filter_champion"))
     return cards
 
 
@@ -991,11 +917,8 @@ def _legal_targets(db, session_id, controller_uid, template_id, source_uid,
                                   (not opposing or owner != controller_uid))
             if not player_allowed:
                 continue
-            card = champion_cards_by_uid.get(int(uid)) or {
-                "card_uid": int(uid), "card_type": "Champion",
-                "location": "champions", "user_id": owner,
-                "controller_id": owner, "name": name or "Champion",
-                "defense": int(health or 0), "attack": 0}
+            card = champion_cards_by_uid.get(int(uid)) or CardView.special_champion(
+                uid, owner, name, health).as_shape("legal_champion")
             # PlayerTargetTemplate overrides IsCardValidTarget in C# and
             # checks only champion identity, player filter and its own filter.
             if (not player_target and kind not in {
@@ -1307,17 +1230,7 @@ def revealed_target_uids(db, session_id, owner_id, source_uid, template_id,
         row = db_condition_card_row(session_id, int(uid), conn=db)
         if not row:
             continue
-        card = {
-            "card_uid": int(row[0]), "card_type": row[1] or "",
-            "location": row[2] or "", "user_id": int(row[3] or 0),
-            "state": int(row[4] or 0), "attack": int(row[5] or 0),
-            "defense": int(row[6] or 0), "template_guid": row[7] or "",
-            "name": row[8] or "", "cost": int(row[9] or 0),
-            "subtype": row[10] or "", "shards": _shards(row[11]),
-            "attributes": int(row[12] or 0) | int(row[13] or 0),
-            "gems": int(row[20] or 0) if len(row) > 20 else 0,
-            "src_owner_side": "player" if int(owner_id or 0) else "ai",
-        }
+        card = CardView.from_revealed_row(row, owner_id).as_shape("revealed")
         context = _FilterContext(battle_state or {})
         if records_filter_matches(card, spec, source=source,
                                   context=context):

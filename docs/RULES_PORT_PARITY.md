@@ -1628,6 +1628,12 @@ remain between the two paths, to decide per filter:
 - Thresholds parse differently when a record has both a `list` and a `values` key:
   `shards_from_threshold` (static) takes the first non-empty list, `_shards`
   (condition) takes `list` whenever the key exists.
+- The target-filter producers in `rules_port/targeting.py` follow the same split.
+  The projected card (`_project_card`, `shape "projected"`) takes the current attack,
+  defense, thresholds and subtype when it has a session. The source card
+  (`_source_card`, shape "source") and the revealed card (`shape "revealed"`) take
+  the template values. A target filter on attack therefore reads the current value in
+  one path and the printed value in the other.
 
 ## Remaining work
 

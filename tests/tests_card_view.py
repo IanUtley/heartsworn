@@ -62,7 +62,22 @@ def test_condition_champion_has_its_own_key_set():
     assert "state" not in entry and "damaged_opponent_this_turn" not in entry
 
 
+def test_every_shape_returns_exactly_its_keys():
+    from rules_port.card_view import SHAPES
+    view = CardView.from_projected_row(
+        (7, "Troop", "warzone", 5, "tpl", 0, 3, 2, "Name", 2, "Robot", "{}", "[]", "{}",
+         "Common", 0, 0, "", 0))
+    for shape, keys in SHAPES.items():
+        assert set(view.as_shape(shape)) == set(keys), shape
+    assert "thresholds" not in view.as_shape("projected")
+    effective = view.with_effective([64], "Dwarf", (9, 8))
+    projected = effective.as_shape("projected")
+    assert projected["thresholds"] == [64] and projected["attack"] == 9
+    assert projected["subtype"] == "Dwarf"
+
+
 if __name__ == "__main__":
+    test_every_shape_returns_exactly_its_keys()
     test_row_maps_to_the_static_filter_mapping()
     test_permanent_buffs_override_subtype_and_thresholds_only()
     test_champion_entry_keeps_its_side_and_health()
