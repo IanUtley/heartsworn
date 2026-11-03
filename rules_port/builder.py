@@ -470,6 +470,7 @@ class AbilityBuilder:
         # Target legality is owned by RulesPort in every mode.
         from rules_port.targeting import legal_targets_for
 
+        target_ref: TargetRef | str
         if isinstance(target, TargetRef):
             target_ref = target
         elif isinstance(target, str):
@@ -495,7 +496,7 @@ class AbilityBuilder:
         selectable costs use the same target filter as the client picker.
         The caller still decides minimum/maximum selection and payment order.
         """
-        result = []
+        result: list[tuple[CostRef, tuple[int, ...]]] = []
         for cost in self.cost_targets:
             if cost.target is None:
                 result.append((cost, ()))

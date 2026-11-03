@@ -20,7 +20,7 @@ import threading
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from types import SimpleNamespace
-from typing import Any, Iterator
+from typing import Any, Iterator, cast
 
 from gamedata import DEFAULT_RECORD_STORE as STORE
 from gamedata.mechanics import CLASSES
@@ -161,7 +161,7 @@ def _candidates(declared: str, version_table: list[dict[str, int]] | None) -> li
             current = name
             while current in CLASSES and current not in chain:
                 chain.append(current)
-                current = CLASSES[current]["base"]
+                current = cast(dict[str, Any], CLASSES[current])["base"]
             if declared in chain and name != declared and name not in found:
                 found.append(name)
     return found
@@ -222,7 +222,7 @@ class Scope:
     # per-activation state on it: a granted "random champion charge power" is picked once per activation and cached
     # in ``ability_runtime_state[<instance>]``, so two activations must not share one entry.
     instance_id: int | None = None
-    chosen: dict[int, int | None] = field(default_factory=dict)   # target index -> the card the player chose
+    chosen: dict[int, int | list[int] | None] = field(default_factory=dict)   # target index -> the card(s) the player chose
     # The clause the interpreter is running, and the targets each effect instance resolved to (for a later
     # clause's secondary target).
     clause: Any = None

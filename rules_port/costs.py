@@ -8,6 +8,8 @@ second rules engine.
 
 from __future__ import annotations
 
+from .runtime_helpers import raw_uid
+
 import json
 from dataclasses import dataclass
 from typing import Any, Mapping, cast
@@ -54,7 +56,7 @@ def _source_is_champion(db, session_id: int, source_uid: int, state) -> bool:
     champion_values = (state.get("champ_map") or {}).values()
     for value in champion_values:
         try:
-            if int(getattr(value, "uid64", value)) == int(source_uid):
+            if raw_uid(value) == int(source_uid):
                 return True
         except (TypeError, ValueError):
             continue
@@ -258,7 +260,7 @@ def validate_cost_target_selection(db, session_id: int, controller_uid: int,
     values = selected if isinstance(selected, (list, tuple, set)) else (
         () if selected is None else (selected,))
     try:
-        values = tuple(int(getattr(value, "uid64", value))
+        values = tuple(raw_uid(value)
                       for value in values)
     except (TypeError, ValueError):
         return None

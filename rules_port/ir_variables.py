@@ -209,7 +209,9 @@ def evaluate(text: str, lookup: Callable[[str], int]) -> float:
 
 def _value(node: ast.expr, lookup: Callable[[str], int]) -> float:
     if isinstance(node, ast.Constant):
-        return node.value
+        if not isinstance(node.value, (int, float)):
+            raise ValueError(f"unsupported constant {node.value!r} in an expression")
+        return float(node.value)
     if isinstance(node, ast.Name):
         return lookup(node.id)
     if isinstance(node, ast.UnaryOp):

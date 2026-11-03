@@ -11,6 +11,8 @@ Source counterparts: ``Session.cs:InternalTick2`` and
 
 from __future__ import annotations
 
+from .runtime_helpers import raw_uid
+
 import os
 import time
 from collections import deque
@@ -54,7 +56,7 @@ from .projections import TransactionProjection
 
 def _uid_value(value) -> int:
     """Serialize Python UID wrappers like the C# ``UID`` value type."""
-    return int(getattr(value, "uid64", value))
+    return raw_uid(value)
 
 
 def _same_player_uid(left, right) -> bool:
@@ -92,6 +94,12 @@ def _json_value(value):
 def _serial_combatant_id(value):
     """Serialize a runtime combat participant or its raw card identity."""
     return _serial_id(getattr(value, "session_card_id", value))
+
+
+def _effect_target_index(effect: dict[Any, Any]) -> Any:
+    """An effect's target index: the authored ``target_index``, else the template's ``m_TargetTemplateIndex``,
+    else -2 (no index)."""
+    return effect.get("target_index", effect.get("m_TargetTemplateIndex", -2))
 
 
 @dataclass(frozen=True)
@@ -196,8 +204,8 @@ class RulesTransaction:
         """C# ``ReadyCardTransaction`` validation contract."""
         ids = tuple(card_ids or ())
         from .transactions import CardCanUntapRequirement, CardTappedRequirement
-        requirements = [TurnPhaseRequirement(game_engine.ETurnPhases.Ready),
-                        PlayerIsActiveRequirement(player_id)]
+        requirements: list[Requirement] = [TurnPhaseRequirement(game_engine.ETurnPhases.Ready),
+                                           PlayerIsActiveRequirement(player_id)]
         for card_id in ids:
             requirements.extend((CardTappedRequirement(card_id),
                                  CardCanUntapRequirement(card_id),
@@ -262,6 +270,7 @@ class RulesTransaction:
     @classmethod
     def resolve_triggered_continuation(cls, player_id, activation_data) -> "RulesTransaction":
         """Resume a metadata trigger target without a transient ability id."""
+        normalized: dict[Any, Any] | tuple[Any, ...]
         if isinstance(activation_data, Mapping):
             normalized = dict(activation_data)
         elif isinstance(activation_data, (list, tuple)):
@@ -591,7 +600,7 @@ class GameEngineEventSink:
             values = selected if isinstance(selected, (list, tuple, set)) else (selected,)
             for value in values:
                 try:
-                    uid64 = int(getattr(value, "uid64", value))
+                    uid64 = raw_uid(value)
                 except (TypeError, ValueError):
                     continue
                 if uid64 and (uid64 & 0xFF) == CARD_UID_TYPE:
@@ -667,8 +676,7 @@ class GameEngineEventSink:
         target_index = getattr(first_prompt, "index", -1)
         effects = tuple(getattr(ability, "ordered_effects", ()))
         matching = [effect for effect in effects if isinstance(effect, dict) and
-                    int(effect.get("target_index", effect.get(
-                        "m_TargetTemplateIndex", -2))) == target_index]
+                    int(_effect_target_index(effect)) == target_index]
         selected = matching or list(effects)
         def value(effect, *keys, default=0):
             for key in keys:
@@ -1507,7 +1515,7 @@ class AuthoritativeSession:
             except Exception:
                 pass
         try:
-            return hex(int(getattr(value, "uid64", value)))
+            return hex(raw_uid(value))
         except (TypeError, ValueError):
             return str(value)
 
@@ -2248,10 +2256,10 @@ class AuthoritativeSession:
         facts = self.runtime_facts
         getter = getattr(facts, "get_card", None)
         if callable(getter):
-            for raw_uid in tuple((state.get("ai_attackers") or {}).keys()) + \
+            for attacker_uid in tuple((state.get("ai_attackers") or {}).keys()) + \
                     tuple((state.get("player_attackers") or {}).keys()):
                 try:
-                    card = getter(int(raw_uid))
+                    card = getter(int(attacker_uid))
                 except (TypeError, ValueError):
                     card = None
                 phase_check = getattr(card, "cares_about_combat_phase", None)
@@ -2821,7 +2829,7 @@ class AuthoritativeSession:
             if value is None:
                 return None
             try:
-                value = int(getattr(value, "uid64", value))
+                value = raw_uid(value)
             except (TypeError, ValueError):
                 for player_id in self.player_ids:
                     if player_id == value or str(player_id) == str(value):
@@ -2922,7 +2930,7 @@ class AuthoritativeSession:
                     continue
                 if instance_id > 0:
                     self._projected_chain_descriptors[instance_id] = dict(descriptor)
-        self.restored_combat_descriptors = ()
+        self.restored_combat_descriptors: tuple[dict[Any, Any], ...] = ()
         combats = saved.get("combats", ())
         if isinstance(combats, (list, tuple)):
             self.restored_combat_descriptors = tuple(
@@ -2975,7 +2983,7 @@ class AuthoritativeSession:
             return False
 
         def as_int(value):
-            return int(getattr(value, "uid64", value))
+            return raw_uid(value)
 
         try:
             for descriptor in self.restored_combat_descriptors:

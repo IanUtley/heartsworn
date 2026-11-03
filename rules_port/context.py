@@ -139,8 +139,8 @@ class EffectContext:
         target, and the leaf can tell "nothing resolved yet" (ask the player)
         apart from "the source is the target".
         """
-        keys = ("player_spell_target", "player_mod_target",
-                "resolving_target_uid")
+        keys: tuple[str, ...] = ("player_spell_target", "player_mod_target",
+                                 "resolving_target_uid")
         if source_fallback:
             keys += ("resolving_source_uid",)
         for key in keys:
@@ -2102,10 +2102,10 @@ class EffectContext:
             collections = {part.strip().rsplit(".", 1)[-1].lower()
                            for part in str(collection).replace(",", "|").split("|")
                            if part.strip()}
-        locations = {"deck": "deck", "hand": "hand", "warzone": "warzone",
-                     "discard": "discard", "void": "void",
-                     "playedresources": "playedresources"}
-        locations = [locations[item] for item in collections if item in locations]
+        location_names = {"deck": "deck", "hand": "hand", "warzone": "warzone",
+                          "discard": "discard", "void": "void",
+                          "playedresources": "playedresources"}
+        locations = [location_names[item] for item in collections if item in location_names]
         if not locations:
             self.bstate.setdefault("ability_variables", {})[str(name)] = 0
             return f"counted {name}=0"

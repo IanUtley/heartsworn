@@ -397,16 +397,16 @@ class NativeTriggerBackend:
                                     ).values()}):
                 continue
             for ability_guid in candidate.ability_guids:
-                key = (source_uid, str(ability_guid).lower())
-                if key in seen:
+                trigger_key = (source_uid, str(ability_guid).lower())
+                if trigger_key in seen:
                     continue
-                seen.add(key)
+                seen.add(trigger_key)
                 # Inspect the lightweight AbilityTemplate before constructing
                 # its full target/effect graph. A cold CardEntered/CardCast
                 # event otherwise deserializes every manual/static ability in
                 # the session before finding the few matching triggers.
                 ability_record = DEFAULT_RECORD_STORE.get(
-                    "AbilityTemplate", key[1])
+                    "AbilityTemplate", trigger_key[1])
                 if ability_record is None:
                     continue
                 trigger_type = str(
@@ -425,11 +425,11 @@ class NativeTriggerBackend:
                         str(trigger_type).rsplit(".", 1)[-1] != event_name and
                         not dynamic_source):
                     continue
-                graph = ability_graph(DEFAULT_RECORD_STORE, key[1])
+                graph = ability_graph(DEFAULT_RECORD_STORE, trigger_key[1])
                 if graph is None:
                     continue
                 if (event_name == "TurnStartedEvent" and
-                        key[1] == TUNNELING_ABILITY_GUID):
+                        trigger_key[1] == TUNNELING_ABILITY_GUID):
                     continue
                 if event_name == "CardCreatedEvent":
                     from .static_rules import is_continuous_self_static
@@ -486,7 +486,7 @@ class NativeTriggerBackend:
                         _opponents_block_deathcries(
                             battle_state, source_owner)):
                     continue
-                trigger_location = (
+                trigger_location: Any = (
                     "warzone" if str(location or "").lower() == "mod"
                     else str(location or ""))
                 # The DB row has already moved when a self-enter event is
@@ -564,7 +564,7 @@ class NativeTriggerBackend:
                         logs.append(inspired)
                 chance = chance_to_happen(graph)
                 if chance < 100 and random.randrange(100) >= chance:
-                    logs.append(f"{event_name} {key[1][:8]} -> chance failed ({chance}%)")
+                    logs.append(f"{event_name} {trigger_key[1][:8]} -> chance failed ({chance}%)")
                     continue
                 target = event.target_card_id or event.source_card_id
                 # A player-owned trigger with no event target (e.g. Moonmonk's
@@ -624,13 +624,13 @@ class NativeTriggerBackend:
                         if callable(prompt):
                             prompt(
                                 game, player_uid, ai_uid, session, battle_state,
-                                source_uid, key[1],
+                                source_uid, trigger_key[1],
                                 tuple(graph.targets[index].guid for index in explicit),
                                 candidates, owner_id=source_card_owner,
                                 trigger_target_uid=event.target_card_id,
                                 trigger_event=_trigger_event_record(event, event_name))
                             logs.append(
-                                f"{event_name} {key[1][:8]} -> awaiting "
+                                f"{event_name} {trigger_key[1][:8]} -> awaiting "
                                 f"{'optional choice' if graph.optional else 'target'}")
                             continue
                     target = candidates[0] if candidates else None
@@ -639,16 +639,16 @@ class NativeTriggerBackend:
                 elif source_card_owner == 0 and target is None:
                     from .targeting import ai_trigger_target
                     target = ai_trigger_target(
-                        db, session, key[1], source_uid, source_card_owner,
+                        db, session, trigger_key[1], source_uid, source_card_owner,
                         battle_state, getattr(handler, "_champion_targets", lambda: [])() or [])
                 elif (graph.optional and source_card_owner != 0 and
                       callable(getattr(handler, "_prompt_optional_trigger", None))):
                     handler._prompt_optional_trigger(
                         game, player_uid, ai_uid, session, battle_state,
-                        source_uid, key[1], (), [], owner_id=source_card_owner,
+                        source_uid, trigger_key[1], (), [], owner_id=source_card_owner,
                         trigger_target_uid=event.target_card_id,
                         trigger_event=_trigger_event_record(event, event_name))
-                    logs.append(f"{event_name} {key[1][:8]} -> awaiting optional choice")
+                    logs.append(f"{event_name} {trigger_key[1][:8]} -> awaiting optional choice")
                     continue
 
                 if not _claim_trigger_uses(
@@ -670,7 +670,7 @@ class NativeTriggerBackend:
                     import game_engine as _ge
                     game.push_ability_on_chain(
                         _ge.SessionCardId(_ge.UID(int(source_uid))),
-                        _ge.ResourceId.from_str(key[1]),
+                        _ge.ResourceId.from_str(trigger_key[1]),
                         ability_instance_id=instance_id,
                         target_card_ids=chain_targets(target),
                         ignores_chain=True)
@@ -698,10 +698,10 @@ class NativeTriggerBackend:
                         event.data or {})
                     try:
                         interpreted = None
-                        if ir_exec.engine_runs(key[1], source_uid, source_card_owner):
+                        if ir_exec.engine_runs(trigger_key[1], source_uid, source_card_owner):
                             interpreted = run_interpreted_trigger(
                                 handler, game, session, db, player_uid, ai_uid,
-                                battle_state, key[1], source_uid, source_card_owner,
+                                battle_state, trigger_key[1], source_uid, source_card_owner,
                                 event_name, event.source_card_id, dict(event.data or {}),
                                 target_player_uid=event.target_player_id,
                                 source_player_uid=event.source_player_id,
@@ -712,7 +712,7 @@ class NativeTriggerBackend:
                         else:
                             result = resolve_port_ability(
                                 handler, game, session, db, player_uid, ai_uid,
-                                battle_state, key[1], source_uid, source_card_owner,
+                                battle_state, trigger_key[1], source_uid, source_card_owner,
                                 target_map=({requires_input_index: int(target)}
                                             if (requires_input_index is not None
                                                 and target is not None) else {}),
@@ -737,7 +737,7 @@ class NativeTriggerBackend:
                             battle_state.pop("resolving_trigger_event_data", None)
                         else:
                             battle_state["resolving_trigger_event_data"] = old_event_data
-                    logs.append(f"{event_name} {key[1][:8]} -> {result}")
+                    logs.append(f"{event_name} {trigger_key[1][:8]} -> {result}")
                     if event_name == "ChampionWouldLoseEvent":
                         # C# CheckForReplacementAbilities returns as soon as
                         # the first replacement is accepted. The helper that
@@ -749,13 +749,13 @@ class NativeTriggerBackend:
                     if not battle_state.get("resolution_paused"):
                         consume_one_shot_trigger(
                             handler, session, game, db, player_uid, ai_uid,
-                            battle_state, key[1], source_uid)
+                            battle_state, trigger_key[1], source_uid)
                     if event_name == "ChampionWouldLoseEvent":
                         return "; ".join(logs)
                 else:
                     import game_engine
                     from . import chain
-                    activation_payload = {}
+                    activation_payload: dict[str, Any] = {}
                     if event_name == "CardActivatedEvent":
                         activation_payload = {
                             field: event.data[field]
@@ -768,7 +768,7 @@ class NativeTriggerBackend:
                             if field in event.data
                         }
                     chain.push(battle_state, {
-                        "kind": "trigger", "ability_guid": key[1],
+                        "kind": "trigger", "ability_guid": trigger_key[1],
                         "source_uid": source_uid, "target_uid": target,
                         "trigger_source_uid": event.source_card_id,
                         "trigger_target_uid": trigger_target_uid,
@@ -782,7 +782,7 @@ class NativeTriggerBackend:
                     push_source(source_uid, source_card_owner)
                     game.push_ability_on_chain(
                         game_engine.SessionCardId(game_engine.UID(source_uid)),
-                        game_engine.ResourceId.from_str(key[1]),
+                        game_engine.ResourceId.from_str(trigger_key[1]),
                         ability_instance_id=instance_id,
                         target_card_ids=chain_targets(target),
                         ignores_chain=graph.client_ignores_chain)
@@ -812,7 +812,7 @@ class NativeTriggerBackend:
                             port, "active_player_id", None) or owner_player
                         queue_projected({
                             "kind": "trigger",
-                            "ability_guid": key[1],
+                            "ability_guid": trigger_key[1],
                             "source_uid": source_uid,
                             "target_uid": target,
                             "trigger_source_uid": event.source_card_id,
@@ -825,7 +825,7 @@ class NativeTriggerBackend:
                             "instance_id": instance_id,
                             **activation_payload,
                         }, source_card_owner, first_player_id=first_player)
-                    logs.append(f"{event_name} {key[1][:8]} -> chain")
+                    logs.append(f"{event_name} {trigger_key[1][:8]} -> chain")
                     if event_name == "ChampionWouldLoseEvent":
                         battle_state[
                             "_champion_would_lose_replacement_accepted"] = True

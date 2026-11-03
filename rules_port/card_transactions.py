@@ -8,6 +8,8 @@ malformed typed payloads from reaching a legacy fallback implicitly.
 
 from __future__ import annotations
 
+from .runtime_helpers import raw_uid
+
 import json
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
@@ -279,7 +281,7 @@ class MetadataCardTransactionExecutor(CardTransactionExecutor):
                         for selected in target_map.values():
                             selected = selected if isinstance(
                                 selected, (list, tuple, set)) else (selected,)
-                            values.extend(int(getattr(value, "uid64", value))
+                            values.extend(raw_uid(value)
                                            for value in selected)
                         # Additional card costs arrive separately from
                         # TargetMap (XCostData.CardsToSacrifice).  Keep them
@@ -296,7 +298,7 @@ class MetadataCardTransactionExecutor(CardTransactionExecutor):
                             selected = selected if isinstance(
                                 selected, (list, tuple, set)) else (selected,)
                             cost_target_map.setdefault(index, []).extend(
-                                int(getattr(value, "uid64", value))
+                                raw_uid(value)
                                 for value in selected)
                     x_cost = max((int(item.get("x_cost", 0) or 0)
                                   for item in (payload.get("ability_data") or ())

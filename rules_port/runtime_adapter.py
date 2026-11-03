@@ -357,6 +357,7 @@ class PvpRuntimeFacts:
             return "" if allowed else "play-validator"
         player = self.get_player(player_id)
         request_uid = getattr(self, "client_player_uid", self.player_uid)
+        owner_id: int | None
         if self.battle_state.get("pvp"):
             owner_id = _raw_player_id(player_id)
         else:
@@ -426,6 +427,7 @@ class PvpRuntimeFacts:
         # live HConnect adapter supplies the profile ids when those namespaces
         # differ; fall back to the raw UID for standalone kernel tests.
         request_uid = getattr(self, "client_player_uid", self.player_uid)
+        owner_id: int | None
         if self.battle_state.get("pvp"):
             owner_id = _raw_player_id(player_id)
         else:

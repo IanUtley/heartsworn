@@ -93,6 +93,10 @@ The generated mechanics classes are type-checked. After regenerating them with
 python3 -m mypy gamedata/mechanics_types.py gamedata/mechanics_base.py --follow-imports=silent --ignore-missing-imports
 ```
 
+The typing gate for `rules_port` is the root `mypy.ini`: run `python3 -m mypy` from the
+repository root. It checks the bodies of typed functions only; add `--check-untyped-defs`
+to see the untyped bodies too.
+
 The repository includes a pre-commit hook for syntax checks and the quick core
 test set. Enable it once per checkout with:
 

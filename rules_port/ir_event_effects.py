@@ -63,7 +63,8 @@ def run_native_leaf(context: Any, effect_type: str, effect_raw: dict[str, Any], 
     bstate = context.bstate
     previous = {key: bstate.get(key) for key in _TARGET_KEYS}
     try:
-        for target in targets or [None]:
+        candidates: list[int | None] = list(targets) if targets else [None]
+        for target in candidates:
             if target is None:
                 for key in _TARGET_KEYS:
                     bstate.pop(key, None)

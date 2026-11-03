@@ -7,7 +7,7 @@ are performed by the caller's runtime projection boundary.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import MutableMapping
+from typing import Any, MutableMapping
 
 import game_engine
 from collections import Counter
@@ -687,6 +687,7 @@ def project_resource_change(game, session, state: MutableMapping, player_uid,
     # have the updated threshold replaced by the older persisted snapshot.
     from .persistence import save_state
     save_state(session, state)
+    event_type: type[Any]
     if property == "currentresource":
         setattr(game, f"{change.side}_resources", change.new_value)
         event_type = game_engine.PlayerCurrentResourcePoolChangedSessionEventArgs
