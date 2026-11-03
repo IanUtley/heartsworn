@@ -28,7 +28,6 @@ from .targeting import (
 )
 from ._shared import attribute_bits_from_flags, attribute_bits_from_text
 from .effects.counters import card_counters_full
-from .condition_engine import ConditionContext, evaluate_effect_condition
 from rules_port.card_view import CardView
 
 
@@ -499,8 +498,11 @@ def _sum_variable(db, session_id, bstate, owner, var, source_uid, stat_prop):
 
 
 def _gate_condition(db, session_id, bstate, condition_id, source_uid, owner):
+    """Whether an authored effect condition holds, evaluated by the native condition layer."""
     if not condition_id:
         return True
+    from rules_port.condition_context import ConditionContext
+    from rules_port.conditions import evaluate_effect_condition
     ctx = ConditionContext(db, _SessionStub(session_id), bstate,
                            ability_source_uid=int(source_uid),
                            ability_source_owner_id=owner)
@@ -508,8 +510,7 @@ def _gate_condition(db, session_id, bstate, condition_id, source_uid, owner):
 
 
 class _SessionStub:
-    """Minimal session object for ConditionContext (only session_id is used
-    by the condition engine's DB queries)."""
+    """Minimal session object for the condition context (only session_id is read)."""
 
     def __init__(self, session_id):
         self.session_id = session_id

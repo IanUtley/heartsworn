@@ -68,11 +68,12 @@ def make_db():
             card_defense_mod INTEGER, card_cost_mod INTEGER,
             cost_mod_json TEXT DEFAULT '[]', card_damage INTEGER,
             permanent_buffs TEXT, temporary_buffs TEXT, card_uses TEXT,
+            original_template_guid TEXT, gems INTEGER DEFAULT 0,
             resolved_at INTEGER)""",
         """CREATE TABLE IF NOT EXISTS card_templates (
             guid TEXT, name TEXT, card_type TEXT, cost INTEGER, attack INTEGER,
             defense INTEGER, attributes INTEGER, abilities_json TEXT,
-            threshold_json TEXT, subtype TEXT)""",
+            threshold_json TEXT, subtype TEXT, rarity TEXT)""",
         """CREATE TABLE IF NOT EXISTS card_abilities_meta (
             ability_guid TEXT, is_triggered INTEGER, trigger_event_type TEXT,
             game_text TEXT, raw_json TEXT, casting_behavior INTEGER,
@@ -136,7 +137,7 @@ def make_db():
 
     def tpl(guid, name, ctype, cost, atk, de, attrs, ab, thresh="[]",
             subtype=""):
-        db.execute("INSERT OR REPLACE INTO card_templates VALUES (?,?,?,?,?,?,?,?,?,?)",
+        db.execute("INSERT OR REPLACE INTO card_templates (guid, name, card_type, cost, attack, defense, attributes, abilities_json, threshold_json, subtype) VALUES (?,?,?,?,?,?,?,?,?,?)",
                    (guid, name, ctype, cost, atk, de, attrs,
                     json.dumps(ab), thresh, subtype))
 
@@ -496,7 +497,7 @@ def test_electroid_combat_threshold_is_continuous(db):
     for uid, subtype in ((102, "Dwarf"), (103, "Dwarf"), (104, "Robot")):
         guid = f"11111111-1111-1111-1111-{uid:012x}"
         db.execute(
-            "INSERT OR REPLACE INTO card_templates VALUES (?,?,?,?,?,?,?,?,?,?)",
+            "INSERT OR REPLACE INTO card_templates (guid, name, card_type, cost, attack, defense, attributes, abilities_json, threshold_json, subtype) VALUES (?,?,?,?,?,?,?,?,?,?)",
             (guid, f"Qualifying {uid}", "Troop", 1, 1, 1, 0,
              "[]", "[]", subtype))
         card(db, uid, 5, guid, "warzone")

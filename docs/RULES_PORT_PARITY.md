@@ -1705,3 +1705,21 @@ branch on it, so the no-op port is exact.
 Use `docs/PRIVATE_SERVER_FEATURES.md` for the other known setup, draw, hand-limit,
 metadata-interpreter and client acceptance gaps. A clean class inventory must
 not clear those items.
+
+## Condition gate: native vs framework engine
+
+`abilities/framework/statics.py` now gates effects with the native layer
+(`rules_port.conditions.evaluate_effect_condition`) instead of
+`abilities/framework/condition_engine.py`. A differential over all 538 Records
+conditions (12,912 contexts) found 2,872 disagreements across 130 conditions.
+By type: RequiresTargetPassesFilter (all), NotEffect (all), RequiresCardsControlled
+(864 framework ValueErrors), AndEffect (192 framework ValueErrors),
+SourceCardHasCounters, RequiresResourceThreshold, RequiresChampionHealth,
+ChampionCardsCast and RequiresSourcePassesFilter. A hand check of
+NotEffect(RequiresResourceThreshold) on an empty state gave the native answer as
+correct and the framework's inner result as wrong.
+
+RequiresChampionHealth now honours `m_PlayerFilter` in the native layer
+(Self, SingleOpponent, MultipleOpponents), matching the framework.
+`condition_engine.py` stays in use by `abilities/framework/deathcry.py` until
+that caller is switched, so its copies are not yet deleted.
