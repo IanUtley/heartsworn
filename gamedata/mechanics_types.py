@@ -3,42 +3,67 @@ AssetExtraction/extract_mechanics.py; do not edit by hand).
 
 Each class names its client type (``type_name``), its version, and its own fields as
 ``fields``: record name -> (C# type, client default). Inherited fields come from the base.
+Each own field is also annotated with its Python type (``m_Name: str``), so attribute
+access on a stored object is typed; deprecated fields are not annotated.
 """
 
+from __future__ import annotations
+
+from typing import Any, ClassVar
+
+from domain.types import ResourceId
 from gamedata.mechanics_base import Typed
 
 
 class AbilityCondition(Typed):
-    type_name = 'Game.Shared.Mechanics.AbilityCondition'
-    version = None
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.AbilityCondition'
+    version: ClassVar[int | None] = None
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class AbilityEffectCondition(Typed):
-    type_name = 'Game.Shared.Mechanics.AbilityEffectCondition'
-    version = None
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.AbilityEffectCondition'
+    version: ClassVar[int | None] = None
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class AbilityEffectConditionTemplate(Typed):
-    type_name = 'Game.Shared.Mechanics.Abilities.AbilityEffectConditionTemplate'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.AbilityEffectConditionTemplate'
+    version: ClassVar[int | None] = 1
+    m_Condition: AbilityEffectCondition | None
+    m_Name: str
+    m_TemplateId: ResourceId | None
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_Condition': ('IAbilityEffectCondition', None),
         'm_Name': ('string', ""),
         'm_TemplateId': ('ResourceId', None),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class AbilityEffectTargetMapping(Typed):
-    type_name = 'Reckoning.Game.AbilityEffectTargetMapping'
-    version = 15
-    fields = {
+    type_name: ClassVar[str] = 'Reckoning.Game.AbilityEffectTargetMapping'
+    version: ClassVar[int | None] = 15
+    m_ConditionId: ResourceId | None
+    m_ContingentEffectInstanceId: int
+    m_EffectDuration: Any
+    m_EffectGroupId: int
+    m_EffectInstanceId: int
+    m_EffectTemplateId: ResourceId | None
+    m_IsOptional: bool
+    m_Layer: int
+    m_OutputVariables: dict[Any, str]
+    m_RecalculateTargets: Any
+    m_SecondaryTargetIndex: int
+    m_TargetTemplateIndex: int
+    m_VfxEventType: Any
+    m_VfxProjectileType: Any
+    m_VfxTargetSelectionType: Any
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_ConditionId': ('ResourceId', None),
         'm_ContingentEffectInstanceId': ('int', -1),
         'm_EffectDuration': ('EAbilityDurations', 'Instant'),
@@ -55,7 +80,7 @@ class AbilityEffectTargetMapping(Typed):
         'm_VfxProjectileType': ('ECardProjectileType', 'None'),
         'm_VfxTargetSelectionType': ('ECardSelectionType', 'Targetable'),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_EffectGroup': ('int', 0),
         'm_InputVariables_DEPRECATED': ('Dictionary<string, string>', {}),
         'm_UpdateTargets_DEPRECATED': ('bool', False),
@@ -64,16 +89,21 @@ class AbilityEffectTargetMapping(Typed):
     }
 
 class AbilityEffectTemplate(Typed):
-    type_name = 'Reckoning.Game.AbilityEffectTemplate'
-    version = 10
-    fields = {
+    type_name: ClassVar[str] = 'Reckoning.Game.AbilityEffectTemplate'
+    version: ClassVar[int | None] = 10
+    m_EditorVariableMap: dict[str, int]
+    m_GameText: str
+    m_Name: str
+    m_SerializedTAC: SerializableTAC | None
+    m_TemplateId: ResourceId | None
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_EditorVariableMap': ('Dictionary<string, int>', {}),
         'm_GameText': ('string', ""),
         'm_Name': ('string', ""),
         'm_SerializedTAC': ('SerializableTAC', None),
         'm_TemplateId': ('ResourceId', None),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_AbilityDuration_DEPRECATED': ('EAbilityDurations', 'Instant'),
         'm_ActivationCost_DEPRECATED': ('int', 0),
         'm_Condition_DEPRECATED': ('AbilityEffectCondition', None),
@@ -85,53 +115,80 @@ class AbilityEffectTemplate(Typed):
     }
 
 class AbilityField(Typed):
-    type_name = 'Game.Shared.Mechanics.Abilities.AbilityField'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.AbilityField'
+    version: ClassVar[int | None] = 1
+    m_DefaultValue: int
+    m_Name: str
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_DefaultValue': ('int', 0),
         'm_Name': ('string', ""),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class AbilityOptionEntry(Typed):
-    type_name = 'Game.Shared.Mechanics.Abilities.AbilityOptionEntry'
-    version = 2
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.AbilityOptionEntry'
+    version: ClassVar[int | None] = 2
+    m_Label: str
+    m_Options: list[AbilityOptionEntry]
+    m_TargetProperty: Any
+    m_Value: int
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_Label': ('string', ""),
         'm_Options': ('List<AbilityOptionEntry>', []),
         'm_TargetProperty': ('EAbilityProperties', None),
         'm_Value': ('int', 0),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class AbilityOptions(Typed):
-    type_name = 'Game.Shared.Mechanics.AbilityOptions'
-    version = 2
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.AbilityOptions'
+    version: ClassVar[int | None] = 2
+    m_Label: str
+    m_Options: list[AbilityOptionEntry]
+    m_TargetProperty: Any
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_Label': ('string', ""),
         'm_Options': ('List<AbilityOptionEntry>', []),
         'm_TargetProperty': ('EAbilityProperties', None),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class AbilityOverrideValue(Typed):
-    type_name = 'Reckoning.Game.AbilityOverrideValue'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Reckoning.Game.AbilityOverrideValue'
+    version: ClassVar[int | None] = 1
+    m_Name: str
+    m_OwnerType: Any
+    m_Value: Any
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_Name': ('string', ""),
         'm_OwnerType': ('Type', None),
         'm_Value': ('object', None),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class AbilityTargetTemplate(Typed):
-    type_name = 'Game.Shared.Mechanics.Abilities.TargetTemplates.AbilityTargetTemplate'
-    version = 12
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.TargetTemplates.AbilityTargetTemplate'
+    version: ClassVar[int | None] = 12
+    m_AllowBestEffortMinimumTargetCount: bool
+    m_CardFilter: Any
+    m_CollectionFlags: Any
+    m_Explicit: bool
+    m_GameText: str
+    m_IsAutoTarget: bool
+    m_IsRandomTarget: bool
+    m_MaxTargetCount: TargetField | None
+    m_MaximumTargetCount_DEPRECATED: AbilityField | None
+    m_MinTargetCount: TargetField | None
+    m_MinimumTargetCount_DEPRECATED: AbilityField | None
+    m_Name: str
+    m_Optional: bool
+    m_PlayerFilter: Any
+    m_TemplateId: ResourceId | None
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_AllowBestEffortMinimumTargetCount': ('bool', False),
         'm_CardFilter': ('CardFilter', None),
         'm_CollectionFlags': ('ECardCollections', None),
@@ -148,7 +205,7 @@ class AbilityTargetTemplate(Typed):
         'm_PlayerFilter': ('EPlayerCardTargets', None),
         'm_TemplateId': ('ResourceId', None),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_MaximumTargetCount': ('AbilityField', None),
         'm_MaximumTargetCount_DEPRECATED': ('int', 0),
         'm_MinimumTargetCount': ('AbilityField', None),
@@ -156,9 +213,57 @@ class AbilityTargetTemplate(Typed):
     }
 
 class AbilityTemplate(Typed):
-    type_name = 'Reckoning.Game.AbilityTemplate'
-    version = 42
-    fields = {
+    type_name: ClassVar[str] = 'Reckoning.Game.AbilityTemplate'
+    version: ClassVar[int | None] = 42
+    m_AIHints: str
+    m_AbilityCondition: AbilityCondition | None
+    m_AbilityEffectList: list[AbilityEffectTargetMapping]
+    m_AbilityFreeCondition: AbilityCondition | None
+    m_AbilityIndex: int
+    m_AbilityOptions: list[AbilityOptions]
+    m_AbilityTargetTemplateIds: list[ResourceId]
+    m_AbilityTemplateId: ResourceId | None
+    m_ActivationCost: int
+    m_ActivationGameText: str
+    m_CastingBehavior: Any
+    m_ChargePointCost: int
+    m_Cooldown: int
+    m_CounterCosts: list[Any]
+    m_DiscardTarget: ResourceId | None
+    m_DiscardTargets: list[ResourceId]
+    m_DiscountMatchCardFilter: Any
+    m_ExhaustTarget: ResourceId | None
+    m_ExhaustTargets: list[ResourceId]
+    m_ExhaustsCardOnUse: bool
+    m_GameText: str
+    m_IgnoresChain: bool
+    m_IsChargePower: bool
+    m_IsSpellPower: bool
+    m_LifeCost: int
+    m_Manual: bool
+    m_Name: str
+    m_Optional: bool
+    m_PutIntoDeckTarget: ResourceId | None
+    m_PutIntoDeckTarget2: ResourceId | None
+    m_PutIntoHandTarget: ResourceId | None
+    m_RecalculateAutoTargets: bool
+    m_RevealTarget: ResourceId | None
+    m_SacrificeTarget: ResourceId | None
+    m_SerializedTAC: SerializableTAC | None
+    m_ShuffleIntoDeckTarget: ResourceId | None
+    m_SpellPointCost: int
+    m_Threshold: list[Any] | None
+    m_TriggerCollectionFlags: Any
+    m_TriggerCondition: TriggerCondition | None
+    m_TriggerEventType: Any
+    m_UsesPerGame: int
+    m_UsesPerTurn: int
+    m_UsesPreviousState: bool
+    m_VariableActivationCost: bool
+    m_VariableActivationCostMinimum: int
+    m_Variables: list[AbilityField]
+    m_VoidTarget: ResourceId | None
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_AIHints': ('string', ""),
         'm_AbilityCondition': ('IAbilityCondition', None),
         'm_AbilityEffectList': ('List<AbilityEffectTargetMapping>', []),
@@ -208,7 +313,7 @@ class AbilityTemplate(Typed):
         'm_Variables': ('List<AbilityField>', []),
         'm_VoidTarget': ('ResourceId', None),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_AICustomAbilityEvaluator_DEPRECATED': ('List<AICustomAbilityEvaluator>', []),
         'm_AbilityEffectTemplates_DEPRECATED': ('List<AbilityEffectTemplate>', []),
         'm_CounterCostAmount_DEPRECATED': ('int', 0),
@@ -218,17 +323,28 @@ class AbilityTemplate(Typed):
     }
 
 class AbilityTriggerTargetTemplate(Typed):
-    type_name = 'Game.Shared.Mechanics.Abilities.TargetTemplates.AbilityTriggerTargetTemplate'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.TargetTemplates.AbilityTriggerTargetTemplate'
+    version: ClassVar[int | None] = 1
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class AdventureZone(Typed):
-    type_name = 'Reckoning.Game.Campaign.AdventureZone'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Reckoning.Game.Campaign.AdventureZone'
+    version: ClassVar[int | None] = 1
+    m_BattleMods: dict[str, EncounterModBase]
+    m_Battles: dict[str, ResourceId]
+    m_Id: ResourceId | None
+    m_Locations: list[LocationNode]
+    m_PayoutAwards: dict[str, list[LootPayoutBase]]
+    m_StartNode: str
+    m_ZoneDescription: str
+    m_ZoneIdentifier: str
+    m_ZoneModifiers: dict[str, EncounterModBase]
+    m_ZoneName: str
+    m_ZoneType: Any
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_BattleMods': ('Dictionary<string, EncounterModBase>', {}),
         'm_Battles': ('Dictionary<string, ResourceId>', {}),
         'm_Id': ('ResourceId', None),
@@ -241,22 +357,87 @@ class AdventureZone(Typed):
         'm_ZoneName': ('string', ""),
         'm_ZoneType': ('EAdventureZoneType', 'REGION'),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class AndCardFilter(Typed):
-    type_name = 'Game.Shared.Mechanics.Cards.Filters.AndCardFilter'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Cards.Filters.AndCardFilter'
+    version: ClassVar[int | None] = 1
+    m_TargetFilters: list[Any]
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_TargetFilters': ('List<CardFilter>', []),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class ArtDataObject(Typed):
-    type_name = 'Reckoning.Game.ArtDataObject'
-    version = 20
-    fields = {
+    type_name: ClassVar[str] = 'Reckoning.Game.ArtDataObject'
+    version: ClassVar[int | None] = 20
+    m_AdventureZone: str
+    m_AlsoInPvPSet: str
+    m_Area: str
+    m_ArtCategory: Any
+    m_ArtNumber: str
+    m_ArtProductionStatus: Any
+    m_ArtProductionStatusChangedDate: str
+    m_ArtRace: str
+    m_ArtRegion: Any
+    m_ArtType: str
+    m_ArtistId: str
+    m_ArtistLate: bool
+    m_ArtistName: str
+    m_ArtistReference: str
+    m_AssignedDate: str
+    m_BasecampMessageId: int
+    m_BookingNotes: str
+    m_CardDescription: str
+    m_CardName: str
+    m_Class: str
+    m_Classification: str
+    m_Difficulty: str
+    m_DueDate: str
+    m_Dungeon: str
+    m_Equipment1: str
+    m_Equipment2: str
+    m_FileName: str
+    m_FileName2: str
+    m_FinalApprovedAndComments: str
+    m_FinalComments: str
+    m_Gem: str
+    m_Gender: str
+    m_History: str
+    m_Id: ResourceId | None
+    m_InternalComments: str
+    m_InternalNotes: str
+    m_InvoiceMessageNumber: int
+    m_InvoiceNumber: int
+    m_InvoiceStatus: str
+    m_InvoiceStatusDate: str
+    m_MarketingApproved: bool
+    m_NcpDescription: str
+    m_NcpName: str
+    m_NpcDescription: str
+    m_NpcName: str
+    m_Number: str
+    m_P4Status: str
+    m_PcLevel: str
+    m_PlannedSet: str
+    m_Price: str
+    m_ProcessedImageLocation: str
+    m_ProcessedSecondaryImageLocation: str
+    m_ProposedArtistId: str
+    m_RawImageLocation: str
+    m_RawSecondaryImageLocation: str
+    m_ReferenceArt: str
+    m_ReleaseSetId: ResourceId | None
+    m_RequestedOriginalArtworkHeight: int
+    m_RequestedOriginalArtworkWidth: int
+    m_SketchEditComents: str
+    m_SleeveName: str
+    m_SpreadsheetPage: str
+    m_StyleGuides: str
+    m_Uploaded: str
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_AdventureZone': ('string', ""),
         'm_AlsoInPvPSet': ('string', ""),
         'm_Area': ('string', ""),
@@ -322,7 +503,7 @@ class ArtDataObject(Typed):
         'm_StyleGuides': ('string', ""),
         'm_Uploaded': ('string', ""),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_ArtStatus_DEPRECATED': ('ECardArtStatus', 'None'),
         'm_Assigned_DEPRECATED': ('string', ""),
         'm_Association': ('string', ""),
@@ -330,9 +511,47 @@ class ArtDataObject(Typed):
     }
 
 class ArtistInfo(Typed):
-    type_name = 'Reckoning.Game.ArtistInfo'
-    version = 16
-    fields = {
+    type_name: ClassVar[str] = 'Reckoning.Game.ArtistInfo'
+    version: ClassVar[int | None] = 16
+    m_AdditionalContacts: list[str]
+    m_Alias: str
+    m_ArtHouseAssignment: bool
+    m_ArtHouseInvoiceAddress: str
+    m_ArtHouseInvoicePhone: str
+    m_ArtHousePaymentInstructions: str
+    m_ArtHousePaymentPreference: str
+    m_ArtHousePreferredCurrency: str
+    m_Availability: str
+    m_AvailabilityLastModifiedDate: str
+    m_AvailableOnDate: str
+    m_Badge: str
+    m_BasecampProjectId: int
+    m_Comment: str
+    m_CommunicationRating: float
+    m_ContractSigned: bool
+    m_ContractStatus: str
+    m_CreativityRating: float
+    m_DeclinedReason: str
+    m_DetailLevelRating: float
+    m_DocuSignEnvelopeId: str
+    m_Email: str
+    m_Id: ResourceId | None
+    m_InvoiceAddress: str
+    m_InvoicePhone: str
+    m_LastDeclinedArt: str
+    m_Name: str
+    m_NextInvoiceNumber: int
+    m_PaymentInstructions: str
+    m_PaymentPreference: str
+    m_PreferredCurrency: str
+    m_Price: str
+    m_Region: str
+    m_Status: str
+    m_Strengths: str
+    m_WantsMoreWorkDate: str
+    m_Weaknesses: str
+    m_Website: str
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_AdditionalContacts': ('List<string>', []),
         'm_Alias': ('string', ""),
         'm_ArtHouseAssignment': ('bool', False),
@@ -372,141 +591,169 @@ class ArtistInfo(Typed):
         'm_Weaknesses': ('string', ""),
         'm_Website': ('string', ""),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_Aliases': ('string', ""),
         'm_Rating_DEPRECATED': ('string', ""),
     }
 
 class AttackImmunityModifier(Typed):
-    type_name = 'Game.Shared.Mechanics.Modifiers.AttackImmunityModifier'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Modifiers.AttackImmunityModifier'
+    version: ClassVar[int | None] = 1
+    m_CardFilter: Any
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_CardFilter': ('CardFilter', None),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class AttackRestrictionModifier(Typed):
-    type_name = 'Game.Shared.Mechanics.Modifiers.AttackRestrictionModifier'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Modifiers.AttackRestrictionModifier'
+    version: ClassVar[int | None] = 1
+    m_CardFilter: Any
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_CardFilter': ('CardFilter', None),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class AttributeModifier(Typed):
-    type_name = 'Game.Shared.Mechanics.Modifiers.AttributeModifier'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Modifiers.AttributeModifier'
+    version: ClassVar[int | None] = 1
+    m_AttributeFlags: Any
+    m_Operation: Any
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_AttributeFlags': ('ECardAttributes', None),
         'm_Operation': ('EOperations', None),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class BattleSceneElementReference(Typed):
-    type_name = 'Game.Shared.Tutorial.BattleSceneElementReference'
-    version = 2
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Tutorial.BattleSceneElementReference'
+    version: ClassVar[int | None] = 2
+    m_Cards: list[ResourceId]
+    m_ElementType: Any
+    m_TargetElement: Any
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_Cards': ('List<ResourceId>', []),
         'm_ElementType': ('EBattleSceneElementType', 'Invalid'),
         'm_TargetElement': ('EBattleSceneElement', 'Invalid'),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_CardId_DEPRECATED': ('ResourceId', None),
     }
 
 class BeingBlockedByFilter(Typed):
-    type_name = 'Game.Shared.Mechanics.Cards.Filters.BeingBlockedByFilter'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Cards.Filters.BeingBlockedByFilter'
+    version: ClassVar[int | None] = 1
+    m_Filter: Any
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_Filter': ('CardFilter', None),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class BlackBoardBits(Typed):
-    type_name = 'Game.Shared.Mechanics.BlackBoardBits'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.BlackBoardBits'
+    version: ClassVar[int | None] = 1
+    mAchievementFlags: int
+    mData: list[str]
+    mLocations: list[str]
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'mAchievementFlags': ('int', 0),
         'mData': ('List<string>', []),
         'mLocations': ('List<string>', []),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class BlockImmunityExceptionModifier(Typed):
-    type_name = 'Game.Shared.Mechanics.Modifiers.BlockImmunityExceptionModifier'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Modifiers.BlockImmunityExceptionModifier'
+    version: ClassVar[int | None] = 1
+    m_CardFilter: Any
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_CardFilter': ('CardFilter', None),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class BlockImmunityModifier(Typed):
-    type_name = 'Game.Shared.Mechanics.Modifiers.BlockImmunityModifier'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Modifiers.BlockImmunityModifier'
+    version: ClassVar[int | None] = 1
+    m_CardFilter: Any
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_CardFilter': ('CardFilter', None),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class BlockRestrictionExceptionModifier(Typed):
-    type_name = 'Game.Shared.Mechanics.Modifiers.BlockRestrictionExceptionModifier'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Modifiers.BlockRestrictionExceptionModifier'
+    version: ClassVar[int | None] = 1
+    m_CardFilter: Any
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_CardFilter': ('CardFilter', None),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class BlockRestrictionModifier(Typed):
-    type_name = 'Game.Shared.Mechanics.Modifiers.BlockRestrictionModifier'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Modifiers.BlockRestrictionModifier'
+    version: ClassVar[int | None] = 1
+    m_CardFilter: Any
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_CardFilter': ('CardFilter', None),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class BlockingFilter(Typed):
-    type_name = 'Game.Shared.Mechanics.Cards.Filters.BlockingFilter'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Cards.Filters.BlockingFilter'
+    version: ClassVar[int | None] = 1
+    m_Filter: Any
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_Filter': ('CardFilter', None),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class CampaignMapDescription(Typed):
-    type_name = 'Reckoning.Game.CampaignMapDescription'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Reckoning.Game.CampaignMapDescription'
+    version: ClassVar[int | None] = 1
+    m_Description: str
+    m_Qualifiers: list[DataRestrictionBase]
+    m_Type: Any
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_Description': ('string', ""),
         'm_Qualifiers': ('List<DataRestrictionBase>', []),
         'm_Type': ('ECampaignNodeDescriptionType', 'SingleClick'),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class CardAbilityContainer(Typed):
-    type_name = 'Reckoning.Game.CardAbilityContainer'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Reckoning.Game.CardAbilityContainer'
+    version: ClassVar[int | None] = 1
+    m_CardAbilityId: ResourceId | None
+    m_CardAbilityOverrides: TemplateOverrideValues | None
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_CardAbilityId': ('ResourceId', None),
         'm_CardAbilityOverrides': ('TemplateOverrideValues', None),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class CardCounterTemplate(Typed):
-    type_name = 'Reckoning.Game.CardCounterTemplate'
-    version = 5
-    fields = {
+    type_name: ClassVar[str] = 'Reckoning.Game.CardCounterTemplate'
+    version: ClassVar[int | None] = 5
+    m_CardCounterId: ResourceId | None
+    m_CounterPrefab: str
+    m_Description: str
+    m_Facedown: bool
+    m_Hidden: bool
+    m_Name: str
+    m_Secret: bool
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_CardCounterId': ('ResourceId', None),
         'm_CounterPrefab': ('string', ""),
         'm_Description': ('string', ""),
@@ -515,13 +762,19 @@ class CardCounterTemplate(Typed):
         'm_Name': ('string', ""),
         'm_Secret': ('bool', False),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class CardSetTemplate(Typed):
-    type_name = 'Reckoning.Game.CardSetTemplate'
-    version = 4
-    fields = {
+    type_name: ClassVar[str] = 'Reckoning.Game.CardSetTemplate'
+    version: ClassVar[int | None] = 4
+    m_BundleName: str
+    m_Id: ResourceId | None
+    m_Name: str
+    m_ReleaseDate: str
+    m_SetNo: int
+    m_Tags: str
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_BundleName': ('string', ""),
         'm_Id': ('ResourceId', None),
         'm_Name': ('string', ""),
@@ -529,13 +782,100 @@ class CardSetTemplate(Typed):
         'm_SetNo': ('int', 1),
         'm_Tags': ('string', ""),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class CardTemplate(Typed):
-    type_name = 'Reckoning.Game.CardTemplate'
-    version = 77
-    fields = {
+    type_name: ClassVar[str] = 'Reckoning.Game.CardTemplate'
+    version: ClassVar[int | None] = 77
+    m_AIHints: str
+    m_ArtNumber: str
+    m_ArtStatus: Any
+    m_ArtistName: str
+    m_ArtistNotes: str
+    m_AttributeFlags: Any
+    m_AudioProductionStatus: str
+    m_BaseAttackValue: int
+    m_BaseDefenseValue: int
+    m_BuildTag: str
+    m_CardAbilities: list[CardAbilityContainer]
+    m_CardImagePath: str
+    m_CardLayoutId: ResourceId | None
+    m_CardNumber: int
+    m_CardRarity: Any
+    m_CardSubtype: str
+    m_CardType: Any
+    m_CounterCosts: list[Any]
+    m_CurrentResourcesGranted: int
+    m_DeckbuildingOneForEach: Any
+    m_DeckbuildingRequiresMatches: Any
+    m_DefaultLayout: CardTemplateLayout | None
+    m_DesignNotes: str
+    m_DesignerCardId: str
+    m_DesignerNumber: int
+    m_DiscardTarget: ResourceId | None
+    m_DiscardTargets: list[ResourceId]
+    m_EntersPlayExhausted: bool
+    m_EquipmentIsDisplayOnly: list[bool]
+    m_EquipmentModifiedCard: bool
+    m_EquipmentSlots: list[ResourceId]
+    m_ExhaustTarget: ResourceId | None
+    m_ExhaustTargets: list[ResourceId]
+    m_ExtendedLayout: CardTemplateLayout | None
+    m_Faction: Any
+    m_FlavorText: str
+    m_GameText: str
+    m_Gender: Any
+    m_HasAlternateArt: bool
+    m_HasAnimatedArt: bool
+    m_HasExtendedArt: bool
+    m_HasExtendedLayout: bool
+    m_Id: ResourceId | None
+    m_ImplNotes: str
+    m_ImplStage: Any
+    m_IneligibleForPvERandomTemplates: bool
+    m_IneligibleForPvPRandomTemplates: bool
+    m_IsPvE: bool
+    m_LifeCost: int
+    m_LineageId: ResourceId | None
+    m_MaxResourcesGranted: int
+    m_Name: str
+    m_OverrideEventEffects: dict[str, str] | None
+    m_OverrideStateEffects: dict[str, str] | None
+    m_Parsable: bool
+    m_PlayCondition: AbilityCondition | None
+    m_PutIntoDeckTarget: ResourceId | None
+    m_PutIntoDeckTarget2: ResourceId | None
+    m_PutIntoHandTarget: ResourceId | None
+    m_RageValue: int
+    m_ResourceCost: int
+    m_ResourceSymbolImagePath: str
+    m_RevealTarget: ResourceId | None
+    m_SacrificeTarget: ResourceId | None
+    m_SerializedTAC: SerializableTAC | None
+    m_SetIconImagePath: str
+    m_SetId: ResourceId | None
+    m_ShuffleIntoDeckTarget: ResourceId | None
+    m_SocketCount: int
+    m_SoundEventOnSpawn: str
+    m_TalentModifiedCard: bool
+    m_TalentModifiers: list[ResourceId]
+    m_Threshold: list[Any] | None
+    m_Tradeable: bool
+    m_Unique: bool
+    m_UniqueTag: str
+    m_Unlimited: bool
+    m_VariableAttack: bool
+    m_VariableCost: bool
+    m_VariableCostDouble: bool
+    m_VariableCostMinimum: int
+    m_VariableDefense: bool
+    m_VfxActivation: Any
+    m_VfxCreation: Any
+    m_VfxDamage: Any
+    m_VfxDestruction: Any
+    m_VoidTarget: ResourceId | None
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_AIHints': ('string', ""),
         'm_ArtNumber': ('string', ""),
         'm_ArtStatus': ('ECardArtStatus', 'None'),
@@ -624,7 +964,7 @@ class CardTemplate(Typed):
         'm_VfxDestruction': ('EVisualEffectType', None),
         'm_VoidTarget': ('ResourceId', None),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_AbilityTemplateIds_DEPRECATED': ('List<ResourceId>', []),
         'm_BaseHealthValue': ('int', 0),
         'm_ColorFlags_DEPRECATED': ('ECardShards', 'Unknown'),
@@ -649,9 +989,19 @@ class CardTemplate(Typed):
     }
 
 class CardTemplateLayout(Typed):
-    type_name = 'Reckoning.Game.CardTemplateLayout'
-    version = 5
-    fields = {
+    type_name: ClassVar[str] = 'Reckoning.Game.CardTemplateLayout'
+    version: ClassVar[int | None] = 5
+    m_Id: ResourceId | None
+    m_Name: str
+    m_PortraitBottom: float
+    m_PortraitCenterX: float
+    m_PortraitCenterY: float
+    m_PortraitLeft: float
+    m_PortraitRadius: float
+    m_PortraitRight: float
+    m_PortraitRotation: int
+    m_PortraitTop: float
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_Id': ('ResourceId', None),
         'm_Name': ('string', ""),
         'm_PortraitBottom': ('float', 1),
@@ -663,7 +1013,7 @@ class CardTemplateLayout(Typed):
         'm_PortraitRotation': ('int', 0),
         'm_PortraitTop': ('float', 0),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_PortraitBottom_DEPRECATED': ('int', 0),
         'm_PortraitLeft_DEPRECATED': ('int', 0),
         'm_PortraitRight_DEPRECATED': ('int', 0),
@@ -671,9 +1021,18 @@ class CardTemplateLayout(Typed):
     }
 
 class ChallengeBaseTemplate(Typed):
-    type_name = 'Game.Shared.ChallengeBaseTemplate'
-    version = 5
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.ChallengeBaseTemplate'
+    version: ClassVar[int | None] = 5
+    m_Bucket: Any
+    m_CustomGroupID: int
+    m_Group: Any
+    m_Id: ResourceId | None
+    m_ResetUponCompletion: bool
+    m_RewardId: ResourceId | None
+    m_Type: Any
+    m_UIData: ChallengeUIData | None
+    m_VersionNumber: int
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_Bucket': ('EChallengeBucket', 'None'),
         'm_CustomGroupID': ('int', 1),
         'm_Group': ('EChallengeGroup', 'None'),
@@ -684,44 +1043,64 @@ class ChallengeBaseTemplate(Typed):
         'm_UIData': ('ChallengeUIData', None),
         'm_VersionNumber': ('int', 1),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_Reward_DEPRECATED': ('RewardTemplate', None),
     }
 
 class ChallengeEvent(Typed):
-    type_name = 'Game.Shared.Mechanics.ChallengeEvent'
-    version = None
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.ChallengeEvent'
+    version: ClassVar[int | None] = None
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class ChallengeTierData(Typed):
-    type_name = 'Game.Shared.ChallengeTierData'
-    version = 2
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.ChallengeTierData'
+    version: ClassVar[int | None] = 2
+    m_RewardId: ResourceId | None
+    m_TargetCount: int
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_RewardId': ('ResourceId', None),
         'm_TargetCount': ('int', 0),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_Reward_DEPRECATED': ('RewardTemplate', None),
     }
 
 class ChallengeUIData(Typed):
-    type_name = 'Game.Shared.ChallengeUIData'
-    version = 2
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.ChallengeUIData'
+    version: ClassVar[int | None] = 2
+    m_Description: str
+    m_Name: str
+    m_VisibleInUI: bool
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_Description': ('string', ""),
         'm_Name': ('string', ""),
         'm_VisibleInUI': ('bool', False),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class ChampionClassData(Typed):
-    type_name = 'Game.Shared.Mechanics.ChampionClassData'
-    version = 5
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.ChampionClassData'
+    version: ClassVar[int | None] = 5
+    m_Abilities: list[ResourceId]
+    m_ChampionTemplateId: ResourceId | None
+    m_Class: Any
+    m_DeckRestrictions: list[ResourceId]
+    m_Description: str
+    m_DesignNotes: str
+    m_FemalePortraits: ChampionClassPortraitData | None
+    m_Id: ResourceId | None
+    m_MalePortraits: ChampionClassPortraitData | None
+    m_Name: str
+    m_Race: Any
+    m_StartingCharges: int
+    m_StartingHandSize: int
+    m_StartingHealth: int
+    m_TalentGroups: list[ChampionTalentGroupData]
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_Abilities': ('List<ResourceId>', []),
         'm_ChampionTemplateId': ('ResourceId', None),
         'm_Class': ('EChampionClass', 'Warrior'),
@@ -738,13 +1117,31 @@ class ChampionClassData(Typed):
         'm_StartingHealth': ('int', 20),
         'm_TalentGroups': ('List<ChampionTalentGroupData>', []),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class ChampionClassPortraitData(Typed):
-    type_name = 'Reckoning.Game.ChampionClassPortraitData'
-    version = 5
-    fields = {
+    type_name: ClassVar[str] = 'Reckoning.Game.ChampionClassPortraitData'
+    version: ClassVar[int | None] = 5
+    m_Abilities: list[ResourceId]
+    m_ChampionTemplateId: ResourceId | None
+    m_Class: Any
+    m_DeckRestrictions: list[ResourceId]
+    m_Description: str
+    m_DesignNotes: str
+    m_FemalePortraits: ChampionClassPortraitData | None
+    m_Id: ResourceId | None
+    m_MalePortraits: ChampionClassPortraitData | None
+    m_Name: str
+    m_Portrait0: str
+    m_Portrait1: str
+    m_Portrait2: str
+    m_Race: Any
+    m_StartingCharges: int
+    m_StartingHandSize: int
+    m_StartingHealth: int
+    m_TalentGroups: list[ChampionTalentGroupData]
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_Abilities': ('List<ResourceId>', []),
         'm_ChampionTemplateId': ('ResourceId', None),
         'm_Class': ('EChampionClass', 'Warrior'),
@@ -764,14 +1161,20 @@ class ChampionClassPortraitData(Typed):
         'm_StartingHealth': ('int', 20),
         'm_TalentGroups': ('List<ChampionTalentGroupData>', []),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_Icon_DEPRECATED': ('string', ""),
     }
 
 class ChampionDeckRestriction(Typed):
-    type_name = 'Reckoning.Game.ChampionDeckRestriction'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Reckoning.Game.ChampionDeckRestriction'
+    version: ClassVar[int | None] = 1
+    m_Class: Any
+    m_DeckRestrictionType: Any
+    m_Id: ResourceId | None
+    m_Name: str
+    m_Race: Any
+    m_Restrictions: dict[int, dict[Any, dict[Any, int]]]
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_Class': ('EChampionClass', 'None'),
         'm_DeckRestrictionType': ('EDeckRestrictionType', 'Unknown'),
         'm_Id': ('ResourceId', None),
@@ -779,13 +1182,20 @@ class ChampionDeckRestriction(Typed):
         'm_Race': ('ERace', 'None'),
         'm_Restrictions': ('Dictionary<int, Dictionary<ECardShards, Dictionary<ERarity, int>>>', {}),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class ChampionPetTemplate(Typed):
-    type_name = 'Reckoning.Game.ChampionPetTemplate'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Reckoning.Game.ChampionPetTemplate'
+    version: ClassVar[int | None] = 1
+    m_ChampionTemplateId: ResourceId | None
+    m_Gender: Any
+    m_HudPortrait: str
+    m_Id: ResourceId | None
+    m_Name: str
+    m_SerializedTAC: SerializableTAC | None
+    m_SubType: str
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_ChampionTemplateId': ('ResourceId', None),
         'm_Gender': ('EGender', None),
         'm_HudPortrait': ('string', ""),
@@ -794,13 +1204,45 @@ class ChampionPetTemplate(Typed):
         'm_SerializedTAC': ('SerializableTAC', None),
         'm_SubType': ('string', ""),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class ChampionTalentData(Typed):
-    type_name = 'Game.Shared.Mechanics.ChampionTalentData'
-    version = 18
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.ChampionTalentData'
+    version: ClassVar[int | None] = 18
+    m_Abilities: list[CardAbilityContainer]
+    m_ArtNumber: str
+    m_BuildTag: str
+    m_Class: Any
+    m_Conditionals: list[Any]
+    m_Cost: int
+    m_DeckRestriction: ResourceId | None
+    m_Description: str
+    m_DesignNotes: str
+    m_DungeonLivesModifier: int
+    m_Eval: str
+    m_From: str
+    m_GameText: str
+    m_Icon: str
+    m_Id: ResourceId | None
+    m_ImplStage: Any
+    m_MercenaryStartingChargesModifier: int
+    m_MercenaryStartingHealthModifier: int
+    m_MinDeckSizeModifier: int
+    m_MinLevel: int
+    m_Modifiers: str
+    m_Name: str
+    m_Prerequisites: list[ChampionTalentPrerequisite]
+    m_SelectionType: Any
+    m_SerializedTAC: SerializableTAC | None
+    m_SetId: ResourceId | None
+    m_StartingHealthModifier: int
+    m_TalentModifiers: list[ResourceId]
+    m_TalentPointModifier: int
+    m_To: str
+    m_UnlockedCards: list[ResourceId]
+    m_UnlockedGemsNew: list[Any]
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_Abilities': ('List<CardAbilityContainer>', []),
         'm_ArtNumber': ('string', ""),
         'm_BuildTag': ('string', ""),
@@ -834,24 +1276,63 @@ class ChampionTalentData(Typed):
         'm_UnlockedCards': ('List<ResourceId>', []),
         'm_UnlockedGemsNew': ('List<EGemTypesNew>', []),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class ChampionTalentGroupData(Typed):
-    type_name = 'Reckoning.Game.ChampionTalentGroupData'
-    version = 2
-    fields = {
+    type_name: ClassVar[str] = 'Reckoning.Game.ChampionTalentGroupData'
+    version: ClassVar[int | None] = 2
+    m_MinLevel: int
+    m_Source: Any
+    m_Talents: list[ResourceId]
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_MinLevel': ('int', 0),
         'm_Source': ('ETalentSource', 'Class'),
         'm_Talents': ('List<ResourceId>', []),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class ChampionTalentPrerequisite(Typed):
-    type_name = 'Reckoning.Game.ChampionTalentPrerequisite'
-    version = 18
-    fields = {
+    type_name: ClassVar[str] = 'Reckoning.Game.ChampionTalentPrerequisite'
+    version: ClassVar[int | None] = 18
+    m_Abilities: list[CardAbilityContainer]
+    m_AllList: list[ResourceId]
+    m_AnyCount: int
+    m_AnyList: list[ResourceId]
+    m_ArtNumber: str
+    m_BuildTag: str
+    m_Class: Any
+    m_Conditionals: list[Any]
+    m_Cost: int
+    m_DeckRestriction: ResourceId | None
+    m_Description: str
+    m_DesignNotes: str
+    m_DisplayText: dict[str, str]
+    m_DungeonLivesModifier: int
+    m_Eval: str | None
+    m_From: str
+    m_GameText: str
+    m_Icon: str
+    m_Id: ResourceId | None
+    m_ImplStage: Any
+    m_MercenaryStartingChargesModifier: int
+    m_MercenaryStartingHealthModifier: int
+    m_MinDeckSizeModifier: int
+    m_MinLevel: int
+    m_Modifiers: str
+    m_Name: str
+    m_Prerequisites: list[ChampionTalentPrerequisite]
+    m_SelectionType: Any
+    m_SerializedTAC: SerializableTAC | None
+    m_SetId: ResourceId | None
+    m_StartingHealthModifier: int
+    m_TalentModifiers: list[ResourceId]
+    m_TalentPointModifier: int
+    m_To: str
+    m_UnlockedCards: list[ResourceId]
+    m_UnlockedGemsNew: list[Any]
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_Abilities': ('List<CardAbilityContainer>', []),
         'm_AllList': ('List<ResourceId>', []),
         'm_AnyCount': ('int', 0),
@@ -889,7 +1370,7 @@ class ChampionTalentPrerequisite(Typed):
         'm_UnlockedCards': ('List<ResourceId>', []),
         'm_UnlockedGemsNew': ('List<EGemTypesNew>', []),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_Ability_DEPRECATED': ('ResourceId', None),
         'm_Category_DEPRECATED': ('ETalentCategory', 'Unknown'),
         'm_HealthModifier': ('int', 0),
@@ -897,9 +1378,50 @@ class ChampionTalentPrerequisite(Typed):
     }
 
 class ChampionTemplate(Typed):
-    type_name = 'Reckoning.Game.ChampionTemplate'
-    version = 20
-    fields = {
+    type_name: ClassVar[str] = 'Reckoning.Game.ChampionTemplate'
+    version: ClassVar[int | None] = 20
+    m_AbilityArtNumbers: dict[str, str]
+    m_AbilityIcons: dict[str, str]
+    m_AbilitySlot1: ResourceId | None
+    m_AbilitySlot2: ResourceId | None
+    m_AbilitySlot3: ResourceId | None
+    m_ArtNumber: str
+    m_ArtStatus: Any
+    m_ArtistName: str
+    m_ArtistNotes: str
+    m_AudioEffectsChargePower: list[str]
+    m_AudioEffectsChat: list[str]
+    m_AudioEffectsDamage: list[str]
+    m_AudioEffectsDestroyed: list[str]
+    m_BuildTag: str
+    m_ChampionAbilities: list[CardAbilityContainer]
+    m_ChampionType: Any
+    m_CircleHudLayout: CardTemplateLayout | None
+    m_Class: Any
+    m_CutoutLayout: CardTemplateLayout | None
+    m_DesignNotes: str
+    m_DisplayText: dict[str, str]
+    m_Faction: Any
+    m_FullPortraitLayout: CardTemplateLayout | None
+    m_GameText: str
+    m_Gender: Any
+    m_HasAnimatedArt: bool
+    m_HudPortrait: str
+    m_Id: ResourceId | None
+    m_ImplNotes: str
+    m_ImplStage: Any
+    m_IsPlayerSelectable: bool
+    m_Name: str
+    m_Nickname: str
+    m_Race: Any
+    m_SelectionLayout: CardTemplateLayout | None
+    m_SerializedTAC: SerializableTAC | None
+    m_SetId: ResourceId | None
+    m_StartingCharges: int
+    m_StartingHandSize: int
+    m_StartingHealth: int
+    m_SubType: str
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_AbilityArtNumbers': ('Dictionary<string, string>', {}),
         'm_AbilityIcons': ('Dictionary<string, string>', {}),
         'm_AbilitySlot1': ('ResourceId', None),
@@ -942,7 +1464,7 @@ class ChampionTemplate(Typed):
         'm_StartingHealth': ('int', 20),
         'm_SubType': ('string', ""),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_AudioEffectChargePower1_DEPRECATED': ('string', ""),
         'm_AudioEffectChargePower2_DEPRECATED': ('string', ""),
         'm_AudioEffectChargePower3_DEPRECATED': ('string', ""),
@@ -957,84 +1479,111 @@ class ChampionTemplate(Typed):
     }
 
 class CompareAttackAndDefenseFilter(Typed):
-    type_name = 'Game.Shared.Mechanics.Cards.Filters.CompareAttackAndDefenseFilter'
-    version = 2
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Cards.Filters.CompareAttackAndDefenseFilter'
+    version: ClassVar[int | None] = 2
+    m_CompareToAbilitySourceAttack: bool
+    m_CompareToAbilitySourceDefense: bool
+    m_ComparisonOp: Any
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_CompareToAbilitySourceAttack': ('bool', False),
         'm_CompareToAbilitySourceDefense': ('bool', False),
         'm_ComparisonOp': ('EComparisons', None),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class CompareAttackToHighestFilter(Typed):
-    type_name = 'Game.Shared.Mechanics.Cards.Filters.CompareAttackToHighestFilter'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Cards.Filters.CompareAttackToHighestFilter'
+    version: ClassVar[int | None] = 1
+    m_CardFilter: Any
+    m_CollectionFlags: Any
+    m_ComparisonOp: Any
+    m_PlayerFilter: Any
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_CardFilter': ('CardFilter', None),
         'm_CollectionFlags': ('ECardCollections', None),
         'm_ComparisonOp': ('EComparisons', None),
         'm_PlayerFilter': ('EPlayerCardTargets', None),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class CompareAttackToLowestFilter(Typed):
-    type_name = 'Game.Shared.Mechanics.Cards.Filters.CompareAttackToLowestFilter'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Cards.Filters.CompareAttackToLowestFilter'
+    version: ClassVar[int | None] = 1
+    m_CardFilter: Any
+    m_CollectionFlags: Any
+    m_ComparisonOp: Any
+    m_PlayerFilter: Any
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_CardFilter': ('CardFilter', None),
         'm_CollectionFlags': ('ECardCollections', None),
         'm_ComparisonOp': ('EComparisons', None),
         'm_PlayerFilter': ('EPlayerCardTargets', None),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class CompareCastingCostToSourceCountersFilter(Typed):
-    type_name = 'Game.Shared.Mechanics.Cards.Filters.CompareCastingCostToSourceCountersFilter'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Cards.Filters.CompareCastingCostToSourceCountersFilter'
+    version: ClassVar[int | None] = 1
+    m_ComparisonOp: Any
+    m_CounterType: ResourceId | None
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_ComparisonOp': ('EComparisons', 'Equals'),
         'm_CounterType': ('ResourceId', None),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class CompareHealthToHighestFilter(Typed):
-    type_name = 'Game.Shared.Mechanics.Cards.Filters.CompareHealthToHighestFilter'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Cards.Filters.CompareHealthToHighestFilter'
+    version: ClassVar[int | None] = 1
+    m_ComparisonOp: Any
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_ComparisonOp': ('EComparisons', None),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class CompareHealthToLowestFilter(Typed):
-    type_name = 'Game.Shared.Mechanics.Cards.Filters.CompareHealthToLowestFilter'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Cards.Filters.CompareHealthToLowestFilter'
+    version: ClassVar[int | None] = 1
+    m_ComparisonOp: Any
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_ComparisonOp': ('EComparisons', None),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class CompareResourceCostToHighestFilter(Typed):
-    type_name = 'Game.Shared.Mechanics.Cards.Filters.CompareResourceCostToHighestFilter'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Cards.Filters.CompareResourceCostToHighestFilter'
+    version: ClassVar[int | None] = 1
+    m_CardFilter: Any
+    m_CollectionFlags: Any
+    m_ComparisonOp: Any
+    m_PlayerFilter: Any
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_CardFilter': ('CardFilter', None),
         'm_CollectionFlags': ('ECardCollections', None),
         'm_ComparisonOp': ('EComparisons', None),
         'm_PlayerFilter': ('EPlayerCardTargets', None),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class ConversationAnswer(Typed):
-    type_name = 'Reckoning.Game.Conversations.ConversationAnswer'
-    version = 4
-    fields = {
+    type_name: ClassVar[str] = 'Reckoning.Game.Conversations.ConversationAnswer'
+    version: ClassVar[int | None] = 4
+    m_AnswerText: str
+    m_Appearance: Any
+    m_EventsToFireWhenSelected: list[ChallengeEvent]
+    m_HightlightType: Any
+    m_IsReentrant: bool
+    m_NextQuestionId: int
+    m_OnSelectedEvents: list[ConversationEventBase]
+    m_Prerequisites: list[DataRestrictionBase]
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_AnswerText': ('string', ""),
         'm_Appearance': ('EAppearance', 'Default'),
         'm_EventsToFireWhenSelected': ('List<ChallengeEvent>', []),
@@ -1044,21 +1593,27 @@ class ConversationAnswer(Typed):
         'm_OnSelectedEvents': ('List<ConversationEventBase>', []),
         'm_Prerequisites': ('List<DataRestrictionBase>', []),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class ConversationEventBase(Typed):
-    type_name = 'Reckoning.Game.Conversations.Events.ConversationEventBase'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Reckoning.Game.Conversations.Events.ConversationEventBase'
+    version: ClassVar[int | None] = 1
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class ConversationQuestion(Typed):
-    type_name = 'Reckoning.Game.Conversations.ConversationQuestion'
-    version = 4
-    fields = {
+    type_name: ClassVar[str] = 'Reckoning.Game.Conversations.ConversationQuestion'
+    version: ClassVar[int | None] = 4
+    m_AnswerIds: list[int]
+    m_Appearance: Any
+    m_OverrideChampionId: ResourceId | None
+    m_OverrideOwnerGender: Any
+    m_OwnerNameOverride: str
+    m_QuestionText: str
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_AnswerIds': ('List<int>', []),
         'm_Appearance': ('EAppearance', 'Default'),
         'm_OverrideChampionId': ('ResourceId', None),
@@ -1066,14 +1621,25 @@ class ConversationQuestion(Typed):
         'm_OwnerNameOverride': ('string', ""),
         'm_QuestionText': ('string', ""),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_ConversationPortraitPathOverride_DEPRECATED': ('string', ""),
     }
 
 class ConversationTemplate(Typed):
-    type_name = 'Reckoning.Game.Conversations.ConversationTemplate'
-    version = 8
-    fields = {
+    type_name: ClassVar[str] = 'Reckoning.Game.Conversations.ConversationTemplate'
+    version: ClassVar[int | None] = 8
+    m_Answers: dict[int, ConversationAnswer]
+    m_Appearance: Any
+    m_BuildTag: str
+    m_ChampionId: ResourceId | None
+    m_DesignerId: int
+    m_Id: ResourceId | None
+    m_Name: str
+    m_OwnerGender: Any
+    m_OwnerName: str
+    m_Questions: dict[int, ConversationQuestion]
+    m_StartingQuestionId: int
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_Answers': ('Dictionary<int, ConversationAnswer>', {}),
         'm_Appearance': ('EAppearance', 'Default'),
         'm_BuildTag': ('string', ""),
@@ -1086,43 +1652,59 @@ class ConversationTemplate(Typed):
         'm_Questions': ('Dictionary<int, ConversationQuestion>', {}),
         'm_StartingQuestionId': ('int', 0),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_ConversationPortraitPath_DEPRECATED': ('string', ""),
     }
 
 class CounterClearModifier(Typed):
-    type_name = 'Game.Shared.Mechanics.Modifiers.CounterClearModifier'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Modifiers.CounterClearModifier'
+    version: ClassVar[int | None] = 1
+    m_CardCounterTemplateId: ResourceId | None
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_CardCounterTemplateId': ('ResourceId', None),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class DamageImmunityModifier(Typed):
-    type_name = 'Game.Shared.Mechanics.Modifiers.DamageImmunityModifier'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Modifiers.DamageImmunityModifier'
+    version: ClassVar[int | None] = 1
+    m_CardFilter: Any
+    m_IsCombatDamage: bool
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_CardFilter': ('CardFilter', None),
         'm_IsCombatDamage': ('bool', False),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class DamagedOpponentThisTurn(Typed):
-    type_name = 'Game.Shared.Mechanics.Cards.Filters.DamagedOpponentThisTurn'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Cards.Filters.DamagedOpponentThisTurn'
+    version: ClassVar[int | None] = 1
+    m_OnlyCombatDamage: bool
+    m_OnlyNonCombatDamage: bool
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_OnlyCombatDamage': ('bool', False),
         'm_OnlyNonCombatDamage': ('bool', False),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class DeckTemplate(Typed):
-    type_name = 'Reckoning.Game.DeckTemplate'
-    version = 7
-    fields = {
+    type_name: ClassVar[str] = 'Reckoning.Game.DeckTemplate'
+    version: ClassVar[int | None] = 7
+    m_ChampionId: ResourceId | None
+    m_DeckFlavor: str
+    m_DeckName: str
+    m_DeckResources: list[TemplateCardStack]
+    m_DeckSleeve: ResourceId | None
+    m_DontShuffleFirstNCards: int
+    m_EquipmentIDs: list[ResourceId]
+    m_Id: ResourceId | None
+    m_MaximumDuplicates: int
+    m_MaximumTotalCards: int
+    m_SetId: ResourceId | None
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_ChampionId': ('ResourceId', None),
         'm_DeckFlavor': ('string', ""),
         'm_DeckName': ('string', ""),
@@ -1135,21 +1717,32 @@ class DeckTemplate(Typed):
         'm_MaximumTotalCards': ('int', 60),
         'm_SetId': ('ResourceId', None),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class DifferentOwners(Typed):
-    type_name = 'Game.Shared.Mechanics.Cards.Filters.DifferentOwners'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Cards.Filters.DifferentOwners'
+    version: ClassVar[int | None] = 1
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class DungeonItemData(Typed):
-    type_name = 'Reckoning.Game.DungeonItemData'
-    version = 13
-    fields = {
+    type_name: ClassVar[str] = 'Reckoning.Game.DungeonItemData'
+    version: ClassVar[int | None] = 13
+    m_Descriptions: list[CampaignMapDescription]
+    m_EventsToFireWhenVisited: list[ChallengeEvent]
+    m_ID: int
+    m_MapNodeId: str
+    m_Name: str
+    m_NodeScapeArtNumber: str
+    m_NodeScapePath: str
+    m_NodeScapeSubBundlePath: str
+    m_TerrainType: Any
+    m_Title: str
+    m_TotemType: Any
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_Descriptions': ('List<CampaignMapDescription>', []),
         'm_EventsToFireWhenVisited': ('List<ChallengeEvent>', []),
         'm_ID': ('int', 0),
@@ -1162,7 +1755,7 @@ class DungeonItemData(Typed):
         'm_Title': ('string', ""),
         'm_TotemType': ('EDungeonNodeTotemType', 'None'),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_ActionType_DEPRECATED': ('EDungeonActionType', 'TransitionToState'),
         'm_ConversationPortraitPath_DEPRECATED': ('string', ""),
         'm_Description_DEPRECATED': ('string', ""),
@@ -1178,17 +1771,24 @@ class DungeonItemData(Typed):
     }
 
 class EffectField(Typed):
-    type_name = 'Game.Shared.Mechanics.Abilities.EffectField'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.EffectField'
+    version: ClassVar[int | None] = 1
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class EncounterDeck(Typed):
-    type_name = 'Reckoning.Game.EncounterDeck'
-    version = 2
-    fields = {
+    type_name: ClassVar[str] = 'Reckoning.Game.EncounterDeck'
+    version: ClassVar[int | None] = 2
+    m_CardsInPlay: list[ResourceId]
+    m_ChampionId: ResourceId | None
+    m_DeckOrder: list[ResourceId]
+    m_DeckTemplateId: ResourceId | None
+    m_Id: ResourceId | None
+    m_Name: str
+    m_OpeningHandSize: int
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_CardsInPlay': ('List<ResourceId>', []),
         'm_ChampionId': ('ResourceId', None),
         'm_DeckOrder': ('List<ResourceId>', []),
@@ -1197,25 +1797,35 @@ class EncounterDeck(Typed):
         'm_Name': ('string', ""),
         'm_OpeningHandSize': ('int', 7),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class EncounterModBase(Typed):
-    type_name = 'Reckoning.Game.EncounterModBase'
-    version = 2
-    fields = {
+    type_name: ClassVar[str] = 'Reckoning.Game.EncounterModBase'
+    version: ClassVar[int | None] = 2
+    m_ConversationId: ResourceId | None
+    m_IsApplied: bool
+    m_ModTargetPlayer: Any
+    m_RoundToApply: int
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_ConversationId': ('ResourceId', None),
         'm_IsApplied': ('bool', False),
         'm_ModTargetPlayer': ('EModTarget', 'AIPlayer'),
         'm_RoundToApply': ('int', 0),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class EncounterPlayer(Typed):
-    type_name = 'Reckoning.Game.EncounterPlayer'
-    version = 3
-    fields = {
+    type_name: ClassVar[str] = 'Reckoning.Game.EncounterPlayer'
+    version: ClassVar[int | None] = 3
+    m_DeckTexture: str
+    m_EncounterDeck: ResourceId | None
+    m_EncounterMods: list[EncounterStartModifications]
+    m_IsAI: bool
+    m_Portrait: str
+    m_Team: int
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_DeckTexture': ('string', ""),
         'm_EncounterDeck': ('ResourceId', None),
         'm_EncounterMods': ('List<EncounterStartModifications>', []),
@@ -1223,34 +1833,45 @@ class EncounterPlayer(Typed):
         'm_Portrait': ('string', ""),
         'm_Team': ('int', 1),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class EncounterSceneMod(Typed):
-    type_name = 'Reckoning.Game.EncounterSceneMod'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Reckoning.Game.EncounterSceneMod'
+    version: ClassVar[int | None] = 1
+    m_Description: str
+    m_Mods: list[ResourceId]
+    m_Title: str
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_Description': ('string', ""),
         'm_Mods': ('List<ResourceId>', []),
         'm_Title': ('string', ""),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class EncounterStartModifications(Typed):
-    type_name = 'Reckoning.Game.EncounterStartModifications'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Reckoning.Game.EncounterStartModifications'
+    version: ClassVar[int | None] = 1
+    m_Effects: list[EncounterModBase]
+    m_Qualifiers: list[DataRestrictionBase]
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_Effects': ('List<EncounterModBase>', []),
         'm_Qualifiers': ('List<DataRestrictionBase>', []),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class GameFormatFilterTemplate(Typed):
-    type_name = 'Reckoning.Game.GameFormatFilterTemplate'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Reckoning.Game.GameFormatFilterTemplate'
+    version: ClassVar[int | None] = 1
+    m_ExcludeOverrideCards: list[ResourceId]
+    m_IncludeOverrideCards: list[ResourceId]
+    m_LeaderboardType: Any
+    m_Name: str
+    m_ResourceId: ResourceId | None
+    m_StaticCardFilter: StaticCardFilter | None
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_ExcludeOverrideCards': ('List<ResourceId>', []),
         'm_IncludeOverrideCards': ('List<ResourceId>', []),
         'm_LeaderboardType': ('LeaderboardDataType', 'Constructed'),
@@ -1258,25 +1879,38 @@ class GameFormatFilterTemplate(Typed):
         'm_ResourceId': ('ResourceId', None),
         'm_StaticCardFilter': ('StaticCardFilter', None),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class GlobeData(Typed):
-    type_name = 'Reckoning.Game.GlobeData'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Reckoning.Game.GlobeData'
+    version: ClassVar[int | None] = 1
+    m_Id: ResourceId | None
+    m_Name: str
+    m_RegionData: list[GlobeRegionData]
+    m_Texture: str
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_Id': ('ResourceId', None),
         'm_Name': ('string', ""),
         'm_RegionData': ('List<GlobeRegionData>', []),
         'm_Texture': ('string', ""),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class GlobeRegionData(Typed):
-    type_name = 'Reckoning.Game.GlobeRegionData'
-    version = 2
-    fields = {
+    type_name: ClassVar[str] = 'Reckoning.Game.GlobeRegionData'
+    version: ClassVar[int | None] = 2
+    m_Description: str
+    m_Height: float
+    m_ItemID: ResourceId | None
+    m_ItemIcon: str
+    m_Latitude: float
+    m_Longitude: float
+    m_Name: str
+    m_SceneOverride: Any
+    m_Type: Any
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_Description': ('string', ""),
         'm_Height': ('float', 0),
         'm_ItemID': ('ResourceId', None),
@@ -1287,72 +1921,82 @@ class GlobeRegionData(Typed):
         'm_SceneOverride': ('ELocationScenes', 'Default'),
         'm_Type': ('EGlobeMapItemType', 'Quest'),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class HasASharedClassWithSourceChampionFilter(Typed):
-    type_name = 'Game.Shared.Mechanics.Cards.Filters.HasASharedClassWithSourceChampionFilter'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Cards.Filters.HasASharedClassWithSourceChampionFilter'
+    version: ClassVar[int | None] = 1
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class HasASharedFactionWithSourceFilter(Typed):
-    type_name = 'Game.Shared.Mechanics.Cards.Filters.HasASharedFactionWithSourceFilter'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Cards.Filters.HasASharedFactionWithSourceFilter'
+    version: ClassVar[int | None] = 1
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class HasASharedRarityWithSourceFilter(Typed):
-    type_name = 'Game.Shared.Mechanics.Cards.Filters.HasASharedRarityWithSourceFilter'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Cards.Filters.HasASharedRarityWithSourceFilter'
+    version: ClassVar[int | None] = 1
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class HasASharedShardWithSourceFilter(Typed):
-    type_name = 'Game.Shared.Mechanics.Cards.Filters.HasASharedShardWithSourceFilter'
-    version = 3
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Cards.Filters.HasASharedShardWithSourceFilter'
+    version: ClassVar[int | None] = 3
+    m_ExactMatch: bool
+    m_StoredShard: bool
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_ExactMatch': ('bool', False),
         'm_StoredShard': ('bool', False),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class HasASharedShardWithTopOfChainFilter(Typed):
-    type_name = 'Game.Shared.Mechanics.Cards.Filters.HasASharedShardWithTopOfChainFilter'
-    version = 2
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Cards.Filters.HasASharedShardWithTopOfChainFilter'
+    version: ClassVar[int | None] = 2
+    m_ExactMatch: bool
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_ExactMatch': ('bool', False),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class HasASharedSubtypeWithSourceChampionFilter(Typed):
-    type_name = 'Game.Shared.Mechanics.Cards.Filters.HasASharedSubtypeWithSourceChampionFilter'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Cards.Filters.HasASharedSubtypeWithSourceChampionFilter'
+    version: ClassVar[int | None] = 1
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class HasASharedSubtypeWithSourceFilter(Typed):
-    type_name = 'Game.Shared.Mechanics.Cards.Filters.HasASharedSubtypeWithSourceFilter'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Cards.Filters.HasASharedSubtypeWithSourceFilter'
+    version: ClassVar[int | None] = 1
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class HasAttackValue(Typed):
-    type_name = 'Game.Shared.Mechanics.Cards.Filters.HasAttackValue'
-    version = 6
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Cards.Filters.HasAttackValue'
+    version: ClassVar[int | None] = 6
+    m_AttackValue: int
+    m_CompareToAbilitySource: bool
+    m_CompareToCardIntegerVariable: str
+    m_CompareToSourceControlledCardFilterCount: Any
+    m_CompareToStoredTarget: bool
+    m_CompareToTriggerSource: bool
+    m_ComparisonOp: Any
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_AttackValue': ('int', 0),
         'm_CompareToAbilitySource': ('bool', False),
         'm_CompareToCardIntegerVariable': ('string', ""),
@@ -1361,63 +2005,82 @@ class HasAttackValue(Typed):
         'm_CompareToTriggerSource': ('bool', False),
         'm_ComparisonOp': ('EComparisons', None),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_CompareToAST_DEPRECATED': ('bool', False),
     }
 
 class HasAttackedThisTurn(Typed):
-    type_name = 'Game.Shared.Mechanics.Cards.Filters.HasAttackedThisTurn'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Cards.Filters.HasAttackedThisTurn'
+    version: ClassVar[int | None] = 1
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class HasCountersValue(Typed):
-    type_name = 'Game.Shared.Mechanics.Cards.Filters.HasCountersValue'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Cards.Filters.HasCountersValue'
+    version: ClassVar[int | None] = 1
+    m_Amount: int
+    m_ComparisonOp: Any
+    m_CounterType: ResourceId | None
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_Amount': ('int', 0),
         'm_ComparisonOp': ('EComparisons', None),
         'm_CounterType': ('ResourceId', None),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class HasDefenseValue(Typed):
-    type_name = 'Game.Shared.Mechanics.Cards.Filters.HasDefenseValue'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Cards.Filters.HasDefenseValue'
+    version: ClassVar[int | None] = 1
+    m_CompareToAbilitySource: bool
+    m_ComparisonOp: Any
+    m_DefenseValue: int
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_CompareToAbilitySource': ('bool', False),
         'm_ComparisonOp': ('EComparisons', None),
         'm_DefenseValue': ('int', 0),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class HasKeywordAbility(Typed):
-    type_name = 'Game.Shared.Mechanics.Cards.Filters.HasKeywordAbility'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Cards.Filters.HasKeywordAbility'
+    version: ClassVar[int | None] = 1
+    m_Keyword: str
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_Keyword': ('string', ""),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class HasName(Typed):
-    type_name = 'Game.Shared.Mechanics.Cards.Filters.HasName'
-    version = 2
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Cards.Filters.HasName'
+    version: ClassVar[int | None] = 2
+    m_Name: str
+    m_UseStoredName: bool
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_Name': ('string', ""),
         'm_UseStoredName': ('bool', False),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class HasResourceCost(Typed):
-    type_name = 'Game.Shared.Mechanics.Cards.Filters.HasResourceCost'
-    version = 10
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Cards.Filters.HasResourceCost'
+    version: ClassVar[int | None] = 10
+    m_AddAttack: bool
+    m_AddCardIntegerVariable: str
+    m_AddDefense: bool
+    m_AddSumListAttrName: str
+    m_AddSumProperty: Any
+    m_AddVariable: EffectField | None
+    m_AddX: bool
+    m_ComparisonOp: Any
+    m_ResourceCost: int
+    m_ResourceCostCardFilter: Any
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_AddAttack': ('bool', False),
         'm_AddCardIntegerVariable': ('string', ""),
         'm_AddDefense': ('bool', False),
@@ -1429,97 +2092,138 @@ class HasResourceCost(Typed):
         'm_ResourceCost': ('int', 0),
         'm_ResourceCostCardFilter': ('CardFilter', None),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_AddAssault_DEPRECATED': ('bool', False),
         'm_AddCardsExhausted_DEPRECATED': ('bool', False),
         'm_TimesAssault_DEPRECATED': ('bool', False),
     }
 
 class HasSourceCastingCostFilter(Typed):
-    type_name = 'Game.Shared.Mechanics.Cards.Filters.HasSourceCastingCostFilter'
-    version = 3
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Cards.Filters.HasSourceCastingCostFilter'
+    version: ClassVar[int | None] = 3
+    m_AddValue: EffectField | None
+    m_CastingCost: int
+    m_ComparisonOp: Any
+    m_UseSource: bool
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_AddValue': ('EffectField', None),
         'm_CastingCost': ('int', 0),
         'm_ComparisonOp': ('EComparisons', None),
         'm_UseSource': ('bool', False),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class HasSourceResourceCost(Typed):
-    type_name = 'Game.Shared.Mechanics.Cards.Filters.HasSourceResourceCost'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Cards.Filters.HasSourceResourceCost'
+    version: ClassVar[int | None] = 1
+    m_ComparisonOp: Any
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_ComparisonOp': ('EComparisons', None),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class HasSourceTypeFilter(Typed):
-    type_name = 'Game.Shared.Mechanics.Cards.Filters.HasSourceTypeFilter'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Cards.Filters.HasSourceTypeFilter'
+    version: ClassVar[int | None] = 1
+    m_DontExactlyMatchOriginal: bool
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_DontExactlyMatchOriginal': ('bool', False),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class HasTag(Typed):
-    type_name = 'Game.Shared.Mechanics.Cards.Filters.HasTag'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Cards.Filters.HasTag'
+    version: ClassVar[int | None] = 1
+    m_Tag: str
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_Tag': ('string', ""),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class InCollection(Typed):
-    type_name = 'Game.Shared.Mechanics.Cards.Filters.InCollection'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Cards.Filters.InCollection'
+    version: ClassVar[int | None] = 1
+    m_CardSource: Any
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_CardSource': ('ECardCollections', 'None'),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class InCombatWithSourceFilter(Typed):
-    type_name = 'Game.Shared.Mechanics.Cards.Filters.InCombatWithSourceFilter'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Cards.Filters.InCombatWithSourceFilter'
+    version: ClassVar[int | None] = 1
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class IntAttrFilter(Typed):
-    type_name = 'Game.Shared.Mechanics.Cards.Filters.IntAttrFilter'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Cards.Filters.IntAttrFilter'
+    version: ClassVar[int | None] = 1
+    m_Attribute: str | None
+    m_CompareToCost: bool
+    m_ComparisonOp: Any
+    m_Value: int
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_Attribute': ('String', None),
         'm_CompareToCost': ('bool', False),
         'm_ComparisonOp': ('EComparisons', None),
         'm_Value': ('int', 0),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class IntAttrModifier(Typed):
-    type_name = 'Game.Shared.Mechanics.Modifiers.IntAttrModifier'
-    version = 3
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Modifiers.IntAttrModifier'
+    version: ClassVar[int | None] = 3
+    m_Attribute: str | None
+    m_Double: bool
+    m_Operation: Any
+    m_Value: int
+    m_ValueField: EffectField | None
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_Attribute': ('String', None),
         'm_Double': ('bool', False),
         'm_Operation': ('EOperations', None),
         'm_Value': ('int', 0),
         'm_ValueField': ('EffectField', None),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class InventoryItemData(Typed):
-    type_name = 'Reckoning.Game.InventoryItemData'
-    version = 15
-    fields = {
+    type_name: ClassVar[str] = 'Reckoning.Game.InventoryItemData'
+    version: ClassVar[int | None] = 15
+    m_ArtNotes: str
+    m_ArtNumber: str
+    m_ArtStatus: Any
+    m_AtlasName: str
+    m_AvailableForPurchase: bool
+    m_BasePrice: int
+    m_BorderColor: str
+    m_BuildTag: str
+    m_Description: str
+    m_DesignNotes: str
+    m_HueSat: str
+    m_Icon: str
+    m_IconColor: str
+    m_Id: ResourceId | None
+    m_ImplStatus: Any
+    m_IsLive: bool
+    m_IsPromo: bool
+    m_IsPvE: bool
+    m_Name: str
+    m_ReleaseDate: Any
+    m_SpriteName: str
+    m_TexturePath: str
+    m_Type: Any
+    m_VendorSuffix: int
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_ArtNotes': ('string', ""),
         'm_ArtNumber': ('string', ""),
         'm_ArtStatus': ('EArtStatus', None),
@@ -1545,166 +2249,180 @@ class InventoryItemData(Typed):
         'm_Type': ('EInventoryItemType', 'Invalid'),
         'm_VendorSuffix': ('int', 0),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_Value': ('int', 1),
     }
 
 class IsAbilitySource(Typed):
-    type_name = 'Game.Shared.Mechanics.Cards.Filters.IsAbilitySource'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Cards.Filters.IsAbilitySource'
+    version: ClassVar[int | None] = 1
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class IsAttacking(Typed):
-    type_name = 'Game.Shared.Mechanics.Cards.Filters.IsAttacking'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Cards.Filters.IsAttacking'
+    version: ClassVar[int | None] = 1
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class IsBlocking(Typed):
-    type_name = 'Game.Shared.Mechanics.Cards.Filters.IsBlocking'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Cards.Filters.IsBlocking'
+    version: ClassVar[int | None] = 1
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class IsCardName(Typed):
-    type_name = 'Game.Shared.Mechanics.Cards.Filters.IsCardName'
-    version = 4
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Cards.Filters.IsCardName'
+    version: ClassVar[int | None] = 4
+    m_CardName: str
+    m_CompareToAbilitySource: bool
+    m_CompareToTriggerSource: bool
+    m_CompareToTriggerTarget: bool
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_CardName': ('string', 'Empty'),
         'm_CompareToAbilitySource': ('bool', False),
         'm_CompareToTriggerSource': ('bool', False),
         'm_CompareToTriggerTarget': ('bool', False),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class IsChildOfAbilitySource(Typed):
-    type_name = 'Game.Shared.Mechanics.Cards.Filters.IsChildOfAbilitySource'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Cards.Filters.IsChildOfAbilitySource'
+    version: ClassVar[int | None] = 1
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class IsControlledBy(Typed):
-    type_name = 'Game.Shared.Mechanics.Cards.Filters.IsControlledBy'
-    version = 2
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Cards.Filters.IsControlledBy'
+    version: ClassVar[int | None] = 2
+    m_TestAgainstActivePlayer: bool
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_TestAgainstActivePlayer': ('bool', False),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class IsDamaged(Typed):
-    type_name = 'Game.Shared.Mechanics.Cards.Filters.IsDamaged'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Cards.Filters.IsDamaged'
+    version: ClassVar[int | None] = 1
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class IsDamagedThisTurn(Typed):
-    type_name = 'Game.Shared.Mechanics.Cards.Filters.IsDamagedThisTurn'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Cards.Filters.IsDamagedThisTurn'
+    version: ClassVar[int | None] = 1
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class IsEquippedCardFilter(Typed):
-    type_name = 'Game.Shared.Mechanics.Cards.Filters.IsEquippedCardFilter'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Cards.Filters.IsEquippedCardFilter'
+    version: ClassVar[int | None] = 1
+    m_EquipmentType: Any
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_EquipmentType': ('Reckoning.Game.EEquipmentType', 'None'),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class IsMercenaryFilter(Typed):
-    type_name = 'Game.Shared.Mechanics.Cards.Filters.IsMercenaryFilter'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Cards.Filters.IsMercenaryFilter'
+    version: ClassVar[int | None] = 1
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class IsNotControlledBy(Typed):
-    type_name = 'Game.Shared.Mechanics.Cards.Filters.IsNotControlledBy'
-    version = 2
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Cards.Filters.IsNotControlledBy'
+    version: ClassVar[int | None] = 2
+    m_FailUncontrolledCards: bool
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_FailUncontrolledCards': ('bool', False),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class IsParentOfAbilitySource(Typed):
-    type_name = 'Game.Shared.Mechanics.Cards.Filters.IsParentOfAbilitySource'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Cards.Filters.IsParentOfAbilitySource'
+    version: ClassVar[int | None] = 1
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class IsPlayedThisTurn(Typed):
-    type_name = 'Game.Shared.Mechanics.Cards.Filters.IsPlayedThisTurn'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Cards.Filters.IsPlayedThisTurn'
+    version: ClassVar[int | None] = 1
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class IsStoredCardFilter(Typed):
-    type_name = 'Game.Shared.Mechanics.Cards.Filters.IsStoredCardFilter'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Cards.Filters.IsStoredCardFilter'
+    version: ClassVar[int | None] = 1
+    m_PermanentData: bool
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_PermanentData': ('bool', True),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class IsTapped(Typed):
-    type_name = 'Game.Shared.Mechanics.Cards.Filters.IsTapped'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Cards.Filters.IsTapped'
+    version: ClassVar[int | None] = 1
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class IsToken(Typed):
-    type_name = 'Game.Shared.Mechanics.Cards.Filters.IsToken'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Cards.Filters.IsToken'
+    version: ClassVar[int | None] = 1
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class IsTopCard(Typed):
-    type_name = 'Game.Shared.Mechanics.Cards.Filters.IsTopCard'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Cards.Filters.IsTopCard'
+    version: ClassVar[int | None] = 1
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class IsTranformed(Typed):
-    type_name = 'Game.Shared.Mechanics.Cards.Filters.IsTranformed'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Cards.Filters.IsTranformed'
+    version: ClassVar[int | None] = 1
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class LocationData(Typed):
-    type_name = 'Reckoning.Game.LocationData'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Reckoning.Game.LocationData'
+    version: ClassVar[int | None] = 1
+    m_Id: ResourceId | None
+    m_ItemData: list[LocationItemData]
+    m_Name: str
+    m_Texture_Background: str
+    m_Texture_Front: str
+    m_Texture_Middle: str
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_Id': ('ResourceId', None),
         'm_ItemData': ('List<LocationItemData>', []),
         'm_Name': ('string', ""),
@@ -1712,13 +2430,26 @@ class LocationData(Typed):
         'm_Texture_Front': ('string', ""),
         'm_Texture_Middle': ('string', ""),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class LocationItemData(Typed):
-    type_name = 'Reckoning.Game.LocationItemData'
-    version = 8
-    fields = {
+    type_name: ClassVar[str] = 'Reckoning.Game.LocationItemData'
+    version: ClassVar[int | None] = 8
+    m_ActionType: Any
+    m_ConversationId: ResourceId | None
+    m_Description: str
+    m_EventsToFireWhenSelected: list[ChallengeEvent]
+    m_ItemID: ResourceId | None
+    m_ItemIcon: str
+    m_Name: str
+    m_PosXDegrees: float
+    m_PosYNormalized: float
+    m_PosZ: float
+    m_Prerequisites: list[DataRestrictionBase]
+    m_TransitionState: Any
+    m_Type: Any
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_ActionType': ('ELocationActionType', 'TransitionToState'),
         'm_ConversationId': ('ResourceId', None),
         'm_Description': ('string', ""),
@@ -1733,7 +2464,7 @@ class LocationItemData(Typed):
         'm_TransitionState': ('EGameState', 'Title'),
         'm_Type': ('ELocationMapItemType', 'Dungeon'),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_Height': ('float', 0),
         'm_PortraitImagePath_DEPRECATED': ('string', ""),
         'm_PosX': ('float', 0),
@@ -1742,9 +2473,18 @@ class LocationItemData(Typed):
     }
 
 class LocationNode(Typed):
-    type_name = 'Reckoning.Game.Campaign.LocationNode'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Reckoning.Game.Campaign.LocationNode'
+    version: ClassVar[int | None] = 1
+    m_LocationDescription: str
+    m_LocationName: str
+    m_NodeID: str
+    m_OnArrivalEvents: list[UIEvent]
+    m_OnExploredFailure: dict[int, list[UIEvent]]
+    m_OnExploredSuccess: dict[int, list[UIEvent]]
+    m_OnFirstEntered: UIEvent | None
+    m_OnNodeExplored: dict[int, list[UIEvent]]
+    m_Optional: bool
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_LocationDescription': ('string', ""),
         'm_LocationName': ('string', ""),
         'm_NodeID': ('string', ""),
@@ -1755,85 +2495,99 @@ class LocationNode(Typed):
         'm_OnNodeExplored': ('Dictionary<int, List<UIEvent>>', {}),
         'm_Optional': ('bool', False),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class LootPayoutBase(Typed):
-    type_name = 'Reckoning.Game.Campaign.LootPayoutBase'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Reckoning.Game.Campaign.LootPayoutBase'
+    version: ClassVar[int | None] = 1
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class LootTableEntry(Typed):
-    type_name = 'Game.Shared.Rewards.LootTableEntry'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Rewards.LootTableEntry'
+    version: ClassVar[int | None] = 1
+    m_RewardItem: Any
+    m_SelectWeight: float
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_RewardItem': ('RewardItemBase', None),
         'm_SelectWeight': ('float', 0.0),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class ModifierList(Typed):
-    type_name = 'Game.Shared.Mechanics.Modifiers.ModifierList'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Modifiers.ModifierList'
+    version: ClassVar[int | None] = 1
+    m_ModifierList: list[Any]
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_ModifierList': ('List<Modifier>', []),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class MovedBySource(Typed):
-    type_name = 'Game.Shared.Mechanics.Cards.Filters.MovedBySource'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Cards.Filters.MovedBySource'
+    version: ClassVar[int | None] = 1
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class NotCardFilter(Typed):
-    type_name = 'Game.Shared.Mechanics.Cards.Filters.NotCardFilter'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Cards.Filters.NotCardFilter'
+    version: ClassVar[int | None] = 1
+    m_TargetFilter: Any
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_TargetFilter': ('CardFilter', None),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class NpcTemplate(Typed):
-    type_name = 'Reckoning.Game.NpcTemplate'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Reckoning.Game.NpcTemplate'
+    version: ClassVar[int | None] = 1
+    m_Description: str
+    m_DesignNotes: str
+    m_Id: ResourceId | None
+    m_Name: str
+    m_Portrait: str
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_Description': ('string', ""),
         'm_DesignNotes': ('string', ""),
         'm_Id': ('ResourceId', None),
         'm_Name': ('string', ""),
         'm_Portrait': ('string', ""),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class NpcVendorItemData(Typed):
-    type_name = 'Reckoning.Game.NpcVendorItemData'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Reckoning.Game.NpcVendorItemData'
+    version: ClassVar[int | None] = 1
+    m_ItemId: ResourceId | None
+    m_Price: int
+    m_Quantity: int
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_ItemId': ('ResourceId', None),
         'm_Price': ('int', -1),
         'm_Quantity': ('int', -1),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class NumericModifier(Typed):
-    type_name = 'Game.Shared.Mechanics.Modifiers.NumericModifier'
-    version = 10
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Modifiers.NumericModifier'
+    version: ClassVar[int | None] = 10
+    m_Amount_DEPRECATED: AbilityField | None
+    m_InputValue: EffectField | None
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_Amount_DEPRECATED': ('AbilityField', None),
         'm_InputValue': ('EffectField', None),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_AbilityProperty_DEPRECATED': ('EAbilityProperties', 'Unknown'),
         'm_Amount': ('AbilityField', None),
         'm_EffectId_DEPRECATED': ('ResourceId', None),
@@ -1847,60 +2601,77 @@ class NumericModifier(Typed):
     }
 
 class OrCardFilter(Typed):
-    type_name = 'Game.Shared.Mechanics.Cards.Filters.OrCardFilter'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Cards.Filters.OrCardFilter'
+    version: ClassVar[int | None] = 1
+    m_TargetFilters: list[Any]
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_TargetFilters': ('List<CardFilter>', []),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class OtherTroops(Typed):
-    type_name = 'Game.Shared.Mechanics.Cards.Filters.OtherTroops'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Cards.Filters.OtherTroops'
+    version: ClassVar[int | None] = 1
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class PlayersWhoControlMatchingFilter(Typed):
-    type_name = 'Game.Shared.Mechanics.Cards.Filters.PlayersWhoControlMatchingFilter'
-    version = 2
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Cards.Filters.PlayersWhoControlMatchingFilter'
+    version: ClassVar[int | None] = 2
+    m_CardCollection: Any
+    m_ComparisonOp: Any
+    m_RequiredQuantity: int
+    m_TargetFilter: Any
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_CardCollection': ('ECardCollections', None),
         'm_ComparisonOp': ('EComparisons', None),
         'm_RequiredQuantity': ('int', 0),
         'm_TargetFilter': ('CardFilter', None),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class QualifiedText(Typed):
-    type_name = 'Reckoning.Game.QualifiedText'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Reckoning.Game.QualifiedText'
+    version: ClassVar[int | None] = 1
+    m_Qualifiers: list[DataRestrictionBase]
+    m_Text: str
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_Qualifiers': ('List<DataRestrictionBase>', []),
         'm_Text': ('string', ""),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class QuestObjectiveBase(Typed):
-    type_name = 'Reckoning.Game.QuestObjectiveBase'
-    version = 2
-    fields = {
+    type_name: ClassVar[str] = 'Reckoning.Game.QuestObjectiveBase'
+    version: ClassVar[int | None] = 2
+    m_ID: int
+    m_QuestLocationId: str
+    m_TitleOld: list[QualifiedText]
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_ID': ('int', 0),
         'm_QuestLocationId': ('string', ""),
         'm_TitleOld': ('List<QualifiedText>', []),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_Title': ('List<QualifiedText>', []),
     }
 
 class QuestTemplate(Typed):
-    type_name = 'Reckoning.Game.QuestTemplate'
-    version = 3
-    fields = {
+    type_name: ClassVar[str] = 'Reckoning.Game.QuestTemplate'
+    version: ClassVar[int | None] = 3
+    m_BuildTag: str
+    m_DescriptionOld: list[QualifiedText]
+    m_Id: ResourceId | None
+    m_Name: str
+    m_Objectives: list[QuestObjectiveBase]
+    m_ScriptName: str
+    m_TitleOld: list[QualifiedText]
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_BuildTag': ('string', ""),
         'm_DescriptionOld': ('List<QualifiedText>', []),
         'm_Id': ('ResourceId', None),
@@ -1909,27 +2680,41 @@ class QuestTemplate(Typed):
         'm_ScriptName': ('string', ""),
         'm_TitleOld': ('List<QualifiedText>', []),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_Description': ('List<QualifiedText>', []),
         'm_Title': ('List<QualifiedText>', []),
     }
 
 class RegionData(Typed):
-    type_name = 'Reckoning.Game.RegionData'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Reckoning.Game.RegionData'
+    version: ClassVar[int | None] = 1
+    m_Id: ResourceId | None
+    m_ItemData: list[RegionItemData]
+    m_Name: str
+    m_Texture: str
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_Id': ('ResourceId', None),
         'm_ItemData': ('List<RegionItemData>', []),
         'm_Name': ('string', ""),
         'm_Texture': ('string', ""),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class RegionItemData(Typed):
-    type_name = 'Reckoning.Game.RegionItemData'
-    version = 3
-    fields = {
+    type_name: ClassVar[str] = 'Reckoning.Game.RegionItemData'
+    version: ClassVar[int | None] = 3
+    m_Description: str
+    m_Height: float
+    m_ItemID: ResourceId | None
+    m_ItemIcon: str
+    m_Name: str
+    m_PosX: float
+    m_PosY: float
+    m_SceneOverride: Any
+    m_TransitionState: Any
+    m_Type: Any
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_Description': ('string', ""),
         'm_Height': ('float', 0),
         'm_ItemID': ('ResourceId', None),
@@ -1941,221 +2726,270 @@ class RegionItemData(Typed):
         'm_TransitionState': ('EGameState', 'Location'),
         'm_Type': ('ERegionMapItemType', 'Dungeon'),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class RestrictionBase(Typed):
-    type_name = 'Game.Shared.Challenge.Restriction.RestrictionBase'
-    version = 4
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Challenge.Restriction.RestrictionBase'
+    version: ClassVar[int | None] = 4
+    m_EventOwnerRestriction: Any
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_EventOwnerRestriction': ('EEventOwnerType', 'Any'),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_Id': ('ResourceId', None),
         'm_RootId_DEPRECATED': ('ResourceId', None),
     }
 
 class RewardCard(Typed):
-    type_name = 'Game.Shared.Rewards.RewardCard'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Rewards.RewardCard'
+    version: ClassVar[int | None] = 1
+    m_CardTemplateId: ResourceId | None
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_CardTemplateId': ('ResourceId', None),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class RewardFungible(Typed):
-    type_name = 'Game.Shared.Rewards.RewardFungible'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Rewards.RewardFungible'
+    version: ClassVar[int | None] = 1
+    m_Amount: int
+    m_RewardType: Any
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_Amount': ('int', 0),
         'm_RewardType': ('ERewardFungibleType', 'Invalid'),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class RewardInventoryItem(Typed):
-    type_name = 'Game.Shared.Rewards.RewardInventoryItem'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Rewards.RewardInventoryItem'
+    version: ClassVar[int | None] = 1
+    m_Amount: int
+    m_ItemId: ResourceId | None
+    m_RewardType: Any
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_Amount': ('int', 1),
         'm_ItemId': ('ResourceId', None),
         'm_RewardType': ('ERewardResourceType', 'Invalid'),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class RewardLootTable(Typed):
-    type_name = 'Game.Shared.Rewards.RewardLootTable'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Rewards.RewardLootTable'
+    version: ClassVar[int | None] = 1
+    m_Amount: int
+    m_Entries: list[LootTableEntry]
+    m_TotalWeight: float
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_Amount': ('int', 0),
         'm_Entries': ('List<LootTableEntry>', []),
         'm_TotalWeight': ('float', 0.0),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class RewardTemplate(Typed):
-    type_name = 'Game.Shared.Rewards.RewardTemplate'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Rewards.RewardTemplate'
+    version: ClassVar[int | None] = 1
+    m_AndRewardItems: list[Any]
+    m_Id: ResourceId | None
+    m_Name: str
+    m_OnlyEarnOnce: bool
+    m_OrRewardItems: list[Any]
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_AndRewardItems': ('List<RewardItemBase>', []),
         'm_Id': ('ResourceId', None),
         'm_Name': ('string', ""),
         'm_OnlyEarnOnce': ('bool', False),
         'm_OrRewardItems': ('List<RewardItemBase>', []),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class SceneData(Typed):
-    type_name = 'Reckoning.Game.SceneData'
-    version = 3
-    fields = {
+    type_name: ClassVar[str] = 'Reckoning.Game.SceneData'
+    version: ClassVar[int | None] = 3
+    m_Id: ResourceId | None
+    m_Name: str
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_Id': ('ResourceId', None),
         'm_Name': ('string', ""),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_SceneID': ('ResourceId', None),
     }
 
 class SerializableTAC(Typed):
-    type_name = 'Reckoning.Game.SerializableTAC'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Reckoning.Game.SerializableTAC'
+    version: ClassVar[int | None] = 1
+    data: str
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'data': ('string', ""),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class SessionCondition(Typed):
-    type_name = 'Game.Shared.Mechanics.SessionCondition'
-    version = None
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.SessionCondition'
+    version: ClassVar[int | None] = None
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class ShinhareCreationBonusModifier(Typed):
-    type_name = 'Game.Shared.Mechanics.Modifiers.ShinhareCreationBonusModifier'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Modifiers.ShinhareCreationBonusModifier'
+    version: ClassVar[int | None] = 1
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class StaticCardFilter(Typed):
-    type_name = 'Game.Shared.Mechanics.StaticCardFilter'
-    version = None
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.StaticCardFilter'
+    version: ClassVar[int | None] = None
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class StringAttrFilter(Typed):
-    type_name = 'Game.Shared.Mechanics.Cards.Filters.StringAttrFilter'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Cards.Filters.StringAttrFilter'
+    version: ClassVar[int | None] = 1
+    m_Attribute: str | None
+    m_ComparisonOp: Any
+    m_Value: str | None
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_Attribute': ('String', None),
         'm_ComparisonOp': ('EComparisons', 'Equals'),
         'm_Value': ('String', None),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class StrongholdBuildingTemplate(Typed):
-    type_name = 'Reckoning.Game.StrongholdBuildingTemplate'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Reckoning.Game.StrongholdBuildingTemplate'
+    version: ClassVar[int | None] = 1
+    m_Icon: str
+    m_Id: ResourceId | None
+    m_Name: str
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_Icon': ('string', ""),
         'm_Id': ('ResourceId', None),
         'm_Name': ('string', ""),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class SubTypeModifier(Typed):
-    type_name = 'Game.Shared.Mechanics.Modifiers.SubTypeModifier'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Modifiers.SubTypeModifier'
+    version: ClassVar[int | None] = 1
+    m_Operation: Any
+    m_Subtype: str
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_Operation': ('EOperations', None),
         'm_Subtype': ('string', ""),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class SwapAttackAndDefenseModifier(Typed):
-    type_name = 'Game.Shared.Mechanics.Modifiers.SwapAttackAndDefenseModifier'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Modifiers.SwapAttackAndDefenseModifier'
+    version: ClassVar[int | None] = 1
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class TACFilter(Typed):
-    type_name = 'Game.Shared.Mechanics.Cards.Filters.TACFilter'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Cards.Filters.TACFilter'
+    version: ClassVar[int | None] = 1
+    m_SerializedTAC: SerializableTAC | None
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_SerializedTAC': ('SerializableTAC', None),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class TagModifier(Typed):
-    type_name = 'Game.Shared.Mechanics.Modifiers.TagModifier'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Modifiers.TagModifier'
+    version: ClassVar[int | None] = 1
+    m_Operation: Any
+    m_Tag: str
+    m_Value: int
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_Operation': ('EOperations', None),
         'm_Tag': ('string', ""),
         'm_Value': ('int', 0),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class TargetField(Typed):
-    type_name = 'Game.Shared.Mechanics.Abilities.TargetTemplates.TargetField'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.TargetTemplates.TargetField'
+    version: ClassVar[int | None] = 1
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class TargetingImmunityModifier(Typed):
-    type_name = 'Game.Shared.Mechanics.Modifiers.TargetingImmunityModifier'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Modifiers.TargetingImmunityModifier'
+    version: ClassVar[int | None] = 1
+    m_CardFilter: Any
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_CardFilter': ('CardFilter', None),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class TemplateCardStack(Typed):
-    type_name = 'Reckoning.Game.TemplateCardStack'
-    version = 4
-    fields = {
+    type_name: ClassVar[str] = 'Reckoning.Game.TemplateCardStack'
+    version: ClassVar[int | None] = 4
+    m_Count: int
+    m_GemTypesNewList: list[list[Any]]
+    m_idTemplate: ResourceId | None
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_Count': ('int', 1),
         'm_GemTypesNewList': ('List<List<EGemTypesNew>>', []),
         'm_idTemplate': ('ResourceId', None),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_GemTypesList_DEPRECATED': ('List<List<EGemTypes>>', []),
         'm_GemTypes_DEPRECATED': ('List<EGemTypes>', []),
     }
 
 class TemplateOverrideValues(Typed):
-    type_name = 'Reckoning.Game.TemplateOverrideValues'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Reckoning.Game.TemplateOverrideValues'
+    version: ClassVar[int | None] = 1
+    m_OverrideValues: list[AbilityOverrideValue]
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_OverrideValues': ('List<AbilityOverrideValue>', []),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class TopNOfDeck(Typed):
-    type_name = 'Game.Shared.Mechanics.Cards.Filters.TopNOfDeck'
-    version = 14
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Cards.Filters.TopNOfDeck'
+    version: ClassVar[int | None] = 14
+    m_AddCardIntegerVariable: str
+    m_AddDamageDealt: bool
+    m_AddDamageThatWouldBeDealt: bool
+    m_AddRemovedCounters: bool
+    m_AddRemovedCountersMultiplier: int
+    m_AddSapphire: bool
+    m_AddSourceCardsAttack: bool
+    m_AddSourceCardsCost: bool
+    m_AddSourceCardsDefense: bool
+    m_AddX: bool
+    m_Amount: int
+    m_CountFromBottom: bool
+    m_Filter: Any
+    m_TopHalfOfDeck: bool
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_AddCardIntegerVariable': ('string', ""),
         'm_AddDamageDealt': ('bool', False),
         'm_AddDamageThatWouldBeDealt': ('bool', False),
@@ -2171,45 +3005,59 @@ class TopNOfDeck(Typed):
         'm_Filter': ('CardFilter', None),
         'm_TopHalfOfDeck': ('bool', False),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_AddAST_DEPRECATED': ('bool', False),
     }
 
 class TriggerCondition(Typed):
-    type_name = 'Game.Shared.Mechanics.Triggers.Conditions.TriggerCondition'
-    version = 2
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Triggers.Conditions.TriggerCondition'
+    version: ClassVar[int | None] = 2
+    m_SerializedTAC: SerializableTAC | None
+    m_TriggerTest: Any
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_SerializedTAC': ('SerializableTAC', None),
         'm_TriggerTest': ('ETriggerSelectors', 'TriggerSource'),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class TroopToArtifactTroopTypeModifier(Typed):
-    type_name = 'Game.Shared.Mechanics.Modifiers.TroopToArtifactTroopTypeModifier'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Modifiers.TroopToArtifactTroopTypeModifier'
+    version: ClassVar[int | None] = 1
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class TurnPhaseActionBase(Typed):
-    type_name = 'Game.Shared.Tutorial.TurnPhaseActionBase'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Tutorial.TurnPhaseActionBase'
+    version: ClassVar[int | None] = 1
+    m_ActionPerformer: Any
+    m_ActivePlayer: Any
+    m_TipText: str
+    m_Turn: int
+    m_TurnPhase: Any
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_ActionPerformer': ('EPlayerType', 'Player'),
         'm_ActivePlayer': ('EPlayerType', 'Player'),
         'm_TipText': ('string', ""),
         'm_Turn': ('int', 0),
         'm_TurnPhase': ('ETurnPhases', 'Unknown'),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class TutorialAbilityActivationData(Typed):
-    type_name = 'Game.Shared.Tutorial.TutorialAbilityActivationData'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Tutorial.TutorialAbilityActivationData'
+    version: ClassVar[int | None] = 1
+    m_AbilityPlayerTarget: Any
+    m_AbilityTemplateId: ResourceId | None
+    m_ExhaustCardIds: list[ResourceId]
+    m_SacCardIds: list[ResourceId]
+    m_TargetCardIds: list[ResourceId]
+    m_TargetFilter: str
+    m_XCostValue: int
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_AbilityPlayerTarget': ('EPlayerType', 'Default'),
         'm_AbilityTemplateId': ('ResourceId', None),
         'm_ExhaustCardIds': ('List<ResourceId>', []),
@@ -2218,366 +3066,426 @@ class TutorialAbilityActivationData(Typed):
         'm_TargetFilter': ('string', ""),
         'm_XCostValue': ('int', 0),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class TutorialDefense(Typed):
-    type_name = 'Game.Shared.Tutorial.TutorialDefense'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Tutorial.TutorialDefense'
+    version: ClassVar[int | None] = 1
+    m_AttackingCardId: ResourceId | None
+    m_AttackingFilter: str
+    m_DefendingCardIds: list[ResourceId]
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_AttackingCardId': ('ResourceId', None),
         'm_AttackingFilter': ('string', ""),
         'm_DefendingCardIds': ('List<ResourceId>', []),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class XpTable(Typed):
-    type_name = 'Reckoning.Game.XpTable'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Reckoning.Game.XpTable'
+    version: ClassVar[int | None] = 1
+    m_Id: ResourceId | None
+    m_XpTable: list[XpTableItem]
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_Id': ('ResourceId', None),
         'm_XpTable': ('List<XpTableItem>', []),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class XpTableItem(Typed):
-    type_name = 'Reckoning.Game.XpTableItem'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Reckoning.Game.XpTableItem'
+    version: ClassVar[int | None] = 1
+    m_Level: int
+    m_LevelXpRequirement: int
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_Level': ('int', 0),
         'm_LevelXpRequirement': ('int', 0),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class AbilityConstant(AbilityField):
-    type_name = 'Game.Shared.Mechanics.Abilities.AbilityConstant'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.AbilityConstant'
+    version: ClassVar[int | None] = 1
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class AbilityControllerHasPriorityAbilityCondition(AbilityCondition):
-    type_name = 'Game.Shared.Mechanics.Abilities.Conditions.AbilityControllerHasPriorityAbilityCondition'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.Conditions.AbilityControllerHasPriorityAbilityCondition'
+    version: ClassVar[int | None] = 1
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class AbilityControllerHasThresholdAbilityCondition(AbilityCondition):
-    type_name = 'Game.Shared.Mechanics.Abilities.Conditions.AbilityControllerHasThresholdAbilityCondition'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.Conditions.AbilityControllerHasThresholdAbilityCondition'
+    version: ClassVar[int | None] = 1
+    m_ColorFlags: Any
+    m_ComparisonOp: Any
+    m_RequiredQuantity: int
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_ColorFlags': ('ECardShards', None),
         'm_ComparisonOp': ('EComparisons', None),
         'm_RequiredQuantity': ('int', 0),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class AbilityControllerIsActiveAbilityCondition(AbilityCondition):
-    type_name = 'Game.Shared.Mechanics.Abilities.Conditions.AbilityControllerIsActiveAbilityCondition'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.Conditions.AbilityControllerIsActiveAbilityCondition'
+    version: ClassVar[int | None] = 1
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class AbilityControllerIsStartingPlayerAbilityCondition(AbilityCondition):
-    type_name = 'Game.Shared.Mechanics.Abilities.Conditions.AbilityControllerIsStartingPlayerAbilityCondition'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.Conditions.AbilityControllerIsStartingPlayerAbilityCondition'
+    version: ClassVar[int | None] = 1
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class AbilityCreatedTargetTemplate(AbilityTargetTemplate):
-    type_name = 'Game.Shared.Mechanics.Abilities.TargetTemplates.AbilityCreatedTargetTemplate'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.TargetTemplates.AbilityCreatedTargetTemplate'
+    version: ClassVar[int | None] = 1
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class AbilitySourceCardTargetTemplate(AbilityTargetTemplate):
-    type_name = 'Game.Shared.Mechanics.Abilities.TargetTemplates.AbilitySourceCardTargetTemplate'
-    version = 2
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.TargetTemplates.AbilitySourceCardTargetTemplate'
+    version: ClassVar[int | None] = 2
+    m_ChoiceOverride: bool
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_ChoiceOverride': ('bool', False),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class AbilityTargetVariable(AbilityField):
-    type_name = 'Game.Shared.Mechanics.Abilities.AbilityTargetVariable'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.AbilityTargetVariable'
+    version: ClassVar[int | None] = 1
+    m_TargetIndex: int
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_TargetIndex': ('int', 0),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class AbilityTriggerCardTargetTemplate(AbilityTargetTemplate):
-    type_name = 'Game.Shared.Mechanics.Abilities.TargetTemplates.AbilityTriggerCardTargetTemplate'
-    version = 2
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.TargetTemplates.AbilityTriggerCardTargetTemplate'
+    version: ClassVar[int | None] = 2
+    m_TriggerSelector: Any
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_TriggerSelector': ('TriggerCondition.ETriggerSelectors', None),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class AbilityTriggerTargetsControllerTargetTemplate(AbilityTargetTemplate):
-    type_name = 'Game.Shared.Mechanics.Abilities.TargetTemplates.AbilityTriggerTargetsControllerTargetTemplate'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.TargetTemplates.AbilityTriggerTargetsControllerTargetTemplate'
+    version: ClassVar[int | None] = 1
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class AbilityVariable(AbilityField):
-    type_name = 'Game.Shared.Mechanics.Abilities.AbilityVariable'
-    version = 2
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.AbilityVariable'
+    version: ClassVar[int | None] = 2
+    m_RequiresExplicitSet: bool
+    m_RequiresPlayerInput: bool
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_RequiresExplicitSet': ('bool', False),
         'm_RequiresPlayerInput': ('bool', False),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class AbilityVariableCondition(AbilityEffectCondition):
-    type_name = 'Game.Shared.Mechanics.Abilities.Conditions.AbilityVariableCondition'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.Conditions.AbilityVariableCondition'
+    version: ClassVar[int | None] = 1
+    m_ComparisonOp: Any
+    m_Lhs: str
+    m_Rhs: str
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_ComparisonOp': ('EComparisons', None),
         'm_Lhs': ('string', ""),
         'm_Rhs': ('string', ""),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class ActivePlayerTargetTemplate(AbilityTargetTemplate):
-    type_name = 'Game.Shared.Mechanics.Abilities.TargetTemplates.ActivePlayerTargetTemplate'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.TargetTemplates.ActivePlayerTargetTemplate'
+    version: ClassVar[int | None] = 1
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class AndAbilityCondition(AbilityCondition):
-    type_name = 'Game.Shared.Mechanics.Abilities.AndAbilityCondition'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.AndAbilityCondition'
+    version: ClassVar[int | None] = 1
+    m_Conditions: list[AbilityCondition]
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_Conditions': ('List<IAbilityCondition>', []),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class AndEffectCondition(AbilityEffectCondition):
-    type_name = 'Game.Shared.Mechanics.Abilities.Conditions.AndEffectCondition'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.Conditions.AndEffectCondition'
+    version: ClassVar[int | None] = 1
+    m_Conditions: list[AbilityEffectCondition]
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_Conditions': ('List<IAbilityEffectCondition>', []),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class AndTriggerCondition(TriggerCondition):
-    type_name = 'Game.Shared.Mechanics.Triggers.Conditions.AndTriggerCondition'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Triggers.Conditions.AndTriggerCondition'
+    version: ClassVar[int | None] = 1
+    m_Conditions: list[TriggerCondition]
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_Conditions': ('List<ITriggerCondition>', []),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class AnyCard(StaticCardFilter):
-    type_name = 'Game.Shared.Mechanics.Cards.Filters.AnyCard'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Cards.Filters.AnyCard'
+    version: ClassVar[int | None] = 1
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class AttackModifier(NumericModifier):
-    type_name = 'Game.Shared.Mechanics.Modifiers.AttackModifier'
-    version = 4
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Modifiers.AttackModifier'
+    version: ClassVar[int | None] = 4
+    m_Property: Any
+    m_ReplaceExistingValue: bool
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_Property': ('ECardProperties', 'Unknown'),
         'm_ReplaceExistingValue': ('bool', False),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_AttackAmmount_DEPRECATED': ('int', 0),
     }
 
 class AttributeWithQuantityModifier(AttributeModifier):
-    type_name = 'Game.Shared.Mechanics.Modifiers.AttributeWithQuantityModifier'
-    version = 2
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Modifiers.AttributeWithQuantityModifier'
+    version: ClassVar[int | None] = 2
+    m_Amount_DEPRECATED: AbilityField | None
+    m_InputValue: EffectField | None
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_Amount_DEPRECATED': ('AbilityField', None),
         'm_InputValue': ('EffectField', None),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_Amount': ('AbilityField', None),
     }
 
 class BattleSceneData(SceneData):
-    type_name = 'Reckoning.Game.BattleSceneData'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Reckoning.Game.BattleSceneData'
+    version: ClassVar[int | None] = 1
+    m_BattleBackground: str
+    m_PlayerOneMat: str
+    m_PlayerTwoMat: str
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_BattleBackground': ('string', ""),
         'm_PlayerOneMat': ('string', ""),
         'm_PlayerTwoMat': ('string', ""),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class CardAbilityEffectTemplate(AbilityEffectTemplate):
-    type_name = 'Game.Shared.Mechanics.CardAbilityEffectTemplate'
-    version = 10
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.CardAbilityEffectTemplate'
+    version: ClassVar[int | None] = 10
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class CardCostModifier(NumericModifier):
-    type_name = 'Game.Shared.Mechanics.Modifiers.CardCostModifier'
-    version = 2
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Modifiers.CardCostModifier'
+    version: ClassVar[int | None] = 2
+    m_ReplaceExistingValue: bool
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_ReplaceExistingValue': ('bool', False),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class CardCostToCastModifier(NumericModifier):
-    type_name = 'Game.Shared.Mechanics.Modifiers.CardCostToCastModifier'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Modifiers.CardCostToCastModifier'
+    version: ClassVar[int | None] = 1
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class CardCostToCastModifierFloorOne(NumericModifier):
-    type_name = 'Game.Shared.Mechanics.Modifiers.CardCostToCastModifierFloorOne'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Modifiers.CardCostToCastModifierFloorOne'
+    version: ClassVar[int | None] = 1
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class CardFilterAbilityCondition(AbilityCondition):
-    type_name = 'Game.Shared.Mechanics.Abilities.Conditions.CardFilterAbilityCondition'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.Conditions.CardFilterAbilityCondition'
+    version: ClassVar[int | None] = 1
+    m_CardFilter: Any
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_CardFilter': ('CardFilter', None),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class CardThresholdModifier(NumericModifier):
-    type_name = 'Game.Shared.Mechanics.Modifiers.CardThresholdModifier'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Modifiers.CardThresholdModifier'
+    version: ClassVar[int | None] = 1
+    m_CopySourceCard: bool
+    m_SetThresholds: bool
+    m_Shard: Any
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_CopySourceCard': ('bool', False),
         'm_SetThresholds': ('bool', False),
         'm_Shard': ('ECardShards', 'Unknown'),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class CardsDiscardedThisTurn(AbilityEffectCondition):
-    type_name = 'Game.Shared.Mechanics.Triggers.Conditions.CardsDiscardedThisTurn'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Triggers.Conditions.CardsDiscardedThisTurn'
+    version: ClassVar[int | None] = 1
+    m_ComparisonOp: Any
+    m_PlayerFilter: Any
+    m_RequiredQuantity: int
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_ComparisonOp': ('EComparisons', None),
         'm_PlayerFilter': ('EPlayerCardTargets', None),
         'm_RequiredQuantity': ('int', 0),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class ChallengeCountedTemplate(ChallengeBaseTemplate):
-    type_name = 'Game.Shared.ChallengeCountedTemplate'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.ChallengeCountedTemplate'
+    version: ClassVar[int | None] = 1
+    m_Events: list[EventRestrictionBase]
+    m_ResetEvents: list[EventRestrictionBase]
+    m_ResetGameTime: float
+    m_StorageType: Any
+    m_TargetCount: int
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_Events': ('List<EventRestrictionBase>', []),
         'm_ResetEvents': ('List<EventRestrictionBase>', []),
         'm_ResetGameTime': ('float', 0.0),
         'm_StorageType': ('EValueStorageType', 'Current'),
         'm_TargetCount': ('int', 0),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class ChallengeDungeonNodeTemplate(ChallengeBaseTemplate):
-    type_name = 'Game.Shared.ChallengeDungeonNodeTemplate'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.ChallengeDungeonNodeTemplate'
+    version: ClassVar[int | None] = 1
+    m_ResetQualifiers: list[EventRestrictionBase]
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_ResetQualifiers': ('List<EventRestrictionBase>', []),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class ChallengeObserverTemplate(ChallengeBaseTemplate):
-    type_name = 'Game.Shared.ChallengeObserverTemplate'
-    version = 3
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.ChallengeObserverTemplate'
+    version: ClassVar[int | None] = 3
+    m_Observed: list[ResourceId]
+    m_ObservedTemplates: list[ChallengeBaseTemplate]
+    m_ResetEvents: list[EventRestrictionBase]
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_Observed': ('List<ResourceId>', []),
         'm_ObservedTemplates': ('List<ChallengeBaseTemplate>', []),
         'm_ResetEvents': ('List<EventRestrictionBase>', []),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class ChallengeParams(ChallengeEvent):
-    type_name = 'Game.Shared.Mechanics.ChallengeParams'
-    version = None
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.ChallengeParams'
+    version: ClassVar[int | None] = None
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class ChallengeQuestTemplate(ChallengeBaseTemplate):
-    type_name = 'Game.Shared.ChallengeQuestTemplate'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.ChallengeQuestTemplate'
+    version: ClassVar[int | None] = 1
+    m_Events: list[EventRestrictionBase]
+    m_IsRepeatable: bool
+    m_ResetEvents: list[EventRestrictionBase]
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_Events': ('List<EventRestrictionBase>', []),
         'm_IsRepeatable': ('bool', False),
         'm_ResetEvents': ('List<EventRestrictionBase>', []),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class ChallengeTierTemplate(ChallengeBaseTemplate):
-    type_name = 'Game.Shared.ChallengeTierTemplate'
-    version = 4
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.ChallengeTierTemplate'
+    version: ClassVar[int | None] = 4
+    m_Events: list[EventRestrictionBase]
+    m_ResetEvents: list[EventRestrictionBase]
+    m_Tier: list[ChallengeTierData]
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_Events': ('List<EventRestrictionBase>', []),
         'm_ResetEvents': ('List<EventRestrictionBase>', []),
         'm_Tier': ('List<ChallengeTierData>', []),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_Challenge_DEPRECATED': ('ResourceId', None),
     }
 
 class ChampionActionsCastThisTurn(AbilityEffectCondition):
-    type_name = 'Game.Shared.Mechanics.Triggers.Conditions.ChampionActionsCastThisTurn'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Triggers.Conditions.ChampionActionsCastThisTurn'
+    version: ClassVar[int | None] = 1
+    m_ComparisonOp: Any
+    m_PlayerFilter: Any
+    m_RequiredQuantity: int
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_ComparisonOp': ('EComparisons', None),
         'm_PlayerFilter': ('EPlayerCardTargets', None),
         'm_RequiredQuantity': ('int', 0),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class ChampionCardsCastCondition(AbilityEffectCondition):
-    type_name = 'Game.Shared.Mechanics.Abilities.Conditions.ChampionCardsCastCondition'
-    version = 3
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.Conditions.ChampionCardsCastCondition'
+    version: ClassVar[int | None] = 3
+    m_ComparisonOp: Any
+    m_NonResource: bool
+    m_PlayerFilter: Any
+    m_RequiredQuantity: int
+    m_Resource: bool
+    m_ThisTurn: bool
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_ComparisonOp': ('EComparisons', None),
         'm_NonResource': ('bool', False),
         'm_PlayerFilter': ('EPlayerCardTargets', None),
@@ -2585,132 +3493,158 @@ class ChampionCardsCastCondition(AbilityEffectCondition):
         'm_Resource': ('bool', False),
         'm_ThisTurn': ('bool', False),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class ChargePointsModifier(NumericModifier):
-    type_name = 'Game.Shared.Mechanics.Modifiers.ChargePointsModifier'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Modifiers.ChargePointsModifier'
+    version: ClassVar[int | None] = 1
+    m_RemoveAllCharges: bool
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_RemoveAllCharges': ('bool', False),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class ChildCardsTargetTemplate(AbilityTargetTemplate):
-    type_name = 'Game.Shared.Mechanics.Abilities.TargetTemplates.ChildCardsTargetTemplate'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.TargetTemplates.ChildCardsTargetTemplate'
+    version: ClassVar[int | None] = 1
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class CompareDefenseToLowestFilter(StaticCardFilter):
-    type_name = 'Game.Shared.Mechanics.Cards.Filters.CompareDefenseToLowestFilter'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Cards.Filters.CompareDefenseToLowestFilter'
+    version: ClassVar[int | None] = 1
+    m_ComparisonOp: Any
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_ComparisonOp': ('EComparisons', None),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class CompareResourceCostToMyHighestFilter(StaticCardFilter):
-    type_name = 'Game.Shared.Mechanics.Cards.Filters.CompareResourceCostToMyHighestFilter'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Cards.Filters.CompareResourceCostToMyHighestFilter'
+    version: ClassVar[int | None] = 1
+    m_ComparisonOp: Any
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_ComparisonOp': ('EComparisons', None),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class CounterModifier(NumericModifier):
-    type_name = 'Game.Shared.Mechanics.Modifiers.CounterModifier'
-    version = 5
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Modifiers.CounterModifier'
+    version: ClassVar[int | None] = 5
+    m_CardCounterTemplateId: ResourceId | None
+    m_Operation: Any
+    m_RemoveAllCounters: bool
+    m_RemoveHalfRoundedUp: bool
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_CardCounterTemplateId': ('ResourceId', None),
         'm_Operation': ('EOperations', 'Add'),
         'm_RemoveAllCounters': ('bool', False),
         'm_RemoveHalfRoundedUp': ('bool', False),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_CounterType_DEPRECATED': ('ECardCounterTypes', None),
     }
 
 class CurrentResourceModifier(NumericModifier):
-    type_name = 'Game.Shared.Mechanics.Modifiers.CurrentResourceModifier'
-    version = 2
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Modifiers.CurrentResourceModifier'
+    version: ClassVar[int | None] = 2
+    m_Set: bool
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_Set': ('bool', False),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class DamageHeroModifier(NumericModifier):
-    type_name = 'Game.Shared.Mechanics.Modifiers.DamageHeroModifier'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Modifiers.DamageHeroModifier'
+    version: ClassVar[int | None] = 1
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class DamageModifier(NumericModifier):
-    type_name = 'Game.Shared.Mechanics.Modifiers.DamageModifier'
-    version = 3
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Modifiers.DamageModifier'
+    version: ClassVar[int | None] = 3
+    m_MasterDealsDamage: bool
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_MasterDealsDamage': ('bool', False),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_DamageAmount_DEPRECATED': ('int', 0),
     }
 
 class DamageMultiplierModifier(NumericModifier):
-    type_name = 'Game.Shared.Mechanics.Modifiers.DamageMultiplierModifier'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Modifiers.DamageMultiplierModifier'
+    version: ClassVar[int | None] = 1
+    m_CombatDamageOnly: bool
+    m_NonCombatDamageOnly: bool
+    m_ReplaceExistingValue: bool
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_CombatDamageOnly': ('bool', False),
         'm_NonCombatDamageOnly': ('bool', False),
         'm_ReplaceExistingValue': ('bool', False),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class DamageShieldModifier(NumericModifier):
-    type_name = 'Game.Shared.Mechanics.Modifiers.DamageShieldModifier'
-    version = 4
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Modifiers.DamageShieldModifier'
+    version: ClassVar[int | None] = 4
+    m_DamageDealerAdditionalTarget: int
+    m_LastsIndefinitely: bool
+    m_OneShot: bool
+    m_OnlyCombatDamage: bool
+    m_OnlyPreventFromDamageDealer: bool
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_DamageDealerAdditionalTarget': ('int', 0),
         'm_LastsIndefinitely': ('bool', False),
         'm_OneShot': ('bool', False),
         'm_OnlyCombatDamage': ('bool', False),
         'm_OnlyPreventFromDamageDealer': ('bool', False),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_ReplaceExistingValue_DEPRECATED': ('bool', False),
     }
 
 class DataRestrictionBase(RestrictionBase):
-    type_name = 'Game.Shared.Mechanics.DataRestrictionBase'
-    version = 4
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.DataRestrictionBase'
+    version: ClassVar[int | None] = 4
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class DefenseModifier(NumericModifier):
-    type_name = 'Game.Shared.Mechanics.Modifiers.DefenseModifier'
-    version = 4
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Modifiers.DefenseModifier'
+    version: ClassVar[int | None] = 4
+    m_Property: Any
+    m_ReplaceExistingValue: bool
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_Property': ('ECardProperties', 'Unknown'),
         'm_ReplaceExistingValue': ('bool', False),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_DefenseAmount_DEPRECATED': ('int', 0),
     }
 
 class DungeonTemplate(SceneData):
-    type_name = 'Reckoning.Game.DungeonTemplate'
-    version = 7
-    fields = {
+    type_name: ClassVar[str] = 'Reckoning.Game.DungeonTemplate'
+    version: ClassVar[int | None] = 7
+    m_BackgroundTexture: str
+    m_BuildTag: str
+    m_DeckFilter: ResourceId | None
+    m_Description: str
+    m_DungeonMods: list[EncounterStartModifications]
+    m_ImplStatus: Any
+    m_ItemData: list[DungeonItemData]
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_BackgroundTexture': ('string', ""),
         'm_BuildTag': ('string', ""),
         'm_DeckFilter': ('ResourceId', None),
@@ -2719,135 +3653,168 @@ class DungeonTemplate(SceneData):
         'm_ImplStatus': ('EDungeonImplStatus', 'Unknown'),
         'm_ItemData': ('List<DungeonItemData>', []),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_ItemLinks_DEPRECATED': ('List<KeyValuePair<int, int>>', []),
         'm_RoomData_DEPRECATED': ('List<DungeonRoomData>', []),
     }
 
 class DuplicateCardTargetTemplate(AbilityTargetTemplate):
-    type_name = 'Game.Shared.Mechanics.Abilities.TargetTemplates.DuplicateCardTargetTemplate'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.TargetTemplates.DuplicateCardTargetTemplate'
+    version: ClassVar[int | None] = 1
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class EffectAbilityVariable(EffectField):
-    type_name = 'Game.Shared.Mechanics.Abilities.EffectAbilityVariable'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.EffectAbilityVariable'
+    version: ClassVar[int | None] = 1
+    m_AbilityVariableName: str
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_AbilityVariableName': ('string', ""),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class EffectConstant(EffectField):
-    type_name = 'Game.Shared.Mechanics.Abilities.EffectConstant'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.EffectConstant'
+    version: ClassVar[int | None] = 1
+    m_Value: int
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_Value': ('int', 0),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class EffectInputVariable(EffectField):
-    type_name = 'Game.Shared.Mechanics.Abilities.EffectInputVariable'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.EffectInputVariable'
+    version: ClassVar[int | None] = 1
+    m_InputVariableName: str
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_InputVariableName': ('string', ""),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class EffectOutputVariable(AbilityField):
-    type_name = 'Game.Shared.Mechanics.Abilities.EffectOutputVariable'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.EffectOutputVariable'
+    version: ClassVar[int | None] = 1
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class EncounterModAddCard(EncounterModBase):
-    type_name = 'Reckoning.Game.EncounterModAddCard'
-    version = 2
-    fields = {
+    type_name: ClassVar[str] = 'Reckoning.Game.EncounterModAddCard'
+    version: ClassVar[int | None] = 2
+    m_Amount: int
+    m_CardId: ResourceId | None
+    m_Collection: Any
+    m_Location: Any
+    m_Shuffle: bool
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_Amount': ('int', 1),
         'm_CardId': ('ResourceId', None),
         'm_Collection': ('ECardCollections', 'Deck'),
         'm_Location': ('ECardLocations', 'Unknown'),
         'm_Shuffle': ('bool', False),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class EncounterModAddCardConditional(EncounterModBase):
-    type_name = 'Reckoning.Game.EncounterModAddCardConditional'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Reckoning.Game.EncounterModAddCardConditional'
+    version: ClassVar[int | None] = 1
+    m_Amount: int
+    m_CardId: ResourceId | None
+    m_Collection: Any
+    m_Location: Any
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_Amount': ('int', 1),
         'm_CardId': ('ResourceId', None),
         'm_Collection': ('ECardCollections', 'Deck'),
         'm_Location': ('ECardLocations', 'Unknown'),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class EncounterModAddChampionHealth(EncounterModBase):
-    type_name = 'Reckoning.Game.EncounterModAddChampionHealth'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Reckoning.Game.EncounterModAddChampionHealth'
+    version: ClassVar[int | None] = 1
+    m_Absolute: bool
+    m_Amount: int
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_Absolute': ('bool', True),
         'm_Amount': ('int', 1),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class EncounterModAddResource(EncounterModBase):
-    type_name = 'Reckoning.Game.EncounterModAddResource'
-    version = 3
-    fields = {
+    type_name: ClassVar[str] = 'Reckoning.Game.EncounterModAddResource'
+    version: ClassVar[int | None] = 3
+    m_Absolute: bool
+    m_ChargeValue: int
+    m_MaxResourceValue: int
+    m_Thresholds: list[Any]
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_Absolute': ('bool', True),
         'm_ChargeValue': ('int', 0),
         'm_MaxResourceValue': ('int', 0),
         'm_Thresholds': ('List<CardThreshold>', []),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_CurrentResourceValue_DEPRECATED': ('int', 0),
         'm_ThresholdValues_DEPRECATED': ('Dictionary<ECardShards, int>', {}),
     }
 
 class EncounterModChampionOverride(EncounterModBase):
-    type_name = 'Reckoning.Game.EncounterModChampionOverride'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Reckoning.Game.EncounterModChampionOverride'
+    version: ClassVar[int | None] = 1
+    m_ChampionCardId: ResourceId | None
+    m_Equipment: list[ResourceId]
+    m_Talents: list[ResourceId]
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_ChampionCardId': ('ResourceId', None),
         'm_Equipment': ('List<ResourceId>', []),
         'm_Talents': ('List<ResourceId>', []),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class EncounterModDrawCards(EncounterModBase):
-    type_name = 'Reckoning.Game.EncounterModDrawCards'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Reckoning.Game.EncounterModDrawCards'
+    version: ClassVar[int | None] = 1
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class EncounterModRunAbilities(EncounterModBase):
-    type_name = 'Reckoning.Game.EncounterModRunAbilities'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Reckoning.Game.EncounterModRunAbilities'
+    version: ClassVar[int | None] = 1
+    m_CardId: ResourceId | None
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_CardId': ('ResourceId', None),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class EncounterScene(SceneData):
-    type_name = 'Reckoning.Game.EncounterScene'
-    version = 8
-    fields = {
+    type_name: ClassVar[str] = 'Reckoning.Game.EncounterScene'
+    version: ClassVar[int | None] = 8
+    m_BuildTag: str
+    m_ChampionDisplayText: str
+    m_EncounterPlayers: list[EncounterPlayer]
+    m_Gameboard: Any
+    m_IsBossEncounter: bool
+    m_Mods: list[EncounterSceneMod]
+    m_RandomizeStartPlayer: bool
+    m_SkipAttack: bool
+    m_SkipMulligan: bool
+    m_Title: str
+    m_UIEvents: list[UIEvent]
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_BuildTag': ('string', ""),
         'm_ChampionDisplayText': ('string', ""),
         'm_EncounterPlayers': ('List<EncounterPlayer>', []),
@@ -2860,21 +3827,31 @@ class EncounterScene(SceneData):
         'm_Title': ('string', ""),
         'm_UIEvents': ('List<UIEvent>', []),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class EventRestrictionBase(RestrictionBase):
-    type_name = 'Game.Shared.Mechanics.EventRestrictionBase'
-    version = None
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.EventRestrictionBase'
+    version: ClassVar[int | None] = None
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class GrantAbilityEffectTemplate(AbilityEffectTemplate):
-    type_name = 'Game.Shared.Mechanics.Abilities.GrantAbilityEffectTemplate'
-    version = 8
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.GrantAbilityEffectTemplate'
+    version: ClassVar[int | None] = 8
+    m_AbilityIsUnique: bool
+    m_AllPaymentPowersOfSource: bool
+    m_AllPaymentPowersOfTarget: bool
+    m_AllRememberedPowers: bool
+    m_AllSocketedPowersOfMyMaster: bool
+    m_AllSocketedPowersOfSource: bool
+    m_AllSocketedPowersOfTarget: bool
+    m_GrantedAbilityTemplateId: ResourceId | None
+    m_RandomChampionChargePower: bool
+    m_RandomInspirePower: bool
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_AbilityIsUnique': ('bool', False),
         'm_AllPaymentPowersOfSource': ('bool', False),
         'm_AllPaymentPowersOfTarget': ('bool', False),
@@ -2886,126 +3863,148 @@ class GrantAbilityEffectTemplate(AbilityEffectTemplate):
         'm_RandomChampionChargePower': ('bool', False),
         'm_RandomInspirePower': ('bool', False),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_AllSocketPowersOfSource': ('bool', False),
     }
 
 class HasAllAttributeFlags(StaticCardFilter):
-    type_name = 'Game.Shared.Mechanics.Cards.Filters.HasAllAttributeFlags'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Cards.Filters.HasAllAttributeFlags'
+    version: ClassVar[int | None] = 1
+    m_CardAttributeFlags: Any
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_CardAttributeFlags': ('ECardAttributes', 'Unknown'),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class HasAnyAttributeFlags(StaticCardFilter):
-    type_name = 'Game.Shared.Mechanics.Cards.Filters.HasAnyAttributeFlags'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Cards.Filters.HasAnyAttributeFlags'
+    version: ClassVar[int | None] = 1
+    m_CardAttributeFlags: Any
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_CardAttributeFlags': ('ECardAttributes', 'Unknown'),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class HasCastingCost(StaticCardFilter):
-    type_name = 'Game.Shared.Mechanics.Cards.Filters.HasCastingCost'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Cards.Filters.HasCastingCost'
+    version: ClassVar[int | None] = 1
+    m_CastingCost: int
+    m_ComparisonOp: Any
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_CastingCost': ('int', 0),
         'm_ComparisonOp': ('EComparisons', 'Equals'),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class HealHeroModifier(NumericModifier):
-    type_name = 'Game.Shared.Mechanics.Modifiers.HealHeroModifier'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Modifiers.HealHeroModifier'
+    version: ClassVar[int | None] = 1
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class InFaction(StaticCardFilter):
-    type_name = 'Game.Shared.Mechanics.Cards.Filters.InFaction'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Cards.Filters.InFaction'
+    version: ClassVar[int | None] = 1
+    m_Faction: Any
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_Faction': ('EFactions', 'None'),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class InZone(StaticCardFilter):
-    type_name = 'Game.Shared.Mechanics.Cards.Filters.InZone'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Cards.Filters.InZone'
+    version: ClassVar[int | None] = 1
+    m_Collection: Any
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_Collection': ('ECardCollections', None),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class InternalMemoryModifier(NumericModifier):
-    type_name = 'Game.Shared.Mechanics.Modifiers.InternalMemoryModifier'
-    version = 2
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Modifiers.InternalMemoryModifier'
+    version: ClassVar[int | None] = 2
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_MemoryValue_DEPRECATED': ('int', 0),
     }
 
 class InventoryCardPack(InventoryItemData):
-    type_name = 'Reckoning.Game.InventoryCardPack'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Reckoning.Game.InventoryCardPack'
+    version: ClassVar[int | None] = 1
+    m_CardPackType: Any
+    m_SetId: ResourceId | None
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_CardPackType': ('ECardPackType', 'Unknown'),
         'm_SetId': ('ResourceId', None),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class InventoryCoinData(InventoryItemData):
-    type_name = 'Reckoning.Game.InventoryCoinData'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Reckoning.Game.InventoryCoinData'
+    version: ClassVar[int | None] = 1
+    m_ImagePath: str
+    m_Reason: str
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_ImagePath': ('string', ""),
         'm_Reason': ('string', ""),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class InventoryCompTicket(InventoryItemData):
-    type_name = 'Reckoning.Game.InventoryCompTicket'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Reckoning.Game.InventoryCompTicket'
+    version: ClassVar[int | None] = 1
+    m_TicketType: Any
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_TicketType': ('ETicketType', 'Unknown'),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class InventoryCurrencyData(InventoryItemData):
-    type_name = 'Reckoning.Game.InventoryCurrencyData'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Reckoning.Game.InventoryCurrencyData'
+    version: ClassVar[int | None] = 1
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class InventoryDeckSleeve(InventoryItemData):
-    type_name = 'Reckoning.Game.InventoryDeckSleeve'
-    version = 5
-    fields = {
+    type_name: ClassVar[str] = 'Reckoning.Game.InventoryDeckSleeve'
+    version: ClassVar[int | None] = 5
+    m_DeckSleeveId: ResourceId | None
+    m_ImagePath: str
+    m_Reason: str
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_DeckSleeveId': ('ResourceId', None),
         'm_ImagePath': ('string', ""),
         'm_Reason': ('string', ""),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_SleeveArtNumber_DEPRECATED': ('string', ""),
     }
 
 class InventoryEquipmentData(InventoryItemData):
-    type_name = 'Reckoning.Game.InventoryEquipmentData'
-    version = 8
-    fields = {
+    type_name: ClassVar[str] = 'Reckoning.Game.InventoryEquipmentData'
+    version: ClassVar[int | None] = 8
+    m_CollectorsNumber: str
+    m_EquipmentSet: ResourceId | None
+    m_EquipmentType: Any
+    m_From: str
+    m_Modifiers: str
+    m_Rarity: Any
+    m_SetId: ResourceId | None
+    m_To: str
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_CollectorsNumber': ('string', ""),
         'm_EquipmentSet': ('ResourceId', None),
         'm_EquipmentType': ('Reckoning.Game.EEquipmentType', 'Trinket'),
@@ -3015,318 +4014,377 @@ class InventoryEquipmentData(InventoryItemData):
         'm_SetId': ('ResourceId', None),
         'm_To': ('string', ""),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_Abilities_DEPRECATED': ('List<CardAbilityContainer>', []),
         'm_Ability_DEPRECATED': ('ResourceId', None),
     }
 
 class InventoryGameboardData(InventoryItemData):
-    type_name = 'Reckoning.Game.InventoryGameboardData'
-    version = 2
-    fields = {
+    type_name: ClassVar[str] = 'Reckoning.Game.InventoryGameboardData'
+    version: ClassVar[int | None] = 2
+    m_EnumValue: int
+    m_Reason: str
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_EnumValue': ('int', 0),
         'm_Reason': ('string', ""),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class InventoryGemData(InventoryItemData):
-    type_name = 'Reckoning.Game.InventoryGemData'
-    version = 6
-    fields = {
+    type_name: ClassVar[str] = 'Reckoning.Game.InventoryGemData'
+    version: ClassVar[int | None] = 6
+    m_Abilities: list[CardAbilityContainer]
+    m_GemTypeNew: Any
+    m_SetId: ResourceId | None
+    m_Threshold: list[Any] | None
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_Abilities': ('List<CardAbilityContainer>', []),
         'm_GemTypeNew': ('EGemTypesNew', 'Unknown'),
         'm_SetId': ('ResourceId', None),
         'm_Threshold': ('List<CardThreshold>', None),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_Ability_DEPRECATED': ('ResourceId', None),
         'm_GemType_DEPRECATED': ('EGemTypes', 'Unknown'),
     }
 
 class InventoryIngredientData(InventoryItemData):
-    type_name = 'Reckoning.Game.InventoryIngredientData'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Reckoning.Game.InventoryIngredientData'
+    version: ClassVar[int | None] = 1
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class InventoryKeepEnhancementData(InventoryItemData):
-    type_name = 'Reckoning.Game.InventoryKeepEnhancementData'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Reckoning.Game.InventoryKeepEnhancementData'
+    version: ClassVar[int | None] = 1
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class InventoryMercenaryData(InventoryItemData):
-    type_name = 'Reckoning.Game.InventoryMercenaryData'
-    version = 2
-    fields = {
+    type_name: ClassVar[str] = 'Reckoning.Game.InventoryMercenaryData'
+    version: ClassVar[int | None] = 2
+    m_DeckTemplateId: ResourceId | None
+    m_MercenarySet: ResourceId | None
+    m_MercenaryTemplateId: ResourceId | None
+    m_Rarity: Any
+    m_Tradeable: bool
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_DeckTemplateId': ('ResourceId', None),
         'm_MercenarySet': ('ResourceId', None),
         'm_MercenaryTemplateId': ('ResourceId', None),
         'm_Rarity': ('ERarity', 'Common'),
         'm_Tradeable': ('bool', True),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class InventoryPlaceholder(InventoryItemData):
-    type_name = 'Reckoning.Game.InventoryPlaceholder'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Reckoning.Game.InventoryPlaceholder'
+    version: ClassVar[int | None] = 1
+    m_PlaceholderType: Any
+    m_VisualGUID: ResourceId | None
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_PlaceholderType': ('EPlaceholderType', 'Invalid'),
         'm_VisualGUID': ('ResourceId', None),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class InventoryStardust(InventoryItemData):
-    type_name = 'Reckoning.Game.InventoryStardust'
-    version = 2
-    fields = {
+    type_name: ClassVar[str] = 'Reckoning.Game.InventoryStardust'
+    version: ClassVar[int | None] = 2
+    m_Rarity: Any
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_Rarity': ('ERarity', 'Common'),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class InventoryTicket(InventoryItemData):
-    type_name = 'Reckoning.Game.InventoryTicket'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Reckoning.Game.InventoryTicket'
+    version: ClassVar[int | None] = 1
+    m_Expiration: Any
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_Expiration': ('TimeSpan', 'Zero'),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class InventoryTreasureChest(InventoryItemData):
-    type_name = 'Reckoning.Game.InventoryTreasureChest'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Reckoning.Game.InventoryTreasureChest'
+    version: ClassVar[int | None] = 1
+    m_ChestInstance: int
+    m_PromotionalID: int
+    m_SetId: ResourceId | None
+    m_TreasureChestType: Any
+    m_TreasureSpinType: Any
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_ChestInstance': ('ulong', 1),
         'm_PromotionalID': ('uint', 0),
         'm_SetId': ('ResourceId', None),
         'm_TreasureChestType': ('ETreasureChestType', 'Common'),
         'm_TreasureSpinType': ('EChestSpinStatus', 'PaidSpin'),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class InventoryVIPProduct(InventoryItemData):
-    type_name = 'Reckoning.Game.InventoryVIPProduct'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Reckoning.Game.InventoryVIPProduct'
+    version: ClassVar[int | None] = 1
+    m_BuyOnce: bool
+    m_ImageName: str
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_BuyOnce': ('bool', False),
         'm_ImageName': ('string', ""),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class IsAlternateArt(StaticCardFilter):
-    type_name = 'Game.Shared.Mechanics.Cards.Filters.IsAlternateArt'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Cards.Filters.IsAlternateArt'
+    version: ClassVar[int | None] = 1
+    m_AlternateArtPref: Any
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_AlternateArtPref': ('EAlternateArt', 'Any'),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class IsArtifact(StaticCardFilter):
-    type_name = 'Game.Shared.Mechanics.Cards.Filters.IsArtifact'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Cards.Filters.IsArtifact'
+    version: ClassVar[int | None] = 1
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class IsColor(StaticCardFilter):
-    type_name = 'Game.Shared.Mechanics.Cards.Filters.IsColor'
-    version = 3
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Cards.Filters.IsColor'
+    version: ClassVar[int | None] = 3
+    m_ColorFlags: Any
+    m_IncludeResources: bool
+    m_Prismatic: bool
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_ColorFlags': ('ECardShards', 'Unknown'),
         'm_IncludeResources': ('bool', False),
         'm_Prismatic': ('bool', False),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class IsColor_DeckBuilder(StaticCardFilter):
-    type_name = 'Game.Shared.Mechanics.Cards.Filters.IsColor_DeckBuilder'
-    version = 3
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Cards.Filters.IsColor_DeckBuilder'
+    version: ClassVar[int | None] = 3
+    m_ColorFlags: Any
+    m_IncludeResources: bool
+    m_Prismatic: bool
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_ColorFlags': ('ECardShards', 'Unknown'),
         'm_IncludeResources': ('bool', False),
         'm_Prismatic': ('bool', False),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class IsExtendedArt(StaticCardFilter):
-    type_name = 'Game.Shared.Mechanics.Cards.Filters.IsExtendedArt'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Cards.Filters.IsExtendedArt'
+    version: ClassVar[int | None] = 1
+    m_ExtendedArtOnly: bool
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_ExtendedArtOnly': ('bool', False),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class IsHero(StaticCardFilter):
-    type_name = 'Game.Shared.Mechanics.Cards.Filters.IsHero'
-    version = 2
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Cards.Filters.IsHero'
+    version: ClassVar[int | None] = 2
+    m_MustBeAI: bool
+    m_MustBeHuman: bool
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_MustBeAI': ('bool', False),
         'm_MustBeHuman': ('bool', False),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class IsMultiThresholdCard(StaticCardFilter):
-    type_name = 'Game.Shared.Mechanics.Cards.Filters.IsMultiThresholdCard'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Cards.Filters.IsMultiThresholdCard'
+    version: ClassVar[int | None] = 1
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class IsNotType(StaticCardFilter):
-    type_name = 'Game.Shared.Mechanics.Cards.Filters.IsNotType'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Cards.Filters.IsNotType'
+    version: ClassVar[int | None] = 1
+    m_CardType: Any
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_CardType': ('ECardTypes', 'Unknown'),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class IsPromo(StaticCardFilter):
-    type_name = 'Game.Shared.Mechanics.Cards.Filters.IsPromo'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Cards.Filters.IsPromo'
+    version: ClassVar[int | None] = 1
+    m_HasAlternateArt: int
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_HasAlternateArt': ('int', -1),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class IsPvECard(StaticCardFilter):
-    type_name = 'Game.Shared.Mechanics.Cards.Filters.IsPvECard'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Cards.Filters.IsPvECard'
+    version: ClassVar[int | None] = 1
+    m_IsPvE: int
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_IsPvE': ('int', -1),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class IsRarity(StaticCardFilter):
-    type_name = 'Game.Shared.Mechanics.Cards.Filters.IsRarity'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Cards.Filters.IsRarity'
+    version: ClassVar[int | None] = 1
+    m_Rarity: Any
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_Rarity': ('ERarity', 'Unknown'),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class IsResource(StaticCardFilter):
-    type_name = 'Game.Shared.Mechanics.Cards.Filters.IsResource'
-    version = 2
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Cards.Filters.IsResource'
+    version: ClassVar[int | None] = 2
+    m_IsBasicResource: bool
+    m_IsNonStandardResource: bool
+    m_ThresholdColorFlags: Any
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_IsBasicResource': ('bool', True),
         'm_IsNonStandardResource': ('bool', False),
         'm_ThresholdColorFlags': ('ECardShards', 'Unknown'),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class IsSocketable(StaticCardFilter):
-    type_name = 'Game.Shared.Mechanics.Cards.Filters.IsSocketable'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Cards.Filters.IsSocketable'
+    version: ClassVar[int | None] = 1
+    m_ComparisonOp: Any
+    m_SocketValue: int
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_ComparisonOp': ('EComparisons', 'Equals'),
         'm_SocketValue': ('int', 0),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class IsSocketed(StaticCardFilter):
-    type_name = 'Game.Shared.Mechanics.Cards.Filters.IsSocketed'
-    version = 3
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Cards.Filters.IsSocketed'
+    version: ClassVar[int | None] = 3
+    m_CompareToAbilitySource: bool
+    m_ComparisonOp: Any
+    m_MustBeMinor: bool
+    m_SocketedValue: int
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_CompareToAbilitySource': ('bool', False),
         'm_ComparisonOp': ('EComparisons', 'Equals'),
         'm_MustBeMinor': ('bool', False),
         'm_SocketedValue': ('int', 0),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class IsSubType(StaticCardFilter):
-    type_name = 'Game.Shared.Mechanics.Cards.Filters.IsSubType'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Cards.Filters.IsSubType'
+    version: ClassVar[int | None] = 1
+    m_SubType: str
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_SubType': ('string', ""),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class IsTroop(StaticCardFilter):
-    type_name = 'Game.Shared.Mechanics.Cards.Filters.IsTroop'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Cards.Filters.IsTroop'
+    version: ClassVar[int | None] = 1
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class IsType(StaticCardFilter):
-    type_name = 'Game.Shared.Mechanics.Cards.Filters.IsType'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Cards.Filters.IsType'
+    version: ClassVar[int | None] = 1
+    m_CardType: Any
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_CardType': ('ECardTypes', 'Unknown'),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class IsUniqueCard(StaticCardFilter):
-    type_name = 'Game.Shared.Mechanics.Cards.Filters.IsUniqueCard'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Cards.Filters.IsUniqueCard'
+    version: ClassVar[int | None] = 1
+    m_Unique: int
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_Unique': ('int', -1),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class LootPayoutGold(LootPayoutBase):
-    type_name = 'Reckoning.Game.Campaign.LootPayoutGold'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Reckoning.Game.Campaign.LootPayoutGold'
+    version: ClassVar[int | None] = 1
+    m_Amount: list[int]
+    m_Odds: list[int]
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_Amount': ('List<int>', []),
         'm_Odds': ('List<int>', []),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class LootPayoutItem(LootPayoutBase):
-    type_name = 'Reckoning.Game.Campaign.LootPayoutItem'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Reckoning.Game.Campaign.LootPayoutItem'
+    version: ClassVar[int | None] = 1
+    m_Items: list[ResourceId]
+    m_Odds: list[int]
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_Items': ('List<ResourceId>', []),
         'm_Odds': ('List<int>', []),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class LoseLifeModifier(NumericModifier):
-    type_name = 'Game.Shared.Mechanics.Modifiers.LoseLifeModifier'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Modifiers.LoseLifeModifier'
+    version: ClassVar[int | None] = 1
+    m_LoseHalfHealth: bool
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_LoseHalfHealth': ('bool', False),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class MatchSecondaryTargetTemplate(AbilityTargetTemplate):
-    type_name = 'Game.Shared.Mechanics.Abilities.TargetTemplates.MatchSecondaryTargetTemplate'
-    version = 4
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.TargetTemplates.MatchSecondaryTargetTemplate'
+    version: ClassVar[int | None] = 4
+    m_CantBePreviousTarget: bool
+    m_DoesntShareRace: bool
+    m_SameCost: bool
+    m_SameName: bool
+    m_SameOwner: bool
+    m_SharesRace: bool
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_CantBePreviousTarget': ('bool', False),
         'm_DoesntShareRace': ('bool', False),
         'm_SameCost': ('bool', False),
@@ -3334,23 +4392,34 @@ class MatchSecondaryTargetTemplate(AbilityTargetTemplate):
         'm_SameOwner': ('bool', False),
         'm_SharesRace': ('bool', False),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class MatchesTargetFilter(StaticCardFilter):
-    type_name = 'Game.Shared.Mechanics.Cards.Filters.MatchesTargetFilter'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Cards.Filters.MatchesTargetFilter'
+    version: ClassVar[int | None] = 1
+    m_MatchName: bool
+    m_TargetIndex: int
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_MatchName': ('bool', True),
         'm_TargetIndex': ('int', 0),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class MercenaryTemplate(ChampionTemplate):
-    type_name = 'Reckoning.Game.MercenaryTemplate'
-    version = 8
-    fields = {
+    type_name: ClassVar[str] = 'Reckoning.Game.MercenaryTemplate'
+    version: ClassVar[int | None] = 8
+    m_ChampionDeckRestrictions: list[ChampionDeckRestriction]
+    m_DeckRestrictions: str
+    m_DeckTemplateId: ResourceId | None
+    m_Description: str
+    m_PartyPassiveAbilities: list[CardAbilityContainer]
+    m_PartyPassiveDescription: str
+    m_PartyPassiveGameText: str
+    m_ShardAlignment: dict[Any, dict[Any, int]]
+    m_UpgradeTemplateId: ResourceId | None
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_ChampionDeckRestrictions': ('List<ChampionDeckRestriction>', []),
         'm_DeckRestrictions': ('string', ""),
         'm_DeckTemplateId': ('ResourceId', None),
@@ -3361,75 +4430,85 @@ class MercenaryTemplate(ChampionTemplate):
         'm_ShardAlignment': ('Dictionary<ECardShards, Dictionary<ERarity, int>>', {}),
         'm_UpgradeTemplateId': ('ResourceId', None),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_PartyPassiveEngineeringTextInvalid_DEPRECATED': ('bool', False),
         'm_PartyPassiveEngineeringText_DEPRECATED': ('string', ""),
     }
 
 class NameContainsFilter(StaticCardFilter):
-    type_name = 'Game.Shared.Mechanics.Cards.Filters.NameContainsFilter'
-    version = 2
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Cards.Filters.NameContainsFilter'
+    version: ClassVar[int | None] = 2
+    m_ContainsString: str
+    m_IncludeKeywords: bool
+    m_IncludeSubType: bool
+    m_LanguageCode: str
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_ContainsString': ('string', ""),
         'm_IncludeKeywords': ('bool', False),
         'm_IncludeSubType': ('bool', False),
         'm_LanguageCode': ('string', ""),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class NonStandardTurnPhaseAction(TurnPhaseActionBase):
-    type_name = 'Game.Shared.Mechanics.NonStandardTurnPhaseAction'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.NonStandardTurnPhaseAction'
+    version: ClassVar[int | None] = 1
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class NotAbilityCondition(AbilityCondition):
-    type_name = 'Game.Shared.Mechanics.Abilities.NotAbilityCondition'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.NotAbilityCondition'
+    version: ClassVar[int | None] = 1
+    m_Condition: AbilityCondition | None
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_Condition': ('IAbilityCondition', None),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class NotContingentAbilityCondition(AbilityEffectCondition):
-    type_name = 'Game.Shared.Mechanics.Abilities.Conditions.NotContingentAbilityCondition'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.Conditions.NotContingentAbilityCondition'
+    version: ClassVar[int | None] = 1
+    m_EffectIndex: int
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_EffectIndex': ('int', 0),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class NotEffectCondition(AbilityEffectCondition):
-    type_name = 'Game.Shared.Mechanics.Abilities.Conditions.NotEffectCondition'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.Conditions.NotEffectCondition'
+    version: ClassVar[int | None] = 1
+    m_Condition: AbilityEffectCondition | None
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_Condition': ('IAbilityEffectCondition', None),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class NotTriggerCondition(TriggerCondition):
-    type_name = 'Game.Shared.Mechanics.Triggers.Conditions.NotTriggerCondition'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Triggers.Conditions.NotTriggerCondition'
+    version: ClassVar[int | None] = 1
+    m_Condition: TriggerCondition | None
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_Condition': ('ITriggerCondition', None),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class NpcVendorData(SceneData):
-    type_name = 'Reckoning.Game.NpcVendorData'
-    version = 4
-    fields = {
+    type_name: ClassVar[str] = 'Reckoning.Game.NpcVendorData'
+    version: ClassVar[int | None] = 4
+    m_DesignNotes: str
+    m_ItemsForSale: list[NpcVendorItemData]
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_DesignNotes': ('string', ""),
         'm_ItemsForSale': ('List<NpcVendorItemData>', []),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_Description_DEPRECATED': ('string', ""),
         'm_Id_DEPRECATED': ('ResourceId', None),
         'm_Name_DEPRECATED': ('string', ""),
@@ -3437,54 +4516,57 @@ class NpcVendorData(SceneData):
     }
 
 class OrAbilityCondition(AbilityCondition):
-    type_name = 'Game.Shared.Mechanics.Abilities.OrAbilityCondition'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.OrAbilityCondition'
+    version: ClassVar[int | None] = 1
+    m_Conditions: list[AbilityCondition]
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_Conditions': ('List<IAbilityCondition>', []),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class OrEffectCondition(AbilityEffectCondition):
-    type_name = 'Game.Shared.Mechanics.Abilities.Conditions.OrEffectCondition'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.Conditions.OrEffectCondition'
+    version: ClassVar[int | None] = 1
+    m_Conditions: list[AbilityEffectCondition]
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_Conditions': ('List<IAbilityEffectCondition>', []),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class OrTriggerCondition(TriggerCondition):
-    type_name = 'Game.Shared.Mechanics.Triggers.Conditions.OrTriggerCondition'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Triggers.Conditions.OrTriggerCondition'
+    version: ClassVar[int | None] = 1
+    m_Conditions: list[TriggerCondition]
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_Conditions': ('List<ITriggerCondition>', []),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class ParentCardTargetTemplate(AbilityTargetTemplate):
-    type_name = 'Game.Shared.Mechanics.Abilities.TargetTemplates.ParentCardTargetTemplate'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.TargetTemplates.ParentCardTargetTemplate'
+    version: ClassVar[int | None] = 1
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class ParentStoredTargetTemplate(AbilityTargetTemplate):
-    type_name = 'Game.Shared.Mechanics.Abilities.TargetTemplates.ParentStoredTargetTemplate'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.TargetTemplates.ParentStoredTargetTemplate'
+    version: ClassVar[int | None] = 1
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class PlayerOrHisStuff(AbilityTargetTemplate):
-    type_name = 'Game.Shared.Mechanics.Abilities.TargetTemplates.PlayerOrHisStuff'
-    version = 3
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.TargetTemplates.PlayerOrHisStuff'
+    version: ClassVar[int | None] = 3
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_MaxTargets': ('int', 0),
         'm_MaximumTargetCount_DEPRECATED': ('int', 0),
         'm_MinimumTargetCount_DEPRECATED': ('int', 0),
@@ -3493,11 +4575,11 @@ class PlayerOrHisStuff(AbilityTargetTemplate):
     }
 
 class PlayerTargetTemplate(AbilityTargetTemplate):
-    type_name = 'Game.Shared.Mechanics.Abilities.TargetTemplates.PlayerTargetTemplate'
-    version = 3
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.TargetTemplates.PlayerTargetTemplate'
+    version: ClassVar[int | None] = 3
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_MaxTargets': ('int', 0),
         'm_MaximumTargetCount_DEPRECATED': ('int', 0),
         'm_MinimumTargetCount_DEPRECATED': ('int', 0),
@@ -3506,49 +4588,68 @@ class PlayerTargetTemplate(AbilityTargetTemplate):
     }
 
 class QuestObjectiveCollect(QuestObjectiveBase):
-    type_name = 'Reckoning.Game.QuestObjectiveCollect'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Reckoning.Game.QuestObjectiveCollect'
+    version: ClassVar[int | None] = 1
+    m_CountRequired: int
+    m_PublicScriptVar: str
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_CountRequired': ('int', 1),
         'm_PublicScriptVar': ('string', 'Empty'),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class QuestObjectiveConversation(QuestObjectiveBase):
-    type_name = 'Reckoning.Game.QuestObjectiveConversation'
-    version = 2
-    fields = {
+    type_name: ClassVar[str] = 'Reckoning.Game.QuestObjectiveConversation'
+    version: ClassVar[int | None] = 2
+    m_ConversationEvent: str
+    m_ConversationIdList: list[ResourceId]
+    m_ConversationIdOld: ResourceId | None
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_ConversationEvent': ('string', 'Empty'),
         'm_ConversationIdList': ('List<ResourceId>', []),
         'm_ConversationIdOld': ('ResourceId', None),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_ConversationId': ('ResourceId', None),
     }
 
 class QuestObjectiveDungeon(QuestObjectiveBase):
-    type_name = 'Reckoning.Game.QuestObjectiveDungeon'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Reckoning.Game.QuestObjectiveDungeon'
+    version: ClassVar[int | None] = 1
+    m_DungeonId: ResourceId | None
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_DungeonId': ('ResourceId', None),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class QuestObjectiveEncounter(QuestObjectiveBase):
-    type_name = 'Reckoning.Game.QuestObjectiveEncounter'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Reckoning.Game.QuestObjectiveEncounter'
+    version: ClassVar[int | None] = 1
+    m_EncounterId: ResourceId | None
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_EncounterId': ('ResourceId', None),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class RequiresCardsControlled(AbilityEffectCondition):
-    type_name = 'Game.Shared.Mechanics.Abilities.Conditions.RequiresCardsControlled'
-    version = 9
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.Conditions.RequiresCardsControlled'
+    version: ClassVar[int | None] = 9
+    m_CardCollection: Any
+    m_CardFilter: Any
+    m_ComparisonOp: Any
+    m_OnlyIncludeDifferentCosts: bool
+    m_OnlyIncludeDifferentNames: bool
+    m_OnlyIncludeDifferentRacesForFaction: Any
+    m_PlayerFilter: Any
+    m_QuantityCardFilter: Any
+    m_QuantityIsHighestOpposingChampionsMatch: bool
+    m_QuantityIsLowestOpposingChampionsMatch: bool
+    m_RequiredQuantity: int
+    m_SameOwner: bool
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_CardCollection': ('ECardCollections', None),
         'm_CardFilter': ('CardFilter', None),
         'm_ComparisonOp': ('EComparisons', None),
@@ -3562,38 +4663,56 @@ class RequiresCardsControlled(AbilityEffectCondition):
         'm_RequiredQuantity': ('int', 0),
         'm_SameOwner': ('bool', False),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class RequiresChampionCharges(AbilityEffectCondition):
-    type_name = 'Game.Shared.Mechanics.Abilities.Conditions.RequiresChampionCharges'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.Conditions.RequiresChampionCharges'
+    version: ClassVar[int | None] = 1
+    m_ComparisonOp: Any
+    m_PlayerFilter: Any
+    m_QuantityIsHighestOpposingChampionsCharges: bool
+    m_RequiredQuantity: int
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_ComparisonOp': ('EComparisons', None),
         'm_PlayerFilter': ('EPlayerCardTargets', None),
         'm_QuantityIsHighestOpposingChampionsCharges': ('bool', False),
         'm_RequiredQuantity': ('int', 0),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class RequiresChampionHealth(AbilityEffectCondition):
-    type_name = 'Game.Shared.Mechanics.Abilities.Conditions.RequiresChampionHealth'
-    version = 3
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.Conditions.RequiresChampionHealth'
+    version: ClassVar[int | None] = 3
+    m_ComparisonOp: Any
+    m_PlayerFilter: Any
+    m_QuantityIsHighestOpposingChampionsHealth: bool
+    m_QuantityIsTwiceStartingHealth: bool
+    m_RequiredQuantity: int
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_ComparisonOp': ('EComparisons', None),
         'm_PlayerFilter': ('EPlayerCardTargets', None),
         'm_QuantityIsHighestOpposingChampionsHealth': ('bool', False),
         'm_QuantityIsTwiceStartingHealth': ('bool', False),
         'm_RequiredQuantity': ('int', 0),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class RequiresDateTime(AbilityEffectCondition):
-    type_name = 'Game.Shared.Mechanics.Abilities.Conditions.RequiresDateTime'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.Conditions.RequiresDateTime'
+    version: ClassVar[int | None] = 1
+    m_ComparisonOp: Any
+    m_Day: int
+    m_DayOfWeek: int
+    m_DayOfYear: int
+    m_Hour: int
+    m_Minute: int
+    m_Month: int
+    m_Second: int
+    m_Year: int
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_ComparisonOp': ('EComparisons', 'Equals'),
         'm_Day': ('int', -1),
         'm_DayOfWeek': ('int', -1),
@@ -3604,285 +4723,320 @@ class RequiresDateTime(AbilityEffectCondition):
         'm_Second': ('int', -1),
         'm_Year': ('int', -1),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class RequiresEncounterGameboard(AbilityEffectCondition):
-    type_name = 'Game.Shared.Mechanics.Abilities.Conditions.RequiresEncounterGameboard'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.Conditions.RequiresEncounterGameboard'
+    version: ClassVar[int | None] = 1
+    m_Gameboard: Any
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_Gameboard': ('GameboardEnums', None),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class RequiresEquippedItem(AbilityEffectCondition):
-    type_name = 'Game.Shared.Mechanics.Abilities.Conditions.RequiresEquippedItem'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.Conditions.RequiresEquippedItem'
+    version: ClassVar[int | None] = 1
+    m_EquipmentSlotId: int
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_EquipmentSlotId': ('int', 0),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class RequiresPreviousCollection(AbilityEffectCondition):
-    type_name = 'Game.Shared.Mechanics.Abilities.Conditions.RequiresPreviousCollection'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.Conditions.RequiresPreviousCollection'
+    version: ClassVar[int | None] = 1
+    m_Collection: Any
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_Collection': ('ECardCollections', 'None'),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class RequiresResourceThreshold(AbilityEffectCondition):
-    type_name = 'Game.Shared.Mechanics.Abilities.Conditions.RequiresResourceThreshold'
-    version = 2
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.Conditions.RequiresResourceThreshold'
+    version: ClassVar[int | None] = 2
+    m_ColorFlags: Any
+    m_ComparisonOp: Any
+    m_RequiredQuantity: int
+    m_RequiresDifferentThresholds: bool
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_ColorFlags': ('ECardShards', None),
         'm_ComparisonOp': ('EComparisons', None),
         'm_RequiredQuantity': ('int', 0),
         'm_RequiresDifferentThresholds': ('bool', False),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class RequiresSourcePassesFilterCondition(AbilityEffectCondition):
-    type_name = 'Game.Shared.Mechanics.Abilities.Conditions.RequiresSourcePassesFilterCondition'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.Conditions.RequiresSourcePassesFilterCondition'
+    version: ClassVar[int | None] = 1
+    m_Filter: Any
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_Filter': ('CardFilter', None),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class RequiresTargetChampionHealth(AbilityEffectCondition):
-    type_name = 'Game.Shared.Mechanics.Abilities.Conditions.RequiresTargetChampionHealth'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.Conditions.RequiresTargetChampionHealth'
+    version: ClassVar[int | None] = 1
+    m_ComparisonOp: Any
+    m_RequiredQuantity: int
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_ComparisonOp': ('EComparisons', None),
         'm_RequiredQuantity': ('int', 0),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class RequiresTargetPassesFilterCondition(AbilityEffectCondition):
-    type_name = 'Game.Shared.Mechanics.Abilities.Conditions.RequiresTargetPassesFilterCondition'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.Conditions.RequiresTargetPassesFilterCondition'
+    version: ClassVar[int | None] = 1
+    m_Filter: Any
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_Filter': ('CardFilter', None),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class RequiresTotalResources(AbilityEffectCondition):
-    type_name = 'Game.Shared.Mechanics.Abilities.Conditions.RequiresTotalResources'
-    version = 2
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.Conditions.RequiresTotalResources'
+    version: ClassVar[int | None] = 2
+    m_ComparisonOp: Any
+    m_PlayerFilter: Any
+    m_QuantityIsHighestOpposingChampionsMatch: bool
+    m_RequiredQuantity: int
+    m_UseTemporaryResources: bool
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_ComparisonOp': ('EComparisons', None),
         'm_PlayerFilter': ('EPlayerCardTargets', None),
         'm_QuantityIsHighestOpposingChampionsMatch': ('bool', False),
         'm_RequiredQuantity': ('int', 0),
         'm_UseTemporaryResources': ('bool', False),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class RevealCardsAbilityEffectTemplate(AbilityEffectTemplate):
-    type_name = 'Game.Shared.Mechanics.Abilities.RevealCardsAbilityEffectTemplate'
-    version = 2
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.RevealCardsAbilityEffectTemplate'
+    version: ClassVar[int | None] = 2
+    m_PlayerRevealTargets: Any
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_PlayerRevealTargets': ('EPlayerRevealTargets', 'Unknown'),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_CardCollection_DEPRECATED': ('ECardCollections', None),
         'm_CardCount_DEPRECATED': ('int', 0),
         'm_CardFilter_DEPRECATED': ('CardFilter', None),
     }
 
 class SecondaryTargetTemplate(AbilityTargetTemplate):
-    type_name = 'Game.Shared.Mechanics.Abilities.TargetTemplates.SecondaryTargetTemplate'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.TargetTemplates.SecondaryTargetTemplate'
+    version: ClassVar[int | None] = 1
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class ServerScriptEvent(ConversationEventBase):
-    type_name = 'Reckoning.Game.Conversations.Events.ServerScriptEvent'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Reckoning.Game.Conversations.Events.ServerScriptEvent'
+    version: ClassVar[int | None] = 1
+    m_EventName: str
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_EventName': ('string', ""),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class SetHeroHealthModifier(NumericModifier):
-    type_name = 'Game.Shared.Mechanics.Modifiers.SetHeroHealthModifier'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Modifiers.SetHeroHealthModifier'
+    version: ClassVar[int | None] = 1
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class SetIdFilter(StaticCardFilter):
-    type_name = 'Game.Shared.Mechanics.Cards.Filters.SetIdFilter'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Cards.Filters.SetIdFilter'
+    version: ClassVar[int | None] = 1
+    m_SetId: ResourceId | None
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_SetId': ('ResourceId', None),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class SetNumberFilter(StaticCardFilter):
-    type_name = 'Game.Shared.Mechanics.Cards.Filters.SetNumberFilter'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Cards.Filters.SetNumberFilter'
+    version: ClassVar[int | None] = 1
+    m_SetNumber: int
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_SetNumber': ('int', -1),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class SharedNameTargetTemplate(AbilityTargetTemplate):
-    type_name = 'Game.Shared.Mechanics.Abilities.TargetTemplates.SharedNameTargetTemplate'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.TargetTemplates.SharedNameTargetTemplate'
+    version: ClassVar[int | None] = 1
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class SourceBuriedTargetTemplate(AbilityTargetTemplate):
-    type_name = 'Game.Shared.Mechanics.Abilities.TargetTemplates.SourceBuriedTargetTemplate'
-    version = 2
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.TargetTemplates.SourceBuriedTargetTemplate'
+    version: ClassVar[int | None] = 2
+    m_ListAttrName: str
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_ListAttrName': ('string', ""),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class SourceCardHasCounters(AbilityEffectCondition):
-    type_name = 'Game.Shared.Mechanics.Abilities.Conditions.SourceCardHasCounters'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.Conditions.SourceCardHasCounters'
+    version: ClassVar[int | None] = 1
+    m_CardCounterTemplateId: ResourceId | None
+    m_ComparisonOp: Any
+    m_RequiredCounters: int
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_CardCounterTemplateId': ('ResourceId', None),
         'm_ComparisonOp': ('EComparisons', 'GreaterThanOrEqual'),
         'm_RequiredCounters': ('int', 0),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class SourceCardHasKeywords(AbilityEffectCondition):
-    type_name = 'Game.Shared.Mechanics.Abilities.Conditions.SourceCardHasKeywords'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.Conditions.SourceCardHasKeywords'
+    version: ClassVar[int | None] = 1
+    m_ComparisonOp: Any
+    m_RequiredQuantity: int
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_ComparisonOp': ('EComparisons', 'GreaterThanOrEqual'),
         'm_RequiredQuantity': ('int', 0),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class SourceDrawnTargetTemplate(AbilityTargetTemplate):
-    type_name = 'Game.Shared.Mechanics.Abilities.TargetTemplates.SourceDrawnTargetTemplate'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.TargetTemplates.SourceDrawnTargetTemplate'
+    version: ClassVar[int | None] = 1
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class SourceRevealedTargetTemplate(AbilityTargetTemplate):
-    type_name = 'Game.Shared.Mechanics.Abilities.TargetTemplates.SourceRevealedTargetTemplate'
-    version = 2
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.TargetTemplates.SourceRevealedTargetTemplate'
+    version: ClassVar[int | None] = 2
+    m_IgnoreActedOn: bool
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_IgnoreActedOn': ('bool', False),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class SourceStoredTargetTemplate(AbilityTargetTemplate):
-    type_name = 'Game.Shared.Mechanics.Abilities.TargetTemplates.SourceStoredTargetTemplate'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.TargetTemplates.SourceStoredTargetTemplate'
+    version: ClassVar[int | None] = 1
+    m_StoredInAbility: bool
+    m_StoredInCard: bool
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_StoredInAbility': ('bool', True),
         'm_StoredInCard': ('bool', True),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class SpellPointsModifier(NumericModifier):
-    type_name = 'Game.Shared.Mechanics.Modifiers.SpellPointsModifier'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Modifiers.SpellPointsModifier'
+    version: ClassVar[int | None] = 1
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class StaticAndCardFilter(StaticCardFilter):
-    type_name = 'Game.Shared.Mechanics.Cards.Filters.StaticAndCardFilter'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Cards.Filters.StaticAndCardFilter'
+    version: ClassVar[int | None] = 1
+    m_TargetFilters: list[StaticCardFilter]
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_TargetFilters': ('List<StaticCardFilter>', []),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class StaticNotCardFilter(StaticCardFilter):
-    type_name = 'Game.Shared.Mechanics.Cards.Filters.StaticNotCardFilter'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Cards.Filters.StaticNotCardFilter'
+    version: ClassVar[int | None] = 1
+    m_TargetFilter: StaticCardFilter | None
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_TargetFilter': ('StaticCardFilter', None),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class StaticOrCardFilter(StaticCardFilter):
-    type_name = 'Game.Shared.Mechanics.Cards.Filters.StaticOrCardFilter'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Cards.Filters.StaticOrCardFilter'
+    version: ClassVar[int | None] = 1
+    m_TargetFilters: list[StaticCardFilter]
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_TargetFilters': ('List<StaticCardFilter>', []),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class StrongholdTalentData(ChampionTalentData):
-    type_name = 'Reckoning.Game.StrongholdTalentData'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Reckoning.Game.StrongholdTalentData'
+    version: ClassVar[int | None] = 1
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class TACTriggerCondition(TriggerCondition):
-    type_name = 'Game.Shared.Mechanics.Triggers.Conditions.TACTriggerCondition'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Triggers.Conditions.TACTriggerCondition'
+    version: ClassVar[int | None] = 1
+    m_Conditions: SerializableTAC | None
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_Conditions': ('SerializableTAC', None),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class TargetConstant(TargetField):
-    type_name = 'Game.Shared.Mechanics.Abilities.TargetTemplates.TargetConstant'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.TargetTemplates.TargetConstant'
+    version: ClassVar[int | None] = 1
+    m_Value: int
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_Value': ('int', 0),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class TargetVariable(TargetField):
-    type_name = 'Game.Shared.Mechanics.Abilities.TargetTemplates.TargetVariable'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.TargetTemplates.TargetVariable'
+    version: ClassVar[int | None] = 1
+    m_AbilityVariableName: str
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_AbilityVariableName': ('string', ""),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class TargetsAPlayerOrHisStuff(AbilityTargetTemplate):
-    type_name = 'Game.Shared.Mechanics.Abilities.TargetTemplates.TargetsAPlayerOrHisStuff'
-    version = 3
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.TargetTemplates.TargetsAPlayerOrHisStuff'
+    version: ClassVar[int | None] = 3
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_MaxTargets': ('int', 0),
         'm_MaximumTargetCount_DEPRECATED': ('int', 0),
         'm_MinimumTargetCount_DEPRECATED': ('int', 0),
@@ -3891,279 +5045,314 @@ class TargetsAPlayerOrHisStuff(AbilityTargetTemplate):
     }
 
 class ThresholdModifier(NumericModifier):
-    type_name = 'Game.Shared.Mechanics.Modifiers.ThresholdModifier'
-    version = 3
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Modifiers.ThresholdModifier'
+    version: ClassVar[int | None] = 3
+    m_Random: bool
+    m_RandomLowestThreshold: bool
+    m_ThresholdColor: Any
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_Random': ('bool', False),
         'm_RandomLowestThreshold': ('bool', False),
         'm_ThresholdColor': ('ECardShards', 'Unknown'),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class TotalResourceModifier(NumericModifier):
-    type_name = 'Game.Shared.Mechanics.Modifiers.TotalResourceModifier'
-    version = 2
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Modifiers.TotalResourceModifier'
+    version: ClassVar[int | None] = 2
+    m_Set: bool
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_Set': ('bool', False),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class TriggerAbilityHasSpellPointCostModifier(TriggerCondition):
-    type_name = 'Game.Shared.Mechanics.Triggers.Conditions.TriggerAbilityHasSpellPointCostModifier'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Triggers.Conditions.TriggerAbilityHasSpellPointCostModifier'
+    version: ClassVar[int | None] = 1
+    m_ComparisonOp: Any
+    m_RequiredQuantity: int
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_ComparisonOp': ('EComparisons', None),
         'm_RequiredQuantity': ('int', 0),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class TriggerAbilityHasUsesPerGameValue(TriggerCondition):
-    type_name = 'Game.Shared.Mechanics.Triggers.Conditions.TriggerAbilityHasUsesPerGameValue'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Triggers.Conditions.TriggerAbilityHasUsesPerGameValue'
+    version: ClassVar[int | None] = 1
+    m_UsesPerGameValue: int
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_UsesPerGameValue': ('int', 0),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class TriggerAbilityIsChargePower(TriggerCondition):
-    type_name = 'Game.Shared.Mechanics.Triggers.Conditions.TriggerAbilityIsChargePower'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Triggers.Conditions.TriggerAbilityIsChargePower'
+    version: ClassVar[int | None] = 1
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class TriggerAbilityIsSpellPower(TriggerCondition):
-    type_name = 'Game.Shared.Mechanics.Triggers.Conditions.TriggerAbilityIsSpellPower'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Triggers.Conditions.TriggerAbilityIsSpellPower'
+    version: ClassVar[int | None] = 1
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class TriggerCardCounter(TriggerCondition):
-    type_name = 'Game.Shared.Mechanics.Triggers.Conditions.TriggerCardCounter'
-    version = 3
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Triggers.Conditions.TriggerCardCounter'
+    version: ClassVar[int | None] = 3
+    m_CardCounterTemplateId: ResourceId | None
+    m_ComparisonOp: Any
+    m_RequiredCounters: int
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_CardCounterTemplateId': ('ResourceId', None),
         'm_ComparisonOp': ('EComparisons', 'GreaterThanOrEqual'),
         'm_RequiredCounters': ('int', 0),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_CounterType_DEPRECATED': ('ECardCounterTypes', 'None'),
     }
 
 class TriggerCardEnteredZone(TriggerCondition):
-    type_name = 'Game.Shared.Mechanics.Triggers.Conditions.TriggerCardEnteredZone'
-    version = 3
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Triggers.Conditions.TriggerCardEnteredZone'
+    version: ClassVar[int | None] = 3
+    m_DestinationCollection: Any
+    m_Opposing: bool
+    m_SourceCollection: Any
+    m_Your: bool
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_DestinationCollection': ('ECardCollections', 'None'),
         'm_Opposing': ('bool', False),
         'm_SourceCollection': ('ECardCollections', 'None'),
         'm_Your': ('bool', False),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class TriggerCardIsAbilitySource(TriggerCondition):
-    type_name = 'Game.Shared.Mechanics.Triggers.Conditions.TriggerCardIsAbilitySource'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Triggers.Conditions.TriggerCardIsAbilitySource'
+    version: ClassVar[int | None] = 1
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class TriggerCardIsNthCardDrawnThisTurnByThisPlayer(TriggerCondition):
-    type_name = 'Game.Shared.Mechanics.Triggers.Conditions.TriggerCardIsNthCardDrawnThisTurnByThisPlayer'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Triggers.Conditions.TriggerCardIsNthCardDrawnThisTurnByThisPlayer'
+    version: ClassVar[int | None] = 1
+    m_Nth: int
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_Nth': ('int', 0),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class TriggerCardIsStoredTargetOfAbilitySource(TriggerCondition):
-    type_name = 'Game.Shared.Mechanics.Triggers.Conditions.TriggerCardIsStoredTargetOfAbilitySource'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Triggers.Conditions.TriggerCardIsStoredTargetOfAbilitySource'
+    version: ClassVar[int | None] = 1
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class TriggerCardMatchesFilter(TriggerCondition):
-    type_name = 'Game.Shared.Mechanics.Triggers.Conditions.TriggerCardMatchesFilter'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Triggers.Conditions.TriggerCardMatchesFilter'
+    version: ClassVar[int | None] = 1
+    m_CardFilter: Any
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_CardFilter': ('CardFilter', None),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class TriggerCardSameNameInZone(TriggerCondition):
-    type_name = 'Game.Shared.Mechanics.Triggers.Conditions.TriggerCardSameNameInZone'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Triggers.Conditions.TriggerCardSameNameInZone'
+    version: ClassVar[int | None] = 1
+    m_Amount: int
+    m_Zone: Any
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_Amount': ('int', 0),
         'm_Zone': ('ECardCollections', 'Deck'),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class TriggerEventDamage(TriggerCondition):
-    type_name = 'Game.Shared.Mechanics.Triggers.Conditions.TriggerEventDamage'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Triggers.Conditions.TriggerEventDamage'
+    version: ClassVar[int | None] = 1
+    m_ComparisonOp: Any
+    m_RequiredQuantity: int
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_ComparisonOp': ('EComparisons', None),
         'm_RequiredQuantity': ('int', 0),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class TriggerEventIntAttribute(TriggerCondition):
-    type_name = 'Game.Shared.Mechanics.Triggers.Conditions.TriggerEventIntAttribute'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Triggers.Conditions.TriggerEventIntAttribute'
+    version: ClassVar[int | None] = 1
+    m_Attribute: str
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_Attribute': ('string', ""),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class TriggerEventIsCombatDamage(TriggerCondition):
-    type_name = 'Game.Shared.Mechanics.Triggers.Conditions.TriggerEventIsCombatDamage'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Triggers.Conditions.TriggerEventIsCombatDamage'
+    version: ClassVar[int | None] = 1
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class TriggerEventProperty(AbilityField):
-    type_name = 'Game.Shared.Mechanics.Abilities.TriggerEventProperty'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.TriggerEventProperty'
+    version: ClassVar[int | None] = 1
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class TriggerPlayerControlsAbilitySource(TriggerCondition):
-    type_name = 'Game.Shared.Mechanics.Triggers.Conditions.TriggerPlayerControlsAbilitySource'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Triggers.Conditions.TriggerPlayerControlsAbilitySource'
+    version: ClassVar[int | None] = 1
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class TriggerPlayerControlsCard(TriggerCondition):
-    type_name = 'Game.Shared.Mechanics.Triggers.Conditions.TriggerPlayerControlsCard'
-    version = 2
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Triggers.Conditions.TriggerPlayerControlsCard'
+    version: ClassVar[int | None] = 2
+    m_CardFilter: Any
+    m_ComparisonOp: Any
+    m_MinimumAmount: int
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_CardFilter': ('CardFilter', None),
         'm_ComparisonOp': ('EComparisons', 'GreaterThanOrEqual'),
         'm_MinimumAmount': ('int', 1),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class TriggerPlayerControlsTarget(TriggerCondition):
-    type_name = 'Game.Shared.Mechanics.Triggers.Conditions.TriggerPlayerControlsTarget'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Triggers.Conditions.TriggerPlayerControlsTarget'
+    version: ClassVar[int | None] = 1
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class TriggerPlayerHealth(TriggerCondition):
-    type_name = 'Game.Shared.Mechanics.Triggers.Conditions.TriggerPlayerHealth'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Triggers.Conditions.TriggerPlayerHealth'
+    version: ClassVar[int | None] = 1
+    m_ComparisonOp: Any
+    m_ComparisonValue: int
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_ComparisonOp': ('EComparisons', None),
         'm_ComparisonValue': ('int', 0),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class TriggerPlayerIsActivePlayer(TriggerCondition):
-    type_name = 'Game.Shared.Mechanics.Triggers.Conditions.TriggerPlayerIsActivePlayer'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Triggers.Conditions.TriggerPlayerIsActivePlayer'
+    version: ClassVar[int | None] = 1
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class TriggerTargetIsAbilitySource(TriggerCondition):
-    type_name = 'Game.Shared.Mechanics.Triggers.Conditions.TriggerTargetIsAbilitySource'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Triggers.Conditions.TriggerTargetIsAbilitySource'
+    version: ClassVar[int | None] = 1
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class TurnPhaseActionAttackWithCards(TurnPhaseActionBase):
-    type_name = 'Game.Shared.Tutorial.TurnPhaseActionAttackWithCards'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Tutorial.TurnPhaseActionAttackWithCards'
+    version: ClassVar[int | None] = 1
+    m_AttackingCardTemplateIds: list[ResourceId]
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_AttackingCardTemplateIds': ('List<ResourceId>', []),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class TurnPhaseActionDefendWithCards(TurnPhaseActionBase):
-    type_name = 'Game.Shared.Tutorial.TurnPhaseActionDefendWithCards'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Tutorial.TurnPhaseActionDefendWithCards'
+    version: ClassVar[int | None] = 1
+    m_Defenses: list[TutorialDefense]
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_Defenses': ('List<TutorialDefense>', []),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class TurnPhaseActionDrawCard(TurnPhaseActionBase):
-    type_name = 'Game.Shared.Tutorial.TurnPhaseActionDrawCard'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Tutorial.TurnPhaseActionDrawCard'
+    version: ClassVar[int | None] = 1
+    m_CardTemplateId: ResourceId | None
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_CardTemplateId': ('ResourceId', None),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class TurnPhaseActionPassPriority(TurnPhaseActionBase):
-    type_name = 'Game.Shared.Tutorial.TurnPhaseActionPassPriority'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Tutorial.TurnPhaseActionPassPriority'
+    version: ClassVar[int | None] = 1
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class TurnPhaseActionPlayCard(TurnPhaseActionBase):
-    type_name = 'Game.Shared.Tutorial.TurnPhaseActionPlayCard'
-    version = 2
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Tutorial.TurnPhaseActionPlayCard'
+    version: ClassVar[int | None] = 2
+    m_ActivationDataTemplate: TutorialAbilityActivationData | None
+    m_CardTemplateId: ResourceId | None
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_ActivationDataTemplate': ('TutorialAbilityActivationData', None),
         'm_CardTemplateId': ('ResourceId', None),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class TurnPhaseActionRemoveReinsFromPlayer(TurnPhaseActionBase):
-    type_name = 'Game.Shared.Tutorial.TurnPhaseActionRemoveReinsFromPlayer'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Tutorial.TurnPhaseActionRemoveReinsFromPlayer'
+    version: ClassVar[int | None] = 1
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class TurnPhaseActionShowTip(TurnPhaseActionBase):
-    type_name = 'Game.Shared.Tutorial.TurnPhaseActionShowTip'
-    version = 2
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Tutorial.TurnPhaseActionShowTip'
+    version: ClassVar[int | None] = 2
+    m_ArrowVisible: bool
+    m_HighLightElement: bool
+    m_SceneReference: BattleSceneElementReference | None
+    m_TipTitle: str
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_ArrowVisible': ('bool', False),
         'm_HighLightElement': ('bool', False),
         'm_SceneReference': ('BattleSceneElementReference', None),
         'm_TipTitle': ('string', ""),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_ArrowDelay_DEPRECATED': ('float', 0),
         'm_ArrowRot_DEPRECATED': ('float', 0),
         'm_ArrowX_DEPRECATED': ('float', 0),
@@ -4175,454 +5364,533 @@ class TurnPhaseActionShowTip(TurnPhaseActionBase):
     }
 
 class TurnPhaseActionUseCardAbility(TurnPhaseActionBase):
-    type_name = 'Game.Shared.Tutorial.TurnPhaseActionUseCardAbility'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Tutorial.TurnPhaseActionUseCardAbility'
+    version: ClassVar[int | None] = 1
+    m_SourceCardId: ResourceId | None
+    m_SourceChampionId: ResourceId | None
+    m_TutorialAbilityActivationData: TutorialAbilityActivationData | None
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_SourceCardId': ('ResourceId', None),
         'm_SourceChampionId': ('ResourceId', None),
         'm_TutorialAbilityActivationData': ('TutorialAbilityActivationData', None),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class TurnPhaseActionZoomCard(TurnPhaseActionBase):
-    type_name = 'Game.Shared.Tutorial.TurnPhaseActionZoomCard'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Tutorial.TurnPhaseActionZoomCard'
+    version: ClassVar[int | None] = 1
+    m_CardTemplateId: ResourceId | None
+    m_ZoomIn: bool
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_CardTemplateId': ('ResourceId', None),
         'm_ZoomIn': ('bool', False),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class TurnPhaseCondition(SessionCondition):
-    type_name = 'Game.Shared.Mechanics.Triggers.Conditions.TurnPhaseCondition'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Triggers.Conditions.TurnPhaseCondition'
+    version: ClassVar[int | None] = 1
+    m_TurnPhase: Any
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_TurnPhase': ('ETurnPhases', None),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class TutorialTemplate(SceneData):
-    type_name = 'Game.Shared.Tutorial.TutorialTemplate'
-    version = 2
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Tutorial.TutorialTemplate'
+    version: ClassVar[int | None] = 2
+    m_AITutorialDeckId: ResourceId | None
+    m_PlayerTutorialDeckId: ResourceId | None
+    m_TutorialActions: list[TurnPhaseActionBase]
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_AITutorialDeckId': ('ResourceId', None),
         'm_PlayerTutorialDeckId': ('ResourceId', None),
         'm_TutorialActions': ('List<TurnPhaseActionBase>', []),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_UIEvents_DEPRECATED': ('List<UIEvent>', []),
     }
 
 class UIEvent(ChallengeEvent):
-    type_name = 'Game.Shared.Challenge.Restriction.UIEvent'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Challenge.Restriction.UIEvent'
+    version: ClassVar[int | None] = 1
+    m_Qualifiers: list[DataRestrictionBase]
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_Qualifiers': ('List<DataRestrictionBase>', []),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class VoidedTargetTemplate(AbilityTargetTemplate):
-    type_name = 'Game.Shared.Mechanics.Abilities.TargetTemplates.VoidedTargetTemplate'
-    version = 2
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.TargetTemplates.VoidedTargetTemplate'
+    version: ClassVar[int | None] = 2
+    m_VoidedBy: Any
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_VoidedBy': ('CardFilter', None),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class AbilityPropertyVariable(AbilityVariable):
-    type_name = 'Game.Shared.Mechanics.Abilities.AbilityPropertyVariable'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.AbilityPropertyVariable'
+    version: ClassVar[int | None] = 1
+    m_Property: Any
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_Property': ('EAbilityProperties', 'Unknown'),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class ActivateAbilityEffectTemplate(CardAbilityEffectTemplate):
-    type_name = 'Game.Shared.Mechanics.Abilities.ActivateAbilityEffectTemplate'
-    version = 2
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.ActivateAbilityEffectTemplate'
+    version: ClassVar[int | None] = 2
+    m_AbilityToInvoke: ResourceId | None
+    m_RandomlyLuckyOrUnlucky: bool
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_AbilityToInvoke': ('ResourceId', None),
         'm_RandomlyLuckyOrUnlucky': ('bool', False),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class ActivatePowerAbilityEffectTemplate(CardAbilityEffectTemplate):
-    type_name = 'Game.Shared.Mechanics.Abilities.ActivatePowerAbilityEffectTemplate'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.ActivatePowerAbilityEffectTemplate'
+    version: ClassVar[int | None] = 1
+    m_ChargePower: bool
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_ChargePower': ('bool', False),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class ActivateTriggeredAbilityEffectTemplate(CardAbilityEffectTemplate):
-    type_name = 'Game.Shared.Mechanics.Abilities.ActivateTriggeredAbilityEffectTemplate'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.ActivateTriggeredAbilityEffectTemplate'
+    version: ClassVar[int | None] = 1
+    m_Keyword: str
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_Keyword': ('String', ""),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class AndQualifier(DataRestrictionBase):
-    type_name = 'Game.Shared.Challenge.Restriction.AndQualifier'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Challenge.Restriction.AndQualifier'
+    version: ClassVar[int | None] = 1
+    m_AndQualifiers: list[RestrictionBase]
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_AndQualifiers': ('List<RestrictionBase>', []),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class AnimationTriggerEffectTemplate(CardAbilityEffectTemplate):
-    type_name = 'Game.Shared.Mechanics.Abilities.AnimationTriggerEffectTemplate'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.AnimationTriggerEffectTemplate'
+    version: ClassVar[int | None] = 1
+    m_AnimationTrigger: Any
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_AnimationTrigger': ('EAnimationTrigger', 'Invalid'),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class Battle2CardsAbilityEffectTemplate(CardAbilityEffectTemplate):
-    type_name = 'Game.Shared.Mechanics.Abilities.Battle2CardsAbilityEffectTemplate'
-    version = 3
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.Battle2CardsAbilityEffectTemplate'
+    version: ClassVar[int | None] = 3
+    m_FightBack: bool
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_FightBack': ('bool', True),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_AdditionalTargetIndex_DEPRECATED': ('int', 0),
     }
 
 class BattleAbilityEffectTemplate(CardAbilityEffectTemplate):
-    type_name = 'Game.Shared.Mechanics.Abilities.BattleAbilityEffectTemplate'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.BattleAbilityEffectTemplate'
+    version: ClassVar[int | None] = 1
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class BlockEffectTemplate(CardAbilityEffectTemplate):
-    type_name = 'Game.Shared.Mechanics.Abilities.BlockEffectTemplate'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.BlockEffectTemplate'
+    version: ClassVar[int | None] = 1
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class BuiltInPlayCardAbilityEffectTemplate(CardAbilityEffectTemplate):
-    type_name = 'Game.Shared.Mechanics.Abilities.BuiltInPlayCardAbilityEffectTemplate'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.BuiltInPlayCardAbilityEffectTemplate'
+    version: ClassVar[int | None] = 1
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class BuryCardAbilityEffectTemplate(CardAbilityEffectTemplate):
-    type_name = 'Game.Shared.Mechanics.Abilities.BuryCardAbilityEffectTemplate'
-    version = 2
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.BuryCardAbilityEffectTemplate'
+    version: ClassVar[int | None] = 2
+    m_Amount: EffectField | None
+    m_Filter: Any
+    m_TopHalfOfDeck: bool
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_Amount': ('EffectField', None),
         'm_Filter': ('CardFilter', None),
         'm_TopHalfOfDeck': ('bool', False),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class CardCountAbilityVariable(AbilityVariable):
-    type_name = 'Game.Shared.Mechanics.Abilities.CardCountAbilityVariable'
-    version = 3
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.CardCountAbilityVariable'
+    version: ClassVar[int | None] = 3
+    m_CardFilter: Any
+    m_CollectionFlags: Any
+    m_DontRecalculate: bool
+    m_OnlyIncludeDifferentRacesForFaction: Any
+    m_PlayerFilter: Any
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_CardFilter': ('CardFilter', None),
         'm_CollectionFlags': ('ECardCollections', None),
         'm_DontRecalculate': ('bool', True),
         'm_OnlyIncludeDifferentRacesForFaction': ('EFactions', 'Unknown'),
         'm_PlayerFilter': ('EPlayerCardTargets', None),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class CardDestroyed(EventRestrictionBase):
-    type_name = 'Game.Shared.Challenge.Restriction.CardDestroyed'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Challenge.Restriction.CardDestroyed'
+    version: ClassVar[int | None] = 1
+    m_CardId: ResourceId | None
+    m_EncounterId: ResourceId | None
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_CardId': ('ResourceId', None),
         'm_EncounterId': ('ResourceId', None),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class CardIntegerVariable(AbilityVariable):
-    type_name = 'Game.Shared.Mechanics.Abilities.CardIntegerVariable'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.CardIntegerVariable'
+    version: ClassVar[int | None] = 1
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class CardModifierAbilityEffectTemplate(CardAbilityEffectTemplate):
-    type_name = 'Game.Shared.Mechanics.Abilities.CardModifierAbilityEffectTemplate'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.CardModifierAbilityEffectTemplate'
+    version: ClassVar[int | None] = 1
+    m_Modifier: Any
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_Modifier': ('Modifier', None),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class CardPlayed(EventRestrictionBase):
-    type_name = 'Game.Shared.Challenge.Restriction.CardPlayed'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Challenge.Restriction.CardPlayed'
+    version: ClassVar[int | None] = 1
+    m_CardId: ResourceId | None
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_CardId': ('ResourceId', None),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class CardPropertyVariable(AbilityVariable):
-    type_name = 'Game.Shared.Mechanics.Abilities.CardPropertyVariable'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.CardPropertyVariable'
+    version: ClassVar[int | None] = 1
+    m_Property: Any
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_Property': ('ECardProperties', 'Unknown'),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class CardSumAbilityVariable(AbilityVariable):
-    type_name = 'Game.Shared.Mechanics.Abilities.CardSumAbilityVariable'
-    version = 2
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.CardSumAbilityVariable'
+    version: ClassVar[int | None] = 2
+    m_Attribute: str
+    m_CardFilter: Any
+    m_CollectionFlags: Any
+    m_PlayerFilter: Any
+    m_Property: Any
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_Attribute': ('string', ""),
         'm_CardFilter': ('CardFilter', None),
         'm_CollectionFlags': ('ECardCollections', None),
         'm_PlayerFilter': ('EPlayerCardTargets', None),
         'm_Property': ('ECardProperties', 'Unknown'),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class CardVoided(EventRestrictionBase):
-    type_name = 'Game.Shared.Challenge.Restriction.CardVoided'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Challenge.Restriction.CardVoided'
+    version: ClassVar[int | None] = 1
+    m_CardId: ResourceId | None
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_CardId': ('ResourceId', None),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class ChallengeParamsSetChallengeComplete(ChallengeParams):
-    type_name = 'Game.Shared.Challenge.Restriction.ChallengeParamsSetChallengeComplete'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Challenge.Restriction.ChallengeParamsSetChallengeComplete'
+    version: ClassVar[int | None] = 1
+    m_ChallengeId: ResourceId | None
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_ChallengeId': ('ResourceId', None),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class ChallengeParamsSetDungeonNodeState(ChallengeParams):
-    type_name = 'Game.Shared.Challenge.Restriction.ChallengeParamsSetDungeonNodeState'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Challenge.Restriction.ChallengeParamsSetDungeonNodeState'
+    version: ClassVar[int | None] = 1
+    m_DungeonNodeId: ResourceId | None
+    m_DungeonNodeState: Any
+    m_ShouldSetBits: bool
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_DungeonNodeId': ('ResourceId', None),
         'm_DungeonNodeState': ('EDungeonNodeState', 'None'),
         'm_ShouldSetBits': ('bool', True),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class ChallengeParamsSetDungeonQuestState(ChallengeParams):
-    type_name = 'Game.Shared.Challenge.Restriction.ChallengeParamsSetDungeonQuestState'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Challenge.Restriction.ChallengeParamsSetDungeonQuestState'
+    version: ClassVar[int | None] = 1
+    m_QuestId: ResourceId | None
+    m_QuestState: Any
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_QuestId': ('ResourceId', None),
         'm_QuestState': ('EQuestState', 'NotAccepted'),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class ChallengeParamsSetQuestState(ChallengeParams):
-    type_name = 'Game.Shared.Challenge.Restriction.ChallengeParamsSetQuestState'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Challenge.Restriction.ChallengeParamsSetQuestState'
+    version: ClassVar[int | None] = 1
+    m_QuestId: ResourceId | None
+    m_QuestState: Any
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_QuestId': ('ResourceId', None),
         'm_QuestState': ('EQuestState', 'NotAccepted'),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class ChallengeStatusRestriction(DataRestrictionBase):
-    type_name = 'Game.Shared.Challenge.Restriction.ChallengeStatusRestriction'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Challenge.Restriction.ChallengeStatusRestriction'
+    version: ClassVar[int | None] = 1
+    m_ChallengeId: ResourceId | None
+    m_IsComplete: bool
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_ChallengeId': ('ResourceId', None),
         'm_IsComplete': ('bool', True),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class ChampionCharged(EventRestrictionBase):
-    type_name = 'Game.Shared.Challenge.Restriction.ChampionCharged'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Challenge.Restriction.ChampionCharged'
+    version: ClassVar[int | None] = 1
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class ChampionIsClass(DataRestrictionBase):
-    type_name = 'Game.Shared.Challenge.Restriction.ChampionIsClass'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Challenge.Restriction.ChampionIsClass'
+    version: ClassVar[int | None] = 1
+    m_Class: Any
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_Class': ('EChampionClass', 'None'),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class ChampionIsFaction(DataRestrictionBase):
-    type_name = 'Game.Shared.Challenge.Restriction.ChampionIsFaction'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Challenge.Restriction.ChampionIsFaction'
+    version: ClassVar[int | None] = 1
+    m_Faction: Any
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_Faction': ('EFactions', 'None'),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class ChampionIsGender(DataRestrictionBase):
-    type_name = 'Game.Shared.Challenge.Restriction.ChampionIsGender'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Challenge.Restriction.ChampionIsGender'
+    version: ClassVar[int | None] = 1
+    m_Gender: Any
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_Gender': ('EGender', 'None'),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class ChampionIsLevel(DataRestrictionBase):
-    type_name = 'Game.Shared.Challenge.Restriction.ChampionIsLevel'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Challenge.Restriction.ChampionIsLevel'
+    version: ClassVar[int | None] = 1
+    m_ComparisonType: Any
+    m_Level: int
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_ComparisonType': ('EComparisons', 'GreaterThan'),
         'm_Level': ('int', 0),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class ChampionIsRace(DataRestrictionBase):
-    type_name = 'Game.Shared.Challenge.Restriction.ChampionIsRace'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Challenge.Restriction.ChampionIsRace'
+    version: ClassVar[int | None] = 1
+    m_Race: Any
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_Race': ('ERace', 'None'),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class ClearStoredAbilityEffectTemplate(CardAbilityEffectTemplate):
-    type_name = 'Game.Shared.Mechanics.Abilities.ClearStoredAbilityEffectTemplate'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.ClearStoredAbilityEffectTemplate'
+    version: ClassVar[int | None] = 1
+    m_TargetIndex: int
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_TargetIndex': ('int', 0),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class ConscriptAbilityEffectTemplate(CardAbilityEffectTemplate):
-    type_name = 'Game.Shared.Mechanics.Abilities.ConscriptAbilityEffectTemplate'
-    version = 2
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.ConscriptAbilityEffectTemplate'
+    version: ClassVar[int | None] = 2
+    m_Amount: EffectField | None
+    m_CardFilter: Any
+    m_Faction: Any
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_Amount': ('EffectField', None),
         'm_CardFilter': ('CardFilter', None),
         'm_Faction': ('EFactions', 'None'),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class ConversationAbilityEffectTemplate(CardAbilityEffectTemplate):
-    type_name = 'Game.Shared.Mechanics.Abilities.ConversationAbilityEffectTemplate'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.ConversationAbilityEffectTemplate'
+    version: ClassVar[int | None] = 1
+    m_ConversationId: ResourceId | None
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_ConversationId': ('ResourceId', None),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class CopyAbilityEffectTemplate(CardAbilityEffectTemplate):
-    type_name = 'Game.Shared.Mechanics.Abilities.CopyAbilityEffectTemplate'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.CopyAbilityEffectTemplate'
+    version: ClassVar[int | None] = 1
+    m_AmountField: EffectField | None
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_AmountField': ('EffectField', None),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class CopyAbilityVariableEffectTemplate(CardAbilityEffectTemplate):
-    type_name = 'Game.Shared.Mechanics.Abilities.CopyAbilityVariableEffectTemplate'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.CopyAbilityVariableEffectTemplate'
+    version: ClassVar[int | None] = 1
+    m_Destination: EffectInputVariable | None
+    m_Source: EffectField | None
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_Destination': ('EffectInputVariable', None),
         'm_Source': ('EffectField', None),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class CostAbilityVariable(AbilityVariable):
-    type_name = 'Game.Shared.Mechanics.Abilities.CostAbilityVariable'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.CostAbilityVariable'
+    version: ClassVar[int | None] = 1
+    m_CostType: Any
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_CostType': ('ECostTypes', None),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class CountListAttrAbilityVariable(AbilityVariable):
-    type_name = 'Game.Shared.Mechanics.Abilities.CountListAttrAbilityVariable'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.CountListAttrAbilityVariable'
+    version: ClassVar[int | None] = 1
+    m_CardFilter: Any
+    m_ListAttrName: str
+    m_PullFromSourceCard: bool
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_CardFilter': ('CardFilter', None),
         'm_ListAttrName': ('string', ""),
         'm_PullFromSourceCard': ('bool', False),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class CounterSpellAbilityEffectTemplate(CardAbilityEffectTemplate):
-    type_name = 'Game.Shared.Mechanics.Abilities.CounterSpellAbilityEffectTemplate'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.CounterSpellAbilityEffectTemplate'
+    version: ClassVar[int | None] = 1
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class CounterVariable(AbilityVariable):
-    type_name = 'Game.Shared.Mechanics.Abilities.CounterVariable'
-    version = 5
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.CounterVariable'
+    version: ClassVar[int | None] = 5
+    m_CardCounterTemplateId: ResourceId | None
+    m_CardFilter: Any
+    m_CollectionFlags: Any
+    m_PlayerFilter: Any
+    m_UseHighestValue: bool
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_CardCounterTemplateId': ('ResourceId', None),
         'm_CardFilter': ('CardFilter', None),
         'm_CollectionFlags': ('ECardCollections', 'None'),
         'm_PlayerFilter': ('EPlayerCardTargets', 'Self'),
         'm_UseHighestValue': ('bool', False),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_LookAtAllYourCardsInPlay_DEPRECATED': ('bool', False),
         'm_LookAtOpposingChampions_DEPRECATED': ('bool', False),
     }
 
 class CreateAndCastSpellAbilityEffectTemplate(CardAbilityEffectTemplate):
-    type_name = 'Game.Shared.Mechanics.Abilities.CreateAndCastSpellAbilityEffectTemplate'
-    version = 2
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.CreateAndCastSpellAbilityEffectTemplate'
+    version: ClassVar[int | None] = 2
+    m_AmountField: EffectField | None
+    m_SendPlayAction: bool
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_AmountField': ('EffectField', None),
         'm_SendPlayAction': ('bool', False),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class CreateTokenCopyAbilityEffectTemplate(CardAbilityEffectTemplate):
-    type_name = 'Game.Shared.Mechanics.Abilities.CreateTokenCopyAbilityEffectTemplate'
-    version = 5
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.CreateTokenCopyAbilityEffectTemplate'
+    version: ClassVar[int | None] = 5
+    m_CardCollection: Any
+    m_CardLocation: Any
+    m_CopyGems: bool
+    m_InputValue: EffectField | None
+    m_IsReplica: bool
+    m_SameOwner: bool
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_CardCollection': ('ECardCollections', 'Warzone'),
         'm_CardLocation': ('ECardLocations', 'Top'),
         'm_CopyGems': ('bool', False),
@@ -4630,280 +5898,322 @@ class CreateTokenCopyAbilityEffectTemplate(CardAbilityEffectTemplate):
         'm_IsReplica': ('bool', False),
         'm_SameOwner': ('bool', False),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class CreateTokenMatchingTargetAbilityEffectTemplate(CardAbilityEffectTemplate):
-    type_name = 'Game.Shared.Mechanics.Abilities.CreateTokenMatchingTargetAbilityEffectTemplate'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.CreateTokenMatchingTargetAbilityEffectTemplate'
+    version: ClassVar[int | None] = 1
+    m_CardCollection: Any
+    m_CardFilter: Any
+    m_CardLocation: Any
+    m_InputValue: EffectField | None
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_CardCollection': ('ECardCollections', 'Warzone'),
         'm_CardFilter': ('CardFilter', None),
         'm_CardLocation': ('ECardLocations', 'Top'),
         'm_InputValue': ('EffectField', None),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class DestroyCardAbilityEffectTemplate(CardAbilityEffectTemplate):
-    type_name = 'Game.Shared.Mechanics.Abilities.DestroyCardAbilityEffectTemplate'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.DestroyCardAbilityEffectTemplate'
+    version: ClassVar[int | None] = 1
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class DestroyCardByDefenseAbilityEffectTemplate(CardAbilityEffectTemplate):
-    type_name = 'Game.Shared.Mechanics.Abilities.DestroyCardByDefenseAbilityEffectTemplate'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.DestroyCardByDefenseAbilityEffectTemplate'
+    version: ClassVar[int | None] = 1
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class DiscardCardAbilityEffectTemplate(CardAbilityEffectTemplate):
-    type_name = 'Game.Shared.Mechanics.Abilities.DiscardCardAbilityEffectTemplate'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.DiscardCardAbilityEffectTemplate'
+    version: ClassVar[int | None] = 1
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class DiscardOrSacrificeCardAbilityEffectTemplate(CardAbilityEffectTemplate):
-    type_name = 'Game.Shared.Mechanics.Abilities.DiscardOrSacrificeCardAbilityEffectTemplate'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.DiscardOrSacrificeCardAbilityEffectTemplate'
+    version: ClassVar[int | None] = 1
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class DoubleChoiceAbilityEffectTemplate(CardAbilityEffectTemplate):
-    type_name = 'Game.Shared.Mechanics.Abilities.DoubleChoiceAbilityEffectTemplate'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.DoubleChoiceAbilityEffectTemplate'
+    version: ClassVar[int | None] = 1
+    m_Choices: list[ResourceId] | None
+    m_NumOptions: EffectField | None
+    m_SecondChoice: bool
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_Choices': ('List<ResourceId>', None),
         'm_NumOptions': ('EffectField', None),
         'm_SecondChoice': ('bool', False),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class DrawCardAbilityEffectTemplate(CardAbilityEffectTemplate):
-    type_name = 'Game.Shared.Mechanics.Abilities.DrawCardAbilityEffectTemplate'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.DrawCardAbilityEffectTemplate'
+    version: ClassVar[int | None] = 1
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class DrawNCardsAbilityEffectTemplate(CardAbilityEffectTemplate):
-    type_name = 'Game.Shared.Mechanics.Abilities.DrawNCardsAbilityEffectTemplate'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.DrawNCardsAbilityEffectTemplate'
+    version: ClassVar[int | None] = 1
+    m_InputValue: EffectField | None
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_InputValue': ('EffectField', None),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class DungeonEnter(EventRestrictionBase):
-    type_name = 'Game.Shared.Challenge.Restriction.DungeonEnter'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Challenge.Restriction.DungeonEnter'
+    version: ClassVar[int | None] = 1
+    m_DungeonId: ResourceId | None
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_DungeonId': ('ResourceId', None),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class DungeonEventMovePlayerToNode(UIEvent):
-    type_name = 'Game.Shared.Challenge.Restriction.DungeonEventMovePlayerToNode'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Challenge.Restriction.DungeonEventMovePlayerToNode'
+    version: ClassVar[int | None] = 1
+    m_NodeId: int
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_NodeId': ('int', -1),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class DungeonExit(EventRestrictionBase):
-    type_name = 'Game.Shared.Challenge.Restriction.DungeonExit'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Challenge.Restriction.DungeonExit'
+    version: ClassVar[int | None] = 1
+    m_DungeonId: ResourceId | None
+    m_MatchResult: Any
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_DungeonId': ('ResourceId', None),
         'm_MatchResult': ('EMatchResult', 'None'),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class DungeonNodeMoveTo(EventRestrictionBase):
-    type_name = 'Game.Shared.Challenge.Restriction.DungeonNodeMoveTo'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Challenge.Restriction.DungeonNodeMoveTo'
+    version: ClassVar[int | None] = 1
+    m_DungeonId: ResourceId | None
+    m_NodeFromId: ResourceId | None
+    m_NodeToId: ResourceId | None
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_DungeonId': ('ResourceId', None),
         'm_NodeFromId': ('ResourceId', None),
         'm_NodeToId': ('ResourceId', None),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class ExchangeCardsAbilityEffectTemplate(CardAbilityEffectTemplate):
-    type_name = 'Game.Shared.Mechanics.Abilities.ExchangeCardsAbilityEffectTemplate'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.ExchangeCardsAbilityEffectTemplate'
+    version: ClassVar[int | None] = 1
+    m_Amount: EffectField | None
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_Amount': ('EffectField', None),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class ExpressionAbilityVariable(AbilityVariable):
-    type_name = 'Game.Shared.Mechanics.Abilities.ExpressionAbilityVariable'
-    version = 2
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.ExpressionAbilityVariable'
+    version: ClassVar[int | None] = 2
+    m_Calculated: bool
+    m_DontRecalculate: bool
+    m_ExpressionText: str
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_Calculated': ('bool', False),
         'm_DontRecalculate': ('bool', False),
         'm_ExpressionText': ('string', ""),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class ExtraCombatsThisTurnAbilityEffectTemplate(CardAbilityEffectTemplate):
-    type_name = 'Game.Shared.Mechanics.Abilities.ExtraCombatsThisTurnAbilityEffectTemplate'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.ExtraCombatsThisTurnAbilityEffectTemplate'
+    version: ClassVar[int | None] = 1
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class FinishMovingCardToWarzoneEffectTemplate(CardAbilityEffectTemplate):
-    type_name = 'Game.Shared.Mechanics.Abilities.FinishMovingCardToWarzoneEffectTemplate'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.FinishMovingCardToWarzoneEffectTemplate'
+    version: ClassVar[int | None] = 1
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class FinishResolvingCardAbilityEffectTemplate(CardAbilityEffectTemplate):
-    type_name = 'Game.Shared.Mechanics.Abilities.FinishResolvingCardAbilityEffectTemplate'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.FinishResolvingCardAbilityEffectTemplate'
+    version: ClassVar[int | None] = 1
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class FireEventEffectTemplate(CardAbilityEffectTemplate):
-    type_name = 'Game.Shared.Mechanics.Abilities.FireEventEffectTemplate'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.FireEventEffectTemplate'
+    version: ClassVar[int | None] = 1
+    m_TriggerType: Any
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_TriggerType': ('Type', None),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class GiveBonusTurnAbilityEffectTemplate(CardAbilityEffectTemplate):
-    type_name = 'Game.Shared.Mechanics.Abilities.GiveBonusTurnAbilityEffectTemplate'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.GiveBonusTurnAbilityEffectTemplate'
+    version: ClassVar[int | None] = 1
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class HasCurrency(DataRestrictionBase):
-    type_name = 'Game.Shared.Challenge.Restriction.HasCurrency'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Challenge.Restriction.HasCurrency'
+    version: ClassVar[int | None] = 1
+    m_AmountRequired: int
+    m_CurrenyType: Any
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_AmountRequired': ('int', 0),
         'm_CurrenyType': ('ECurrencyType', 'Gold'),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class HighestCardAbilityVariable(AbilityVariable):
-    type_name = 'Game.Shared.Mechanics.Abilities.HighestCardAbilityVariable'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.HighestCardAbilityVariable'
+    version: ClassVar[int | None] = 1
+    m_CardFilter: Any
+    m_CollectionFlags: Any
+    m_PlayerFilter: Any
+    m_Property: Any
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_CardFilter': ('CardFilter', None),
         'm_CollectionFlags': ('ECardCollections', None),
         'm_PlayerFilter': ('EPlayerCardTargets', None),
         'm_Property': ('ECardProperties', 'Unknown'),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class IntAttrAbilityVariable(AbilityVariable):
-    type_name = 'Game.Shared.Mechanics.Abilities.IntAttrAbilityVariable'
-    version = 2
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.IntAttrAbilityVariable'
+    version: ClassVar[int | None] = 2
+    m_HalfRoundedUp: bool
+    m_IntAttrName: str
+    m_PullFromSourceCard: bool
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_HalfRoundedUp': ('bool', False),
         'm_IntAttrName': ('string', ""),
         'm_PullFromSourceCard': ('bool', False),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class InterruptSpellAbilityEffectTemplate(CardAbilityEffectTemplate):
-    type_name = 'Game.Shared.Mechanics.Abilities.InterruptSpellAbilityEffectTemplate'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.InterruptSpellAbilityEffectTemplate'
+    version: ClassVar[int | None] = 1
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class InventoryStarterPack(InventoryCardPack):
-    type_name = 'Reckoning.Game.InventoryStarterPack'
-    version = 2
-    fields = {
+    type_name: ClassVar[str] = 'Reckoning.Game.InventoryStarterPack'
+    version: ClassVar[int | None] = 2
+    m_DeckTemplateId: ResourceId | None
+    m_Race: Any
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_DeckTemplateId': ('ResourceId', None),
         'm_Race': ('ERace', 'None'),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class ItemEquippedAbilityVariable(AbilityVariable):
-    type_name = 'Game.Shared.Mechanics.Abilities.ItemEquippedAbilityVariable'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.ItemEquippedAbilityVariable'
+    version: ClassVar[int | None] = 1
+    m_ResourceId: ResourceId | None
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_ResourceId': ('ResourceId', None),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class KeywordAbilityVariable(AbilityVariable):
-    type_name = 'Game.Shared.Mechanics.Abilities.KeywordAbilityVariable'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.KeywordAbilityVariable'
+    version: ClassVar[int | None] = 1
+    m_Keyword: Any
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_Keyword': ('ECardAttributes', 'Unknown'),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class LoadPlayerDeckAbilityEffectTemplate(CardAbilityEffectTemplate):
-    type_name = 'Game.Shared.Mechanics.Abilities.LoadPlayerDeckAbilityEffectTemplate'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.LoadPlayerDeckAbilityEffectTemplate'
+    version: ClassVar[int | None] = 1
+    m_DeckTemplateId: ResourceId | None
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_DeckTemplateId': ('ResourceId', None),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class LoseGameAbilityEffectTemplate(CardAbilityEffectTemplate):
-    type_name = 'Game.Shared.Mechanics.Abilities.LoseGameAbilityEffectTemplate'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.LoseGameAbilityEffectTemplate'
+    version: ClassVar[int | None] = 1
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class LoseThresholdAbilityEffectTemplate(CardAbilityEffectTemplate):
-    type_name = 'Game.Shared.Mechanics.Abilities.LoseThresholdAbilityEffectTemplate'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.LoseThresholdAbilityEffectTemplate'
+    version: ClassVar[int | None] = 1
+    m_Thresholds: list[Any]
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_Thresholds': ('List<ECardShards>', []),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class MatchEnd(EventRestrictionBase):
-    type_name = 'Game.Shared.Challenge.Restriction.MatchEnd'
-    version = 3
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Challenge.Restriction.MatchEnd'
+    version: ClassVar[int | None] = 3
+    m_ChampionClass: Any
+    m_ChampionGender: Any
+    m_ChampionLevel: Any
+    m_ChampionRace: Any
+    m_MatchIsPvE: Any
+    m_MatchResult: Any
+    m_NumPlayers: Any
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_ChampionClass': ('Nullable<EChampionClass>', None),
         'm_ChampionGender': ('Nullable<EGender>', None),
         'm_ChampionLevel': ('Nullable<int>', None),
@@ -4912,42 +6222,59 @@ class MatchEnd(EventRestrictionBase):
         'm_MatchResult': ('EMatchResult', 'None'),
         'm_NumPlayers': ('Nullable<int>', None),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class MatchEndPlayerCardTypes(EventRestrictionBase):
-    type_name = 'Game.Shared.Challenge.Restriction.MatchEndPlayerCardTypes'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Challenge.Restriction.MatchEndPlayerCardTypes'
+    version: ClassVar[int | None] = 1
+    m_CardCollections: Any
+    m_CardTypes: Any
+    m_NumberOfCardsRequired: int
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_CardCollections': ('ECardCollections', 'None'),
         'm_CardTypes': ('ECardTypes', 'Unknown'),
         'm_NumberOfCardsRequired': ('int', 0),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class MatchStart(EventRestrictionBase):
-    type_name = 'Game.Shared.Challenge.Restriction.MatchStart'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Challenge.Restriction.MatchStart'
+    version: ClassVar[int | None] = 1
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class MergeCardCollectionsAbilityEffectTemplate(CardAbilityEffectTemplate):
-    type_name = 'Game.Shared.Mechanics.Abilities.MergeCardCollectionsAbilityEffectTemplate'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.MergeCardCollectionsAbilityEffectTemplate'
+    version: ClassVar[int | None] = 1
+    m_DestinationCollection: Any
+    m_SourceCollection: Any
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_DestinationCollection': ('ECardCollections', None),
         'm_SourceCollection': ('ECardCollections', None),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class MoveCardToZoneEffectTemplate(CardAbilityEffectTemplate):
-    type_name = 'Game.Shared.Mechanics.Abilities.MoveCardToZoneEffectTemplate'
-    version = 9
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.MoveCardToZoneEffectTemplate'
+    version: ClassVar[int | None] = 9
+    m_AbilityOpponentTakesControl: bool
+    m_AbilityOwnerTakesControl: bool
+    m_AllCardsOfTargetInZone: Any
+    m_ArenaChampionTakesControl: bool
+    m_ControlGivenToTargetIndex: int
+    m_DestinationCollection: Any
+    m_DestinationLocation: Any
+    m_EntersPlayAttacking: bool
+    m_EntersPlayExhausted: bool
+    m_PreviousControllerTakesControl: bool
+    m_RandomLocation: int
+    m_TopHalfOfDeck: bool
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_AbilityOpponentTakesControl': ('bool', False),
         'm_AbilityOwnerTakesControl': ('bool', False),
         'm_AllCardsOfTargetInZone': ('ECardCollections', 'None'),
@@ -4961,329 +6288,382 @@ class MoveCardToZoneEffectTemplate(CardAbilityEffectTemplate):
         'm_RandomLocation': ('int', -1),
         'm_TopHalfOfDeck': ('bool', False),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class NoOpEffectTemplate(CardAbilityEffectTemplate):
-    type_name = 'Game.Shared.Mechanics.Abilities.NoOpEffectTemplate'
-    version = 0
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.NoOpEffectTemplate'
+    version: ClassVar[int | None] = 0
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class NotQualifier(DataRestrictionBase):
-    type_name = 'Game.Shared.Challenge.Restriction.NotQualifier'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Challenge.Restriction.NotQualifier'
+    version: ClassVar[int | None] = 1
+    m_NotQualifier: RestrictionBase | None
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_NotQualifier': ('RestrictionBase', None),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class OrQualifier(DataRestrictionBase):
-    type_name = 'Game.Shared.Challenge.Restriction.OrQualifier'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Challenge.Restriction.OrQualifier'
+    version: ClassVar[int | None] = 1
+    m_OrQualifiers: list[RestrictionBase]
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_OrQualifiers': ('List<RestrictionBase>', []),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class PlanCAbilityEffectTemplate(CardAbilityEffectTemplate):
-    type_name = 'Game.Shared.Mechanics.Abilities.PlanCAbilityEffectTemplate'
-    version = 2
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.PlanCAbilityEffectTemplate'
+    version: ClassVar[int | None] = 2
+    m_CardCollection: Any
+    m_CardLocation: Any
+    m_CardTemplateId: ResourceId | None
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_CardCollection': ('ECardCollections', 'Warzone'),
         'm_CardLocation': ('ECardLocations', 'Top'),
         'm_CardTemplateId': ('ResourceId', None),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class PlayCardAbilityEffectTemplate(CardAbilityEffectTemplate):
-    type_name = 'Game.Shared.Mechanics.Abilities.PlayCardAbilityEffectTemplate'
-    version = 2
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.PlayCardAbilityEffectTemplate'
+    version: ClassVar[int | None] = 2
+    m_JustActivate: bool
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_JustActivate': ('bool', False),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class PlayerAttributeAbilityEffectTemplate(CardAbilityEffectTemplate):
-    type_name = 'Game.Shared.Mechanics.Abilities.PlayerAttributeAbilityEffectTemplate'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.PlayerAttributeAbilityEffectTemplate'
+    version: ClassVar[int | None] = 1
+    m_AttributeFlags: Any
+    m_Operation: Any
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_AttributeFlags': ('EPlayerAttributes', None),
         'm_Operation': ('EOperations', None),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class PutTopOfDeckIntoHandAbilityEffectTemplate(CardAbilityEffectTemplate):
-    type_name = 'Game.Shared.Mechanics.Abilities.PutTopOfDeckIntoHandAbilityEffectTemplate'
-    version = 2
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.PutTopOfDeckIntoHandAbilityEffectTemplate'
+    version: ClassVar[int | None] = 2
+    m_AbilityOwnerTakesControl: bool
+    m_Bloodwash: bool
+    m_InputValue: EffectField | None
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_AbilityOwnerTakesControl': ('bool', False),
         'm_Bloodwash': ('bool', False),
         'm_InputValue': ('EffectField', None),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_NumberOfCards_DEPRECATED': ('int', 0),
     }
 
 class RegisterTriggerAbilityEffectTemplate(CardAbilityEffectTemplate):
-    type_name = 'Game.Shared.Mechanics.Abilities.RegisterTriggerAbilityEffectTemplate'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.RegisterTriggerAbilityEffectTemplate'
+    version: ClassVar[int | None] = 1
+    m_TriggerAbilityTemplateId: ResourceId | None
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_TriggerAbilityTemplateId': ('ResourceId', None),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class RememberKeywordPowersEffectTemplate(CardAbilityEffectTemplate):
-    type_name = 'Game.Shared.Mechanics.Abilities.RememberKeywordPowersEffectTemplate'
-    version = 2
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.RememberKeywordPowersEffectTemplate'
+    version: ClassVar[int | None] = 2
+    m_AllPowers: bool
+    m_Keyword: str
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_AllPowers': ('bool', False),
         'm_Keyword': ('string', ""),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class RemoveCardFromCombatAbilityEffectTemplate(CardAbilityEffectTemplate):
-    type_name = 'Game.Shared.Mechanics.Abilities.RemoveCardFromCombatAbilityEffectTemplate'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.RemoveCardFromCombatAbilityEffectTemplate'
+    version: ClassVar[int | None] = 1
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class RepeatingAbilityEffectTemplate(CardAbilityEffectTemplate):
-    type_name = 'Game.Shared.Mechanics.Abilities.RepeatingAbilityEffectTemplate'
-    version = 2
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.RepeatingAbilityEffectTemplate'
+    version: ClassVar[int | None] = 2
+    m_LoopCount_DEPRECATED: EffectField | None
+    m_RepeatingEffect: CardAbilityEffectTemplate | None
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_LoopCount_DEPRECATED': ('EffectField', None),
         'm_RepeatingEffect': ('CardAbilityEffectTemplate', None),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_LoopCount': ('EffectField', None),
     }
 
 class ReplenishResourcesAbilityEffectTemplate(CardAbilityEffectTemplate):
-    type_name = 'Game.Shared.Mechanics.Abilities.ReplenishResourcesAbilityEffectTemplate'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.ReplenishResourcesAbilityEffectTemplate'
+    version: ClassVar[int | None] = 1
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class ReturnToHandAbilityEffectTemplate(CardAbilityEffectTemplate):
-    type_name = 'Game.Shared.Mechanics.Abilities.ReturnToHandAbilityEffectTemplate'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.ReturnToHandAbilityEffectTemplate'
+    version: ClassVar[int | None] = 1
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class RevertPermanentModificationsAbilityEffectTemplate(CardAbilityEffectTemplate):
-    type_name = 'Game.Shared.Mechanics.Abilities.RevertPermanentModificationsAbilityEffectTemplate'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.RevertPermanentModificationsAbilityEffectTemplate'
+    version: ClassVar[int | None] = 1
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class RevertTransformedCardAbilityEffectTemplate(CardAbilityEffectTemplate):
-    type_name = 'Game.Shared.Mechanics.Abilities.RevertTransformedCardAbilityEffectTemplate'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.RevertTransformedCardAbilityEffectTemplate'
+    version: ClassVar[int | None] = 1
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class RevokeAbilityEffectTemplate(CardAbilityEffectTemplate):
-    type_name = 'Game.Shared.Mechanics.Abilities.RevokeAbilityEffectTemplate'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.RevokeAbilityEffectTemplate'
+    version: ClassVar[int | None] = 1
+    m_RevokedAbilityTemplateId: ResourceId | None
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_RevokedAbilityTemplateId': ('ResourceId', None),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class SacrificeCardAbilityEffectTemplate(CardAbilityEffectTemplate):
-    type_name = 'Game.Shared.Mechanics.Abilities.SacrificeCardAbilityEffectTemplate'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.SacrificeCardAbilityEffectTemplate'
+    version: ClassVar[int | None] = 1
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class SetAbilityVariableEffectEffectTemplate(CardAbilityEffectTemplate):
-    type_name = 'Game.Shared.Mechanics.Abilities.SetAbilityVariableEffectEffectTemplate'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.SetAbilityVariableEffectEffectTemplate'
+    version: ClassVar[int | None] = 1
+    m_VariableName: str
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_VariableName': ('string', ""),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class SetCardIntegerVariableEffectTemplate(CardAbilityEffectTemplate):
-    type_name = 'Game.Shared.Mechanics.Abilities.SetCardIntegerVariableEffectTemplate'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.SetCardIntegerVariableEffectTemplate'
+    version: ClassVar[int | None] = 1
+    m_InputValue: EffectField | None
+    m_Operation: Any
+    m_VariableName: str
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_InputValue': ('EffectField', None),
         'm_Operation': ('EOperations', None),
         'm_VariableName': ('string', ""),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class SetResponsiblePlayerAbilityEffectTemplate(CardAbilityEffectTemplate):
-    type_name = 'Game.Shared.Mechanics.Abilities.SetResponsiblePlayerAbilityEffectTemplate'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.SetResponsiblePlayerAbilityEffectTemplate'
+    version: ClassVar[int | None] = 1
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class ShuffleCardCollectionAbilityEffectTemplate(CardAbilityEffectTemplate):
-    type_name = 'Game.Shared.Mechanics.Abilities.ShuffleCardCollectionAbilityEffectTemplate'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.ShuffleCardCollectionAbilityEffectTemplate'
+    version: ClassVar[int | None] = 1
+    m_Collection: Any
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_Collection': ('ECardCollections', None),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class SourcePlayerBriarLegionVariable(AbilityVariable):
-    type_name = 'Game.Shared.Mechanics.Abilities.SourcePlayerBriarLegionVariable'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.SourcePlayerBriarLegionVariable'
+    version: ClassVar[int | None] = 1
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class SourcePlayerChargeVariable(AbilityVariable):
-    type_name = 'Game.Shared.Mechanics.Abilities.SourcePlayerChargeVariable'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.SourcePlayerChargeVariable'
+    version: ClassVar[int | None] = 1
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class SourcePlayerHealthMinusOpponentHealthVariable(AbilityVariable):
-    type_name = 'Game.Shared.Mechanics.Abilities.SourcePlayerHealthMinusOpponentHealthVariable'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.SourcePlayerHealthMinusOpponentHealthVariable'
+    version: ClassVar[int | None] = 1
+    m_DontRecalculate: bool
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_DontRecalculate': ('bool', True),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class SourcePlayerHealthVariable(AbilityVariable):
-    type_name = 'Game.Shared.Mechanics.Abilities.SourcePlayerHealthVariable'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.SourcePlayerHealthVariable'
+    version: ClassVar[int | None] = 1
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class SourcePlayerResourceAbilityVariable(AbilityVariable):
-    type_name = 'Game.Shared.Mechanics.Abilities.SourcePlayerResourceAbilityVariable'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.SourcePlayerResourceAbilityVariable'
+    version: ClassVar[int | None] = 1
+    m_LookUpTemporaryResources: bool
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_LookUpTemporaryResources': ('bool', False),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class SourcePlayerShardAbilityVariable(AbilityVariable):
-    type_name = 'Game.Shared.Mechanics.Abilities.SourcePlayerShardAbilityVariable'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.SourcePlayerShardAbilityVariable'
+    version: ClassVar[int | None] = 1
+    m_DifferentThresholds: bool
+    m_Zone: Any
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_DifferentThresholds': ('bool', False),
         'm_Zone': ('ECardCollections', 'Warzone'),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class SourcePlayerThresholdAbilityVariable(AbilityVariable):
-    type_name = 'Game.Shared.Mechanics.Abilities.SourcePlayerThresholdAbilityVariable'
-    version = 3
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.SourcePlayerThresholdAbilityVariable'
+    version: ClassVar[int | None] = 3
+    m_CountUniques: bool
+    m_DontRecalculate: bool
+    m_Threshold: Any
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_CountUniques': ('bool', False),
         'm_DontRecalculate': ('bool', True),
         'm_Threshold': ('ECardShards', None),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class StealCardAbilityEffectTemplate(CardAbilityEffectTemplate):
-    type_name = 'Game.Shared.Mechanics.Abilities.StealCardAbilityEffectTemplate'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.StealCardAbilityEffectTemplate'
+    version: ClassVar[int | None] = 1
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class StealEffectsAbilityEffectTemplate(CardAbilityEffectTemplate):
-    type_name = 'Game.Shared.Mechanics.Abilities.StealEffectsAbilityEffectTemplate'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.StealEffectsAbilityEffectTemplate'
+    version: ClassVar[int | None] = 1
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class StoreListAttrAbilityEffectTemplate(CardAbilityEffectTemplate):
-    type_name = 'Game.Shared.Mechanics.Abilities.StoreListAttrAbilityEffectTemplate'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.StoreListAttrAbilityEffectTemplate'
+    version: ClassVar[int | None] = 1
+    m_IntAttrName: str
+    m_IntAttrValue: int
+    m_ListAttrName: str
+    m_OnlyUntilEndOfTurn: bool
+    m_Set: bool
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_IntAttrName': ('string', ""),
         'm_IntAttrValue': ('int', 0),
         'm_ListAttrName': ('string', ""),
         'm_OnlyUntilEndOfTurn': ('bool', False),
         'm_Set': ('bool', False),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class StoreNameAbilityEffectTemplate(CardAbilityEffectTemplate):
-    type_name = 'Game.Shared.Mechanics.Abilities.StoreNameAbilityEffectTemplate'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.StoreNameAbilityEffectTemplate'
+    version: ClassVar[int | None] = 1
+    m_OnlyUntilEndOfTurn: bool
+    m_TargetIndex: int
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_OnlyUntilEndOfTurn': ('bool', False),
         'm_TargetIndex': ('int', 0),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class StoreTargetsAbilityEffectTemplate(CardAbilityEffectTemplate):
-    type_name = 'Game.Shared.Mechanics.Abilities.StoreTargetsAbilityEffectTemplate'
-    version = 2
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.StoreTargetsAbilityEffectTemplate'
+    version: ClassVar[int | None] = 2
+    m_OnlyUntilEndOfTurn: bool
+    m_SetTargets: bool
+    m_TargetIndex: int
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_OnlyUntilEndOfTurn': ('bool', False),
         'm_SetTargets': ('bool', False),
         'm_TargetIndex': ('int', 0),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class SumVariableInListAttrCardsAbilityVariable(AbilityVariable):
-    type_name = 'Game.Shared.Mechanics.Abilities.SumVariableInListAttrCardsAbilityVariable'
-    version = 2
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.SumVariableInListAttrCardsAbilityVariable'
+    version: ClassVar[int | None] = 2
+    m_CardFilter: Any
+    m_ListAttrName: str
+    m_Property: Any
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_CardFilter': ('CardFilter', None),
         'm_ListAttrName': ('string', ""),
         'm_Property': ('ECardProperties', 'Unknown'),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class SummonTokenTroopAbilityEffectTemplate(CardAbilityEffectTemplate):
-    type_name = 'Game.Shared.Mechanics.Abilities.SummonTokenTroopAbilityEffectTemplate'
-    version = 10
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.SummonTokenTroopAbilityEffectTemplate'
+    version: ClassVar[int | None] = 10
+    m_Amount: int
+    m_AmountField: EffectField | None
+    m_CardCollection: Any
+    m_CardFilter: Any
+    m_CardLocation: Any
+    m_CardTemplateId: ResourceId | None
+    m_CombinedCost: EffectField | None
+    m_CopyGems: bool
+    m_EntersPlayAttacking: bool
+    m_EntersPlayExhausted: bool
+    m_Terminus: bool
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_Amount': ('int', 1),
         'm_AmountField': ('EffectField', None),
         'm_CardCollection': ('ECardCollections', 'Warzone'),
@@ -5296,422 +6676,479 @@ class SummonTokenTroopAbilityEffectTemplate(CardAbilityEffectTemplate):
         'm_EntersPlayExhausted': ('bool', False),
         'm_Terminus': ('bool', False),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class SummonXTokenTroopsAbilityEffectTemplate(CardAbilityEffectTemplate):
-    type_name = 'Game.Shared.Mechanics.Abilities.SummonXTokenTroopsAbilityEffectTemplate'
-    version = 3
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.SummonXTokenTroopsAbilityEffectTemplate'
+    version: ClassVar[int | None] = 3
+    m_BaseAmount: int
+    m_CardCollection: Any
+    m_CardFilter: Any
+    m_CardLocation: Any
+    m_CardTemplateId: ResourceId | None
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_BaseAmount': ('int', 0),
         'm_CardCollection': ('ECardCollections', 'Warzone'),
         'm_CardFilter': ('CardFilter', None),
         'm_CardLocation': ('ECardLocations', 'Top'),
         'm_CardTemplateId': ('ResourceId', None),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class SwapHealthAbilityEffectTemplate(CardAbilityEffectTemplate):
-    type_name = 'Game.Shared.Mechanics.Abilities.SwapHealthAbilityEffectTemplate'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.SwapHealthAbilityEffectTemplate'
+    version: ClassVar[int | None] = 1
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class TACAbilityEffectTemplate(CardAbilityEffectTemplate):
-    type_name = 'Game.Shared.Mechanics.Abilities.TACAbilityEffectTemplate'
-    version = 0
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.TACAbilityEffectTemplate'
+    version: ClassVar[int | None] = 0
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class TagExistsVariable(AbilityVariable):
-    type_name = 'Game.Shared.Mechanics.Abilities.TagExistsVariable'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.TagExistsVariable'
+    version: ClassVar[int | None] = 1
+    m_Tag: str
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_Tag': ('string', ""),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class TagValueVariable(AbilityVariable):
-    type_name = 'Game.Shared.Mechanics.Abilities.TagValueVariable'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.TagValueVariable'
+    version: ClassVar[int | None] = 1
+    m_Tag: str
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_Tag': ('string', ""),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class TapCardAbilityEffectTemplate(CardAbilityEffectTemplate):
-    type_name = 'Game.Shared.Mechanics.Abilities.TapCardAbilityEffectTemplate'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.TapCardAbilityEffectTemplate'
+    version: ClassVar[int | None] = 1
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class TargetCardsCountAbilityVariable(AbilityTargetVariable):
-    type_name = 'Game.Shared.Mechanics.Abilities.TargetCardsCountAbilityVariable'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.TargetCardsCountAbilityVariable'
+    version: ClassVar[int | None] = 1
+    m_CardFilter: Any
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_CardFilter': ('CardFilter', None),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class TargetPlayerTakesControlEffectTemplate(CardAbilityEffectTemplate):
-    type_name = 'Game.Shared.Mechanics.Abilities.TargetPlayerTakesControlEffectTemplate'
-    version = 0
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.TargetPlayerTakesControlEffectTemplate'
+    version: ClassVar[int | None] = 0
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class TargetPlayerThresholdAbilityVariable(AbilityTargetVariable):
-    type_name = 'Game.Shared.Mechanics.Abilities.TargetPlayerThresholdAbilityVariable'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.TargetPlayerThresholdAbilityVariable'
+    version: ClassVar[int | None] = 1
+    m_Threshold: Any
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_Threshold': ('ECardShards', None),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class TestCampaignState(DataRestrictionBase):
-    type_name = 'Game.Shared.Mechanics.TestCampaignState'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.TestCampaignState'
+    version: ClassVar[int | None] = 1
+    m_ComparisonOp: Any
+    m_Value: str
+    m_VariableName: str
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_ComparisonOp': ('EComparisons', 'Equals'),
         'm_Value': ('string', ""),
         'm_VariableName': ('string', ""),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class TestDungeonNodeState(DataRestrictionBase):
-    type_name = 'Game.Shared.Challenge.Restriction.TestDungeonNodeState'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Challenge.Restriction.TestDungeonNodeState'
+    version: ClassVar[int | None] = 1
+    m_DungeonNodeResourceIdRestriction: ResourceId | None
+    m_DungeonNodeState: Any
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_DungeonNodeResourceIdRestriction': ('ResourceId', None),
         'm_DungeonNodeState': ('EDungeonNodeState', 'None'),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class TestQuestState(DataRestrictionBase):
-    type_name = 'Game.Shared.Challenge.Restriction.TestQuestState'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Challenge.Restriction.TestQuestState'
+    version: ClassVar[int | None] = 1
+    m_ComparisonOp: Any
+    m_QuestResourceIdRestriction: ResourceId | None
+    m_QuestStateRestriction: Any
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_ComparisonOp': ('EComparisons', 'Equals'),
         'm_QuestResourceIdRestriction': ('ResourceId', None),
         'm_QuestStateRestriction': ('EQuestState', 'Accepted'),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class TransformCardAbilityEffectTemplate(CardAbilityEffectTemplate):
-    type_name = 'Game.Shared.Mechanics.Abilities.TransformCardAbilityEffectTemplate'
-    version = 2
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.TransformCardAbilityEffectTemplate'
+    version: ClassVar[int | None] = 2
+    m_CardTemplateId: ResourceId | None
+    m_Portal: bool
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_CardTemplateId': ('ResourceId', None),
         'm_Portal': ('bool', False),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class TransformCardAtRandomAbilityEffectTemplate(CardAbilityEffectTemplate):
-    type_name = 'Game.Shared.Mechanics.Abilities.TransformCardAtRandomAbilityEffectTemplate'
-    version = 3
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.TransformCardAtRandomAbilityEffectTemplate'
+    version: ClassVar[int | None] = 3
+    m_CantBeSameCard: bool
+    m_Filter: Any
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_CantBeSameCard': ('bool', False),
         'm_Filter': ('CardFilter', None),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class TransformCardIntoReplicaAbilityEffectTemplate(CardAbilityEffectTemplate):
-    type_name = 'Game.Shared.Mechanics.Abilities.TransformCardIntoReplicaAbilityEffectTemplate'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.TransformCardIntoReplicaAbilityEffectTemplate'
+    version: ClassVar[int | None] = 1
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class TransformCardToTargetAbilityEffectTemplate(CardAbilityEffectTemplate):
-    type_name = 'Game.Shared.Mechanics.Abilities.TransformCardToTargetAbilityEffectTemplate'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.TransformCardToTargetAbilityEffectTemplate'
+    version: ClassVar[int | None] = 1
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class TransformSelfAbilityEffectTemplate(CardAbilityEffectTemplate):
-    type_name = 'Game.Shared.Mechanics.Abilities.TransformSelfAbilityEffectTemplate'
-    version = 3
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.TransformSelfAbilityEffectTemplate'
+    version: ClassVar[int | None] = 3
+    m_IsReplica: bool
+    m_PlantGarden: bool
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_IsReplica': ('bool', False),
         'm_PlantGarden': ('bool', False),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class TriggerCardPropertyVariable(AbilityVariable):
-    type_name = 'Game.Shared.Mechanics.Abilities.TriggerCardPropertyVariable'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.TriggerCardPropertyVariable'
+    version: ClassVar[int | None] = 1
+    m_Property: Any
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_Property': ('ECardProperties', 'Unknown'),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class TriggerEventDamageProperty(AbilityVariable):
-    type_name = 'Game.Shared.Mechanics.Abilities.TriggerEventDamageProperty'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.TriggerEventDamageProperty'
+    version: ClassVar[int | None] = 1
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class TriggerSourcePropertyVariable(AbilityVariable):
-    type_name = 'Game.Shared.Mechanics.Abilities.TriggerSourcePropertyVariable'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.TriggerSourcePropertyVariable'
+    version: ClassVar[int | None] = 1
+    m_Property: Any
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_Property': ('ECardProperties', 'Unknown'),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class TriggerTargetPropertyVariable(AbilityVariable):
-    type_name = 'Game.Shared.Mechanics.Abilities.TriggerTargetPropertyVariable'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.TriggerTargetPropertyVariable'
+    version: ClassVar[int | None] = 1
+    m_Property: Any
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_Property': ('ECardProperties', 'Unknown'),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class TunnelAbilityEffectTemplate(CardAbilityEffectTemplate):
-    type_name = 'Game.Shared.Mechanics.Abilities.TunnelAbilityEffectTemplate'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.TunnelAbilityEffectTemplate'
+    version: ClassVar[int | None] = 1
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class TurnPhaseActionChangeChampion(NonStandardTurnPhaseAction):
-    type_name = 'Game.Shared.Tutorial.TurnPhaseActionChangeChampion'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Tutorial.TurnPhaseActionChangeChampion'
+    version: ClassVar[int | None] = 1
+    m_AIDeckID: ResourceId | None
+    m_PlayerDeckID: ResourceId | None
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_AIDeckID': ('ResourceId', None),
         'm_PlayerDeckID': ('ResourceId', None),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class TurnPhaseActionShowSummary(NonStandardTurnPhaseAction):
-    type_name = 'Game.Shared.Tutorial.TurnPhaseActionShowSummary'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Tutorial.TurnPhaseActionShowSummary'
+    version: ClassVar[int | None] = 1
+    m_RewardCards: list[ResourceId]
+    m_SummaryLocs: int
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_RewardCards': ('List<ResourceId>', []),
         'm_SummaryLocs': ('int', 1),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class TurnPhaseActionStartConversation(NonStandardTurnPhaseAction):
-    type_name = 'Game.Shared.Tutorial.TurnPhaseActionStartConversation'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Tutorial.TurnPhaseActionStartConversation'
+    version: ClassVar[int | None] = 1
+    m_ConversationID: ResourceId | None
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_ConversationID': ('ResourceId', None),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class TurnPhaseActionToggleUI(NonStandardTurnPhaseAction):
-    type_name = 'Game.Shared.Tutorial.TurnPhaseActionToggleUI'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Tutorial.TurnPhaseActionToggleUI'
+    version: ClassVar[int | None] = 1
+    m_ElementsToToggle: list[BattleSceneElementReference]
+    m_ShowElements: bool
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_ElementsToToggle': ('List<BattleSceneElementReference>', []),
         'm_ShowElements': ('bool', False),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class UIEventBeginConversation(UIEvent):
-    type_name = 'Game.Shared.Challenge.Restriction.UIEventBeginConversation'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Challenge.Restriction.UIEventBeginConversation'
+    version: ClassVar[int | None] = 1
+    m_ConversationId: ResourceId | None
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_ConversationId': ('ResourceId', None),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class UIEventBeginEncounter(UIEvent):
-    type_name = 'Game.Shared.Challenge.Restriction.UIEventBeginEncounter'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Challenge.Restriction.UIEventBeginEncounter'
+    version: ClassVar[int | None] = 1
+    m_EncounterId: ResourceId | None
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_EncounterId': ('ResourceId', None),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class UIEventClearQueue(UIEvent):
-    type_name = 'Game.Shared.Challenge.Restriction.UIEventClearQueue'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Challenge.Restriction.UIEventClearQueue'
+    version: ClassVar[int | None] = 1
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class UIEventCompleteNode(UIEvent):
-    type_name = 'Game.Shared.Challenge.Restriction.UIEventCompleteNode'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Challenge.Restriction.UIEventCompleteNode'
+    version: ClassVar[int | None] = 1
+    m_NodeId: str
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_NodeId': ('string', ""),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class UIEventEnableBattleMod(UIEvent):
-    type_name = 'Game.Shared.Challenge.Restriction.UIEventEnableBattleMod'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Challenge.Restriction.UIEventEnableBattleMod'
+    version: ClassVar[int | None] = 1
+    m_Modification: str
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_Modification': ('string', ""),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class UIEventEndZone(UIEvent):
-    type_name = 'Game.Shared.Challenge.Restriction.UIEventEndZone'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Challenge.Restriction.UIEventEndZone'
+    version: ClassVar[int | None] = 1
+    m_GiveRewards: bool
+    m_ZoneTransition: ResourceId | None
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_GiveRewards': ('bool', False),
         'm_ZoneTransition': ('ResourceId', None),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class UIEventLaunchBattle(UIEvent):
-    type_name = 'Game.Shared.Challenge.Restriction.UIEventLaunchBattle'
-    version = 2
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Challenge.Restriction.UIEventLaunchBattle'
+    version: ClassVar[int | None] = 2
+    m_AllowCancel: bool
+    m_BattleId: str
+    m_EncounterId: ResourceId | None
+    m_Params: list[Any] | None
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_AllowCancel': ('bool', True),
         'm_BattleId': ('string', ""),
         'm_EncounterId': ('ResourceId', None),
         'm_Params': ('List<object>', None),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class UIEventLootPayout(UIEvent):
-    type_name = 'Game.Shared.Challenge.Restriction.UIEventLootPayout'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Challenge.Restriction.UIEventLootPayout'
+    version: ClassVar[int | None] = 1
+    m_PayoutID: str
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_PayoutID': ('string', ""),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class UIEventPlayMusic(UIEvent):
-    type_name = 'Game.Shared.Challenge.Restriction.UIEventPlayMusic'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Challenge.Restriction.UIEventPlayMusic'
+    version: ClassVar[int | None] = 1
+    m_Playlist: str
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_Playlist': ('string', ""),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class UIEventPlaySFX(UIEvent):
-    type_name = 'Game.Shared.Challenge.Restriction.UIEventPlaySFX'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Challenge.Restriction.UIEventPlaySFX'
+    version: ClassVar[int | None] = 1
+    m_Fade: bool
+    m_SoundID: str
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_Fade': ('bool', False),
         'm_SoundID': ('string', ""),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class UIEventShowObjectivePanel(UIEvent):
-    type_name = 'Game.Shared.Challenge.Restriction.UIEventShowObjectivePanel'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Challenge.Restriction.UIEventShowObjectivePanel'
+    version: ClassVar[int | None] = 1
+    m_ObjectiveHeading: str
+    m_ObjectiveText: str
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_ObjectiveHeading': ('string', ""),
         'm_ObjectiveText': ('string', ""),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class UntapCardAbilityEffectTemplate(CardAbilityEffectTemplate):
-    type_name = 'Game.Shared.Mechanics.Abilities.UntapCardAbilityEffectTemplate'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.UntapCardAbilityEffectTemplate'
+    version: ClassVar[int | None] = 1
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class VerdictAbilityEffectTemplate(CardAbilityEffectTemplate):
-    type_name = 'Game.Shared.Mechanics.Abilities.VerdictAbilityEffectTemplate'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.VerdictAbilityEffectTemplate'
+    version: ClassVar[int | None] = 1
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class VoidCardAbilityEffectTemplate(CardAbilityEffectTemplate):
-    type_name = 'Game.Shared.Mechanics.Abilities.VoidCardAbilityEffectTemplate'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.VoidCardAbilityEffectTemplate'
+    version: ClassVar[int | None] = 1
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class XarloxAbilityEffectTemplate(CardAbilityEffectTemplate):
-    type_name = 'Game.Shared.Mechanics.Abilities.XarloxAbilityEffectTemplate'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.XarloxAbilityEffectTemplate'
+    version: ClassVar[int | None] = 1
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class ZombiePlagueAbilityEffectTemplate(CardAbilityEffectTemplate):
-    type_name = 'Game.Shared.Mechanics.Abilities.ZombiePlagueAbilityEffectTemplate'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.ZombiePlagueAbilityEffectTemplate'
+    version: ClassVar[int | None] = 1
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class RandomizeVariableEffectTemplate(SetAbilityVariableEffectEffectTemplate):
-    type_name = 'Game.Shared.Mechanics.Abilities.RandomizeVariableEffectTemplate'
-    version = 3
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.RandomizeVariableEffectTemplate'
+    version: ClassVar[int | None] = 3
+    m_MaxValue: int
+    m_MaxValueField: EffectField | None
+    m_MinValue: int
+    m_SecondValue: bool
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_MaxValue': ('int', 0),
         'm_MaxValueField': ('EffectField', None),
         'm_MinValue': ('int', 0),
         'm_SecondValue': ('bool', False),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class SetCardCountVariableEffectTemplate(SetAbilityVariableEffectEffectTemplate):
-    type_name = 'Game.Shared.Mechanics.Abilities.SetCardCountVariableEffectTemplate'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.SetCardCountVariableEffectTemplate'
+    version: ClassVar[int | None] = 1
+    m_CardFilter: Any
+    m_CollectionFlags: Any
+    m_PlayerFilter: Any
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_CardFilter': ('CardFilter', None),
         'm_CollectionFlags': ('ECardCollections', None),
         'm_PlayerFilter': ('EPlayerCardTargets', None),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }
 
 class SetConstantValueVariableEffectTemplate(SetAbilityVariableEffectEffectTemplate):
-    type_name = 'Game.Shared.Mechanics.Abilities.SetConstantValueVariableEffectTemplate'
-    version = 1
-    fields = {
+    type_name: ClassVar[str] = 'Game.Shared.Mechanics.Abilities.SetConstantValueVariableEffectTemplate'
+    version: ClassVar[int | None] = 1
+    m_Value: int
+    fields: ClassVar[dict[str, tuple[str, Any]]] = {
         'm_Value': ('int', 0),
     }
-    deprecated = {
+    deprecated: ClassVar[dict[str, tuple[str, Any]]] = {
     }

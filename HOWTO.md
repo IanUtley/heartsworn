@@ -86,6 +86,13 @@ Use a full restart after changing `hconnect_server.py`, startup wiring,
 encoders, schema initialization, or process configuration. Do not run tests in
 parallel when they use SQLite or the shared runtime database.
 
+The generated mechanics classes are type-checked. After regenerating them with
+`python3 AssetExtraction/extract_mechanics.py`, run:
+
+```bash
+python3 -m mypy gamedata/mechanics_types.py gamedata/mechanics_base.py --follow-imports=silent --ignore-missing-imports
+```
+
 The repository includes a pre-commit hook for syntax checks and the quick core
 test set. Enable it once per checkout with:
 

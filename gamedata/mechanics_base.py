@@ -28,6 +28,9 @@ class Typed:
     version: ClassVar[int | None] = None
     fields: ClassVar[dict[str, tuple[str, Any]]] = {}       # own fields: record name -> (type, default)
     deprecated: ClassVar[dict[str, tuple[str, Any]]] = {}   # removed or renamed fields
+    # Set per object by from_record (absent otherwise, so to_record falls back to the class).
+    _record_order: list[str] | None
+    _stored_type: str | None
 
     def __init__(self, **arguments: Any) -> None:
         known = _argument_names(type(self))
@@ -64,17 +67,17 @@ class Typed:
         return f"{type(self).__name__}({shown})"
 
 
-def _chain(cls: type) -> list[type]:
+def _chain(cls: type) -> list[type[Typed]]:
     """The class and its typed base classes, nearest first."""
-    out = []
+    out: list[type[Typed]] = []
     current: type | None = cls
     while current is not None and issubclass(current, Typed) and current is not Typed:
-        out.append(current)
+        out.append(current)  # type: ignore[arg-type]  # narrowed by issubclass above
         current = current.__bases__[0]
     return out
 
 
-def _record_names(cls: type) -> list[str]:
+def _record_names(cls: type[Typed]) -> list[str]:
     """Every current field of a class, inherited ones first (the order the client serializes them in)."""
     names: list[str] = []
     for klass in reversed(_chain(cls)):
@@ -84,12 +87,12 @@ def _record_names(cls: type) -> list[str]:
     return names
 
 
-def _argument_names(cls: type) -> dict[str, str]:
+def _argument_names(cls: type[Typed]) -> dict[str, str]:
     """Keyword argument (snake_case) -> record field name."""
     return {ir_name(name): name for name in _record_names(cls)}
 
 
-def _default_of(cls: type, record_name: str) -> Any:
+def _default_of(cls: type[Typed], record_name: str) -> Any:
     for klass in _chain(cls):
         if record_name in klass.fields:
             return klass.fields[record_name][1]
