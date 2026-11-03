@@ -1,6 +1,9 @@
 """Shared utilities used by abilities framework modules."""
 
 import game_engine
+# Single owners live in rules_port; re-exported for the framework callers.
+from rules_port.zone_effects import state_after_zone_exit  # noqa: F401
+from rules_port.runtime_helpers import next_game_card_uid  # noqa: F401
 
 
 # These flags describe the current battle/turn instance, not the card's
@@ -24,11 +27,6 @@ ZONE_EXIT_STATE_FLAGS = (
 )
 
 
-def state_after_zone_exit(state):
-    """Return card state with transient battle/turn flags removed."""
-    return int(state or 0) & ~int(ZONE_EXIT_STATE_FLAGS)
-
-
 def _log(msg):
     try:
         from db import log_req
@@ -44,18 +42,6 @@ def _card_state_of(db, session, card_uid):
             session.session_id, int(card_uid), conn=db)
     except Exception:
         return 0
-
-
-def next_game_card_uid(db, session_id):
-    """Allocate a fresh SessionCardId instance for a generated card.
-
-    The database row id and the instance portion of a SessionCardId are
-    independent values.  Using MAX(game_cards.id) for both can reuse a UID
-    when cards were inserted or restored in a different order, causing the
-    client/server card cache to resolve a token as another card.
-    """
-    from pvp_db import db_next_card_uid
-    return db_next_card_uid(session_id, conn=db)
 
 
 def card_collection_for_location(location):

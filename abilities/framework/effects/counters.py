@@ -4,6 +4,8 @@ import json
 import re
 import base64
 import binascii
+
+from rules_port.tunneling import _tac_hash  # noqa: F401 (single owner in rules_port)
 import struct
 
 import game_engine
@@ -19,16 +21,6 @@ TUNNELING_COUNTER_GUID = "def75520-0b8b-447f-8705-b34e71043890"
 # would add a second counter and put a pointless ability on the chain.
 TUNNELING_ABILITY_GUID = "a4fc4440-4f02-4f40-b786-214ad0205dad"
 SURFACE_ABILITY_GUID = "f2d6797b-1a24-4c3d-9239-a27a2e0de0ff"
-
-
-def _tac_hash(name):
-    import hashlib
-    digest = bytearray(hashlib.md5(str(name).encode("ascii")).digest()[:4])
-    if digest[0] == 0:
-        digest[0] = 1
-    if digest[3] == 0:
-        digest[3] = 1
-    return bytes(reversed(digest))
 
 
 def tunneling_value(db, template_guid, persisted_int_attrs=None):

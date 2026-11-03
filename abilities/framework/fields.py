@@ -12,156 +12,18 @@ from typing import Any
 from typing import cast
 
 from gamedata import DEFAULT_RECORD_STORE
+# The implementations live in rules_port.bom_fields (the single owner); these
+# names remain importable from here for the framework callers.
+from rules_port.bom_fields import (  # noqa: F401
+    _last_type, _load_effect_templates, effect_template,
+    _load_ability_templates, _raw_ability, ability_record,
+    ability_variables, _field_name, field_variable_name, resolve_field,
+    effect_template_value, counter_template_name)
 
 
 _EFFECT_TEMPLATES = None
 _ABILITY_TEMPLATES = None
 _RECORD_STORE = DEFAULT_RECORD_STORE
-
-
-def _last_type(value):
-    return str(value or "").rsplit(".", 1)[-1]
-
-
-def _load_effect_templates():
-    """Load effect templates once from the extracted gamedata snapshot."""
-    global _EFFECT_TEMPLATES
-    if _EFFECT_TEMPLATES is not None:
-        return _EFFECT_TEMPLATES
-    _EFFECT_TEMPLATES = {
-        record.guid.lower(): record.to_dict()
-        for record in _RECORD_STORE.load("AbilityEffectTemplate")
-        if record.guid
-    }
-    return _EFFECT_TEMPLATES
-
-
-def effect_template(effect_guid):
-    """Return the typed effect-template record for a BOM effect GUID."""
-    if not effect_guid:
-        return None
-    return _load_effect_templates().get(str(effect_guid).lower())
-
-
-def _load_ability_templates():
-    """Load the current typed AbilityTemplate records from Records.
-
-    SQLite stores generated indexes and runtime state; it is not consulted for
-    the ability definition or its typed variables.
-    """
-    global _ABILITY_TEMPLATES
-    if _ABILITY_TEMPLATES is not None:
-        return _ABILITY_TEMPLATES
-    _ABILITY_TEMPLATES = {
-        record.guid.lower(): record.to_dict()
-        for record in _RECORD_STORE.load("AbilityTemplate")
-        if record.guid
-    }
-    return _ABILITY_TEMPLATES
-
-
-def _raw_ability(db, ability_guid):
-    if not ability_guid:
-        return {}
-    # SQLite contains indexes/materialized state. All callers resolve the
-    # current typed AbilityTemplate from Records.
-    return _load_ability_templates().get(str(ability_guid).lower(), {})
-
-
-def ability_record(db, ability_guid):
-    """Return the authoritative AbilityTemplate record for *ability_guid*.
-
-    Transitive grants are not always materialized in the compact database
-    seed, but their source AbilityTemplate is still present in Records.  The
-    runtime uses this accessor when resolving such an ability without making
-    localized card text part of the rules path.
-    """
-    return _raw_ability(db, ability_guid)
-
-
-def ability_variables(db, ability_guid):
-    """Return AbilityTemplate constant defaults keyed by variable name."""
-    record = _raw_ability(db, ability_guid)
-    values = {}
-    for field in record.get("m_Variables") or []:
-        if not isinstance(field, dict):
-            continue
-        name = field.get("m_Name") or field.get("m_VariableName")
-        if not name:
-            continue
-        value = field.get("m_DefaultValue", field.get("m_Value", 0))
-        try:
-            values[str(name)] = int(value or 0)
-        except (TypeError, ValueError):
-            continue
-    return values
-
-
-def _field_name(field):
-    if not isinstance(field, dict):
-        return ""
-    return (field.get("m_InputVariableName") or field.get("m_VariableName")
-            or field.get("m_Name") or "")
-
-
-def field_variable_name(field):
-    """Return the variable referenced by a serialized EffectField.
-
-    ``EffectInputVariable`` is not a literal zero.  The client evaluates it
-    against the active AbilityInstance, where names such as ``AForEach...``
-    can be computed from the current board.  Keeping this small accessor
-    public lets effect leaves use the same typed field contract without
-    reading the localized ability text.
-    """
-    if not isinstance(field, dict):
-        return ""
-    if _last_type(field.get("_t")) not in (
-            "EffectInputVariable", "EffectAbilityVariable",
-            "AbilityVariable", "EffectVariable"):
-        return ""
-    return str(_field_name(field) or "")
-
-
-def resolve_field(field, variables=None, outputs=None, bstate=None,
-                  default=0):
-    """Evaluate one client ``EffectField``/``AbilityField`` value.
-
-    Unknown field kinds deliberately return the supplied default.  That is
-    safer than treating an unresolved dynamic value as a localized number.
-    """
-    variables = variables or {}
-    outputs = outputs or {}
-    bstate = bstate or {}
-    if field is None:
-        return int(default or 0)
-    if isinstance(field, bool):
-        return int(field)
-    if isinstance(field, (int, float)):
-        return int(field)
-    if isinstance(field, str):
-        try:
-            return int(field)
-        except (TypeError, ValueError):
-            return int(variables.get(field, default) or 0)
-    if not isinstance(field, dict):
-        return int(default or 0)
-
-    kind = _last_type(field.get("_t"))
-    if kind in ("EffectConstant", "AbilityConstant", "Constant"):
-        return int(field.get("m_Value", field.get("m_DefaultValue", default)) or 0)
-    if kind in ("EffectInputVariable", "EffectAbilityVariable",
-                "AbilityVariable", "EffectVariable"):
-        name = _field_name(field)
-        return int(variables.get(name, bstate.get(name, default)) or 0)
-    if kind in ("EffectOutputVariable", "OutputVariable"):
-        name = (_field_name(field) or field.get("m_OutputVariableName") or "")
-        return int(outputs.get(name, bstate.get(name, default)) or 0)
-    if kind in ("EffectCardIntegerVariable", "CardIntegerVariable"):
-        name = _field_name(field)
-        card_values = bstate.get("card_integer_variables") or {}
-        return int(card_values.get(name, variables.get(name, default)) or 0)
-
-    return int(default or 0)
 
 
 def effect_field(db, bstate, effect_guid, field_name, default=0):
@@ -212,23 +74,6 @@ def effect_field(db, bstate, effect_guid, field_name, default=0):
         except (AttributeError, TypeError, ValueError):
             pass
     return value
-
-
-def effect_template_value(db, bstate, effect_guid, field_name, default=None):
-    """Read a non-numeric typed effect-template field."""
-    template = effect_template(effect_guid)
-    if not template:
-        return default
-    value = template.get(field_name, default)
-    if isinstance(value, dict) and "m_Guid" in value:
-        return str(value.get("m_Guid") or "").lower()
-    return value
-
-
-def counter_template_name(counter_guid):
-    """Return the current Records name for a card-counter template."""
-    record = _RECORD_STORE.get("CardCounterTemplate", str(counter_guid).lower())
-    return str(record.field("m_Name", "")) if record is not None else ""
 
 
 def modifier_metadata(effect_guid):
