@@ -7,7 +7,6 @@ these modules resolve abilities; `rules_port` does (see `../README.md`).
 |---|---|
 | `_shared.py` | Logging, card-state masks, zone/collection mapping, champion-owner helpers |
 | `bom.py` | `_push_card_state` and `_controller_id_for_target` (the remains of the old BOM module) |
-| `condition_engine.py` | Data-driven condition evaluation used by the AI and projections |
 | `cost_mod.py` | Dynamic cost modifiers from ability variables |
 | `deathcry.py` | Deathcry filtering; resolution is delegated to `rules_port.resolution` |
 | `fields.py` | AbilityField/EffectField evaluation |
@@ -22,7 +21,7 @@ these modules resolve abilities; `rules_port` does (see `../README.md`).
 | `keywords/combat.py` | Rage adapter over `statics.apply_rage` |
 
 Several of these duplicate logic that also exists in `rules_port`
-(`condition_engine.py` vs `rules_port/conditions.py`, `fields.py` vs
+(`rules_port/conditions.py` now covers condition evaluation; `fields.py` vs
 `rules_port/fields.py`, `targeting.py` vs `rules_port/targeting.py`). Prefer
 the `rules_port` version in new code; the copies here are candidates for the
 next consolidation pass.

@@ -1218,7 +1218,7 @@ def test_tutorial_script_parses_draw_and_hell_to_freeze_commands(tmp_path):
 
 
 def test_condition_combinators_fold_their_children():
-    from abilities.framework.condition_engine import evaluate_condition
+    from rules_port.conditions import evaluate_condition
     always = {"_t": "AndTriggerCondition", "m_Conditions": []}
     never = {"_t": "OrTriggerCondition", "m_Conditions": []}
     assert evaluate_condition(always, None) is True

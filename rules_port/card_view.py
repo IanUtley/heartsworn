@@ -206,8 +206,12 @@ class CardView:
             location=row[2] or "",
             user_id=user_id,
             state=int(row[4] or 0),
-            attack=int(row[5] or 0) + int(row[14] or 0),
-            defense=int(row[6] or 0) + int(row[15] or 0),
+            # Persistent stat buffs survive a move to the discard, so a death
+            # trigger's previous-state value includes them (temporary buffs do not).
+            attack=(int(row[5] or 0) + int(row[14] or 0)
+                    + int(buffs.get("atk", 0) or 0)),
+            defense=(int(row[6] or 0) + int(row[15] or 0)
+                     + int(buffs.get("def", 0) or 0)),
             name=row[8] or "",
             cost=int(effective_cost or 0),
             subtype=row[10] or "",

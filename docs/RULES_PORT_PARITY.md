@@ -1726,4 +1726,15 @@ Deathcry trigger checks also use the native layer. The first differential found
 pass the dying card's controller as the trigger owner, so the native check
 rejected it. Deathcry now passes `trigger_owner_id`, and the 28,224-case
 differential over all CardEnteredZone triggers agrees. `condition_engine.py` is
-now used only by tests.
+now deleted; its two test files use the native layer.
+
+Migrating its two test files exposed three native gaps, now fixed:
+- `TurnPhaseCondition` compared `str(phase)` with the phase name; phases are
+  `ETurnPhases` values, so a live turn never matched. It now compares numerically.
+- Warzone -> Discard triggers with `m_UsesPreviousState` ignored the pre-move
+  Dead bit, so a card buried from hand or deck could fire a death trigger.
+- Condition cards left out persistent `atk`/`def` buffs, so death-trigger
+  previous-state values missed them.
+Two fixtures were incomplete rather than wrong: trigger conditions need the
+event's player (`trigger_owner_id`), a nth-draw needs the draw index in the
+event data, and a threshold gain needs `GainThresholdEvent`.
