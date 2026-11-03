@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import replace
+from typing import Any, cast
 
 import game_engine
 from rules_port.card_view import CardView
@@ -11,6 +12,9 @@ from rules_port.card_view import CardView
 
 class CardStateMixin:
     """Methods of HCPHandler, mixed into it (see hconnect_server)."""
+
+    # Set by the live handler's scene setup (CardPlayMixin); declared here for the type checker.
+    _scene_targeted_ability_owners: dict[str, int]
 
     @staticmethod
     def _champion_health_by_guid(guid):
@@ -254,7 +258,7 @@ class CardStateMixin:
         gem_instance_id = (instance_id if instance_id is not None
                            else card_instance_ref)
         gem_type = _hc.HCPHandler._card_gem_type(
-            self, game, scid, gem_instance_id, persisted_gem=persisted_gem)
+            cast(Any, self), game, scid, gem_instance_id, persisted_gem=persisted_gem)
         display_gems = int(gem_type or 0)
         if (display_gems > 0x3FF and
                 not (display_gems & _hc.EMPTY_SOCKET_GEMS)):
