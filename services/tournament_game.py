@@ -6,6 +6,9 @@ from typing import Any
 
 import game_engine as _ge
 from rules_port.persistence import (load_pvp_state, save_pvp_state)
+from services.pvp_priority import (
+    flush_priority_clock, priority_elapsed_ticks,
+    priority_window_elapsed_seconds)
 from rules_port.pvp_lifecycle import (phase_is_stop as port_phase_is_stop,
                                       player_auto_passes as port_player_auto_passes,
                                       phase_after_blockers as port_phase_after_blockers,
@@ -505,7 +508,7 @@ def pvp_save_state(session, state):
         existing = getattr(session, "turn_order", None)
         if isinstance(existing, dict) and existing.get("champ_map"):
             state["champ_map"] = dict(existing["champ_map"])
-    save_pvp_state(session, state, flush_clock=_pvp_flush_priority_clock)
+    save_pvp_state(session, state, flush_clock=flush_priority_clock)
 
 
 def project_accepted_pvp_transaction(handler, session, kind, transaction,
@@ -1419,7 +1422,7 @@ def attach_pvp_rules_port(handler, session, game, state):
                         _ge.UID.make(244, int(live.get("turn_pid") or
                                               next_priority)),
                         _ge.UID.make(244, next_priority),
-                        _pvp_priority_elapsed_ticks(
+                        priority_elapsed_ticks(
                             live, next_priority) // 10_000_000)
                     _send_pvp_packet(
                         target_h, session, handoff, target_uid,
@@ -1701,104 +1704,6 @@ def attach_pvp_rules_port(handler, session, game, state):
     return port
 
 
-def _pvp_flush_priority_clock(state, now_ns=None):
-    """Accumulate wall-clock time for the currently prioritised player.
-
-    The PvP state is written after priority-changing actions, so this clock is
-    deliberately independent of the mutable ``priority_pid`` value.  That
-    lets us account for the interval belonging to the previous priority owner
-    before starting the new owner's interval.  The watchdog also flushes it
-    periodically, limiting time lost if the process stops unexpectedly.
-    """
-    if not isinstance(state, dict):
-        return
-    now_ns = int(now_ns if now_ns is not None else time.time_ns())
-    try:
-        current_pid = int(state.get("priority_pid") or 0)
-    except (TypeError, ValueError):
-        current_pid = 0
-    try:
-        clock_pid = int(state.get("_priority_clock_pid") or 0)
-    except (TypeError, ValueError):
-        clock_pid = 0
-    try:
-        started_ns = int(state.get("_priority_clock_started_ns") or 0)
-    except (TypeError, ValueError):
-        started_ns = 0
-
-    elapsed = state.get("priority_elapsed_ticks")
-    if not isinstance(elapsed, dict):
-        elapsed = {}
-        state["priority_elapsed_ticks"] = elapsed
-
-    if clock_pid and started_ns:
-        delta_ticks = max(0, now_ns - started_ns) // 100
-        if delta_ticks:
-            key = str(clock_pid)
-            elapsed[key] = int(elapsed.get(key, 0) or 0) + delta_ticks
-
-    # A priority change closes the old interval and starts the new one.  When
-    # priority is unset, leave the clock stopped rather than charging either
-    # player while the game is in a non-priority setup phase.
-    state["_priority_clock_pid"] = current_pid
-    state["_priority_clock_started_ns"] = now_ns if current_pid else 0
-
-    # This marker is intentionally NOT refreshed on every state save.  It is
-    # the client's five-minute inactivity/turn-phase window, which remains
-    # active for as long as the same player retains priority.  The cumulative
-    # clock above is flushed frequently; conflating the two would prevent the
-    # timeout from ever firing.
-    try:
-        window_pid = int(state.get("_priority_window_pid") or 0)
-        window_started_ns = int(
-            state.get("_priority_window_started_ns") or 0)
-    except (TypeError, ValueError):
-        window_pid = window_started_ns = 0
-    if current_pid != window_pid:
-        window_pid = current_pid
-        window_started_ns = now_ns if current_pid else 0
-    elif current_pid and not window_started_ns:
-        window_started_ns = now_ns
-    state["_priority_window_pid"] = window_pid
-    state["_priority_window_started_ns"] = window_started_ns
-
-
-def _pvp_priority_elapsed_ticks(state, pid, now_ns=None):
-    """Return persisted plus currently-running priority time for ``pid``."""
-    try:
-        pid = int(pid)
-    except (TypeError, ValueError):
-        return 0
-    elapsed = state.get("priority_elapsed_ticks") if isinstance(state, dict) else None
-    try:
-        total = int((elapsed or {}).get(str(pid), 0) or 0)
-    except (AttributeError, TypeError, ValueError):
-        total = 0
-    try:
-        clock_pid = int(state.get("_priority_clock_pid") or 0)
-        started_ns = int(state.get("_priority_clock_started_ns") or 0)
-    except (TypeError, ValueError):
-        clock_pid = started_ns = 0
-    if clock_pid == pid and started_ns:
-        now_ns = int(now_ns if now_ns is not None else time.time_ns())
-        total += max(0, now_ns - started_ns) // 100
-    return total
-
-
-def _pvp_priority_window_elapsed_seconds(state, pid, now_ns=None):
-    """Return seconds since ``pid`` most recently gained priority."""
-    try:
-        pid = int(pid)
-        window_pid = int(state.get("_priority_window_pid") or 0)
-        started_ns = int(state.get("_priority_window_started_ns") or 0)
-    except (TypeError, ValueError):
-        return 0
-    if pid <= 0 or window_pid != pid or not started_ns:
-        return 0
-    now_ns = int(now_ns if now_ns is not None else time.time_ns())
-    return max(0, now_ns - started_ns) // 1_000_000_000
-
-
 def _pvp_push_turn_phase_with_elapsed(game, phase, active_uid, priority_uid,
                                       elapsed_seconds):
     """Push TurnPhaseUpdated with the cumulative clock value for reconnect."""
@@ -2067,7 +1972,7 @@ def _pvp_priority_watchdog_loop(session, sid):
                     # is now the one being flushed, so resource/phase writes
                     # cannot be overwritten by a stale watchdog snapshot.
                     pvp_save_state(fresh, state)
-                    if (_pvp_priority_window_elapsed_seconds(state, pid) >=
+                    if (priority_window_elapsed_seconds(state, pid) >=
                             _PVP_INACTIVITY_TIMEOUT_SECONDS):
                         winner_pid = (pids[1]
                                       if pids[0] == pid else pids[0])
@@ -2732,7 +2637,7 @@ def _pvp_run_phase_start(session, state, phase):
                 (_ge.EPriorityContext.ResolveTopOfChain
                  if chain_from_phase_start else _ge.EPriorityContext.Normal))
         priority_elapsed_seconds = (
-            _pvp_priority_elapsed_ticks(state, priority_pid) // 10_000_000
+            priority_elapsed_ticks(state, priority_pid) // 10_000_000
             if phase not in (3, 4) else 0)
         _pvp_push_turn_phase_with_elapsed(
             g, phase, turn_uid_p, prio_uid, priority_elapsed_seconds)
@@ -4852,7 +4757,7 @@ def _pvp_resolve_discard_prompt(handler, session, inner_bytes, my_pid,
                     priority_uid, _ge.EPriorityContext.Normal)
                 _pvp_push_turn_phase_with_elapsed(
                     gp, phase, turn_uid, priority_uid,
-                    _pvp_priority_elapsed_ticks(state, priority_pid) // 10_000_000)
+                    priority_elapsed_ticks(state, priority_pid) // 10_000_000)
                 _send_pvp_packet(
                     player_handlers.get(int(pid)) or handler,
                     session, gp, recipient, "discard-priority")
@@ -4931,7 +4836,7 @@ def _pvp_resolve_discard_prompt(handler, session, inner_bytes, my_pid,
         gp.push_green_light(priority_uid, _ge.EPriorityContext.Normal)
         _pvp_push_turn_phase_with_elapsed(
             gp, phase, turn_uid, priority_uid,
-            _pvp_priority_elapsed_ticks(state, priority_pid) // 10_000_000)
+            priority_elapsed_ticks(state, priority_pid) // 10_000_000)
         _send_pvp_packet(h, session, gp, recipient, "discard-priority")
     if phase in (_ge.ETurnPhases.FirstMainPhase,
                  _ge.ETurnPhases.SecondMainPhase):
@@ -5503,7 +5408,7 @@ def route_pvp_pass(handler, session):
                     g, int(state["phase"]),
                     _ge.UID.make(244, int(state.get("turn_pid") or waiting_pid)),
                     waiting_uid,
-                    _pvp_priority_elapsed_ticks(state, waiting_pid) // 10_000_000)
+                    priority_elapsed_ticks(state, waiting_pid) // 10_000_000)
                 # Champion charge powers must stay interactive in ANY priority
                 # window (mirrors PvE _push_phase_options_empty): push an
                 # empty options list carrying the champion so the buttons
@@ -5537,7 +5442,7 @@ def route_pvp_pass(handler, session):
                         _ge.UID.make(
                             244, int(state.get("turn_pid") or waiting_pid)),
                         waiting_uid,
-                        _pvp_priority_elapsed_ticks(
+                        priority_elapsed_ticks(
                             state, waiting_pid) // 10_000_000)
                     _send_pvp_packet(passed_h, session, passed_game,
                                      passed_uid, "pass-handoff-lost")
@@ -7140,7 +7045,7 @@ def _pvp_resolve_optional_trigger(handler, session, inner_bytes, my_pid,
             resume.push_green_light(turn_uid, _ge.EPriorityContext.Normal)
         _pvp_push_turn_phase_with_elapsed(
             resume, int(state.get("phase", 0)), turn_uid, turn_uid,
-            _pvp_priority_elapsed_ticks(state, turn_pid) // 10_000_000)
+            priority_elapsed_ticks(state, turn_pid) // 10_000_000)
         _send_pvp_packet(turn_h, session, resume, turn_uid,
                          "optional-trigger-declined")
     phase = int(state.get("phase", 0))
@@ -7294,7 +7199,7 @@ def _pvp_resolve_trigger_target(handler, session, inner_bytes, my_pid,
         resume.push_green_light(turn_uid, _ge.EPriorityContext.Normal)
         _pvp_push_turn_phase_with_elapsed(
             resume, int(state.get("phase", 0)), turn_uid, turn_uid,
-            _pvp_priority_elapsed_ticks(state, turn_pid) // 10_000_000)
+            priority_elapsed_ticks(state, turn_pid) // 10_000_000)
         _send_pvp_packet(turn_h, session, resume, turn_uid,
                          "trigger-target-chain-empty")
     phase = int(state.get("phase", 0))
@@ -7630,7 +7535,7 @@ def _pvp_push_reconnect_snapshot(handler, session, pid):
     priority_uid = _ge.UID.make(244, priority_pid)
     turn_uid = _ge.UID.make(244, turn_pid)
     priority_elapsed_seconds = (
-        _pvp_priority_elapsed_ticks(state, priority_pid) // 10_000_000)
+        priority_elapsed_ticks(state, priority_pid) // 10_000_000)
     g.push_green_light(priority_uid, _ge.EPriorityContext.Normal)
     _pvp_push_turn_phase_with_elapsed(
         g, phase, turn_uid, priority_uid, priority_elapsed_seconds)
@@ -7801,7 +7706,7 @@ def _pvp_reassign_priority_after_disconnect(session, disconnected_pid,
         else:
             # Still persist the latest clock before the socket disappears;
             # this prevents the watchdog from charging a stale interval.
-            _pvp_flush_priority_clock(state)
+            flush_priority_clock(state)
             pvp_save_state(session, state)
 
     survivor_handler = player_handlers.get(survivor_pid)
@@ -7822,7 +7727,7 @@ def _pvp_reassign_priority_after_disconnect(session, disconnected_pid,
     game.push_green_light(priority_uid, _ge.EPriorityContext.Normal)
     _pvp_push_turn_phase_with_elapsed(
         game, phase, turn_uid, priority_uid,
-        _pvp_priority_elapsed_ticks(state, survivor_pid) // 10_000_000)
+        priority_elapsed_ticks(state, survivor_pid) // 10_000_000)
     _send_pvp_packet(survivor_handler, session, game, pl_uid,
                      "disconnect-priority")
     if phase in (_ge.ETurnPhases.FirstMainPhase,
@@ -8748,7 +8653,7 @@ def _pvp_resolve_ability_item(session, state, handler, my_pid, item):
             gg.push_green_light(turn_pt, _ge.EPriorityContext.Normal)
             _pvp_push_turn_phase_with_elapsed(
                 gg, int(state.get("phase", 0)), turn_pt, turn_pt,
-                _pvp_priority_elapsed_ticks(state, turn_pid) // 10_000_000)
+                priority_elapsed_ticks(state, turn_pid) // 10_000_000)
             _send_pvp_packet(turn_h, session, gg, turn_pt, "chain-empty")
         # Mirror PvE (hconnect ~8880): re-announce the current phase + push the
         # phase-appropriate options so the client rebuilds its state and the
