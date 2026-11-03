@@ -280,8 +280,8 @@ concrete operations derive from `CardAbilityEffectTemplate` (most) or directly.
 
 Read `_t` (or the last `_v` entry), take the final `.`-segment as the class
 name, and look up an executor keyed by that name. That class name is exactly
-what `ability_effects.effect_type` stores and what `_LEAFS` in `bom.py` is
-keyed on.
+what `ability_effects.effect_type` stores and what the dispatch table in
+`rules_port/effects.py` is keyed on.
 
 ### Per-operation parameters (most common 60 of ~120 effect classes)
 
@@ -627,12 +627,11 @@ production resolution rejects an ability absent from Records.
    - `target_templates(template_id, game_text)` — target template GUID → text.
    - `champion_abilities(champion_guid, …)` — champion charge powers and their
      cost/game text.
-3. **Resolution**: `abilities.resolve_effect(guid)` returns a registered custom
-   handler (in `abilities/cards/`) or a BOM-walking wrapper that builds the
-   `AbilityGraph` from Records, adapts its typed effect templates to the leaf
-   ABI, and dispatches each concrete effect type to `_LEAFS`
-   (`abilities/framework/bom.py`). `ActivateAbilityEffectTemplate` recursion
-   follows the typed `m_AbilityToInvoke` field.
+3. **Resolution**: `rules_port.resolution` builds the `AbilityGraph` from
+   Records and dispatches each concrete effect type through
+   `rules_port.effects.dispatch` to a named `EffectContext` operation.
+   `ActivateAbilityEffectTemplate` recursion follows the typed
+   `m_AbilityToInvoke` field.
 
 ### Data-driven resolution algorithm (target state)
 
@@ -737,7 +736,7 @@ complete modifier semantics.
 The Python layer is a **work in progress**. This table shows what is genuinely
 data-driven today vs. what is inferred from game text vs. what is missing.
 
-### Implemented leaf executors (`abilities/framework/bom.py`, `_LEAFS`)
+### Implemented effect types (`rules_port/effects.py` dispatch → `EffectContext`)
 
 | `effect_type` (class name) | Status | Notes |
 |----------------------------|--------|-------|
@@ -775,16 +774,6 @@ contains a nested typed ability and loop-count field rather than a normal
 per-target leaf. Random target templates are likewise resolved from their
 metadata filter and count, even when the template is not marked as an
 auto-target in the extracted record.
-
-#### Typed-field audit
-
-`tools/ir_coverage/audit_effect_leaves.py` is the field-level counterpart to the
-registration inventory above. It reads the C# `m_*` field declarations, the
-Records field unions, and the Python leaf call closures, then reports every
-meaningful Records field a leaf never reads, leaves with no typed reads, and
-classes without a handler. A field may only be exempted through the tool's
-`ACCEPTED_FIELDS` list with a cited C# reason. Run it after touching a leaf so
-"registered" never stands in for "reads the authored fields".
 
 #### Card text vs implementation audit
 

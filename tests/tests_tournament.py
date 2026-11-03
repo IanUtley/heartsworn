@@ -348,7 +348,7 @@ def test_pvp_result_is_published_before_game_over():
 
 
 def test_pvp_champion_damage_uses_target_player_health():
-    from abilities.framework.bom import _deal_damage
+    from abilities.framework.effects.damage import deal_damage as _deal_damage
 
     class Session:
         session_id = 42765

@@ -4765,22 +4765,6 @@ def test_completed_chain_instance_skips_bom_on_the_finishing_pass():
         db.close()
 
 
-def test_native_effect_context_rejects_legacy_helpers():
-    """A native context must never silently enter the transitional BOM ABI."""
-    from abilities.framework.context import EffectContext
-
-    context = EffectContext.from_rules_port(
-        game=SimpleNamespace(), session=SimpleNamespace(), db=None,
-        handler=SimpleNamespace(), pl_t=None, ai_t=None, bstate={},
-        effect_guid="native", ability=None)
-    try:
-        context._legacy("should_not_run")
-    except RuntimeError as exc:
-        assert "legacy helper" in str(exc)
-    else:
-        raise AssertionError("native context entered a legacy helper")
-
-
 def test_rules_port_modules_do_not_import_legacy_rule_engines():
     """The native package must not acquire a hidden compatibility dependency."""
     from pathlib import Path

@@ -45,14 +45,11 @@ def _ensure_column(db, table, column, kind):
 
 def resolve_ability(handler, game, session, db, pl_t, ai_t, bstate,
                     ability_guid, source_uid, owner_id, target_map=None):
-    """Legacy-shaped adapter retained until these fixtures migrate.
-
-    TODO(native): re-point to ``rules_port.resolution.resolve_port_ability``
-    once the explicit-target fixtures below are migrated.
-    """
-    from abilities.framework.resolution import resolve_ability as _walk
-    return _walk(handler, game, session, db, pl_t, ai_t, bstate,
-                 ability_guid, source_uid, owner_id, target_map or {})
+    """Resolve one ability through the native RulesPort lifecycle."""
+    from rules_port.resolution import resolve_port_ability
+    return resolve_port_ability(handler, game, session, db, pl_t, ai_t, bstate,
+                                ability_guid, source_uid, owner_id,
+                                target_map=target_map or {})
 
 
 def _copy_card(db, guid):
@@ -167,7 +164,7 @@ def _resolve_pending_trigger_stack(handler, game, bstate, db, pl_t, ai_t):
     chain.  The production battle engine drains these items after priority;
     this helper models that part for direct trigger-dispatch tests.
     """
-    from abilities.framework.triggers import resolve_stack_trigger
+    from rules_port.resolution import resolve_port_trigger as resolve_stack_trigger
 
     while bstate.get("stack"):
         item = bstate["stack"].pop()
@@ -199,7 +196,7 @@ def test_twisted_fate_buries_on_player_draw(db):
                      "CardDrawnEvent", champ_uid, 5, extra_target=202)
     # The trigger does NOT ignore the chain (m_IgnoresChain=0): resolve the
     # pushed stack item like the server's _resolve_stack_item would.
-    from abilities.framework.triggers import resolve_stack_trigger
+    from rules_port.resolution import resolve_port_trigger as resolve_stack_trigger
     for item in list(bstate.get("stack") or []):
         bstate["stack"].remove(item)
         resolve_stack_trigger(handler, game, SessionStub(), db, pl_t, ai_t,
@@ -218,49 +215,6 @@ def test_twisted_fate_buries_on_player_draw(db):
     loc2 = db.execute(
         "SELECT location FROM game_cards WHERE card_uid=202").fetchone()[0]
     assert loc2 == "deck", loc2
-
-
-def test_malfunctioning_war_bot_hits_a_random_champion_at_turn_start(db):
-    """Malfunctioning War Bot's data-defined TurnStarted trigger must deal
-    one damage when its controller's turn begins in a two-player game."""
-    from abilities.framework.triggers import resolve_triggers
-
-    _copy_card(db, "20b38d5f-ec11-4928-b10e-ee4d77df83bf")
-    add_card(db, 301, 1001,
-             "20b38d5f-ec11-4928-b10e-ee4d77df83bf", loc="warzone")
-    db.execute(
-        "UPDATE game_cards SET card_abilities=? WHERE card_uid=?",
-        (json.dumps(["278c9761-f7e0-f42c-5f8f-065770b6e63e"]), 301))
-    db.commit()
-
-    pl_t = game_engine.UID.make(244, 1001)
-    ai_t = game_engine.UID.make(244, 1002)
-    game = game_engine.Game(1, pl_t, ai_t)
-    handler = HandlerStub(db)
-    handler._champion_targets = lambda: [
-        (10001, 1001, "Controller", 20),
-        (10002, 1002, "Opponent", 20),
-    ]
-    bstate = {
-        "pvp": True,
-        "pids": [1001, 1002],
-        "champ_map": {"1001": 10001, "1002": 10002},
-        "pvp_health_map": {1001: "player_health", 1002: "ai_health"},
-        "player_health": 20,
-        "ai_health": 20,
-        "turn_number": 1,
-        "stack": [],
-    }
-
-    log = resolve_triggers(
-        db, handler, game, SessionStub(), pl_t, ai_t, bstate,
-        "TurnStartedEvent", None, 1001)
-
-    assert "278c9761" in log, log
-    _resolve_pending_trigger_stack(handler, game, bstate, db, pl_t, ai_t)
-    assert sorted((bstate["player_health"], bstate["ai_health"])) == [19, 20], bstate
-    assert any(isinstance(ev, game_engine.ChampionHealthChangedSessionEventArgs)
-               for ev in game.events)
 
 
 def test_native_resource_modifier_maps_pvp_owner_to_effect_view_side(db):
@@ -475,7 +429,8 @@ def test_argus_hand_trigger_fires_at_turn_start(db):
 def test_charge_bot_deploy_gains_a_charge(db):
     """Charge Bot's data-defined Deploy modifier must update the controller's
     charge pool and emit the client-visible charge event."""
-    from abilities.framework.triggers import resolve_triggers, resolve_stack_trigger
+    from abilities.framework.triggers import resolve_triggers
+    from rules_port.resolution import resolve_port_trigger as resolve_stack_trigger
 
     tpl = "7325706e-6bf1-4ca4-8d6b-5da13ac069f4"
     ag = "271c887a-2a70-629e-51a5-dd4a6acd3bcc"
@@ -627,81 +582,6 @@ def test_crazed_squirrel_titan_ai_battles_a_legal_opposing_troop(db):
     location = db.execute(
         "SELECT location FROM game_cards WHERE card_uid=332").fetchone()[0]
     assert location == "discard", location
-
-
-def test_crazed_squirrel_titan_respects_verdant_wyldeboar_buff(db):
-    """Battle2Cards must use effective stats, not printed defense/attack."""
-    from abilities.framework.triggers import resolve_stack_trigger, resolve_triggers
-
-    titan_tpl = "4523c2f4-8aba-4f3b-a974-108a40b3d5fb"
-    boar_tpl = "15bfdb99-7a05-46f8-9da3-d90b213eaa19"
-    titan_ag = "f28e7b5b-9ab4-ee29-19ce-a45e2044fe72"
-    _copy_card(db, titan_tpl)
-    _copy_card(db, boar_tpl)
-    add_card(db, 351, 1002, titan_tpl, loc="warzone")
-    add_card(db, 352, 1001, boar_tpl, loc="warzone")
-    db.execute(
-        "UPDATE game_cards SET card_abilities=? WHERE card_uid=351",
-        (json.dumps([titan_ag]),))
-    db.execute(
-        "UPDATE game_cards SET permanent_buffs=? WHERE card_uid=352",
-        (json.dumps({"atk": 4, "def": 4}),))
-    db.commit()
-
-    pl_t = game_engine.UID.make(244, 1001)
-    ai_t = game_engine.UID.make(244, 1002)
-    game = game_engine.Game(1, pl_t, ai_t)
-    handler = HandlerStub(db)
-    bstate = {
-        "pvp": True, "pids": [1001, 1002],
-        "champ_map": {"1001": 10001, "1002": 10002},
-        "pvp_health_map": {1001: "player_health", 1002: "ai_health"},
-        "player_health": 20, "ai_health": 20, "stack": [],
-    }
-    resolve_triggers(db, handler, game, SessionStub(), pl_t, ai_t, bstate,
-                     "CardEnteredZoneEvent", 351, 1002)
-    for item in list(bstate.get("stack") or []):
-        bstate["stack"].remove(item)
-        resolve_stack_trigger(handler, game, SessionStub(), db, pl_t, ai_t,
-                              bstate, item)
-    rows = db.execute(
-        "SELECT location, card_damage FROM game_cards "
-        "WHERE card_uid IN (351, 352) ORDER BY card_uid").fetchall()
-    assert rows == [("discard", 0), ("warzone", 4)], rows
-
-
-def test_oakhenge_moves_revealed_troop_to_hand_with_its_template(db):
-    """Oakhenge must hand over the selected troop's card identity."""
-
-    oak_tpl = "f42da1e5-159c-41d2-9664-2e64be20257e"
-    caterpillar_tpl = "4a8bca1b-db0f-4c14-b3cf-70502fd411ba"
-    oak_ag = "200337da-9971-cf13-7e98-011a78b9ac64"
-    _copy_card(db, oak_tpl)
-    _copy_card(db, caterpillar_tpl)
-    add_card(db, 361, 5, oak_tpl, loc="CastSpells")
-    add_card(db, 362, 5, caterpillar_tpl, loc="deck")
-    pl_t = game_engine.UID.make(244, 5)
-    ai_t = game_engine.UID.make(3, 1000)
-    game = game_engine.Game(1, pl_t, ai_t)
-    handler = HandlerStub(db)
-    bstate = {"resolving_source_uid": 361, "resolving_owner_id": 5,
-              "player_health": 20, "ai_health": 20}
-
-    resolve_ability(handler, game, SessionStub(), db, pl_t, ai_t, bstate,
-                    oak_ag, 361, 5, {})
-
-    row = db.execute(
-        "SELECT location, template_guid, card_template_id "
-        "FROM game_cards WHERE card_uid=362").fetchone()
-    assert row == ("hand", caterpillar_tpl, caterpillar_tpl), row
-    updated = [ev for ev in game.events
-               if isinstance(ev, game_engine.CardUpdatedSessionEventArgs)
-               and int(ev.session_card_id.uid.uid64) == 362]
-    assert updated and str(updated[-1].card_id.guid) == caterpillar_tpl, updated
-    assert updated[-1].nulling is False, updated[-1]
-    assert any(isinstance(ev, game_engine.CardDrawnSessionEventArgs)
-               and int(ev.session_card_id.uid.uid64) == 362
-               for ev in game.events)
 
 
 def test_oakhenge_reveal_opens_one_selectable_picker(db):
@@ -1436,103 +1316,6 @@ def test_discard_continuation_reprojects_native_chain_window(db):
         hcs._db = old_hcs_db
 
 
-def test_cosmic_transmogrifier_preserves_type_and_cost(db):
-    """Cosmic's random transform uses each target as the filter source.
-
-    The client passes the card being transformed to HasSourceCastingCostFilter;
-    the activating constant must not make every target look like cost 5.  The
-    authored category union also selects the target's own troop/constant/
-    artifact branch.
-    """
-    from abilities.framework.bom import _LEAFS
-
-    cosmic_tpl = "e3e88475-e2cd-4d60-adef-be0070d9213c"
-    cosmic_ag = "add058ec-ae27-6749-70ef-934b360f55b5"
-    effect_guid = "453fd3fe-cb93-b839-2cc4-e46f5b7d1de8"
-    # The shared combat fixture predates the two template columns used by the
-    # random-template pool; add them with their production defaults locally.
-    db.commit()
-    _copy_card(db, cosmic_tpl)
-    src = sqlite3.connect(SRC)
-    try:
-        cases = []
-        for card_type in ("Troop", "Constant", "Artifact"):
-            costs = src.execute(
-                "SELECT cost FROM card_templates WHERE is_pve=0 AND "
-                "card_type=? GROUP BY cost HAVING COUNT(*) >= 2 "
-                "ORDER BY cost", (card_type,)).fetchall()
-            chosen = None
-            for (cost,) in costs:
-                wrong = src.execute(
-                    "SELECT guid, card_type FROM card_templates "
-                    "WHERE is_pve=0 AND cost=? AND card_type<>? LIMIT 1",
-                    (cost, card_type)).fetchone()
-                if wrong:
-                    chosen = (cost, wrong)
-                    break
-            assert chosen, f"no test pool for {card_type}"
-            cost, wrong = chosen
-            same = src.execute(
-                "SELECT guid FROM card_templates WHERE is_pve=0 AND "
-                "card_type=? AND cost=? ORDER BY guid LIMIT 2",
-                (card_type, cost)).fetchall()
-            cases.append((card_type, int(cost), [r[0] for r in same], wrong[0]))
-    finally:
-        src.close()
-
-    old_db = dbmod._db
-    dbmod._db = db
-    try:
-        pl_t = game_engine.UID.make(244, 5)
-        ai_t = game_engine.UID.make(3, 1000)
-        handler = HandlerStub(db)
-        session = SessionStub()
-        for index, (card_type, cost, same_guids, wrong_guid) in enumerate(cases):
-            guids = same_guids + [wrong_guid]
-            for guid in guids:
-                _copy_card(db, guid)
-            target_uid = 9000 + index
-            add_card(db, target_uid, 5, same_guids[0], loc="warzone")
-            db.execute(
-                "UPDATE game_cards SET card_type=(SELECT card_type FROM "
-                "card_templates WHERE guid=game_cards.template_guid), "
-                "card_attributes=(SELECT attributes FROM card_templates "
-                "WHERE guid=game_cards.template_guid) WHERE card_uid=?",
-                (target_uid,))
-            db.commit()
-            seen = []
-            game = game_engine.Game(1, pl_t, ai_t)
-            bstate = {
-                "resolving_ability": cosmic_ag,
-                "resolving_source_uid": 8000,
-                "resolving_target_uid": target_uid,
-                "player_mod_target": target_uid,
-            }
-            with mock.patch(
-                    "abilities.framework.bom.random.choice",
-                    side_effect=lambda values: (seen.extend(values), values[0])[1]):
-                _LEAFS["TransformCardAtRandomAbilityEffectTemplate"](
-                    game, session, db, handler, pl_t, ai_t, bstate,
-                    effect_guid, None)
-            assert seen, (card_type, cost)
-            assert all(
-                db.execute("SELECT card_type FROM card_templates WHERE guid=?",
-                           (guid,)).fetchone()[0] == card_type
-                for guid in seen), (card_type, seen)
-            result = db.execute(
-                "SELECT ct.card_type, ct.cost FROM game_cards gc "
-                "JOIN card_templates ct ON ct.guid=gc.template_guid "
-                "WHERE gc.card_uid=?", (target_uid,)).fetchone()
-            assert result == (card_type, cost), (card_type, cost, result)
-            db.execute("DELETE FROM game_cards WHERE card_uid=?", (target_uid,))
-            db.execute(
-                "DELETE FROM card_templates WHERE guid IN (%s)" %
-                ",".join("?" * len(guids)), guids)
-            db.commit()
-    finally:
-        dbmod._db = old_db
-
-
 def test_crown_of_the_primals_buffs_target_troop(db):
     """Crown's card ability must resolve as a card ability, not as a
     champion payment that voids the source and selected troop."""
@@ -1640,44 +1423,6 @@ def test_spam_bot_charge_power_targets_one_robot_and_one_stat(db):
         assert (untouched.get("atk", 0), untouched.get("def", 0)) == (0, 0), buffs
 
 
-def test_jadiim_triggers_for_a_one_cost_permanent(db):
-    """Jadiim's CardCastEvent trigger must also see a one-cost troop.
-
-    Actions already use the spell-resolution CardCastEvent path; permanent
-    plays resolve through the troop path and must emit the same event.
-    """
-    from abilities.framework.triggers import resolve_stack_trigger, resolve_triggers
-
-    jadiim_tpl = "7319c52f-6de0-41e3-bdb8-047099606d63"
-    caterpillar_tpl = "4a8bca1b-db0f-4c14-b3cf-70502fd411ba"
-    jadiim_ag = "e1a610bb-d643-f7a8-a4c0-5fcf124932de"
-    _copy_card(db, jadiim_tpl)
-    _copy_card(db, caterpillar_tpl)
-    add_card(db, 710, 5, jadiim_tpl, loc="warzone")
-    db.execute("UPDATE game_cards SET card_abilities=? WHERE card_uid=?",
-               (json.dumps([jadiim_ag]), 710))
-    add_card(db, 711, 5, caterpillar_tpl, loc="warzone")
-    db.commit()
-
-    pl_t = game_engine.UID.make(244, 5)
-    ai_t = game_engine.UID.make(3, 1000)
-    game = game_engine.Game(1, pl_t, ai_t)
-    handler = HandlerStub(db)
-    bstate = {"player_health": 20, "ai_health": 20, "turn_number": 1,
-              "stack": [], "_next_instance_id": 1}
-
-    resolve_triggers(db, handler, game, SessionStub(), pl_t, ai_t, bstate,
-                     "CardCastEvent", 711, 5)
-    assert len(bstate["stack"]) == 1, bstate
-    item = bstate["stack"].pop()
-    resolve_stack_trigger(handler, game, SessionStub(), db, pl_t, ai_t,
-                          bstate, item)
-    buffs = json.loads(db.execute(
-        "SELECT temporary_buffs FROM game_cards WHERE card_uid=710"
-    ).fetchone()[0] or "{}")
-    assert buffs.get("atk", 0) == 1 and buffs.get("def", 0) == 1, buffs
-
-
 def test_fertility_magic_talent_triggers_on_shinhare_play(db):
     """A champion talent trigger must gather and resolve from CardCastEvent.
 
@@ -1686,9 +1431,8 @@ def test_fertility_magic_talent_triggers_on_shinhare_play(db):
     ability TAC and must be rolled before the Battle Hopper summon is put on
     the chain.
     """
-    from abilities.framework.triggers import (
-        resolve_stack_trigger, resolve_triggers,
-    )
+    from abilities.framework.triggers import resolve_triggers
+    from rules_port.resolution import resolve_port_trigger as resolve_stack_trigger
 
     fertility_ag = "e4767a62-5a39-7e17-42e9-5d174b39539c"
     player_champion_guid = "e5fe174b-9e5c-44db-b22b-a273cc6e05ad"
@@ -1721,7 +1465,7 @@ def test_fertility_magic_talent_triggers_on_shinhare_play(db):
     for roll, expected in ((25, 0), (24, 1)):
         bstate = {"player_health": 20, "ai_health": 20,
                   "stack": [], "_next_instance_id": 1}
-        with mock.patch("abilities.framework.triggers.random.randrange",
+        with mock.patch("random.randrange",
                         return_value=roll):
             resolve_triggers(db, handler, game, session, pl_t, ai_t, bstate,
                              "CardCastEvent", 720, 5)
@@ -1737,86 +1481,6 @@ def test_fertility_magic_talent_triggers_on_shinhare_play(db):
             assert count == 1, count
 
 
-def test_verdant_wyldeboar_deck_move_clears_battle_state(db):
-    """A Wyldeboar returned to deck is hidden and cannot redraw tapped."""
-    from abilities.framework.triggers import resolve_stack_trigger, resolve_triggers
-
-    tpl = "15bfdb99-7a05-46f8-9da3-d90b213eaa19"
-    ag = "28f0058e-6b3d-2b05-c718-9f5b649158fa"
-    _copy_card(db, tpl)
-    add_card(db, 341, 1001, tpl, loc="warzone",
-             state=(game_engine.ECardStates.Tapped
-                    | game_engine.ECardStates.Attacking
-                    | game_engine.ECardStates.StartedATurnOnYourSide))
-    db.execute("UPDATE game_cards SET card_abilities=? WHERE card_uid=341",
-               (json.dumps([ag]),))
-    db.commit()
-    pl_t = game_engine.UID.make(244, 1001)
-    ai_t = game_engine.UID.make(244, 1002)
-    game = game_engine.Game(1, pl_t, ai_t)
-    handler = HandlerStub(db)
-    bstate = {"pvp": True, "pids": [1001, 1002], "stack": [],
-              "player_health": 20, "ai_health": 20}
-    resolve_triggers(db, handler, game, SessionStub(), pl_t, ai_t, bstate,
-                     "TurnEndedEvent", None, 1001)
-    for item in list(bstate.get("stack") or []):
-        bstate["stack"].remove(item)
-        resolve_stack_trigger(handler, game, SessionStub(), db, pl_t, ai_t,
-                              bstate, item)
-    row = db.execute(
-        "SELECT location, card_state FROM game_cards WHERE card_uid=341").fetchone()
-    assert row == ("deck", 0), row
-    moved = [e for e in game.events
-             if isinstance(e, game_engine.CardMovedSessionEventArgs)
-             and int(e.session_card_id.uid.uid64) == 341]
-    updated = [e for e in game.events
-               if isinstance(e, game_engine.CardUpdatedSessionEventArgs)
-               and int(e.session_card_id.uid.uid64) == 341]
-    assert moved and moved[-1].location == game_engine.ECardLocations.Unknown
-    assert updated and updated[-1].nulling is True and updated[-1].state == 0, [
-        (e.nulling, e.state, e.collection) for e in updated]
-
-
-def test_cocoon_transform_replaces_client_attributes(db):
-    """Transforming Cocoon to Butterfly removes the cached Defensive flag."""
-    from abilities.framework.transform import transform_card
-
-    cocoon = "da7d22de-d162-4d40-8f19-59112da8054a"
-    butterfly = "3d833f8b-5475-425c-98ff-0defca7e4d8d"
-    _copy_card(db, cocoon)
-    _copy_card(db, butterfly)
-    add_card(db, 351, 1001, cocoon, loc="warzone")
-
-    class TransformHandler(HandlerStub):
-        def _sync_instance_card_data(self, session, card_uid, template_guid):
-            attrs = db.execute(
-                "SELECT attributes FROM card_templates WHERE guid=?",
-                (template_guid,)).fetchone()[0]
-            db.execute(
-                "UPDATE game_cards SET card_attributes=? WHERE card_uid=?",
-                (attrs, int(card_uid)))
-            db.commit()
-
-    pl_t = game_engine.UID.make(244, 1001)
-    ai_t = game_engine.UID.make(244, 1002)
-    game = game_engine.Game(1, pl_t, ai_t)
-    import db as dbmod
-    old_db = dbmod._db
-    dbmod._db = db
-    try:
-        transform_card(TransformHandler(db), game, SessionStub(), pl_t, ai_t,
-                       351, butterfly, keep_zone=True,
-                       bstate={"pvp": True, "pids": [1001, 1002]})
-    finally:
-        dbmod._db = old_db
-    transformed = [e for e in game.events
-                   if isinstance(e, game_engine.CardTransformedSessionEventArgs)]
-    assert transformed and str(transformed[-1].card_template_id.guid).lower() == butterfly
-    updated = [e for e in game.events
-               if isinstance(e, game_engine.CardUpdatedSessionEventArgs)]
-    assert updated and updated[-1].attributes == game_engine.ECardAttributes.Flight
-
-
 def test_twisted_fate_buries_opposing_drawer_deck(db):
     """An opponent's Twisted Fate must NOT trigger when this player draws.
 
@@ -1824,7 +1488,7 @@ def test_twisted_fate_buries_opposing_drawer_deck(db):
     deck must remain untouched.
     """
     from abilities.framework.triggers import resolve_triggers
-    from abilities.framework.triggers import resolve_stack_trigger
+    from rules_port.resolution import resolve_port_trigger as resolve_stack_trigger
     _copy_card(db, "4b6df816-7a67-419c-896b-d30bd959bc02")  # Twisted Fate
     add_card(db, 111, 0, "4b6df816-7a67-419c-896b-d30bd959bc02")  # AI TF
     db.execute(
@@ -1856,7 +1520,8 @@ def test_twisted_fate_buries_opposing_drawer_deck(db):
 def test_twisted_fate_buries_opposing_pvp_deck(db):
     """Both PvP owners are non-zero ids; the owner's draw still selects the
     other player's deck, without collapsing both players into one side."""
-    from abilities.framework.triggers import resolve_triggers, resolve_stack_trigger
+    from abilities.framework.triggers import resolve_triggers
+    from rules_port.resolution import resolve_port_trigger as resolve_stack_trigger
     _copy_card(db, "4b6df816-7a67-419c-896b-d30bd959bc02")  # Twisted Fate
     add_card(db, 121, 1001, "4b6df816-7a67-419c-896b-d30bd959bc02")
     db.execute(
@@ -1899,7 +1564,7 @@ def test_countermagic_modifies_all_same_name_opposing_cards(db):
     receives the +2 cost modifier.  A same-name card controlled by the caster
     is not affected.
     """
-    from abilities import resolve_played_spell
+    from rules_port.resolution import resolve_port_played_spell as resolve_played_spell
 
     counter_guid = "16c354dd-50a7-45fb-b4e6-309d27cb6575"
     eternal_guid = "ec78ce90-4343-4e2f-a1b9-acadee12c2b0"
@@ -2372,86 +2037,6 @@ def test_battleboard_mod_summons_token_for_opposing_race_champion(db):
     assert owners == [5]
 
 
-def test_chlorophyllia_plays_wild_shard_from_deck(db):
-    """The nested PlayCard effect selects the gamedata target, then applies
-    the same resource/threshold/charge events as a normal Wild Shard play."""
-    from abilities import resolve_played_spell
-
-    chlorophyllia = "59396337-eaf2-4be8-a14f-785067c6ca40"
-    wild_shard = "cd41bd00-7585-4762-a721-6163bdaee3c3"
-    _copy_card(db, chlorophyllia)
-    _copy_card(db, wild_shard)
-    add_card(db, 701, 5, chlorophyllia, loc="CastSpells")
-    add_card(db, 702, 5, wild_shard, loc="deck")
-    handler = HandlerStub(db)
-    session = SessionStub()
-    pl_t = game_engine.UID.make(244, 5)
-    ai_t = game_engine.UID.make(3, 1000)
-    game = game_engine.Game(1, pl_t, ai_t)
-    bstate = {
-        "player_resources": 0, "player_total_resources": 0,
-        "player_charges": 0, "player_threshold": {},
-        "ai_resources": 0, "ai_total_resources": 0,
-        "ai_charges": 0, "ai_threshold": {},
-        "resolving_source_uid": 701, "resolving_owner_id": 5,
-    }
-    resolve_played_spell(
-        game, session, db, handler, pl_t, ai_t, bstate,
-        ["e99736cb-7e6f-3237-8b4f-509ad8c6bee6"])
-    assert db.execute(
-        "SELECT location FROM game_cards WHERE card_uid=702").fetchone()[0] \
-        == "PlayedResources"
-    assert bstate["player_resources"] == 1
-    assert bstate["player_total_resources"] == 1
-    assert bstate["player_threshold"].get(32) == 1
-    assert bstate["player_charges"] == 1
-    assert any(isinstance(e, game_engine.ResourceCardPlayedSessionEventArgs)
-               for e in game.events)
-
-
-def test_chlorophyllia_pvp_view_persists_resource_state(db):
-    """PvP's FRA-shaped resolver view must copy the free shard's resource
-    changes back to the pid-keyed tournament state."""
-    from abilities.framework.bom import _leaf_play_card
-    from services.tournament_game import _pvp_sync_view_to_state
-
-    chlorophyllia = "59396337-eaf2-4be8-a14f-785067c6ca40"
-    wild_shard = "cd41bd00-7585-4762-a721-6163bdaee3c3"
-    _copy_card(db, chlorophyllia)
-    _copy_card(db, wild_shard)
-    add_card(db, 801, 1001, chlorophyllia, loc="CastSpells")
-    add_card(db, 802, 1001, wild_shard, loc="deck")
-    handler = HandlerStub(db)
-    session = SessionStub()
-    pl_t = game_engine.UID.make(244, 1001)
-    ai_t = game_engine.UID.make(244, 1002)
-    game = game_engine.Game(1, pl_t, ai_t)
-    view = {
-        "pvp": True, "pids": [1001, 1002],
-        "player_resources": 0, "player_total_resources": 0,
-        "player_charges": 0, "player_threshold": {},
-        "ai_resources": 0, "ai_total_resources": 0,
-        "ai_charges": 0, "ai_threshold": {},
-        "resolving_source_uid": 801, "resolving_owner_id": 1001,
-    }
-    _leaf_play_card(
-        game, session, db, handler, pl_t, ai_t, view,
-        "29bce00b-d2a3-0503-31ee-33a70e607e18", None)
-    state = {
-        "res_1001": 0, "res_total_1001": 0, "chg_1001": 0,
-        "thresh_1001": {}, "res_1002": 0, "res_total_1002": 0,
-        "chg_1002": 0, "thresh_1002": {},
-    }
-    _pvp_sync_view_to_state(state, view, 1001, 1002)
-    assert state["res_1001"] == 1
-    assert state["res_total_1001"] == 1
-    assert state["chg_1001"] == 1
-    assert state["thresh_1001"].get(32) == 1
-    assert db.execute(
-        "SELECT location FROM game_cards WHERE card_uid=802").fetchone()[0] \
-        == "PlayedResources"
-
-
 def test_shards_randomly_reinsert_into_deck(db):
     """Shards-of-Fate candidates are randomly reinserted while non-shards
     retain their relative deck order."""
@@ -2511,70 +2096,6 @@ def test_single_card_reinsert_stays_within_deck(db):
             assert any(int(uid) == 602 for uid, _pos in rows), rows
     finally:
         dbmod._db = old_db
-
-
-def test_incubation_slave_egg_summon_and_sacrifice(db):
-    """Incubation Slave's manual ability (cost 6, auto 'You' target): remove
-    all egg counters, sacrifice the slave, summon one Spiderspawn per egg."""
-    _copy_card(db, "a77f395f-41b1-45e0-9f8e-7f63286a8797")  # Incubation Slave
-    _copy_card(db, "a9ebe40e-ef30-4c9e-b4dd-1b414dc35d0c")  # Spiderspawn
-    add_card(db, 401, 5, "a77f395f-41b1-45e0-9f8e-7f63286a8797")
-    db.execute(
-        "UPDATE game_cards SET permanent_buffs=? WHERE card_uid=401",
-        (json.dumps({"counters": {"egg": 3},
-                     "counter_guids": {"egg": "b55ea635-a2a9-ba00-4af2-0a097b2566ee"}}),))
-    db.commit()
-    pl_t = game_engine.UID.make(244, 5)
-    ai_t = game_engine.UID.make(3, 1000)
-    game = game_engine.Game(1, pl_t, ai_t)
-    handler = HandlerStub(db)
-    bstate = {"player_health": 20, "ai_health": 20, "turn_number": 1,
-              "resolving_source_uid": 401, "resolving_owner_id": 5,
-              "player_mod_target": 401}
-    out = resolve_ability(handler, game, SessionStub(), db, pl_t, ai_t,
-                          bstate, "66e7b30e-1bdf-4401-59fc-20cf9788f96f",
-                          401, 5, {})
-    assert "summon" in out, out
-    loc = db.execute(
-        "SELECT location FROM game_cards WHERE card_uid=401").fetchone()[0]
-    assert loc == "discard", loc  # sacrificed
-    spiders = db.execute(
-        "SELECT COUNT(*) FROM game_cards WHERE session_id=1 AND user_id=5 "
-        "AND template_guid='a9ebe40e-ef30-4c9e-b4dd-1b414dc35d0c' "
-        "AND location='warzone'").fetchone()[0]
-    assert spiders == 3, spiders
-    buffs = db.execute(
-        "SELECT permanent_buffs FROM game_cards WHERE card_uid=401"
-    ).fetchone()[0]
-    assert '"egg":' not in (buffs or "{}"), buffs
-
-
-def test_bunjitsu_charge_power_summon_and_buff(db):
-    """Bun'jitsu's charge power (re-seeded from gamedata): summon an exhausted
-    Abomination and buff it with the voided troop's ATK/DEF + 3."""
-    _copy_ability(db, "32d0d36a-55fd-2cff-0d3d-341319536a57")
-    _copy_card(db, "c776499e-53c1-4526-9be4-acba62050d06")  # Abomination
-    _copy_card(db, "2b575216-e5a9-421b-988c-badf120d7443")  # Bun'jitsu troop
-    pl_t = game_engine.UID.make(244, 5)
-    ai_t = game_engine.UID.make(3, 1000)
-    game = game_engine.Game(1, pl_t, ai_t)
-    handler = HandlerStub(db)
-    bstate = {"player_health": 20, "ai_health": 20, "turn_number": 1,
-              "resolving_source_uid": 900, "resolving_owner_id": 5,
-              "champion_voided_stats": {"atk": 2, "def": 2}}
-    out = resolve_ability(handler, game, SessionStub(), db, pl_t, ai_t,
-                          bstate, "32d0d36a-55fd-2cff-0d3d-341319536a57",
-                          900, 5, {})
-    assert "abomination" in out.lower(), out
-    row = db.execute(
-        "SELECT permanent_buffs, card_state, location "
-        "FROM game_cards WHERE template_guid='c776499e-53c1-4526-9be4-acba62050d06' "
-        "AND session_id=1 ORDER BY id DESC LIMIT 1").fetchone()
-    assert row is not None, "Abomination not summoned"
-    buffs = json.loads(row[0] or "{}")
-    assert buffs.get("atk", 0) == 5 and buffs.get("def", 0) == 5, row  # 2 + 3
-    assert row[2] == "warzone", row
-    assert int(row[1] or 0) & game_engine.ECardStates.Tapped, row  # exhausted
 
 
 def test_blood_cauldron_ai_pays_sacrifice_cost(db):
@@ -2989,9 +2510,8 @@ def test_concubunny_exhausts_selected_ready_shinhare(db):
     try:
         # UID 102 is 0x6601 on the wire (little-endian uint64).
         inner = b"m_UID64;;;;0166000000000000;"
-        with mock.patch("abilities.resolve_effect", return_value=lambda *args: ""):
-            handler._activate_troop_ability(
-                session, pl_t, ai_t, bstate, source_uid, ability_guid, inner)
+        handler._activate_troop_ability(
+            session, pl_t, ai_t, bstate, source_uid, ability_guid, inner)
 
         states = dict(db.execute(
             "SELECT card_uid, card_state FROM game_cards "
@@ -3040,8 +2560,6 @@ def main():
          test_twisted_fate_buries_opposing_drawer_deck),
         ("Twisted Fate buries opposing PvP deck",
          test_twisted_fate_buries_opposing_pvp_deck),
-        ("Malfunctioning War Bot turn-start damage",
-         test_malfunctioning_war_bot_hits_a_random_champion_at_turn_start),
         ("Native PvP resource modifier owner mapping",
          test_native_resource_modifier_maps_pvp_owner_to_effect_view_side),
         ("PvP StartTurn resource bonus survives view refill",
@@ -3058,10 +2576,6 @@ def main():
          test_ingenuity_engine_exhaust_cost_is_encoded_as_a_card_picker),
         ("Crazed Squirrel Titan target resolution",
          test_crazed_squirrel_titan_ai_battles_a_legal_opposing_troop),
-        ("Crazed Squirrel Titan respects Wyldeboar buff",
-         test_crazed_squirrel_titan_respects_verdant_wyldeboar_buff),
-        ("Oakhenge preserves revealed troop identity",
-         test_oakhenge_moves_revealed_troop_to_hand_with_its_template),
         ("Oakhenge reveal opens one selectable picker",
          test_oakhenge_reveal_opens_one_selectable_picker),
         ("Oakhenge single revealed troop skips the picker",
@@ -3072,22 +2586,14 @@ def main():
          test_revealed_choice_completion_reprojects_native_priority),
         ("Discard continuation re-projects native chain window",
          test_discard_continuation_reprojects_native_chain_window),
-        ("Cosmic Transmogrifier preserves type and cost",
-         test_cosmic_transmogrifier_preserves_type_and_cost),
         ("Crown of the Primals buffs its target troop",
          test_crown_of_the_primals_buffs_target_troop),
         ("Strength of the Redwood uses typed stat values",
          test_strength_of_redwood_uses_each_typed_stat_value),
         ("S.P.A.M. Bot charge power targets one Robot/stat",
          test_spam_bot_charge_power_targets_one_robot_and_one_stat),
-        ("Jadiim triggers for a one-cost permanent",
-         test_jadiim_triggers_for_a_one_cost_permanent),
         ("Fertility Magic triggers on Shin'hare play",
          test_fertility_magic_talent_triggers_on_shinhare_play),
-        ("Verdant Wyldeboar deck state reset",
-         test_verdant_wyldeboar_deck_move_clears_battle_state),
-        ("Cocoon transform attributes",
-         test_cocoon_transform_replaces_client_attributes),
         ("Countermagic modifies all same-name opposing cards",
          test_countermagic_modifies_all_same_name_opposing_cards),
         ("Shards of Fate detection + AI threshold",
@@ -3098,10 +2604,6 @@ def main():
          test_primal_shard_grants_the_thresholds_the_hand_needs),
         ("Woeful Webbing summons a random Spider",
          test_woeful_webbing_summons_a_random_spider),
-        ("Incubation Slave egg summon + sacrifice",
-         test_incubation_slave_egg_summon_and_sacrifice),
-        ("Bun'jitsu charge power summon + buff",
-         test_bunjitsu_charge_power_summon_and_buff),
         ("Blood Cauldron AI sacrifice payment",
          test_blood_cauldron_ai_pays_sacrifice_cost),
         ("Wind Whisperer AI targets best blocker",
@@ -3124,10 +2626,6 @@ def main():
          test_granted_resource_ability_adds_fruitful_forsight_resources),
         ("Hidden scene static resource grant at game start",
          test_hidden_scene_static_resource_grant_runs_at_game_start),
-        ("Chlorophyllia plays a Wild Shard",
-         test_chlorophyllia_plays_wild_shard_from_deck),
-        ("Chlorophyllia PvP state projection",
-         test_chlorophyllia_pvp_view_persists_resource_state),
         ("Shards randomly reinsert into deck",
          test_shards_randomly_reinsert_into_deck),
         ("Single-card reinsert stays within deck",

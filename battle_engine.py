@@ -265,19 +265,9 @@ def stack_pop(state):
     return pop(state)
 
 
-def stack_top(state):
-    from rules_port.chain import top
-    return top(state)
-
-
 def stack_empty(state):
     from rules_port.chain import empty
     return empty(state)
-
-
-def stack_clear(state):
-    from rules_port.chain import clear
-    clear(state)
 
 
 def stack_set_pass(state, player, passed):
@@ -412,7 +402,5 @@ def skip_to_phase(state, phase):
         return False
     state["phase_idx"] = target
     return True
-
-
 
 

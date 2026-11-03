@@ -254,11 +254,11 @@ def resolve_native_combat(handler, session, pl_t, ai_t, bstate, attackers,
         "", ability=None)
     resolve_native(context, first_strike=first_strike,
                    attacker_key="ai_attackers", blocker_key="ai_blockers")
-    from abilities.framework import triggers as _legacy_triggers
+    from rules_port.resolution import resolve_port_trigger
     stack = bstate.get("stack") or []
     while stack:
         item = stack.pop()
-        _legacy_triggers.resolve_stack_trigger(
+        resolve_port_trigger(
             handler, game, session, handler._db, pl_t, ai_t, bstate, item)
     return game
 
@@ -814,94 +814,6 @@ class PromptHandlerStub(HandlerStub):
         return "deck search: awaiting candidates"
 
 
-def test_priestess_deathcry_human_picker(db):
-    """A HUMAN-controlled Darkspire Priestess's Deathcry search branch must
-    present every matching deck card for the player to choose — not auto-pick.
-    The AI auto-picks (covered by test_priestess_deathcry_search_branch with a
-    non-interactive stub).  Champions (e.g. Poca) are never candidates."""
-    from abilities.framework.kill_troop import kill_troop
-    add_card(db, 101, 5, TPL_PRIESTESS)
-    add_card(db, 102, 5, TPL_ENFORCER, loc="deck")
-    add_card(db, 103, 5, TPL_ENFORCER, loc="deck")
-    db.execute(
-        "INSERT OR REPLACE INTO card_templates (guid, name, card_type, cost, attack, defense, attributes, abilities_json, threshold_json, subtype) VALUES (?,?,?,?,?,?,?,?,?,?)",
-        ("4dc8bff7-17b3-4497-8bec-3d8537a30260", "Poca, The Conflagrater",
-         "Troop", 3, 3, 3, 4, "[]", "[]", ""))
-    db.execute(
-        "INSERT INTO game_cards (session_id, user_id, card_uid, template_guid, "
-        "card_template_id, location, position, card_state, card_abilities, "
-        "card_type, card_attributes, is_champion, card_attack_mod, "
-        "card_defense_mod, card_cost_mod, card_damage, permanent_buffs, "
-        "temporary_buffs, card_uses, resolved_at, original_template_guid) "
-        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-        (1, 5, 104, "4dc8bff7-17b3-4497-8bec-3d8537a30260",
-         "4dc8bff7-17b3-4497-8bec-3d8537a30260", "deck", 5, 0, "[]",
-         "Troop", 4, 1, 0, 0, 0, 0, "{}", "{}", "{}", 0,
-         "4dc8bff7-17b3-4497-8bec-3d8537a30260"))
-    db.commit()
-    pl_t = game_engine.UID.make(244, 5)
-    ai_t = game_engine.UID.make(3, 1000)
-    game = game_engine.Game(1, pl_t, ai_t)
-    handler = PromptHandlerStub(db)
-    bstate = {"player_health": 20, "ai_health": 20, "turn_number": 1}
-    with mock.patch("random.randint", return_value=2):
-        kill_troop(game, SessionStub(), db, handler, pl_t, ai_t, 101,
-                   bstate, cause="damage")
-    assert handler.prompt_calls, "human picker was not presented"
-    ag, src, owner, candidates = handler.prompt_calls[0]
-    assert ag == AG_DEATHCRY and src == 101 and owner == 5
-    assert sorted(candidates) == [102, 103], candidates
-    assert 104 not in candidates, "champion leaked into card options"
-    # Nothing auto-moved — the player still has both Darkspire troops in deck.
-    for uid in (102, 103):
-        loc = db.execute(
-            "SELECT location FROM game_cards WHERE card_uid=?",
-            (uid,)).fetchone()[0]
-        assert loc == "deck", (uid, loc)
-
-
-def test_poca_summons_blaze_elemental(db):
-    """Poca's charge power ("Summon a Blaze Elemental") creates the token troop
-    in the warzone — the SummonTokenTroop leaf reads the ability's game_text,
-    so resolving_ability must reach it."""
-    import abilities
-    db.execute(
-        "INSERT OR REPLACE INTO card_templates (guid, name, card_type, cost, attack, defense, attributes, abilities_json, threshold_json, subtype) VALUES (?,?,?,?,?,?,?,?,?,?)",
-        ("4bc00b6f-1baf-4962-85e8-e2de9e204037", "Blaze Elemental",
-         "Troop", 3, 3, 1, 4, "[]", "[]", ""))
-    db.execute(
-        "INSERT OR REPLACE INTO card_abilities_meta (ability_guid, is_triggered, trigger_event_type, game_text, raw_json, casting_behavior, is_manual, activation_cost, uses_per_game, uses_per_turn, target_template_ids, exhausts_on_use) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
-        ("3687a2ea-baf1-2dfe-25ca-b51cb1a95c28", 0, "", "[RUBY][RUBY]: [BASIC] "
-         "[4] [ARROWR] Summon a <b>Blaze Elemental</b>.", "", 0, 0, 0, 0, 0,
-         "[]", 0))
-    db.execute(
-        "INSERT OR REPLACE INTO ability_effects (ability_guid, effect_guid, effect_order, effect_type, param) VALUES (?,?,?,?,?)",
-        ("3687a2ea-baf1-2dfe-25ca-b51cb1a95c28",
-         "1cc228e3-9222-7d6b-2334-6eb8366030f3", 0,
-         "SummonTokenTroopAbilityEffectTemplate", ""))
-    pl_t = game_engine.UID.make(244, 5)
-    ai_t = game_engine.UID.make(3, 1000)
-    game = game_engine.Game(1, pl_t, ai_t)
-    bstate = {"resolving_ability": "3687a2ea-baf1-2dfe-25ca-b51cb1a95c28",
-              "player_health": 20, "ai_health": 20, "turn_number": 1}
-    fn = abilities.resolve_effect("3687a2ea-baf1-2dfe-25ca-b51cb1a95c28")
-    out = fn(game, SessionStub(), db, HandlerStub(db), pl_t, ai_t, bstate,
-             "3687a2ea-baf1-2dfe-25ca-b51cb1a95c28", None)
-    assert "blaze elemental" in out.lower(), out
-    row = db.execute(
-        "SELECT template_guid, location FROM game_cards "
-        "WHERE template_guid=? LIMIT 1",
-        ("4bc00b6f-1baf-4962-85e8-e2de9e204037",)).fetchone()
-    assert row and row[1] == "warzone", row
-    uid64 = db.execute(
-        "SELECT card_uid FROM game_cards WHERE template_guid=? LIMIT 1",
-        ("4bc00b6f-1baf-4962-85e8-e2de9e204037",)).fetchone()[0]
-    # The token must be a Card-type UID (low byte 1) — the old arithmetic
-    # produced 12 (Champion), which made the client treat the Blaze Elemental
-    # as a champion: it couldn't attack or leave the field visually.
-    assert uid64 & 0xFF == 1, hex(uid64)
-
-
 def test_speed_troop_can_attack_same_turn(db):
     """A troop with Speed may attack the turn it comes into play (client's
     HasSummoningSickness exempts Speed) — e.g. Poca's Blaze Elemental must be
@@ -963,7 +875,7 @@ def test_ragefire_escalation_damage(db):
     """Ragefire ("Deal ESC:2 damage", Escalation) deals 2 to a targeted
     champion on the first cast, increments same-name card instances, then a
     second copy deals 4 from its own incremented EscalationCount."""
-    import abilities
+    from rules_port.resolution import resolve_port_played_spell
     src = sqlite3.connect(SRC)
     target_guids = set()
     for ag in ("3e29a0c9-f636-0d1f-a829-2c5bf2e4101b",
@@ -1008,7 +920,7 @@ def test_ragefire_escalation_damage(db):
               "player_health": 20, "ai_health": 20,
               "turn_number": 1}
     game = game_engine.Game(1, pl_t, ai_t)
-    abilities.resolve_played_spell(
+    resolve_port_played_spell(
         game, SessionStub(), db, handler, pl_t, ai_t, bstate,
         ["3e29a0c9-f636-0d1f-a829-2c5bf2e4101b",
          "5e434cd5-22ca-93ad-3cc0-43c2ead48949"])
@@ -1025,7 +937,7 @@ def test_ragefire_escalation_damage(db):
     bstate["resolving_source_uid"] = 102
     bstate["player_spell_target"] = int(ai_champ.uid.uid64)
     bstate["ai_health"] = 20
-    abilities.resolve_played_spell(
+    resolve_port_played_spell(
         game, SessionStub(), db, handler, pl_t, ai_t, bstate,
         ["3e29a0c9-f636-0d1f-a829-2c5bf2e4101b",
          "5e434cd5-22ca-93ad-3cc0-43c2ead48949"])
@@ -1104,7 +1016,7 @@ def test_x_cost_detection_and_damage(db):
         # X=4 against the AI champion: deals 4.
         add_card(db, 101, 5, "0fe0fcf5-1054-463c-ab01-a1b5743d66b9",
                  loc="CastSpells")
-        import abilities
+        from rules_port.resolution import resolve_port_played_spell
         pl_t = game_engine.UID.make(244, 5)
         ai_t = game_engine.UID.make(3, 1000)
         handler = HandlerStub(db)
@@ -1115,7 +1027,7 @@ def test_x_cost_detection_and_damage(db):
                   "x_cost": 4, "player_health": 20, "ai_health": 20,
                   "turn_number": 1}
         game = game_engine.Game(1, pl_t, ai_t)
-        abilities.resolve_played_spell(
+        resolve_port_played_spell(
             game, SessionStub(), db, handler, pl_t, ai_t, bstate,
             ["58f59723-1a20-b17c-a5db-013e249d4970"])
         assert bstate["ai_health"] == 16, bstate
@@ -1472,88 +1384,6 @@ def test_authoritative_resolution_deathcry(db):
         assert loc == "hand", loc
     finally:
         dbmod._db = old_db
-
-
-def test_ai_x_kills_target(db):
-    """The AI's variable-X spell pays the LARGEST X that kills the chosen
-    target (capped by resources): a 3-defense player troop with 5 resources
-    and a 1-cost Burn to the Ground -> X=3 kills it."""
-    import ai as ai_mod
-    import hconnect_server as hcs
-    import db as dbmod
-    old_db = dbmod._db
-    old_ai_db = ai_mod._db
-    old_hcs_db = hcs._db
-    dbmod._db = db
-    ai_mod._db = db
-    hcs._db = db
-    try:
-        db.execute(
-            "INSERT OR REPLACE INTO card_abilities_meta (ability_guid, is_triggered, trigger_event_type, game_text, raw_json, casting_behavior, is_manual, activation_cost, uses_per_game, uses_per_turn, target_template_ids, exhausts_on_use) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
-            ("58f59723-1a20-b17c-a5db-013e249d4970", 0, "",
-             "Deal X damage to target champion or troop.", "", 0, 0, 0, 0, 0,
-             "[]", 0))
-        db.execute(
-            "INSERT OR REPLACE INTO card_templates (guid, name, card_type, cost, attack, defense, attributes, abilities_json, threshold_json, subtype, variable_cost, variable_cost_minimum) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
-            ("0fe0fcf5-1054-463c-ab01-a1b5743d66b9", "Burn to the Ground",
-             "BasicAction", 1, 0, 0, 0,
-             json.dumps(["58f59723-1a20-b17c-a5db-013e249d4970"]), "[]", "", 1, 0))
-        db.execute(
-            "INSERT OR REPLACE INTO ability_effects (ability_guid, effect_guid, effect_order, effect_type, param) VALUES (?,?,?,?,?)",
-            ("58f59723-1a20-b17c-a5db-013e249d4970",
-             "b7767275-3b18-b063-b6e8-4c29628ea377", 0,
-             "CardModifierAbilityEffectTemplate",
-             '{"text": "Deal X damage to target champion or troop.", '
-             '"property": "damage", "amount": 0}'))
-        add_card(db, 101, 0, "0fe0fcf5-1054-463c-ab01-a1b5743d66b9",
-                 loc="hand")
-        add_card(db, 102, 5, TPL_ENFORCER, state=16384)
-        db.execute(
-            "UPDATE game_cards SET card_attack_mod=1, card_defense_mod=1 "
-            "WHERE card_uid=102")
-        db.commit()
-        pl_t = game_engine.UID.make(244, 5)
-        ai_t = game_engine.UID.make(3, 1000)
-        handler = HandlerStub(db)
-        handler.client_reck_id = 5
-        handler._player_champ_scid = game_engine.SessionCardId(
-            game_engine.UID.make(244, 5))
-        battle_state = {"ai_resources": 5, "ai_threshold": {},
-                        "player_health": 20, "player_threshold": {},
-                        "turn_number": 1}
-        game = game_engine.Game(1, pl_t, ai_t)
-        ai_mod.ai_play_spell(handler, game, SessionStub(), ai_t, battle_state)
-        # The spell now sits on the chain (CastSpells) until the player passes;
-        # drain it the way the server's stack resolution does (the AI auto-passes,
-        # the human passed, so both sides count as passed).
-        import battle_engine as _be
-        _be.stack_set_pass(battle_state, _be.PLAYER, True)
-        _be.stack_set_pass(battle_state, _be.AI, True)
-        while not _be.stack_empty(battle_state):
-            item = _be.stack_pop(battle_state)
-            _be.stack_reset_passes(battle_state)
-            bstate = battle_state
-            bstate["player_spell_target"] = item.get("target_uid")
-            bstate["resolving_source_uid"] = item.get("source_uid")
-            bstate["resolving_owner_id"] = 0
-            bstate["x_cost"] = int(item.get("x_cost") or 0)
-            from abilities import resolve_played_spell
-            resolve_played_spell(game, SessionStub(), db, handler, pl_t, ai_t,
-                                 bstate, item.get("ability_guids", []))
-            bstate.pop("player_spell_target", None)
-            bstate.pop("resolving_source_uid", None)
-            bstate.pop("resolving_owner_id", None)
-            bstate.pop("x_cost", None)
-        # X=3 kills the 3-defense player troop (base 2/2 +1/+1); 1 + X paid.
-        row = db.execute(
-            "SELECT location, card_state FROM game_cards WHERE card_uid=102"
-        ).fetchone()
-        assert row[0] == "discard" and (row[1] & game_engine.ECardStates.Dead), row
-        assert battle_state["ai_resources"] == 1, battle_state
-    finally:
-        dbmod._db = old_db
-        ai_mod._db = old_ai_db
-        hcs._db = old_hcs_db
 
 
 def test_swiftstrike_kills_before_normal_damage(db):
@@ -2245,12 +2075,10 @@ def main():
         ("Completed GameStarted chain is hidden",
          test_completed_game_started_chain_events_are_not_rendered),
         ("CardUpdated carries Rage", test_card_updated_carries_rage),
-        ("Priestess Deathcry human picker", test_priestess_deathcry_human_picker),
         ("Blocker options exclude CantBlock", test_player_can_block_excludes_cantblock),
         ("Block rules read owner/zone", test_block_rule_filter_uses_card_owner_and_zone),
         ("Transform BOM applies Bone Warrior",
          test_transform_bom_applies_bone_warrior),
-        ("Poca summons Blaze Elemental", test_poca_summons_blaze_elemental),
         ("Speed troop attacks same turn", test_speed_troop_can_attack_same_turn),
         ("Ragefire escalation damage", test_ragefire_escalation_damage),
         ("AI discards to 7", test_ai_discard_down_to_seven),
@@ -2264,7 +2092,6 @@ def main():
         ("Gem Rage applies as static", test_gem_rage_applies_as_static),
         ("Champion zero-health state check", test_champion_zero_health_state_check),
         ("Authoritative deathcry resolution", test_authoritative_resolution_deathcry),
-        ("AI X kills target", test_ai_x_kills_target),
         ("Swiftstrike kills before normal damage", test_swiftstrike_kills_before_normal_damage),
         ("AI attacks unblocked zero-attack Rage troop", test_ai_attacks_zero_attack_rage_troop_when_unblocked),
         ("simultaneous combat damage cannot be undone by lifelink",

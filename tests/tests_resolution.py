@@ -57,39 +57,6 @@ def _insert_ability(db, ag, tids, effects):
     db.commit()
 
 
-def _fixture_effect_list(db, ability_guid):
-    """Build the resolver ABI for an intentionally synthetic test ability."""
-    rows = db.execute(
-        "SELECT effect_guid, effect_order, effect_type, param, "
-        "effect_group_id, condition_id, target_index, effect_instance_id, "
-        "contingent_effect_instance_id, secondary_target_index, "
-        "recalculate_targets, is_optional, effect_duration, output_variables "
-        "FROM ability_effects WHERE ability_guid=? ORDER BY effect_order",
-        (ability_guid,)).fetchall()
-    return [{
-        "effect_guid": row[0], "effect_order": row[1],
-        "effect_type": row[2] or "", "param": row[3] or "",
-        "effect_group_id": int(row[4] or 0), "condition_id": row[5] or "",
-        "target_index": int(row[6] if row[6] is not None else -1),
-        "effect_instance_id": int(row[7] if row[7] is not None else -1),
-        "contingent_effect_instance_id": int(
-            row[8] if row[8] is not None else -1),
-        "secondary_target_index": int(row[9] if row[9] is not None else -1),
-        "recalculate_targets": int(row[10] if row[10] is not None else -1),
-        "is_optional": int(row[11] or 0),
-        "effect_duration": row[12] or "Instant",
-        "output_variables": row[13] or "{}",
-    } for row in rows]
-
-
-def _fixture_target_template_ids(db, ability_guid):
-    row = db.execute(
-        "SELECT target_template_ids FROM card_abilities_meta "
-        "WHERE ability_guid=? LIMIT 1", (ability_guid,)).fetchone()
-    return [str(value).lower() for value in (
-        json.loads(row[0] or "[]") if row and row[0] else []) if value]
-
-
 def _condition(db, cid, lhs, rhs):
     db.execute(
         "INSERT OR REPLACE INTO ability_effect_conditions (condition_id, name, condition_json) "
@@ -963,40 +930,7 @@ def test_choice_ability_transforms_real_parent(db):
         (choice_uid,)).fetchone()[0] == "PlayedResources"
 
 
-def test_records_target_filter_dict_is_parsed_for_choice_prompt(db):
-    """Records TargetSpecs are typed dicts, not only legacy JSON strings."""
-    from abilities.framework import resolution
-
-    filter_data = {
-        "_t": "Game.Shared.Mechanics.Cards.Filters.InZone",
-        "m_Collection": "Choosing",
-    }
-    assert resolution._filter_has_exact_zone(
-        resolution._parse_param(filter_data), "Choosing")
-
-
-def test_attached_session_rejects_legacy_walker_even_with_native_dispatch(*_args):
-    """Passing a native leaf callback must not re-enable the legacy walker."""
-    from abilities.framework.resolution import resolve_ability
-
-    class AttachedSession:
-        session_id = 9
-        _rules_port_session = object()
-
-    try:
-        resolve_ability(
-            object(), object(), AttachedSession(), object(), 1, 2,
-            {"_rules_port_attached": True}, "not-a-live-ability", 101, 5,
-            {}, native_effect=lambda *_args: "native")
-    except RuntimeError as exc:
-        assert "bypassed RulesPort" in str(exc)
-    else:
-        raise AssertionError("attached session entered legacy resolver")
-
-
 def main():
-    from abilities.framework import resolution
-
     tests = [
         ("Random variable + conditions + recursion",
          test_random_variable_conditions_and_recursion),
@@ -1032,23 +966,12 @@ def main():
          test_native_ai_triggered_target_reselects_with_current_evaluator),
         ("Choice transforms its real parent",
          test_choice_ability_transforms_real_parent),
-        ("Records choice filter preserves typed target data",
-         test_records_target_filter_dict_is_parsed_for_choice_prompt),
-        ("Attached session rejects legacy walker",
-         test_attached_session_rejects_legacy_walker_even_with_native_dispatch),
     ]
     failed = 0
     for name, fn in tests:
         db = make_db()
         try:
-            # These tests intentionally use tiny SQLite-only abilities. Keep
-            # their source adapter in the test module so production resolution
-            # has exactly one supported Records path.
-            with mock.patch.object(resolution, "_effect_list",
-                                   _fixture_effect_list), \
-                    mock.patch.object(resolution, "_target_template_ids",
-                                      _fixture_target_template_ids):
-                fn(db)
+            fn(db)
             print(f"PASS {name}")
         except Exception as e:
             failed += 1

@@ -1,47 +1,28 @@
 # abilities/framework/
 
-Shared utilities that card abilities and other server code depend on.
-New card abilities (`abilities/cards/`) import from here as needed.
+Helpers shared by the RulesPort runtime, the AI and the protocol host. None of
+these modules resolve abilities; `rules_port` does (see `../README.md`).
 
-## Files
+| Module | Owns |
+|---|---|
+| `_shared.py` | Logging, card-state masks, zone/collection mapping, champion-owner helpers |
+| `bom.py` | `_push_card_state` and `_controller_id_for_target` (the remains of the old BOM module) |
+| `condition_engine.py` | Data-driven condition evaluation used by the AI and projections |
+| `cost_mod.py` | Dynamic cost modifiers from ability variables |
+| `deathcry.py` | Deathcry filtering; resolution is delegated to `rules_port.resolution` |
+| `fields.py` | AbilityField/EffectField evaluation |
+| `kill_troop.py` | Dead state, move to discard, replacement effects, Deathcry dispatch |
+| `resources.py` | Resource-ability entry points over RulesPort |
+| `stat_mod.py` | Persist ATK/DEF modifiers and push `CardUpdated` |
+| `statics.py` | Continuous (WhileCardInPlay / Permanent) static evaluation |
+| `tac.py` | TAC v2 decoder (`tac_function`, `decode_tac`, ...) |
+| `targeting.py` | Data-driven target filters and legal-target lists |
+| `triggers.py` | Historical trigger entry points; every event goes to `rules_port.triggers` |
+| `effects/` | Counters, damage, deck search, choice constants, visibility projection, zone-move projection |
+| `keywords/combat.py` | Rage adapter over `statics.apply_rage` |
 
-| File | Purpose |
-|------|---------|
-| `bom.py` | BOM (bill-of-materials) walking + built-in leaf executors. The `_LEAFS` dict maps `AbilityEffectTemplate` class names to executor functions. All current production leaves use `@effect`; retain `@leaf_register` only as a compatibility API for future compatibility-heavy leaves. |
-| `builder.py` | Metadata-backed `AbilityBuilder`, `TargetRef`, `CostRef`, and `EffectRef` views over `AbilityGraph`/`AbilityInstance`, including typed values and effect conditions/continuations; no parallel card-rules source. |
-| `context.py` | `EffectContext` adapter for typed values, targets, ownership, counters, stats, damage, draws, and client event/persistence operations. |
-| `resolution.py` | Shared target, condition, variable, and effect-resolution helpers used by the BOM path. |
-| `effects/` | Operation-specific effect implementations and leaf registry, including damage, token, search, counter, and utility effects. |
-| `tac.py` | TAC v2 binary decoder. `tac_guid(b64)` extracts the ability GUID from a serialized TAC. `tac_function(b64)` extracts the operation key (e.g. `"ShiftAbility"`). |
-| `conditions.py` | Pre-game condition functions (`pregame_shards_in_deck`, etc.) evaluated during the PreGame phase. `apply_pregame_abilities()` is the public entry point. |
-| `kill_troop.py` | `kill_troop()` — marks a troop Dead, moves it to the graveyard, and fires its Deathcry. `state_based_deaths()` — kills any warzone troop with effective defense ≤ 0. |
-| `deathcry.py` | `resolve_deathcry()` — walks a dead card's abilities and resolves Deathcry-triggered BOM leaves (CardModifier, Draw, Discard, Transform). |
-| `transform.py` | `transform_card()` — replaces a card instance's template GUID, type, and stats in-place while preserving its card_uid. |
-| `stat_mod.py` | `apply_card_stat_mod()` — persists +/- ATK/DEF modifiers to the `game_cards` table and pushes a `CardUpdated` event. |
-| `triggers.py` | Trigger and event matching used to decide when metadata-defined abilities resolve. |
-| `_shared.py` | `_log()`, `_card_state_of()`, `_stat_delta()` — tiny helpers used by multiple framework modules. |
-
-## Adding a new BOM leaf executor
-
-For a simple effect, use the context adapter:
-
-```python
-from abilities import effect
-
-@effect("MyNewEffectTemplate")
-def my_new_effect(effect):
-    return effect.damage(effect.target(), effect.value("m_InputValue"))
-```
-
-The adapter preserves the old resolver ABI while giving the implementation a
-single context. For an effect that still needs the full compatibility surface,
-`@leaf_register` remains available:
-
-```python
-@leaf_register("MyNewEffectTemplate")
-def _leaf_my_new_effect(game, session, db, handler, pl_t, ai_t, bstate, effect_guid, param):
-    ...
-    return "log message"
-```
-
-The legacy function signature must match `(game, session, db, handler, pl_t, ai_t, bstate, effect_guid, param) -> str`.
+Several of these duplicate logic that also exists in `rules_port`
+(`condition_engine.py` vs `rules_port/conditions.py`, `fields.py` vs
+`rules_port/fields.py`, `targeting.py` vs `rules_port/targeting.py`). Prefer
+the `rules_port` version in new code; the copies here are candidates for the
+next consolidation pass.

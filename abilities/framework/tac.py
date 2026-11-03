@@ -59,27 +59,6 @@ _TAC_STRING_HASHES = {
 }
 
 
-def tac_int(data_b64, name, default=0):
-    """Return an integer flag/value from a serialized mechanics TAC.
-
-    Card and ability metadata uses the same TAC encoding for flags such as
-    ``Scrounge``.  Keep this lookup in the shared decoder so callers do not
-    need to identify cards by name or inspect the serialized bytes directly.
-    """
-    if not data_b64 or not name:
-        return default
-    value = decode_tac_tree(data_b64).get(_tac_attr_hash(str(name)))
-    return value if isinstance(value, int) else default
-
-
-def tac_string(data_b64, name, default=""):
-    """Return a string TAC attribute, such as a TACFilter template name."""
-    if not data_b64 or not name:
-        return default
-    value = decode_tac_tree(data_b64).get(_tac_attr_hash(str(name)))
-    return value if isinstance(value, str) else default
-
-
 def decode_tac_tree(data_b64):
     """Decode TAC while retaining nested TAC/list structure.
 
@@ -193,13 +172,6 @@ def decode_tac(data_b64):
             out[rid] = _st.unpack_from("<i", b, i)[0]
             i += 4
     return out
-
-
-def tac_guid(data_b64):
-    """The ability GUID a TAC references (StringAttrs.Guid), or None."""
-    t = decode_tac(data_b64)
-    v = t.get(_TAC_GUID_HASH)
-    return v if isinstance(v, str) and v else None
 
 
 def tac_function(data_b64):

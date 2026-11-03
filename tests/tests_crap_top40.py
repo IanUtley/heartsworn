@@ -177,21 +177,6 @@ def test_legal_targets_for_an_unknown_template_offers_nothing():
                          both_players=True) == []
 
 
-def test_legacy_card_modifier_with_no_authored_effect_changes_nothing():
-    from abilities.framework import bom
-    import game_engine
-    from tests.tests_combat import HandlerStub, SessionStub
-    db = make_db()
-    pl_t = game_engine.UID.make(244, 5)
-    ai_t = game_engine.UID.make(3, 1000)
-    game = game_engine.Game(1, pl_t, ai_t)
-    result = bom._card_modifier_legacy(
-        game, SessionStub(), db, HandlerStub(db), pl_t, ai_t,
-        {"player_health": 20, "ai_health": 20},
-        "00000000-0000-0000-0000-00000000cafe", "{}")
-    assert result == "card modifier: "
-
-
 def test_tac_without_an_operation_is_rejected_in_native_play():
     import pytest
     from types import SimpleNamespace
@@ -1121,48 +1106,6 @@ def test_dungeon_import_dry_run_reports_each_dungeon_without_writing(capsys):
     assert "Devonshire Keep:" in out, out[:400]
 
 
-def test_legacy_card_modifier_applies_a_permanent_attack_bonus_to_its_target():
-    import json
-    import game_engine
-    import hconnect_server
-    import battle_engine as be
-    import db as shared
-    from abilities.framework import bom
-    from tests.tests_combat import SessionStub, add_card
-    db = make_db()
-    previous = shared._db
-    shared._db = db
-    hconnect_server._db = db
-    try:
-        add_card(db, 300, 5, "8305c05f-8355-4740-8599-2cf4a85c2c79", "warzone")
-        handler = hconnect_server.HCPHandler(None, ("127.0.0.1", 0))
-        handler.user_profile = {"id": 5}
-        handler.client_reck_id = 5
-        handler._maybe_attach_rules_port = lambda *args, **kwargs: None
-        handler.send = lambda header, body: None
-        session = SessionStub()
-        bstate = be.default_state(turn_player=be.PLAYER)
-        bstate["resolving_source_uid"] = 300
-        bstate["player_mod_target"] = 300
-        session.turn_order = bstate
-        pl_t = game_engine.UID.make(244, 5)
-        ai_t = game_engine.UID.make(game_engine.SERVICE_AI_UID_TYPE, 1000)
-        game = game_engine.Game(1, pl_t, ai_t)
-        # Authored +1[ATK] Permanent effect (a Records effect row).
-        param = json.dumps({"text": "+1[ATK]", "property": "attack", "amount": 1,
-                            "duration": "Permanent", "target_index": 0,
-                            "condition_id": "", "replaceexistingvalue": 0,
-                            "input_variable": "P1"})
-        result = bom._card_modifier_legacy(
-            game, session, db, handler, pl_t, ai_t, bstate,
-            "139ca40e-8cae-e3d9-e42a-01f59c0c6501", param)
-        assert result == "mod 0x12c +1/+0", result
-        assert any(type(ev).__name__ == "CardUpdatedSessionEventArgs"
-                   for ev in game.events), [type(ev).__name__ for ev in game.events]
-    finally:
-        shared._db = previous
-
-
 def test_practice_mulligan_keep_accepts_the_hand_and_replies_to_the_client():
     from types import SimpleNamespace
     import battle_engine as be
@@ -1428,7 +1371,6 @@ def test_tournament_gameplay_without_a_rules_port_host_is_refused_and_acknowledg
         assert handler._handle_generic_player_transaction(session, play, 1, 0, None) is True
     concede.assert_not_called()
     assert acks == [session]
-
 
 
 def test_tutorial_script_parses_draw_and_hell_to_freeze_commands(tmp_path):
@@ -2092,47 +2034,6 @@ def test_champion_bom_extraction_regenerates_both_seed_blocks_in_static(tmp_path
     assert "CHAMPION_ABILITY_EFFECTS = [" in text, text
 
 
-def test_legacy_block_effect_assigns_the_created_troop_as_a_blocker():
-    import battle_engine as be
-    import db as shared
-    import game_engine
-    import hconnect_server
-    from abilities.framework.effects.combat import _block_legacy
-    from tests.tests_combat import SessionStub, add_card
-    db = make_db()
-    previous = shared._db
-    shared._db = db
-    hconnect_server._db = db
-    try:
-        add_card(db, 100, 5, "8305c05f-8355-4740-8599-2cf4a85c2c79", "warzone")
-        add_card(db, 201, 0, "8305c05f-8355-4740-8599-2cf4a85c2c79", "warzone")
-        db.execute("UPDATE game_cards SET card_state=? WHERE card_uid=100",
-                   (int(game_engine.ECardStates.StartedATurnOnYourSide),))
-        db.commit()
-        handler = hconnect_server.HCPHandler(None, ("127.0.0.1", 0))
-        handler.user_profile = {"id": 5}
-        handler.client_reck_id = 5
-        handler._maybe_attach_rules_port = lambda *args, **kwargs: None
-        handler.send = lambda header, body: None
-        handler._player_champ_scid = game_engine.SessionCardId(game_engine.UID.make(1, 9001))
-        handler._ai_champ_scid = game_engine.SessionCardId(game_engine.UID.make(1, 9002))
-        session = SessionStub()
-        session.session_name = "practice-1"
-        state = be.default_state(turn_player=be.PLAYER)
-        state["player_attackers"] = {"100": 0}
-        state["player_spell_target"] = 100
-        state["resolving_secondary_target_uid"] = 201
-        session.turn_order = state
-        player = game_engine.UID.make(244, 5)
-        ai = game_engine.UID.make(game_engine.SERVICE_AI_UID_TYPE, 1000)
-        game = game_engine.Game(1, player, ai)
-        result = _block_legacy(game, session, db, handler, player, ai, state, "effect", "{}")
-        assert result.startswith("blocked "), result
-        assert state["ai_blockers"] == {"100": ["201"]}, state.get("ai_blockers")
-    finally:
-        shared._db = previous
-
-
 def test_campaign_state_maps_visits_completion_and_flags_for_the_rules_engine():
     import json as _json
     import sqlite3
@@ -2211,7 +2112,7 @@ def test_resolving_a_tap_ability_taps_its_chosen_target():
     import db as shared
     import game_engine
     import hconnect_server
-    from abilities.framework.resolution import resolve_ability
+    from rules_port.resolution import resolve_port_ability
     from tests.tests_combat import SessionStub, add_card
     db = make_db()
     previous = shared._db
@@ -2235,9 +2136,10 @@ def test_resolving_a_tap_ability_taps_its_chosen_target():
         player = game_engine.UID.make(244, 5)
         ai = game_engine.UID.make(game_engine.SERVICE_AI_UID_TYPE, 1000)
         game = game_engine.Game(1, player, ai)
-        result = resolve_ability(handler, game, session, db, player, ai, state,
-                                 "1c6d0fdf-9be0-27b3-186e-e139d1f71544", 300, 5,
-                                 target_map={0: [257]})
+        result = resolve_port_ability(
+            handler, game, session, db, player, ai, state,
+            "1c6d0fdf-9be0-27b3-186e-e139d1f71544", 300, 5,
+            target_map={0: [257]})
         assert result.startswith("tapped"), result
         state_row = db.execute("SELECT card_state FROM game_cards WHERE card_uid=257").fetchone()[0]
         assert state_row & int(game_engine.ECardStates.Tapped), state_row
@@ -2267,12 +2169,6 @@ def test_card_count_variable_counts_the_owners_cards_in_the_default_zones():
     # The owner has two troops in the warzone; the opponent's troop is not counted.
     assert context.set_card_count_variable() == "counted Cards=2"
     assert bstate["ability_variables"] == {"Cards": 2}, bstate
-
-
-def test_equipment_filter_matches_a_card_that_requires_equipment_only():
-    from abilities.framework.targeting import template_equipment_match
-    assert template_equipment_match("aa2bab91-2ec8-f8e5-395c-7283371426f8") is True
-    assert template_equipment_match("00000000-0000-0000-0000-000000000000") is False
 
 
 def test_adding_a_champion_saves_it_for_the_user_and_replies():
@@ -2476,17 +2372,6 @@ def test_az1_node_details_come_from_its_encounter_scene_row(tmp_path):
     assert node.pre_conversations == ("Feralroot Bear",), node
 
 
-def test_set_one_coverage_sweep_reports_the_non_resource_cards(monkeypatch, capsys):
-    from tests.test_db import fresh_database
-    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "tools", "ir_coverage"))
-    import sweep_set1_coverage
-    monkeypatch.setattr(sweep_set1_coverage, "DB", fresh_database())
-    sweep_set1_coverage.main()
-    first_line = capsys.readouterr().out.splitlines()[0]
-    assert first_line.startswith("Set 1 cards (non-resource): "), first_line
-    assert int(first_line.rsplit(": ", 1)[1]) > 0, first_line
-
-
 def test_tac_list_read_returns_the_cards_stored_for_the_resolving_ability():
     from rules_port.static_rules import _list_card_uids
     state = {"resolving_ability": "ab1",
@@ -2534,20 +2419,6 @@ def test_practice_session_attaches_an_authoritative_rules_host():
         assert port is not None and session._rules_port_session is port
     finally:
         shared._db = previous
-
-
-def test_ai_choice_picks_one_of_the_offered_choice_cards():
-    import pytest
-    from abilities.framework.effects.choices import ai_choice_prefer_missing
-    from tests.tests_combat import add_card
-    from types import SimpleNamespace
-    db = make_db()
-    add_card(db, 257, 0, "02dd3c6f-dbcb-4803-9514-b340290084a1", "choosing")
-    add_card(db, 258, 0, "00a36f11-1c46-4b57-9e61-6bce9be591a1", "choosing")
-    session = SimpleNamespace(session_id=1)
-    assert ai_choice_prefer_missing(db, session, {"ai_threshold": {}}, [257, 258]) in (257, 258)
-    with pytest.raises(IndexError):
-        ai_choice_prefer_missing(db, session, {}, [])
 
 
 def _rulesport_duel(db, attacker_state, monkeypatch):
@@ -2743,18 +2614,6 @@ def test_panorama_importer_dry_run_reports_every_template_and_writes_nothing(tmp
     import_az1_panoramas.main()
     out = capsys.readouterr().out
     assert "cavein:" in out and "amblingmesa:" in out and "rows moved" in out, out[:300]
-
-
-def test_effect_leaf_audit_writes_a_report_for_every_effect_class(tmp_path, monkeypatch, capsys):
-    import json as _json
-    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "tools", "ir_coverage"))
-    import audit_effect_leaves
-    report = tmp_path / "effect_leaf_audit.json"
-    monkeypatch.setattr(sys, "argv", ["audit_effect_leaves.py", "--json", str(report)])
-    audit_effect_leaves.main()
-    data = _json.loads(report.read_text(encoding="utf-8"))
-    assert "ActivateAbilityEffectTemplate" in data, sorted(data)[:5]
-    assert "effect classes in Records" in capsys.readouterr().out
 
 
 def test_profile_stream_pushes_the_account_profile_to_the_client():

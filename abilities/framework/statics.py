@@ -1159,17 +1159,6 @@ def effective_stats(db, session_id, bstate, card_uid):
     return atk, max(0, def_ - dmg), attrs, d["flags"], d["rage"]
 
 
-def effective_attributes(db, session_id, bstate, card_uid):
-    """Return the current combat keyword bits for one card instance.
-
-    Combat option generation must use the same continuous/static evaluation as
-    combat resolution.  In particular, conditional CardModifier abilities
-    (Electroid's Dwarf/Robot count is one example) are not persisted in
-    ``game_cards.card_attributes``.
-    """
-    return effective_stats(db, session_id, bstate, card_uid)[2]
-
-
 def effective_cost(db, session_id, bstate, card_uid):
     """Current play cost of a card instance (template cost + cost modifiers +
     continuous static cost reductions) — the X value for AbilityResourceXCost
@@ -1214,50 +1203,6 @@ def controller_flags(db, session_id, bstate, owner):
         d = self_deltas(db, session_id, bstate, uid)
         flags |= d["flags"]
     return flags
-
-
-def global_flags(db, session_id, bstate):
-    """Flags from every player's warzone statics (e.g. Emberspire Witch's
-    "Champions can't gain health" applies while she is in play)."""
-    flags = set()
-    from pvp_db import db_warzone_owner_ids
-    for (owner,) in db_warzone_owner_ids(session_id, conn=db):
-        flags |= controller_flags(db, session_id, bstate, owner)
-    return flags
-
-
-def health_gain_bonus(db, session_id, bstate, owner):
-    """Return the controller's continuous bonus to each health gain.
-
-    The client represents effects such as Lifeweaver Shaman's
-    ``LifeGainModifier`` as a static typed ``IntAttrModifier``.  It is not a
-    triggered ability, so it must be folded into the amount before the shared
-    health-gain event is emitted.  Iterate over card instances so identical
-    copies stack independently.
-    """
-    total = 0
-    from pvp_db import db_warzone_card_uids
-    rows = db_warzone_card_uids(session_id, owner, conn=db)
-    for (card_uid,) in rows:
-        for ability_guid, _raw in _card_static_abilities(
-                db, session_id, int(card_uid)):
-            for param, raw in _static_leaves(db, ability_guid):
-                if (param.get("property") != "intattr" or
-                        str(param.get("attribute") or "") !=
-                        "LifeGainModifier"):
-                    continue
-                if not _gate_condition(
-                        db, session_id, bstate, param.get("condition_id"),
-                        int(card_uid), owner):
-                    continue
-                try:
-                    value = int(param.get("amount") or 0)
-                except (TypeError, ValueError):
-                    value = 0
-                operation = str(param.get("operation") or "Add").lower()
-                if operation == "add":
-                    total += value
-    return total
 
 
 def can_block(db, session_id, bstate, attacker_uid, blocker_uid):

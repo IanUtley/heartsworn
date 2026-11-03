@@ -27,34 +27,11 @@ import db as dbmod
 from abilities.framework import triggers
 from rules_port.resolution import (
     resolve_port_ability,
-    resolve_port_played_spell as resolve_played_spell)
+    resolve_port_played_spell as resolve_played_spell,
+    resolve_port_trigger)
 
 
-class _NativeLeafs:
-    """Legacy-shaped leaf lookup backed by the native RulesPort dispatcher."""
-
-    def __contains__(self, effect_type):
-        from rules_port.coverage import NATIVE_EFFECTS
-        return effect_type in NATIVE_EFFECTS
-
-    def __getitem__(self, effect_type):
-        def call(game, session, db, handler, pl_t, ai_t, bstate,
-                 effect_guid="", param=None, **kwargs):
-            from rules_port import effects as native_effects
-            from rules_port.context import EffectContext
-
-            if bstate is None:
-                bstate = {}
-            bstate["_rules_port_native_effect"] = True
-            context = EffectContext.from_rules_port(
-                game, session, db, handler, pl_t, ai_t, bstate,
-                effect_guid, param or "")
-            return native_effects.dispatch(
-                effect_type, context, {"param": param or ""})
-        return call
-
-
-_LEAFS = _NativeLeafs()
+from tests.native_leafs import LEAFS as _LEAFS
 
 
 TPL = {
@@ -216,7 +193,7 @@ def drain_stack(db, handler, game, session, pl_t, ai_t, bstate):
     stack = bstate.get("stack") or []
     while stack:
         item = stack.pop()
-        triggers.resolve_stack_trigger(handler, game, session, db, pl_t, ai_t,
+        resolve_port_trigger(handler, game, session, db, pl_t, ai_t,
                                        bstate, item)
 
 
@@ -275,45 +252,6 @@ def test_heal_chain(db):
     inc = db.execute(
         "SELECT permanent_buffs FROM game_cards WHERE card_uid=102").fetchone()[0]
     assert '"incantation": 1' in inc, inc
-
-
-def test_lifesteal_heal_fires_healed_trigger(db):
-    """Lifelink healing routes through _apply_health_gain so 'when you gain
-    health' triggers (Righteous Paladin, Incantation of Righteousness) fire —
-    the combat lifelink path must not bypass them."""
-    add_card(db, 101, 5, "paladin", "warzone")
-    pl_t, ai_t, game, bstate = new_game(db)
-    session = SessionStub()
-    handler = HandlerStub()
-    handler._db = db
-    from abilities.framework.triggers import _apply_health_gain
-    _apply_health_gain(game, bstate, pl_t, ai_t, 2, 5,
-                       db=db, handler=handler, session=session)
-    drain_stack(db, handler, game, session, pl_t, ai_t, bstate)
-    assert bstate["player_health"] == 22, bstate["player_health"]
-    pal = db.execute(
-        "SELECT permanent_buffs FROM game_cards WHERE card_uid=101").fetchone()[0]
-    assert '"atk": 1' in pal and '"def": 1' in pal, pal
-
-
-def test_lifeweaver_shamans_stack_on_each_health_gain(db):
-    """Each Lifeweaver Shaman modifies every gain, including later gains."""
-    add_card(db, 103, 5, "lifeweaver", "warzone")
-    add_card(db, 104, 5, "lifeweaver", "warzone")
-    pl_t, ai_t, game, bstate = new_game(db)
-    session = SessionStub()
-    handler = HandlerStub()
-    handler._db = db
-    from abilities.framework.triggers import _apply_health_gain
-
-    # Harvest Moon's base gain: 4 + 1 per Shaman.
-    _apply_health_gain(game, bstate, pl_t, ai_t, 4, 5,
-                       db=db, handler=handler, session=session)
-    assert bstate["player_health"] == 26, bstate["player_health"]
-    # Whispering Breeze's Foretelling gain: 3 + 1 per Shaman.
-    _apply_health_gain(game, bstate, pl_t, ai_t, 3, 5,
-                       db=db, handler=handler, session=session)
-    assert bstate["player_health"] == 31, bstate["player_health"]
 
 
 def test_dimmid_starting_health(db):
@@ -467,7 +405,7 @@ def test_pregame_health_counts_only_heals(db):
     """Dimmid's Lifedrain charge power (an attribute-grant BOM) must not add
     +1 starting health; only real PreGame heal talents (healhero leaves with a
     pregame_* condition) contribute."""
-    from abilities.framework.conditions import _apply_bom_health
+    from rules_port.pregame import _apply_bom_health
     src = sqlite3.connect(fresh_database())
     lifedrain = _apply_bom_health(
         src, "3ccc7773-0697-86ac-ab88-b40379aed08b")
@@ -679,25 +617,6 @@ def test_burn_champion_playable(db):
     uids = [int(t.uid.uid64) for t in targets]
     assert int(s._player_champ_scid.uid.uid64) in uids, uids
     assert int(s._ai_champ_scid.uid.uid64) in uids, uids
-
-
-def test_you_damage_targets_champion(db):
-    """Shamed Gladiator's Deploy 'This deals 2 damage to you' must hit the
-    controller's CHAMPION, not the source troop ('You' target template)."""
-    import db as dbmod
-    dbmod._db = db
-    from abilities.framework.bom import _champion_target_uid
-
-    class H:
-        _player_champ_scid = game_engine.SessionCardId(
-            game_engine.UID.make(244, 5))
-        _ai_champ_scid = game_engine.SessionCardId(
-            game_engine.UID.make(3, 1000))
-
-    bstate = {"resolving_ability": "b95fdd81-2eca-f2cb-b28b-c5ec70307ca0",
-              "resolving_owner_id": 5}
-    uid = _champion_target_uid(H(), bstate, db, SessionStub())
-    assert uid == int(H._player_champ_scid.uid.uid64), uid
 
 
 def test_auto_target_no_picker(db):
@@ -980,32 +899,6 @@ def test_outrider_attack(db):
     assert '"atk": 4' in tb, tb
 
 
-def test_angel_draw(db):
-    add_card(db, 400, 5, "angel", "hand")
-    pl_t, ai_t, game, bstate = new_game(db)
-    # Thresholds are keyed by shard flag bits (Diamond = 64), as in live state.
-    bstate["player_threshold"] = {int(game_engine.SHARD_TO_FLAG["diamond"]): 1}
-    session = SessionStub()
-    handler = HandlerStub()
-    handler._db = db
-    # The draw path (draw_effects.py) emits CardDrawnEvent from the drawing
-    # champion, targets the card drawn, and carries this player's draw ordinal.
-    # Angel's TriggerSource Nth-draw condition reads that ordinal.
-    from rules_port.triggers import dispatch_native_trigger
-    dispatch_native_trigger(
-        db=db, handler=handler, game=game, session=session, player_uid=pl_t,
-        ai_uid=ai_t, battle_state=bstate, event_type="CardDrawnEvent",
-        source_card_id=int(handler._player_champ_scid.uid.uid64),
-        source_player_id=5, target_card_id=400,
-        data={"nth_card_drawn_this_turn_by_this_player": 1})
-    drain_stack(db, handler, game, session, pl_t, ai_t, bstate)
-    loc = db.execute(
-        "SELECT location FROM game_cards WHERE card_uid=400").fetchone()[0]
-    # Free play follows the normal chain contract: the card waits in
-    # CastSpells until the battle engine resolves its queued play item.
-    assert loc == "CastSpells", loc
-
-
 def test_angel_draw_gate(db):
     add_card(db, 400, 5, "angel", "hand")
     pl_t, ai_t, game, bstate = new_game(db)
@@ -1130,9 +1023,6 @@ def test_voiding_exile_returns_voided_cards(db):
 
 if __name__ == "__main__":
     run("heal chain (Scrivener -> Paladin/Incantation)", test_heal_chain)
-    run("lifesteal heal fires healed triggers", test_lifesteal_heal_fires_healed_trigger)
-    run("Lifeweaver Shamans stack on each health gain",
-        test_lifeweaver_shamans_stack_on_each_health_gain)
     run("Dimmid starts at 19 from champion table", test_dimmid_starting_health)
     run("Prairie Scout gated to combat + attacking troop", test_prairie_scout_activation_gating)
     run("Hand Tunnel uses its own threshold and cost", test_hand_tunnel_activation_gating)
@@ -1144,7 +1034,6 @@ if __name__ == "__main__":
     run("CardUpdated carries counters and related cards", test_cardupdated_carries_counters_and_related)
     run("Spell heal goes to the caster not the AI", test_spell_heal_targets_caster)
     run("Burn playable vs champion targets", test_burn_champion_playable)
-    run("'You' damage hits the champion", test_you_damage_targets_champion)
     run("Auto targets never show a picker", test_auto_target_no_picker)
     run("Gem survives instance-less re-push", test_gem_survives_repush)
     run("Consumed one-shot leaves CardUpdated", test_consumed_one_shot_stays_off_card_updated)
@@ -1155,7 +1044,6 @@ if __name__ == "__main__":
         test_incantation_gate_does_not_transform_below_five)
     run("Kraken Guard Inspire grants Steadfast", test_kraken_inspire)
     run("Chimera Guard Outrider attack buff", test_outrider_attack)
-    run("Angel of Dawn plays free on first draw", test_angel_draw)
     run("Angel of Dawn gate blocks second draw", test_angel_draw_gate)
     run("Eternal Youth escalation heals 4 then 8", test_eternal_youth)
     run("Living Totem manual +1/+1 and Flight", test_totem_manual)

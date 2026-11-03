@@ -1,7 +1,5 @@
-"""Effect implementations grouped by the operation they perform.
+"""Effect-adjacent helpers (counters, damage, search, visibility, zone moves).
 
-The BOM dispatcher remains the compatibility entry point for now.  New code
-should import an operation from this package rather than from a trigger
-module, and leaf registration will migrate here incrementally.
+Effect *dispatch* lives in ``rules_port.effects``; these modules hold shared
+persistence and projection code it and the protocol layer call.
 """
-

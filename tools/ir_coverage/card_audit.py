@@ -182,30 +182,6 @@ def _string_literals() -> tuple[set[str], set[str]]:
     return all_literals, field_literals
 
 
-def _decorated_registrations() -> set[str]:
-    names: set[str] = set()
-    for path in sorted((ROOT / "abilities").rglob("*.py")):
-        try:
-            tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
-        except SyntaxError:
-            continue
-        for node in ast.walk(tree):
-            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                continue
-            for deco in node.decorator_list:
-                if not isinstance(deco, ast.Call):
-                    continue
-                func = deco.func
-                name = func.id if isinstance(func, ast.Name) else (
-                    func.attr if isinstance(func, ast.Attribute) else "")
-                if name not in ("effect", "leaf_register"):
-                    continue
-                for arg in deco.args:
-                    if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
-                        names.add(arg.value)
-    return names
-
-
 def _csharp_class_file(class_name: str) -> Path | None:
     for directory in CS_DIRS:
         candidate = directory / f"{class_name}.cs"
@@ -449,7 +425,7 @@ def build_report(card_filter: str | None = None) -> dict[str, Any]:
     python_literals, python_fields = _string_literals()
     reference_lower = _reference_text().lower()
     csharp_intattrs = _csharp_consumed_intattrs()
-    handled = set(NATIVE_EFFECTS) | set(STRUCTURAL_EFFECTS) | _decorated_registrations()
+    handled = set(NATIVE_EFFECTS) | set(STRUCTURAL_EFFECTS)
     unhandled = [name for name in used if name not in handled]
     missing_nested = _nested_type_report(nested_types, python_literals)
     gaps = _field_parity(used, data_fields, python_fields)

@@ -13,8 +13,7 @@ fresh_database()   # bind this process's database before ``db`` is imported
 
 import game_engine
 from rules_port.builder import AbilityBuilder
-from abilities.framework.context import EffectContext
-from abilities.framework.effects.registry import _LEAFS, effect
+from rules_port.context import EffectContext
 from gamedata.models import AbilityCost, TargetSpec
 from gamedata.play_plan import (AbilityInstance, ActivationData, CardPlayCost,
                                 PlayPlan)
@@ -49,34 +48,6 @@ class _DrawHandler:
 
     def _player_draw_card(self, game, session, draw_uid, owner):
         self.calls.append((game, session, draw_uid, owner))
-
-
-def test_legacy_effect_context_rejects_rules_port_sessions():
-    """Attached sessions cannot enter legacy leaf or child resolvers."""
-    for session, bstate in (
-            (SimpleNamespace(_rules_port_session=object()), {}),
-            (_Session(), {"_rules_port_attached": True})):
-        try:
-            EffectContext.from_legacy(
-                object(), session, _DB(), object(), "player", "ai",
-                bstate, "legacy-effect")
-        except RuntimeError as exc:
-            assert "bypassed RulesPort" in str(exc), str(exc)
-        else:
-            raise AssertionError(
-                "attached RulesPort session created a legacy context")
-
-    # Direct construction must not bypass the factory boundary and enter a
-    # legacy context on an attached session.
-    attached = SimpleNamespace(_rules_port_session=object(), session_id=9)
-    try:
-        EffectContext(
-            object(), attached, _DB(), object(), "player", "ai", {},
-            "legacy-effect", param="00000000-0000-0000-0000-000000000001")
-    except RuntimeError as exc:
-        assert "bypassed RulesPort" in str(exc), str(exc)
-    else:
-        raise AssertionError("attached RulesPort created a legacy context")
 
 
 class _Game:
@@ -203,30 +174,6 @@ def test_native_discard_creates_parent_continuation_for_hand_picker():
     assert state["resolution_paused"] is True
 
 
-def test_context_decorator_adapts_legacy_leaf_arguments():
-    seen = {}
-
-    @effect("TestContextEffect")
-    def capture(ctx: EffectContext):
-        seen["target"] = ctx.target()
-        seen["owner"] = ctx.target_owner()
-        seen["value"] = ctx.value("m_InputValue", default=7)
-        return "captured"
-
-    result = _LEAFS["TestContextEffect"](
-        object(), _Session(), _DB(), object(), "player", "ai",
-        {"resolving_target_uid": 123}, "missing-effect", "")
-
-    assert result == "captured"
-    assert seen == {"target": 123, "owner": 5, "value": 7}
-
-    # Direct imports retain the historical ABI while the resolver uses the
-    # same registered adapter.
-    assert capture(
-        object(), _Session(), _DB(), object(), "player", "ai",
-        {"resolving_target_uid": 123}, "missing-effect", "") == "captured"
-
-
 def test_tunnel_moves_source_to_underground_and_emits_zone_triggers():
     class TunnelDB:
         def __init__(self):
@@ -295,43 +242,6 @@ def test_surface_queues_the_buried_card_for_free_with_speed():
         context.handler, context.game, context.session, context.db,
         context.player_uid, context.ai_uid, context.bstate, 123, 5,
         "spy-template", "Troop")
-
-
-def test_current_resource_modifier_persists_before_next_rules_port_cost():
-    """A temporary resource grant must update all three state projections.
-
-    Hideous Conversion grants current resource, not maximum resource.  The
-    client receives the pool event immediately, so the checkpoint must be
-    saved at the same effect boundary or the next RulesPort activation can
-    incorrectly charge from the old pool.
-    """
-    from abilities.framework.bom import _apply_resource_property
-    import battle_engine
-
-    class Handler:
-        user_profile = {"id": 5}
-
-    game = _Game()
-    game.player_uid = "player"
-    game.ai_uid = "ai"
-    session = _Session()
-    state = {
-        "player_resources": 1,
-        "player_total_resources": 3,
-        "ai_resources": 0,
-        "ai_total_resources": 0,
-    }
-    import rules_port.persistence as persistence
-    with mock.patch.object(persistence, "save_state") as save_state:
-        result = _apply_resource_property(
-            game, session, _DB(), Handler(), "player", "ai", state,
-            {"property": "currentresource", "amount": 1}, None)
-
-    assert result == "player resources 1->2"
-    assert state["player_resources"] == 2
-    assert game.player_resources == 2
-    assert game.events[-1].new_value == 2
-    save_state.assert_called_once_with(session, state)
 
 
 def test_tunneling_metadata_and_underground_visibility_are_data_driven():
@@ -760,8 +670,8 @@ def test_subterranean_spy_visibility_reveals_only_the_controller_view():
 
 
 def test_tunneling_surface_queue_is_empty_without_underground_cards():
-    from abilities.framework.effects.counters import (
-        queue_tunneling_surfaces, surface_source_is_underground)
+    from abilities.framework.effects.counters import queue_tunneling_surfaces
+    from rules_port.tunneling import surface_source_is_underground
 
     class EmptyCursor:
         def fetchall(self):
@@ -869,28 +779,6 @@ def test_resource_choice_ability_is_detected_from_metadata():
     assert printed_resource_choice_ability([
         "43461713-afe7-299f-9aba-40002e9105eb",
     ]) is None
-
-
-def test_match_secondary_reveal_uses_stored_target_owner():
-    from abilities.framework.bom import _reveal_owner_for_target
-
-    class OwnerCursor:
-        def fetchone(self):
-            return (1002,)
-
-    class OwnerDB:
-        def execute(self, _sql, _params):
-            return OwnerCursor()
-
-    target_champion = 0x6801
-    battle_state = {
-        "pvp": True,
-        "stored_targets": {"withering-touch": [target_champion]},
-    }
-    owner = _reveal_owner_for_target(
-        OwnerDB(), object(), _Session(), battle_state, 1001,
-        "MatchSecondaryTargetTemplate", "withering-touch")
-    assert owner == 1002
 
 
 def test_player_updated_carries_subterranean_spy_hand_permission():
@@ -1018,8 +906,6 @@ def test_continuation_carries_only_serializable_activation_data():
 
 
 def test_context_activate_ability_uses_typed_child_resolver():
-    import abilities.framework.resolution as resolution
-
     state = {
         "resolving_source_uid": 123,
         "resolving_owner_id": 5,
@@ -1067,7 +953,7 @@ def test_activate_hand_target_prompts_the_player_instead_of_auto_picking():
 
 
 def test_ability_trace_records_authoritative_zone_and_event_deltas():
-    from abilities.framework.trace import _CARD_COLUMNS, begin_effect, end_effect
+    from rules_port.trace import _CARD_COLUMNS, begin_effect, end_effect
 
     class TraceDB:
         def __init__(self):
@@ -1154,40 +1040,6 @@ def test_pvp_extra_combat_entries_use_the_active_player_key():
     assert phases[second_main + 1:second_main + 1 + len(
         battle_engine.COMBAT_STEPS)] == battle_engine.COMBAT_STEPS
 
-def test_all_registered_effects_use_the_context_adapter():
-    """Keep the nine-argument ABI behind one registry boundary."""
-    assert _LEAFS
-    assert all(hasattr(leaf, "__wrapped__") for leaf in _LEAFS.values())
-
-
-def test_ability_resolution_entrypoint_accepts_context(monkeypatch):
-    from abilities import resolve_ability_context
-
-    context = EffectContext.from_rules_port(
-        object(), _Session(), _DB(), object(), "player", "ai", {},
-        "ability-guid", "")
-    seen = {}
-
-    def fake_resolve(handler, game, session, db, player_uid, ai_uid, bstate,
-                     ability_guid, source_uid, owner_id, target_map,
-                     variables=None, activation_data=None):
-        seen.update({
-            "handler": handler, "game": game, "ability_guid": ability_guid,
-            "source_uid": source_uid, "owner_id": owner_id,
-            "target_map": target_map,
-        })
-        return "resolved"
-
-    monkeypatch.setattr("abilities.framework.resolution.resolve_ability",
-                        fake_resolve)
-    assert resolve_ability_context(
-        context, source_uid=123, owner_id=5, target_map={0: 123}) == \
-        "resolved"
-    assert seen["ability_guid"] == "ability-guid"
-    assert seen["source_uid"] == 123
-    assert seen["owner_id"] == 5
-    assert seen["target_map"] == {0: 123}
-
 
 def test_context_draw_preserves_owner_and_handler_boundary():
     handler = _DrawHandler()
@@ -1222,7 +1074,7 @@ def test_context_conversation_uses_typed_id_and_pauses_at_handler_boundary():
 
 
 def test_tac_decoder_preserves_append_to_list_metadata():
-    from abilities.framework.tac import decode_tac_tree, tac_function, tac_string
+    from rules_port.tac import decode_tac_tree, tac_function, tac_string
 
     # Representative authored TAC from Records.  Keeping the fixture local
     # makes this test independent of the developer's runtime database.
@@ -2299,10 +2151,8 @@ def test_battle2cards_uses_authored_secondary_effect_target():
 
 
 if __name__ == "__main__":
-    test_legacy_effect_context_rejects_rules_port_sessions()
     test_native_grant_ability_can_target_a_champion()
     test_player_target_template_uses_champion_identity_for_grants()
-    test_context_decorator_adapts_legacy_leaf_arguments()
     test_tunnel_moves_source_to_underground_and_emits_zone_triggers()
     test_tunneling_metadata_and_underground_visibility_are_data_driven()
     test_tunneling_surface_queue_is_empty_without_underground_cards()
@@ -2310,10 +2160,8 @@ if __name__ == "__main__":
     test_resource_choice_ability_is_detected_from_metadata()
     test_packet_visibility_matches_csharp_collections_and_reveal_scopes()
     test_subterranean_spy_visibility_reveals_only_the_controller_view()
-    test_match_secondary_reveal_uses_stored_target_owner()
     test_player_updated_carries_subterranean_spy_hand_permission()
     test_player_updated_preserves_the_established_deck_sleeve()
-    test_all_registered_effects_use_the_context_adapter()
     test_context_draw_preserves_owner_and_handler_boundary()
     test_context_authored_events_use_typed_event_names()
     test_native_transform_uses_typed_stored_target_copy()

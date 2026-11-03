@@ -12,7 +12,6 @@ import game_engine
 from gamedata import DEFAULT_RECORD_STORE, ability_graph
 
 from .._shared import owner_uid
-from ..condition_engine import ConditionContext, evaluate_effect_condition
 from ..fields import modifier_metadata
 
 
@@ -56,29 +55,19 @@ def _has_active_player_modifier(db, session, handler, pl_t, ai_t, bstate,
             continue
         condition_id = str(effect.condition_guid or "")
         if condition_id:
-            context_type = ConditionContext
-            evaluate = evaluate_effect_condition
-            if (getattr(session, "_rules_port_session", None) is not None or
-                    bstate.get("_rules_port_attached")):
-                # Visibility is emitted by a projection module, but its
-                # authored modifier condition is still gameplay semantics.
-                # Evaluate it through RulesPort for native sessions so this
-                # projection cannot quietly re-enter the legacy condition
-                # engine.
-                from rules_port.conditions import (ConditionContext as
-                                                    PortConditionContext,
-                                                    evaluate_effect_condition as
-                                                    evaluate_port_condition)
-                context_type = PortConditionContext
-                evaluate = evaluate_port_condition
-            context = context_type(
+            # Visibility is emitted by a projection module, but its
+            # authored modifier condition is still gameplay semantics, so it
+            # is evaluated through RulesPort.
+            from rules_port.conditions import (ConditionContext,
+                                               evaluate_effect_condition)
+            context = ConditionContext(
                 db, session, bstate,
                 ability_source_uid=int(card_uid),
                 ability_source_owner_id=int(owner_id),
                 ability_source_card_owner=int(owner_id),
                 trigger_owner_id=int(owner_id),
                 pl_t=pl_t, ai_t=ai_t, champions=champions)
-            if not evaluate(db, condition_id, context):
+            if not evaluate_effect_condition(db, condition_id, context):
                 continue
         try:
             if int(meta.get("value", meta.get("input_value", 1)) or 0) <= 0:

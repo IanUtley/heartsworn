@@ -21,19 +21,9 @@ def _resolve_deathcry_effect(game, session, db, handler, pl_t, ai_t, bstate,
     bstate = bstate or {}
     bstate["resolving_owner_id"] = owner_user_id
     bstate["resolving_source_uid"] = card_uid
-    if (getattr(session, "_rules_port_session", None) is not None or
-            (bstate or {}).get("_rules_port_attached")):
-        from rules_port.resolution import resolve_port_ability
-        def resolve(handler, game, session, db, pl_t, ai_t, bstate,
-                   ability_guid, source_uid, owner_id, target_map):
-            return resolve_port_ability(
-                handler, game, session, db, pl_t, ai_t, bstate,
-                ability_guid, source_uid, owner_id, target_map=target_map)
-    else:
-        from .resolution import resolve_ability
-        resolve = resolve_ability
-    out = resolve(handler, game, session, db, pl_t, ai_t, bstate,
-                  ag, card_uid, owner_user_id, {})
+    from rules_port.resolution import resolve_port_ability
+    out = resolve_port_ability(handler, game, session, db, pl_t, ai_t, bstate,
+                               ag, card_uid, owner_user_id, target_map={})
     _log(f"    Deathcry {ag[:8]} resolved from stack")
     return out
 

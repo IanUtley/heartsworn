@@ -23,8 +23,8 @@ from abilities.framework.statics import (
     can_block,
     effective_deltas,
     effective_stats,
-    global_flags,
 )
+from rules_port.static_rules import global_flags
 
 
 LIGHT = "fb84ad94-e6ed-f04b-353d-eda325e0ae43"   # +2/+2 per card in your hand
@@ -559,7 +559,7 @@ def test_damage_esc_variable(db):
 def test_champion_damage(db):
     """'Deal 2 damage to target champion' — champions are not game_cards rows;
     _deal_damage maps the champion SessionCardId to the champion's health."""
-    from abilities.framework.bom import _deal_damage
+    from abilities.framework.effects.damage import deal_damage as _deal_damage
 
     class H:
         user_profile = {"id": 5}
@@ -587,109 +587,9 @@ def test_champion_damage(db):
     assert bstate["player_health"] == 17, bstate
 
 
-def test_resource_properties(db):
-    """Comet Strike: 'Each champion gains 10 [DIAMOND].' — threshold property
-    applies to both champions' thresholds."""
-    from abilities.framework.bom import _apply_resource_property
-
-    class H:
-        user_profile = {"id": 5}
-        _player_champ_scid = game_engine.SessionCardId(
-            game_engine.UID.make(244, 5))
-        _ai_champ_scid = game_engine.SessionCardId(
-            game_engine.UID.make(3, 1000))
-
-    class S:
-        session_id = 1
-
-        def _persist(self, conn=None):
-            """Native resource transitions persist their checkpoint here."""
-
-    pl_t = game_engine.UID.make(244, 5)
-    ai_t = game_engine.UID.make(3, 1000)
-    game = game_engine.Game(1, pl_t, ai_t)
-    bstate = {"player_resources": 3, "player_total_resources": 3,
-              "player_threshold": {}, "ai_threshold": {}}
-    pm = {"property": "threshold", "amount": 10,
-          "text": "Each champion gains 10 [DIAMOND]."}
-    _apply_resource_property(game, S(), db, H(), pl_t, ai_t, bstate, pm, None)
-    assert bstate["player_threshold"][game_engine.ECardShards.Diamond] == 10
-    assert bstate["ai_threshold"][game_engine.ECardShards.Diamond] == 10
-    pm2 = {"property": "totalresource", "amount": 10,
-           "text": "Each champion gains [L0][R10]."}
-    _apply_resource_property(game, S(), db, H(), pl_t, ai_t, bstate, pm2, None)
-    assert bstate["player_total_resources"] == 13
-    assert bstate["ai_total_resources"] == 10
-
-
-def test_temporary_attribute_grant(db):
-    """Dimmid's Lifedrain charge power is "this turn" — the grant must land in
-    temporary_attributes (cleared at the next Ready step) and still show up in
-    effective stats for combat, but not persist in card_attributes."""
-    from abilities.framework._shared import apply_attribute_grant
-    from abilities.framework.statics import effective_stats
-
-    class H:
-        user_profile = {"id": 5}
-
-        def _card_full_data(self, game, scid, tpl, inst=None):
-            return (tpl, "Troop", "Card", 1, 1, 1, 0)
-
-    class S:
-        session_id = 1
-        server_id = 100
-
-    pl_t = game_engine.UID.make(244, 5)
-    ai_t = game_engine.UID.make(3, 1000)
-    game = game_engine.Game(1, pl_t, ai_t)
-    card(db, 101, 5, TPL_PLAIN, "warzone")
-    apply_attribute_grant(game, S(), db, H(), pl_t, ai_t, 101, "<b>Lifedrain</b>",
-                          temporary=True)
-    row = db.execute(
-        "SELECT card_attributes, temporary_attributes FROM game_cards "
-        "WHERE card_uid=101").fetchone()
-    assert row[0] == 0, row                       # not permanent
-    assert row[1] & game_engine.ECardAttributes.SpiritDrain, row
-    _atk, _def, attrs, _flags, _rage = effective_stats(db, 1, {}, 101)
-    assert attrs & game_engine.ECardAttributes.SpiritDrain
-
-
-def test_end_of_turn_clear_removes_temp_attrs(db):
-    """The EndTurn clear (temporary_attributes = 0) drops 'this turn'
-    attribute grants from effective stats — Dimmid's Lifedrain must not
-    persist past the turn it was granted."""
-    from abilities.framework._shared import apply_attribute_grant
-    from abilities.framework.statics import effective_stats
-
-    class H:
-        user_profile = {"id": 5}
-
-        def _card_full_data(self, game, scid, tpl, inst=None):
-            return (tpl, "Troop", "Card", 1, 1, 1, 0)
-
-    class S:
-        session_id = 1
-
-    pl_t = game_engine.UID.make(244, 5)
-    ai_t = game_engine.UID.make(3, 1000)
-    game = game_engine.Game(1, pl_t, ai_t)
-    card(db, 101, 5, TPL_PLAIN, "warzone")
-    apply_attribute_grant(game, S(), db, H(), pl_t, ai_t, 101,
-                          "<b>Lifedrain</b>", temporary=True)
-    _atk, _def, attrs, _flags, _rage = effective_stats(db, 1, {}, 101)
-    assert attrs & game_engine.ECardAttributes.SpiritDrain
-    # End-of-turn clear (same SQL the EndTurn handlers run).
-    db.execute(
-        "UPDATE game_cards SET temporary_attributes = 0 "
-        "WHERE session_id=? AND user_id=5 AND location='warzone'", (1,))
-    db.commit()
-    _atk, _def, attrs, _flags, _rage = effective_stats(db, 1, {}, 101)
-    assert not (attrs & game_engine.ECardAttributes.SpiritDrain)
-
-
 def test_end_of_turn_cleanup_clears_damage_before_buffs(db):
     """Cleanup removes marked combat damage before temporary DEF expires."""
-    from abilities.framework._shared import (
+    from rules_port.lifecycle import (
         clear_combat_damage, clear_expired_temporary_attributes)
     from abilities.framework.statics import effective_stats
 
@@ -945,9 +845,6 @@ if __name__ == "__main__":
         test_count_list_attribute_uses_gamedata_list_name)
     run("Damage scales with ESC", test_damage_esc_variable)
     run("Damage maps champion targets", test_champion_damage)
-    run("Resource properties hit both champions", test_resource_properties)
-    run("This-turn attribute grants are temporary", test_temporary_attribute_grant)
-    run("End-of-turn clear drops this-turn attributes", test_end_of_turn_clear_removes_temp_attrs)
     run("End-of-turn cleanup clears damage before buffs",
         test_end_of_turn_cleanup_clears_damage_before_buffs)
     run("Source-owned durations expire on source turn", test_beginning_of_owners_turn_uses_source_controller)

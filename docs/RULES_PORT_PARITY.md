@@ -1577,6 +1577,37 @@ disassembly, plus typed `hex-private/Records/AbilityTemplate.jsonl` and
 `hex-private/Records/AbilityEffectTemplate.jsonl` fields. No card text was used to infer
 these behaviors.
 
+## Card fixtures that only passed on the removed legacy resolver
+
+The legacy ability resolver (`abilities/framework/resolution.py`, the BOM leaf
+table and `EffectContext.from_legacy`) was removed. Live sessions never used it:
+it refused any session with RulesPort attached, and attachment is unconditional.
+Some test fixtures still reached it, because their stub sessions were not
+attached. They were moved to the native entry points (`resolve_port_ability`,
+`resolve_port_trigger`, `resolve_port_played_spell`, `rules_port.effects.dispatch`).
+The fixtures below fail the same way on the pre-removal production code, so
+each one is either a native gap or a fixture that asserted the legacy log
+text. They were removed rather than kept as failing tests. Re-add each one as
+a native acceptance test when its behavior is confirmed against the client:
+
+| Former test | Native result when it was removed |
+|---|---|
+| `tests_cards_fixes`: Crazed Squirrel Titan respects Verdant Wyldeboar buff | wrong troop stats `[(warzone, 8), (warzone, 4)]` |
+| `tests_cards_fixes`: Oakhenge moves revealed troop to hand with its template | assertion failed |
+| `tests_cards_fixes`: Jadiim triggers for a one-cost permanent | no stat buff applied |
+| `tests_cards_fixes`: Verdant Wyldeboar deck move clears battle state | assertion failed |
+| `tests_cards_fixes`: Incubation Slave egg summon and sacrifice | fixture asserted the legacy log string |
+| `tests_cards_fixes`: Bun'jitsu charge power summon and buff | fixture asserted the legacy log string |
+| `tests_cards_fixes`: Chlorophyllia plays Wild Shard from deck | assertion failed |
+| `tests_cards_fixes`: Chlorophyllia PvP view persists resource state | assertion failed |
+| `tests_cards_fixes`: Malfunctioning War Bot hits a random champion at turn start | champion health unchanged in the PvP view |
+| `tests_chain_abilities`: Brood Creeper / Spawn of Othuyeg | `NotImplementedError: the event names no target player` |
+| `tests_chain_abilities`: Chronic Madness buries, escalates and returns to deck | resolver returned `COMPLETED` with no move |
+| `tests_chain_abilities`: Incubate puts eggs in the opposing deck | no eggs created |
+| `tests_combat`: Priestess Deathcry human picker | prompt advertises the invoked child ability, not the Deathcry |
+| `tests_combat`: AI X-cost spell kills its target | target survived |
+| `tests_deck_abilities`: Angel of Dawn plays free on first draw | card stayed in hand |
+
 ## Remaining work
 
 The scope of the complete original-client port is not complete. In addition to
@@ -1595,9 +1626,8 @@ the uncertified rows above, the inspected damage path still needs:
 - Consistent state-based death timing across effect groups and simultaneous
   damage, with real trigger and zone-event acceptance scenarios.
 
-Effect-field audit follow-ups (`tools/ir_coverage/audit_effect_leaves.py`
-reports no meaningful unread effect-template fields for the current snapshot;
-these are the remaining projection limits):
+Effect-field follow-ups (remaining projection limits; the old
+`audit_effect_leaves.py` leaf audit was removed with the legacy leaf registry):
 
 - Current Records contain no `GrantAbility.m_AllSocketedPowersOfMyMaster = 1`
   and no `CreateTokenCopy.m_CopyGems = 1` instances. The master equipment link

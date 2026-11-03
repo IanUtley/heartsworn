@@ -28,7 +28,7 @@ Key files:
 - `game_session.py` — Session state management
 - `static.py` — ALL DB DDL + seeded tables (fresh DBs; single source of truth)
 - `db.py` — Shared SQLite connection (`db._db`) + reusable `db_*` DML helpers
-- `ability.py` - Card ability implementation (BOM leaf executors)
+- `rules_port/resolution.py` / `rules_port/effects.py` - ability resolution and effect dispatch
 - `AssetExtraction/extract_talents.py` — regenerates talent/ability-BOM seed snapshot
 - `migration.py` — run-and-delete one-off migrations (restart.sh)
 - `hconnect.db` — SQLite database
@@ -72,8 +72,7 @@ full restart. The reloaded set is defined by `reload_runtime_modules()` in
   `gamemodes/`, `campaign_runtime/`.
 
 Not reloaded: `hconnect_server.py` and `commands.py` (the reload driver itself), and `application/commands.py` (the command classes the dispatcher and server share; re-running it breaks their identity),
-so changes to them need `bash restart.sh`. Also not reloaded: `ability.py`
-(a facade named `ability`, not under `abilities/`), the `domain/` modules
+so changes to them need `bash restart.sh`. Also not reloaded: the `domain/` modules
 other than `domain/constants.py`, and everything under `gamedata/`. The Records
 store keeps objects built from the classes it was loaded with, so reloading
 `gamedata` mixes class generations and drops nested modifier inputs. Records
