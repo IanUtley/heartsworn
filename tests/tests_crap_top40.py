@@ -31,19 +31,19 @@ _IS_TROOP = {"_t": "Game.Shared.Mechanics.Cards.Filters.IsTroop"}
 
 
 def test_card_filter_accepts_anything_without_a_filter_object():
-    from abilities.framework.targeting import evaluate_card_filter
+    from rules_port.targeting import evaluate_card_filter
     assert evaluate_card_filter(_TROOP_CARD, None, 999) is True
 
 
 def test_card_filter_separates_troops_from_other_cards():
-    from abilities.framework.targeting import evaluate_card_filter
+    from rules_port.targeting import evaluate_card_filter
     spell = dict(_TROOP_CARD, card_type="QuickAction", name="Spell")
     assert evaluate_card_filter(_TROOP_CARD, _IS_TROOP, 999) is True
     assert evaluate_card_filter(spell, _IS_TROOP, 999) is False
 
 
 def test_card_filter_and_requires_every_branch():
-    from abilities.framework.targeting import evaluate_card_filter
+    from rules_port.targeting import evaluate_card_filter
     both = {"_t": "Game.Shared.Mechanics.Cards.Filters.AndCardFilter",
             "m_TargetFilters": [_IS_TROOP,
                                 {"_t": "Game.Shared.Mechanics.Cards.Filters.NotCardFilter",
@@ -171,7 +171,7 @@ def test_csharp_manual_fallback_finds_nothing_for_an_ability_without_targets():
 
 
 def test_legal_targets_for_an_unknown_template_offers_nothing():
-    from abilities.framework.targeting import legal_targets
+    from rules_port.targeting import legal_targets
     db = make_db()
     assert legal_targets(db, 1, 5, "00000000-0000-0000-0000-00000000beef", 999,
                          both_players=True) == []
@@ -706,7 +706,7 @@ def test_legal_targets_offers_the_ability_source_for_a_self_target_template():
     import hconnect_server
     import json
     import pvp_db
-    from abilities.framework.targeting import legal_targets
+    from rules_port.targeting import legal_targets
     db = make_db()
     hconnect_server._db = db
     from tests.tests_combat import add_card

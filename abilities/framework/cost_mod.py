@@ -17,7 +17,7 @@ current as the board changes (matching the client's recalculated variables).
 import json
 import re
 
-from .targeting import (
+from rules_port.targeting import (
     ZONE_MAP,
     evaluate_card_filter,
     shards_from_threshold,

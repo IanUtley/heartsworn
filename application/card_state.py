@@ -302,7 +302,7 @@ class CardStateMixin:
         # Wild troops in the warzone, including troops created later, without
         # ever placing those grants on the chain.
         if scid is not None and card_location == "warzone":
-            from abilities.framework.targeting import evaluate_card_filter
+            from rules_port.targeting import evaluate_card_filter
             card_subtype = subtype or ""
             # Scene target filters can inspect dynamic IntAttr markers (for
             # example, Taming Dire Toad only grants Untamed to non-Tamed

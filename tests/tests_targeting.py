@@ -21,7 +21,7 @@ SRC = fresh_database()
 import game_engine
 
 from abilities.framework import triggers
-from abilities.framework.targeting import evaluate_card_filter
+from rules_port.targeting import evaluate_card_filter
 from rules_port.targeting import legal_targets
 
 
@@ -196,7 +196,7 @@ def test_attacking_filter(db):
     f = {"_t": "Game.Shared.Mechanics.Cards.Filters.AndCardFilter",
          "m_TargetFilters": [{"_t": "Game.Shared.Mechanics.Cards.Filters.IsAttacking"},
                              {"_t": "Game.Shared.Mechanics.Cards.Filters.IsTroop"}]}
-    from abilities.framework.targeting import evaluate_card_filter
+    from rules_port.targeting import evaluate_card_filter
     from game_engine import ECardStates
     assert evaluate_card_filter(
         {"card_type": "Troop", "state": ECardStates.Attacking}, f, 0)

@@ -20,7 +20,7 @@ import game_engine
 
 from rules_port.condition_context import ConditionContext
 from rules_port.conditions import evaluate_effect_condition, trigger_condition_met
-from abilities.framework.targeting import evaluate_card_filter
+from rules_port.targeting import evaluate_card_filter
 
 
 SCRIVENER = "e6e77180-238a-a5db-08da-16f07cb67836"

@@ -2130,8 +2130,13 @@ class EffectContext:
         count = 0
         for row in rows:
             card = CardView.from_count_row(row).as_shape("count_card")
-            if evaluate_card_filter(card, card_filter, self.bstate.get(
-                    "resolving_source_uid"), ability_state=self.bstate, db=self.db):
+            try:
+                matched = evaluate_card_filter(
+                    card, card_filter, self.bstate.get("resolving_source_uid"),
+                    ability_state=self.bstate, db=self.db)
+            except (TypeError, ValueError, KeyError):
+                matched = False
+            if matched:
                 count += 1
         self.bstate.setdefault("ability_variables", {})[str(name)] = count
         return f"counted {name}={count}"

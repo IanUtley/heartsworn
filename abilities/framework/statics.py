@@ -21,7 +21,7 @@ import sqlite3
 
 import game_engine
 
-from .targeting import (
+from rules_port.targeting import (
     ZONE_MAP,
     evaluate_card_filter,
     shards_from_threshold,

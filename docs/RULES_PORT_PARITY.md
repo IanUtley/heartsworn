@@ -1747,3 +1747,13 @@ found `effect_field` identical. `modifier_metadata` differed only by the
 `double` key (m_Double), which the framework dropped and the native doubling
 path reads. The framework's own merge in `statics.py` copies a fixed key list,
 so its behaviour is unchanged.
+
+## Framework targeting module removed
+
+`abilities/framework/targeting.py` is deleted. `evaluate_card_filter`, `ZONE_MAP`
+and the ownership-context guard moved into `rules_port/targeting.py`, and the
+framework callers import them from there. Its `legal_targets` copy had no
+production callers (only two tests), so those tests now use the native
+`legal_targets`; both pass. `shards_from_threshold` moved to `card_view`'s
+`threshold_shards`, which now falls back to `values` when `list` is empty, as
+the framework did (no flag changes in Records).

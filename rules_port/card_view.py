@@ -19,7 +19,6 @@ import json
 from dataclasses import dataclass, field, replace
 from typing import Any, Sequence
 
-from abilities.framework.targeting import shards_from_threshold
 
 
 def threshold_shards(value: Any) -> list[int]:
@@ -28,7 +27,10 @@ def threshold_shards(value: Any) -> list[int]:
         data = json.loads(value or "{}")
     except (TypeError, ValueError, json.JSONDecodeError):
         return []
-    values = data if isinstance(data, list) else data.get("list", data.get("values", []))
+    if isinstance(data, list):
+        values = data
+    else:
+        values = data.get("list") or data.get("values") or []
     return [{0: 0, 1: 4, 2: 8, 3: 16, 4: 32, 5: 64}.get(int(item), 0)
             for item in (values or [])]
 
@@ -184,7 +186,7 @@ class CardView:
             name=row[7] or "",
             cost=row[8] or 0,
             subtype=row[9] or "",
-            shards=list(shards_from_threshold(row[10])),
+            shards=list(threshold_shards(row[10])),
             attributes=int(row[11] or 0) | int(row[12] or 0),
             src_owner_side="player" if (user_id or 0) else "ai",
         )
@@ -549,7 +551,7 @@ class CardView:
         return cls(card_uid=int(uid), template_guid=row[0], name=row[6] or "",
                    card_type=row[1] or "", location=row[2] or "", user_id=int(row[3] or 0),
                    state=int(row[4] or 0), attack=0, defense=0, cost=int(row[7] or 0),
-                   rarity=row[8] or "", shards=shards_from_threshold(row[9]),
+                   rarity=row[8] or "", shards=threshold_shards(row[9]),
                    subtype=row[10] or "",
                    attributes=int(row[11] or 0) | int(row[12] or 0),
                    counters=saved.get("counters") or {},
@@ -561,7 +563,7 @@ class CardView:
         """A template a random transform may become (candidate rows: guid, name, type, ...)."""
         return cls(card_uid=0, template_guid=row[0], name=row[1] or "", card_type=row[2] or "",
                    cost=int(row[3] or 0), rarity=row[4] or "",
-                   shards=shards_from_threshold(row[5]), subtype=row[6] or "",
+                   shards=threshold_shards(row[5]), subtype=row[6] or "",
                    attributes=int(row[7] or 0), location="", user_id=owner, state=0,
                    attack=0, defense=0)
 

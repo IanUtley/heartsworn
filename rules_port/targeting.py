@@ -1,9 +1,9 @@
 """RulesPort-owned target candidate and selection evaluation.
 
-Target legality is a rules decision, so live sessions must not call the
-historical ``abilities.framework.targeting`` implementation.  This module
-keeps the database projection at the edge and evaluates the extracted
-Records filter through the native filter port.
+Target legality is a rules decision.  This module keeps the database
+projection at the edge and evaluates the extracted Records filter through the
+native filter port.  It also owns the card-filter entry point that the
+framework's static, cost and damage paths share.
 """
 
 from __future__ import annotations
@@ -596,28 +596,85 @@ def _parent_uid(serialized_buffs):
     return int(value.get("parent_uid", 0) or 0) if isinstance(value, dict) else 0
 
 
-def evaluate_card_filter(card, spec, source_uid=None, *, ability_state=None,
-                         db=None):
+ZONE_MAP = {
+    "Warzone": "warzone",
+    "Hand": "hand",
+    "Deck": "deck",
+    "Crypt": "discard",
+    "Discard": "discard",
+    "Void": "void",
+    "Champions": "champions",
+    "CastSpells": "CastSpells",
+    "Underground": "underground",
+    "PlayedResources": "PlayedResources",
+    "Choosing": "choosing",
+}
+
+_OWNERSHIP_FILTERS = {"IsControlledBy", "IsNotControlledBy", "DifferentOwners"}
+
+
+def _filter_type_names(node, acc):
+    if isinstance(node, dict):
+        name = str(node.get("_t", "")).rsplit(".", 1)[-1]
+        if name:
+            acc.add(name)
+        for child in node.get("m_TargetFilters") or ():
+            _filter_type_names(child, acc)
+        _filter_type_names(node.get("m_TargetFilter"), acc)
+    return acc
+
+
+def _ownership_context_is_incomplete(card, filter_json, source):
+    """Return True when only the legacy side fallback can resolve ownership."""
+    if not (_filter_type_names(filter_json, set()) & _OWNERSHIP_FILTERS):
+        return False
+    if isinstance(card, dict) and card.get("src_owner_id") is not None:
+        return False
+    if source is None:
+        return True
+    return not any(source.get(key) is not None for key in
+                   ("user_id", "owner_id", "controller_id", "player_id"))
+
+
+def evaluate_card_filter(card, spec, source_uid=None, stored_names=None,
+                         source_card=None, card_pool=None, champion_pool=None,
+                         ability_state=None, db=None):
     """Evaluate one Records card filter against a projected card dict.
 
-    Companion to :func:`legal_targets` for leaves that count filtered cards
-    (``SetCardCountVariable``).  The native context imports this from
-    ``rules_port.targeting``; it previously did not exist there and raised
-    ImportError.
+    ``card`` is a dict with at least card_uid, card_type, location, user_id, attack and defense.
+    ``source_card`` is the live source card when the filter needs it (cost, shared-source filters);
+    otherwise the source is identified by ``source_uid``. An ownership filter whose context is
+    incomplete raises ``ValueError`` instead of guessing; callers that accept a non-match decide
+    that themselves.
     """
-    if not spec:
+    if not isinstance(spec, dict) or not spec:
         return True
-    source = None
-    if source_uid is not None:
+    source = source_card
+    if source is None and source_uid is not None:
         try:
             source = {"card_uid": int(source_uid)}
         except (TypeError, ValueError):
             source = None
-    try:
-        return records_filter_matches(
-            card, spec, source=source, context=ability_state or {})
-    except (TypeError, ValueError, KeyError):
-        return False
+    if _ownership_context_is_incomplete(card, spec, source):
+        raise ValueError("legacy ownership context is incomplete")
+    context = ability_state if isinstance(ability_state, dict) else {}
+    extra = {}
+    if stored_names is not None:
+        extra["stored_names"] = stored_names
+    if card_pool is not None:
+        extra["all_cards"] = tuple(card_pool)
+    if db is not None:
+        extra["db"] = db
+    if extra:
+        context = {**context, **extra}
+    # Ownership filters compare numeric owner ids: the player is the source's owner, falling back
+    # to the card's own owner id.
+    player = None
+    if isinstance(source, dict) and source.get("user_id") is not None:
+        player = source["user_id"]
+    elif isinstance(card, dict):
+        player = card.get("src_owner_id", card.get("src_owner_side"))
+    return records_filter_matches(card, spec, source=source, context=context, player=player)
 
 
 def is_chosen_secondary_target(spec):

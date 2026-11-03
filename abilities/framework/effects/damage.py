@@ -105,7 +105,7 @@ def _card_view(db, session_id, card_uid, bstate=None):
             "attack": 0, "defense": 0, "name": "Champion", "cost": 0,
             "subtype": "", "shards": [], "card_abilities": [],
         }
-    from ..targeting import shards_from_threshold
+    from rules_port.targeting import shards_from_threshold
     view = {
         "card_uid": int(row[0]), "card_type": row[1] or "",
         "location": row[2] or "", "user_id": row[3],
@@ -134,7 +134,7 @@ def _rule_prevents_damage(db, session, bstate, target_uid, dealer_uid,
     if db is None or dealer_uid is None:
         return False
     from ..statics import rule_modifiers
-    from ..targeting import evaluate_card_filter
+    from rules_port.targeting import evaluate_card_filter
 
     target = _card_view(db, session.session_id, target_uid, bstate)
     dealer = _card_view(db, session.session_id, dealer_uid, bstate)
