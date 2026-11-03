@@ -176,7 +176,7 @@ def _live_has_legal_blockers(session):
 
 def default_phase_states(enum) -> dict[str, TurnPhaseState]:
     """Build state objects keyed by C# phase name from ``game_engine.ETurnPhases``."""
-    states = {}
+    states: dict[str, TurnPhaseState] = {}
     # These are subclasses of the C# PriorityWindowState rather than merely
     # phases whose names happen to mention priority. Their queue includes all
     # players; the other states below intentionally do not.

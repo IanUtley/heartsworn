@@ -1633,7 +1633,8 @@ class AuthoritativeSession:
             return False
         transaction = self._transactions.popleft()
         profile_callback = getattr(self, "_transaction_profile_callback", None)
-        started = time.perf_counter() if callable(profile_callback) else None
+        callback = profile_callback if callable(profile_callback) else None
+        started = time.perf_counter() if callback is not None else None
         handler = self._transaction_handlers.get(transaction.kind)
         try:
             self._in_transaction_handler = True
@@ -1648,8 +1649,8 @@ class AuthoritativeSession:
                 self.persist()
             return handled
         finally:
-            if started is not None:
-                profile_callback(
+            if callback is not None and started is not None:
+                callback(
                     transaction.kind, time.perf_counter() - started)
 
     def _resolve_pass_priority(self, transaction: RulesTransaction) -> bool:

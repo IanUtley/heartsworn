@@ -174,9 +174,9 @@ NATIVE_EFFECTS = {
 # Reserved for an effect family whose native implementation is intentionally
 # limited to named metadata subsets. The current Records CardModifier set is
 # fully handled and is therefore listed in NATIVE_EFFECTS instead.
-STAGED_EFFECTS = set()
+STAGED_EFFECTS: frozenset[str] = frozenset()
 
-NATIVE_EFFECT_SUBSETS = {
+NATIVE_EFFECT_SUBSETS: dict[str, frozenset[str]] = {
 }
 
 def coverage_summary():

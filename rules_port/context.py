@@ -2444,13 +2444,13 @@ class EffectContext:
                 "AND user_id=? AND location=? ORDER BY position",
                 (self.session.session_id, int(owner or 0),
                  zone_map[all_zone])).fetchall()
-            moved = 0
+            count = 0
             for (uid,) in rows:
                 if uid is None:
                     continue
                 self._move_simple_zone(int(uid), destination)
-                moved += 1
-            return f"moved all {moved} {all_zone} cards to {destination}"
+                count += 1
+            return f"moved all {count} {all_zone} cards to {destination}"
         moved = self._move_simple_zone(target, destination,
                                        previous_owner_id=previous_owner_id)
         # A card the owner looked at, then put into hand, is revealed to the

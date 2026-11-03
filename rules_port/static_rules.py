@@ -24,7 +24,7 @@ def _empty_deltas():
             "card_properties": {}, "int_attr_modifiers": []}
 
 
-_EMPTY_TARGET_SET = frozenset()
+_EMPTY_TARGET_SET: frozenset[int] = frozenset()
 _MISSING = object()
 # Continuous leaf properties that change a card's projected view (thresholds
 # and subtype) rather than its combat numbers.

@@ -266,6 +266,8 @@ def bind_expressions(variables: dict[str, Any], values: dict[str, int], wanted: 
         if name in stack:
             raise NotImplementedError(f"expression cycle on {name}")
         if _is_threshold(variable):
+            if threshold is None:
+                raise ValueError(f"threshold variable {name} needs a threshold resolver")
             fresh[name] = int(threshold(variable))
             return fresh[name]
         default = int(variable.m_DefaultValue or 0)

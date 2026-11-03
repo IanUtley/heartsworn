@@ -1,3 +1,4 @@
+from typing import Any, Callable
 """RulesPort-owned PreGame condition and setup-modifier helpers.
 
 Data-driven from the extracted talent table and Records ability graphs; the
@@ -35,7 +36,7 @@ def _effect_template_json(effect_guid):
         "AbilityEffectTemplate", str(effect_guid).lower()))
 
 
-_CONDITIONS = {}
+_CONDITIONS: dict[str, Callable[..., Any]] = {}
 
 def register_condition(name):
     def deco(fn):

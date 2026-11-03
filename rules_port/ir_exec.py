@@ -730,7 +730,7 @@ def _resolved_targets(root: MechanicsObject, index: int, scope: Scope) -> list[i
         # them (rules_port.targeting.legal_targets).
         from rules_port.targeting import legal_targets
         context = scope.context
-        champions = getattr(context.handler, "_champion_targets", lambda: [])() or []
+        champions: list[Any] = getattr(context.handler, "_champion_targets", lambda: [])() or []
         return [int(uid) for uid in legal_targets(
             context.db, context.session.session_id, int(scope.owner_uid), _guid(root.m_AbilityTargetTemplateIds[index]),
             int(scope.source_uid), both_players=True, champions=champions, battle_state=context.bstate)]
@@ -1045,7 +1045,7 @@ def _run_clause(root: MechanicsObject, clause: Any, scope: Scope) -> None:
             now = int(current[0] if kind == "AttackModifier" else current[1])
             # C# AttackModifier.Apply: a named property (the card's own attack or defense) takes the place of the
             # amount. A replacing modifier sets the value, so its buff is the difference from the value now.
-            value = now if prop != "Unknown" else amount
+            value = now if prop != "Unknown" else int(amount or 0)
             if replace:
                 value = value - now
             attack, defense = (value, 0) if kind == "AttackModifier" else (0, value)
@@ -1134,7 +1134,7 @@ ENABLED: set[str] = {DAZED_ABILITY_GUID, VULNERABLE_ABILITY_GUID,
 # The client's built-in ability templates (hex-private/HexClient/.../Resources/BuiltInResources.cs). The native built-in
 # rules own them (Dazed, Vulnerable, Stealth, the card-play and conscript templates), so the interpreter never resolves
 # them: coverage reports them as owned, and engine_runs leaves them on the native path.
-NATIVE_OWNED_TEMPLATES = frozenset({
+NATIVE_OWNED_TEMPLATES: frozenset[str] = frozenset({
 })
 
 

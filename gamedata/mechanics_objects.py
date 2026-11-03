@@ -57,6 +57,11 @@ class MechanicsObject:
         for key, value in values.items():
             setattr(self, key, value)
 
+    # Fields are set from the Records dict at runtime (see __init__), so their names are not
+    # known statically. Declaring the lookup as Any lets callers read a Records field typed.
+    def __getattr__(self, name: str) -> Any:
+        raise AttributeError(name)
+
     def present(self, name: str) -> bool:
         return name in self._order
 

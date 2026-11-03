@@ -91,7 +91,7 @@ def unsupported(node: Any, prefix: str) -> list[str]:
 def _champions(context: Any) -> list[tuple]:
     """The champions as ``(card uid, owner, name, health)``, from the handler the live path holds. A context with no
     handler (the static paths) takes them from the battle state's champion map, with the health the handler reads."""
-    champions = getattr(context.handler, "_champion_targets", lambda: [])() or []
+    champions: list[Any] = getattr(context.handler, "_champion_targets", lambda: [])() or []
     if champions:
         return list(champions)
     state = context.bstate or {}
