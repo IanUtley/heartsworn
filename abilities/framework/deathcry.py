@@ -37,7 +37,8 @@ def resolve_deathcry(game, session, db, handler, pl_t, ai_t, card_uid, tpl_guid,
     condition actually holds for a death (source Warzone -> destination
     Discard), so a Deploy (enters-play) trigger never fires as a Deathcry.
     """
-    from .condition_engine import ConditionContext, trigger_condition_met
+    from rules_port.condition_context import ConditionContext
+    from rules_port.conditions import trigger_condition_met
 
     from pvp_db import (db_template_ability_payload, db_card_ability_payload,
                         db_card_owner_id, db_ability_trigger_metadata,
@@ -91,6 +92,9 @@ def resolve_deathcry(game, session, db, handler, pl_t, ai_t, card_uid, tpl_guid,
                     db, session, bstate or {}, event_type="CardEnteredZoneEvent",
                     ability_source_uid=int(card_uid),
                     ability_source_owner_id=owner_id,
+                    # The death is the event: its player is the dying card's
+                    # controller (client TriggerPlayerControlsAbilitySource).
+                    trigger_owner_id=owner_id,
                     trigger_uid=int(card_uid),
                     pl_t=pl_t, ai_t=ai_t,
                     event_source_collection="warzone",

@@ -1721,5 +1721,9 @@ correct and the framework's inner result as wrong.
 
 RequiresChampionHealth now honours `m_PlayerFilter` in the native layer
 (Self, SingleOpponent, MultipleOpponents), matching the framework.
-`condition_engine.py` stays in use by `abilities/framework/deathcry.py` until
-that caller is switched, so its copies are not yet deleted.
+Deathcry trigger checks also use the native layer. The first differential found
+79 disagreements, all from `TriggerPlayerControlsAbilitySource`: deathcry did not
+pass the dying card's controller as the trigger owner, so the native check
+rejected it. Deathcry now passes `trigger_owner_id`, and the 28,224-case
+differential over all CardEnteredZone triggers agrees. `condition_engine.py` is
+now used only by tests.
