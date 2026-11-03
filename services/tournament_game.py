@@ -7742,7 +7742,7 @@ def _pvp_end_game(session, state, winner_pid, loser_pid, reason=""):
                              "game-end-enable-input")
             import commands as _cmd
             _cmd.push_battle_game_end(h, session, [winner_uid], [loser_uid])
-        except Exception as e:
+        except Exception:
             # Fall back to sending the raw packet if the helper path fails.
             from domain.events import make_game_ended_packet
             nw = make_game_ended_packet(int(session.session_id), my_uid,

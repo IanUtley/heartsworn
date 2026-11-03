@@ -48,7 +48,7 @@ def card_art() -> dict[str, str]:
 
 def harc_index(path: Path) -> tuple[int, dict[str, tuple[int, int]]]:
     """``(data start, {art number: (offset, size)})`` from a .harc header."""
-    items, position = {}, 0
+    items = {}
     with path.open("rb") as handle:
         if handle.readline() != b"HARC\r\n":
             raise ValueError(f"{path.name}: not a HARC file")

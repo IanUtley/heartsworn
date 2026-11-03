@@ -592,7 +592,7 @@ class CardStateMixin(_HostBase):
         ab_json = ab_json or "[]"
         attrs = int(attrs or 0)
         try:
-            ability_guids = [g.lower() for g in json.loads(ab_json)]
+            [g.lower() for g in json.loads(ab_json)]
         except Exception:
             pass
         _hc.db_card_sync_abilities(

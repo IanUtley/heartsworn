@@ -568,7 +568,7 @@ class TransactionsMixin(_HostBase):
                     ct = _hc.game_engine.card_type_from_db(ct_name)
                 else:
                     ct = _hc.game_engine.ECardTypes.Troop
-                    cost, atk, def_ = 0, 0, 0
+                    cost = 0
                 hand_cards.append((scid, cost))
                 # Full card data from the template via _card_full_data so
                 # the re-pushed hand card keeps its thresholds, abilities,
@@ -1000,7 +1000,6 @@ class TransactionsMixin(_HostBase):
             game2 = _hc.game_engine.Game(session.session_id, pl_t, ai_t)
 
             # Fetch deck's active_gems ONCE (not per card)
-            deck_gems = {}
             arena_lookup = _hc.db_get_arena_state(self.user_profile["id"])
             deck_lookup_id = self._resolve_fra_deck_id(
                 arena_lookup["deck_id"]) or 0
@@ -1149,12 +1148,11 @@ class TransactionsMixin(_HostBase):
             self._push_transaction_ack(session)
             _hc.log_req(f"    Trigger target chosen: {ag[:8]} "
                     f"target={hex(chosen_uid) if chosen_uid else 'none'}")
-            handled = True
         if bstate.get("pending_deck_search"):
             # The player answered a "search your deck" class-39 prompt
             # (e.g. Darkspire Priestess's Deathcry) — move the chosen
             # matching deck card into the controller's hand.
-            handled = self._resolve_pending_deck_search(
+            self._resolve_pending_deck_search(
                 session, pl_t, ai_t, inner_bytes)
         if bstate.get("pending_discard_ability"):
             # The chosen card is the LAST Card-type UID in the transaction
@@ -1813,7 +1811,6 @@ class TransactionsMixin(_HostBase):
         """Resolve a priority pass through the gameplay service boundary."""
         import hconnect_server as _hc
         pass_turn_phase = transaction.pass_turn_phase
-        handled = False
         from rules_port import lifecycle as _be
         pl_t = _hc.game_engine.UID.make(244, int(self.client_reck_id))
         ai_t = _hc.game_engine.UID.make(_hc.game_engine.SERVICE_AI_UID_TYPE, 1000)
@@ -1841,7 +1838,6 @@ class TransactionsMixin(_HostBase):
             if not _rpv:
                 _hc.log_req("    Pass during setup phase — no-op (battle not started)")
             self._push_transaction_ack(session)
-            handled = True
         else:
             bstate = _be.load_state(session)
             self._current_bstate = bstate
@@ -1882,7 +1878,6 @@ class TransactionsMixin(_HostBase):
                     and not pending_ai_chain):
                 _hc.log_req(f"    Ignored stale pass (client phase {pass_turn_phase} != {_be.current_phase(bstate)})")
                 self._push_transaction_ack(session)
-                handled = True
             elif (_be.stack_empty(bstate) and
                   bstate.get("turn_player") == _be.AI):
                 # The human passed during the AI's turn (an opponent-stop
@@ -1892,7 +1887,6 @@ class TransactionsMixin(_HostBase):
                 _be.save_state(session, bstate)
                 _hc.log_req(f"    Human passed during AI turn — resuming AI at idx {start_idx}")
                 self._run_ai_turn(session, pl_t, ai_t, bstate, start_idx=start_idx)
-                handled = True
             elif _be.current_phase(bstate) in (_hc.game_engine.ETurnPhases.EndTurn,
                                                _hc.game_engine.ETurnPhases.Discard):
                 # Hand the human's turn to the AI. The "end of your turn" triggers are not dispatched

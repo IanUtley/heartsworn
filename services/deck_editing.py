@@ -233,7 +233,6 @@ def handle_addnewdeck_2089(handler, target, instance, data_type, reqid, comp, se
     W(hexlify(struct.pack("<Q", deck_uid64)).decode("ascii")); S()
     sz[midx] = b.tell() - fs ; sz[uidx] = b.tell() - f
     # Deckbits (manual 22 fields — skip ActiveGems, Lock, Personality)
-    dbidx = len(sz)-1
     f = b.tell(); sz.append(0) ; dbx = len(sz)-1
     W("Deckbits"); S(); W(str(dbx)); S(); W(str(ft2("Game.Shared.Domain.deck_bits"))); S(); W("22"); S()
     def wfld(name, typ, val):

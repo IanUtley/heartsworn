@@ -1225,7 +1225,7 @@ def _shared_name_card_is_valid(db, session_id, card, template_id, template,
     if "champions" in {zone.lower() for zone in zones}:
         for entry in champions or ():
             try:
-                uid, candidate_owner = int(entry[0]), int(entry[1])
+                _, candidate_owner = int(entry[0]), int(entry[1])
                 candidate_name = str(entry[2] if len(entry) > 2 else
                                       "Champion").lower()
             except (IndexError, TypeError, ValueError):

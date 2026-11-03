@@ -173,7 +173,7 @@ class ProfileStreamMixin(_HostBase):
                 # Pre-resolve card IDs to template GUIDs
                 import json as _json
                 try:
-                    card_ids = _json.loads(dk.get("cards", "[]"))
+                    _json.loads(dk.get("cards", "[]"))
                 except:
                     pass
                 card_guids: list[int] = []  # CardsInDeck kept empty in profile push

@@ -369,7 +369,6 @@ def handle_send_challenge_response(handler, target, instance, reqid, comp,
 
     player_name = (handler.user_profile.get("name", "Unknown")
                    if handler.user_profile else "Unknown")
-    player_id = int(handler.client_reck_id) if hasattr(handler, 'client_reck_id') else 0
 
     log_req(f">>> SendChallengeResponse: {player_name} match={match_id} accepted={accepted}")
 

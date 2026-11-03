@@ -2,7 +2,6 @@
 
 import json, time
 import sys
-from datetime import datetime
 
 from db import log_req
 from chat_db import db_store_chat, db_get_recent_chat, display_name_from_identity
@@ -83,14 +82,6 @@ def _handle_rjoin(handler, room, chat_data):
     elif handler.user_profile:
         recent = db_get_recent_chat(room, 30)
         for msg in recent:
-            ts = msg.get("time", "")
-            time_str = ""
-            if ts:
-                try:
-                    dt = datetime.fromisoformat(ts)
-                    time_str = f"[{dt.strftime('%H:%M')}] "
-                except Exception:
-                    pass
             hist = json.dumps({
                 "action": "rchat",
                 "room": room,
