@@ -1080,7 +1080,6 @@ class HCPHandler(RulesPortProjectionMixin, ProfileStreamMixin, CardPlayMixin, Ca
                     event_owner = game.player_uid
                 else:
                     current_key = "ai_resources"
-                    total_key = "ai_total_resources"
                     event_owner = game.ai_uid
                 prefix = "player" if current_key.startswith("player") else "ai"
                 current = int(battle_state.get(current_key, 0) or 0)
@@ -1110,7 +1109,6 @@ class HCPHandler(RulesPortProjectionMixin, ProfileStreamMixin, CardPlayMixin, Ca
                     return False
                 amount = cost_plan.resource
                 charge_amount = cost_plan.charge_points
-                effective_spell = cost_plan.spell_points
                 # Additional card costs are part of the same client ability
                 # activation (for example Hideous Conversion's authored
                 # ``m_SacrificeTarget``).  The Mono payload commonly flattens

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from typing import Any
 
 from .actions import AbilityResolutionState
 
@@ -2189,6 +2190,7 @@ def prompt_interpreted_reveal(handler, game, session, db, player_uid, ai_uid, ba
     if pause.revealed and not battle_state.get("pvp") and int(continuation["owner_uid"]) != int(player_uid) \
             and pause.candidates:
         from rules_port.context import EffectContext
+        from . import ir_exec
         pick = _ai_revealed_pick(handler, session, battle_state, ai_uid, player_uid, pause.candidates)
         battle_state.pop("resolution_paused", None)
         try:

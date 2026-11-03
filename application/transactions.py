@@ -448,7 +448,6 @@ class TransactionsMixin:
     def _handle_mulligan_keep_transaction(self, session, transaction):
         """Resolve an accepted opening hand for PvP or Practice."""
         import hconnect_server as _hc
-        inner_bytes = transaction.inner_bytes
         handled = False
         if (session.session_name or "").startswith("tourney-"):
             from services.tournament_game import (
@@ -557,7 +556,6 @@ class TransactionsMixin:
                     tpl_guid, ct_name, _name, cost, atk, def_ = t
                     ct = _hc.game_engine.card_type_from_db(ct_name)
                 else:
-                    tpl_guid = "00000000-0000-0000-0000-000000000000"
                     ct = _hc.game_engine.ECardTypes.Troop
                     cost, atk, def_ = 0, 0, 0
                 hand_cards.append((scid, cost))
@@ -1658,7 +1656,6 @@ class TransactionsMixin:
             save_checkpoint(session, bstate)
             self._push_transaction_ack(session)
             _hc.log_req("    AssignDamage: paused for deck-search answer")
-            handled = True
             return True
         # Advance to the next phase (SecondMain after AssignDamage).  Native
         # RulesPort already performed that transition above; applying the
@@ -1808,7 +1805,6 @@ class TransactionsMixin:
     def _handle_pass_priority_transaction(self, session, transaction):
         """Resolve a priority pass through the gameplay service boundary."""
         import hconnect_server as _hc
-        inner_bytes = transaction.inner_bytes
         pass_turn_phase = transaction.pass_turn_phase
         handled = False
         from rules_port import lifecycle as _be
@@ -2060,7 +2056,6 @@ class TransactionsMixin:
                             # follow-up advances the phase.
                             self._push_transaction_ack(session)
                             _hc.log_req("    Pass at AssignDamage: paused for deck-search answer")
-                            handled = True
                             return True
                     _be.advance_phase(bstate)
                     _be.save_state(session, bstate)

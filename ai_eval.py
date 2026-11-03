@@ -398,7 +398,6 @@ class Hints:
             self.multiplier *= self.personality.values["Buff"]
 
     def _find_buffs(self, ag):
-        card = self.card
         perm_atk = perm_def = tmp_atk = tmp_def = 0
         for etype, pm in self.evaluator.effects_for(ag):
             if etype != "CardModifierAbilityEffectTemplate":

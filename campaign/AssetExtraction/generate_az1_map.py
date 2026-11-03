@@ -294,7 +294,6 @@ def conversation_label(name: str) -> str:
 def load_node_details(database_path: Path, records_path: Path) -> dict[str, NodeDetails]:
     """Load authored AZ1 encounter/conversation details (campaign_content)."""
     champion_map = champion_names(records_path)
-    details = {}
     import campaign_source
     campaign_source.ensure_campaign_path()
     import campaign_content

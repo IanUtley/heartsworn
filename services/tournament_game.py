@@ -9890,7 +9890,6 @@ def handle_ready_for_game_setup(handler, session, pvp_ready, player_handlers):
         try:
             from binascii import hexlify as _hx
             opp_hex = _hx(struct.pack("<Q", opp_uid_val)).decode("ascii")
-            opp_name = b"Opponent"
 
             from encoder import encode_objfmt_response
             resp_inner = encode_objfmt_response(

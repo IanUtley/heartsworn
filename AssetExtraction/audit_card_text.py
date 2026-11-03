@@ -111,7 +111,6 @@ _MODIFIER_CLAIMS = {
     "attackimmunity": {"immunity"},
     "blockimmunity": {"immunity"},
     "setherohealth": {"health_set"},
-    "healhero": {"heal"},
 }
 
 # Cards whose printed claim is fulfilled outside battle resolution (PvE

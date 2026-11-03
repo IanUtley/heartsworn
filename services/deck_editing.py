@@ -780,7 +780,6 @@ def handle_addchampion_2033(handler, target, instance, data_type, reqid, comp, s
     else:
         champ_db_id = 1
 
-    champ_uid64 = (champ_db_id << 8) | 12  # 12 = UID.Type.Champion
 
     # Read back the champion's actual last_deck_id (set by the auto-created
     # starter deck above, or 0 if the deck was already granted previously).

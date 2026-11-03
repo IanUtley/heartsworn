@@ -103,7 +103,6 @@ def run(race: str, zones: set[str], verbose: bool = False,
                                  (champ_id,)).fetchone()[0]
         else:
             _deleted, camp_id = campaign.restart_champion_campaigns(db, champ_id)
-        net = (0, "s", "t", "i", 0, 1)
 
         def call(fn, env):
             responses.clear()
