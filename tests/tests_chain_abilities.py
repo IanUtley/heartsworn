@@ -252,7 +252,7 @@ def test_brood_creeper_does_not_fire_on_own_champion(db):
     controls the damaged champion (the Not(TriggerPlayerControlsTarget) gate).
     A troop can't hit its own champion in combat, so simulate the event where
     the AI's Brood Creeper's owner controls the target."""
-    from abilities.framework.triggers import resolve_triggers
+    from rules_port.triggers import resolve_triggers
     _copy_card(db, TPL_BROOD_CREEPER)
     _copy_card(db, TPL_SPIDESPAWN)
     add_card(db, 101, 0, TPL_BROOD_CREEPER)
@@ -524,7 +524,7 @@ def test_hand_incantation_trigger_does_not_fire(db):
     CardDrawnEvent trigger from the hand (m_TriggerCollectionFlags =
     Champions|Warzone) — this was the "AI played it without spending mana"
     symptom: the draw trigger put the hand card on the chain."""
-    from abilities.framework.triggers import resolve_triggers
+    from rules_port.triggers import resolve_triggers
     _copy_card(db, TPL_INCANTATION)
     add_card(db, 101, 0, TPL_INCANTATION, loc="hand")
     add_card(db, 102, 0, TPL_INCANTATION, loc="warzone")

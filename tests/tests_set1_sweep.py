@@ -35,7 +35,7 @@ import game_engine
 
 from tests.tests_combat import HandlerStub, SessionStub
 from rules_port.resolution import resolve_port_ability
-from abilities.framework.triggers import resolve_triggers
+from rules_port.triggers import resolve_triggers
 from rules_port.resolution import resolve_port_trigger as resolve_stack_trigger
 
 SET1 = "0382f729-7710-432b-b761-13677982dcd2"

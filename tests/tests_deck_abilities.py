@@ -24,7 +24,7 @@ fresh_database()
 import game_engine
 import db as dbmod
 
-from abilities.framework import triggers
+from rules_port import triggers
 from rules_port.resolution import (
     resolve_port_ability,
     resolve_port_played_spell as resolve_played_spell,

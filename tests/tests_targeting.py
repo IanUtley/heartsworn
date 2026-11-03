@@ -20,7 +20,7 @@ SRC = fresh_database()
 
 import game_engine
 
-from abilities.framework import triggers
+from rules_port import triggers
 from rules_port.targeting import evaluate_card_filter
 from rules_port.targeting import legal_targets
 

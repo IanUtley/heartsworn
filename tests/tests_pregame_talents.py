@@ -100,7 +100,7 @@ def test_expendable_lives_grants_and_resolves_one_shot_deathcry():
     """Shin'hare's Expendable Lives resolves through one GameStarted path."""
     db, path = _database_copy()
     try:
-        from abilities.framework.triggers import resolve_triggers
+        from rules_port.triggers import resolve_triggers
         from rules_port.resolution import resolve_port_trigger as resolve_stack_trigger
         from rules_port.context import EffectContext
         from rules_port.death_effects import kill_troop

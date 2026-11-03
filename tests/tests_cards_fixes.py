@@ -176,7 +176,7 @@ def test_twisted_fate_buries_on_player_draw(db):
     """The player draws a card -> their Twisted Fate (warzone) fires and buries
     the top card of the AI's deck.  The trigger source is the drawing champion
     (IsHero) and the target is the drawn card (IsType)."""
-    from abilities.framework.triggers import resolve_triggers
+    from rules_port.triggers import resolve_triggers
     _copy_card(db, "4b6df816-7a67-419c-896b-d30bd959bc02")  # Twisted Fate
     add_card(db, 101, 5, "4b6df816-7a67-419c-896b-d30bd959bc02")  # player TF
     db.execute(
@@ -369,7 +369,7 @@ def test_native_keyword_modifier_survives_stat_modifier_sequence(db):
 
 def test_argus_hand_trigger_fires_at_turn_start(db):
     """Argus's hand-based start-of-turn trigger must be discovered in PvP."""
-    from abilities.framework.triggers import resolve_triggers
+    from rules_port.triggers import resolve_triggers
 
     argus = "e9b37ccc-6f20-4f8f-8a93-90a85179f5b3"
     trigger = "2fdfc7c6-2fa0-2eb8-9d71-ac2952359a0b"
@@ -429,7 +429,7 @@ def test_argus_hand_trigger_fires_at_turn_start(db):
 def test_charge_bot_deploy_gains_a_charge(db):
     """Charge Bot's data-defined Deploy modifier must update the controller's
     charge pool and emit the client-visible charge event."""
-    from abilities.framework.triggers import resolve_triggers
+    from rules_port.triggers import resolve_triggers
     from rules_port.resolution import resolve_port_trigger as resolve_stack_trigger
 
     tpl = "7325706e-6bf1-4ca4-8d6b-5da13ac069f4"
@@ -1431,7 +1431,7 @@ def test_fertility_magic_talent_triggers_on_shinhare_play(db):
     ability TAC and must be rolled before the Battle Hopper summon is put on
     the chain.
     """
-    from abilities.framework.triggers import resolve_triggers
+    from rules_port.triggers import resolve_triggers
     from rules_port.resolution import resolve_port_trigger as resolve_stack_trigger
 
     fertility_ag = "e4767a62-5a39-7e17-42e9-5d174b39539c"
@@ -1487,7 +1487,7 @@ def test_twisted_fate_buries_opposing_drawer_deck(db):
     The printed "you draw" condition is owner-scoped; the opposing player's
     deck must remain untouched.
     """
-    from abilities.framework.triggers import resolve_triggers
+    from rules_port.triggers import resolve_triggers
     from rules_port.resolution import resolve_port_trigger as resolve_stack_trigger
     _copy_card(db, "4b6df816-7a67-419c-896b-d30bd959bc02")  # Twisted Fate
     add_card(db, 111, 0, "4b6df816-7a67-419c-896b-d30bd959bc02")  # AI TF
@@ -1520,7 +1520,7 @@ def test_twisted_fate_buries_opposing_drawer_deck(db):
 def test_twisted_fate_buries_opposing_pvp_deck(db):
     """Both PvP owners are non-zero ids; the owner's draw still selects the
     other player's deck, without collapsing both players into one side."""
-    from abilities.framework.triggers import resolve_triggers
+    from rules_port.triggers import resolve_triggers
     from rules_port.resolution import resolve_port_trigger as resolve_stack_trigger
     _copy_card(db, "4b6df816-7a67-419c-896b-d30bd959bc02")  # Twisted Fate
     add_card(db, 121, 1001, "4b6df816-7a67-419c-896b-d30bd959bc02")
@@ -1961,7 +1961,7 @@ def test_hidden_scene_static_resource_grant_runs_at_game_start(db):
     GameStarted dispatcher must execute it for the hidden ``mod`` card and
     grant both champions their current and permanent resource.
     """
-    from abilities.framework.triggers import resolve_triggers
+    from rules_port.triggers import resolve_triggers
     from rules_port.lifecycle import default_state
 
     early_sprouts = "1bbcc90a-0046-4d64-911b-b1ea69ee5b1c"

@@ -1786,3 +1786,12 @@ Migrating their tests showed two framework-only details:
 The tests' stub handler returned the card type as a string, which made 11
 `tests_leaves` cases fail with `str & int`; the stub now returns
 `ECardTypes.Troop`, and all 20 cases pass.
+
+## Framework trigger forwarder removed
+
+`abilities/framework/triggers.py` is deleted. Its `resolve_triggers` was a
+forwarder to `NativeTriggerBackend`, and no production code called it, so the
+function moved unchanged into `rules_port/triggers.py`. Test callers import it
+from there. The trigger-related test files show the same pass count (128) and the
+same failures as before the move. Several of those failures are older: some tests
+still call `resolve_enters_play_triggers`, which no module defines.

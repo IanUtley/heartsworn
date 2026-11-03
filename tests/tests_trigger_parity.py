@@ -348,7 +348,7 @@ def _records_trigger_inventory_is_45_authored_event_types():
 
 
 def _rules_port_checkpoint_cannot_fall_back_to_legacy_trigger_scan():
-    from abilities.framework.triggers import resolve_triggers
+    from rules_port.triggers import resolve_triggers
 
     session = SessionStub()
     session.session_id = 41

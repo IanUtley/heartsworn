@@ -11,7 +11,6 @@ these modules resolve abilities; `rules_port` does (see `../README.md`).
 | `stat_mod.py` | Persist ATK/DEF modifiers and push `CardUpdated` |
 | `statics.py` | Continuous (WhileCardInPlay / Permanent) static evaluation |
 | `tac.py` | TAC v2 decoder (`tac_function`, `decode_tac`, ...) |
-| `triggers.py` | Historical trigger entry points; every event goes to `rules_port.triggers` |
 | `effects/` | Counters, deck search, choice constants, visibility projection, zone-move projection |
 | `keywords/combat.py` | Rage adapter over `statics.apply_rage` |
 
