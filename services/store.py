@@ -339,7 +339,6 @@ def handle_purchase(handler, target, instance, reqid, comp, session_id, conh,
         item_id=int(item_id),
         quantity=int(quantity),
     )).value
-    item_name = result["item_name"]
     currency_type = result["currency"]
     template_guid = result["template_guid"]
     remaining = result["remaining"]

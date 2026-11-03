@@ -1016,7 +1016,7 @@ def _record_resource_decision(report, owner_id, row, played):
     if report is None:
         return
     template_guid = str(row[2])
-    card_uid = int(row[1])
+    int(row[1])
     name_row = _db.execute(
         "SELECT name FROM card_templates WHERE guid=?", (template_guid,)
     ).fetchone()

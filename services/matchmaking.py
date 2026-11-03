@@ -365,7 +365,7 @@ def handle_send_challenge_response(handler, target, instance, reqid, comp,
                 accepted = (parts[4] == b"1" or parts[4] == b"1")
 
     match_id = _extract_guid(inner_bytes, "matchID") if isinstance(inner_bytes, bytes) else ""
-    respondent_deck_id = _extract_uid(inner_bytes, "DeckID")
+    _extract_uid(inner_bytes, "DeckID")
 
     player_name = (handler.user_profile.get("name", "Unknown")
                    if handler.user_profile else "Unknown")

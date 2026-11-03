@@ -587,7 +587,7 @@ class CardStateMixin:
         try:
             ability_guids = [g.lower() for g in json.loads(ab_json)]
         except Exception:
-            ability_guids = []
+            pass
         _hc.db_card_sync_abilities(
             session.session_id, card_uid, ab_json, attrs, template_guid,
             commit=commit)

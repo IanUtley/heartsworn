@@ -658,7 +658,7 @@ def typed_payload_from_decoded(command, decoded):
 
     def find(*names):
         """Find labelled fields through the decoded wrapper's nesting."""
-        wanted = set(names)
+        set(names)
         pending = [decoded]
         while pending:
             current = pending.pop()

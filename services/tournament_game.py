@@ -9672,7 +9672,7 @@ def _pvp_declare_blockers(handler, session, inner_bytes, my_pid,
     champ_map = state.get("champ_map") or {}
     opp_champ = int(champ_map.get(str(opp_pid), 0))
     opp_uid = _ge.UID.make(244, opp_pid)
-    my_uid = _ge.UID.make(244, my_pid)
+    _ge.UID.make(244, my_pid)
     for pid in pids:
         h = player_handlers.get(pid)
         if not h:
@@ -9721,7 +9721,6 @@ def _pvp_advance_past_declare_defense(session, state):
     if len(pids) < 2:
         return False
     turn_pid = state.get("turn_pid")
-    opp_pid = pids[0] if pids[1] == turn_pid else pids[1]
     try:
         new_phase = _ge.ETurnPhases.DeclareDefensePriorityWindow
     except Exception:

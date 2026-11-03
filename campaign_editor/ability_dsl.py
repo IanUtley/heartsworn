@@ -1156,7 +1156,7 @@ def _render_clause(shape: dict[str, Any], clause: dict[str, Any], you: bool, ins
 
 def render(parsed: dict[str, Any]) -> str:
     """The DSL text of a parsed ability."""
-    cat = catalogue()
+    catalogue()
     lines = []
     clauses = parsed.get("clauses") or []
     settings = list(parsed.get("settings") or [])

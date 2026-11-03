@@ -189,7 +189,7 @@ def main():
             continue
         seen.add(ag)
         arec = abilities.get(ag, "")
-        var_map = variables(arec)
+        variables(arec)
         for order, (eg, duration) in enumerate(effect_list(arec)):
             key = (ag, eg, order)
             if key in seen:

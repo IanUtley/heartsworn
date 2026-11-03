@@ -848,7 +848,7 @@ def _legal_targets(db, session_id, controller_uid, template_id, source_uid,
     opposing = player_filter in {"opponent", "opposing", "singleopponent", "multipleopponents"}
     is_auto = bool(template.get("is_auto_target"))
     source = _source_card(db, session_id, source_uid, controller_uid)
-    source_owner = int((source or {}).get("user_id", controller_uid) or 0)
+    int((source or {}).get("user_id", controller_uid) or 0)
     cards = []
     by_owner: dict[Any, Any] = {}
     for row in rows:

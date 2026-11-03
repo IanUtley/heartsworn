@@ -941,7 +941,7 @@ class CombatMixin:
                 f"    Sacrifice rejected wrong owner uid={int(card_uid)} "
                 f"expected={int(expected_owner_id)} actual={int(actual_owner or 0)}")
             return False
-        owner_id = int(actual_owner or 0)
+        int(actual_owner or 0)
         # Sacrifice is a native death transition: zone events, replacement
         # checks, CardSacrificed, and Deathcry resolution stay inside one
         # RulesPort lifecycle.

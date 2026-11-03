@@ -608,7 +608,7 @@ def handle_readyforgamesetup_22027(handler, target, instance, data_type, reqid, 
     import hconnect_server as _hc
     _hc.log_req(">>> ReadyForGameSetup (dt=22027)")
     player_uid = _hc.make_uid(_hc.UID_TYPE["ServicePlayer"], int(handler.client_reck_id))
-    ai_uid = _hc.make_uid(_hc.SERVICE_AI_UID_TYPE, 1000)
+    _hc.make_uid(_hc.SERVICE_AI_UID_TYPE, 1000)
     session = handler._application.execute(_hc.SetSessionStateCommand(
         player_uid=player_uid,
         state="setup",
@@ -1101,7 +1101,6 @@ def handle_readytostartgame_22031(handler, target, instance, data_type, reqid, c
                                          cfg["gnd_name"])
         player_talents_json = cfg["player_talents_json"]
         player_starting_health = cfg["player_starting_health"]
-        is_tutorial = cfg["is_tutorial"]
         player_champ_guid = cfg["player_champ_guid"]
         campaign_player_deck_json = cfg.get("player_deck_cards_json")
         # Temporary dungeon cards (a Chapel reward pick) join the deck for

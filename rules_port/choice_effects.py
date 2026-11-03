@@ -287,7 +287,7 @@ def double_choice(context):
     typed_second = bool(context.template_value("m_SecondChoice", False))
     owner_id = int(context.bstate.get("resolving_owner_id", 0) or 0)
     source_uid = context.bstate.get("resolving_source_uid")
-    ability_guid = context.bstate.get("resolving_ability", "")
+    context.bstate.get("resolving_ability", "")
     _clear_choice_zone(context)
     if typed_second:
         templates = list(context.bstate.pop(

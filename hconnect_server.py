@@ -1150,8 +1150,6 @@ class HCPHandler(RulesPortProjectionMixin, ProfileStreamMixin, CardPlayMixin, Ca
                 if owner_id == int(self.user_profile.get("id", 0)
                                    if isinstance(self.user_profile, dict) else 0):
                     current_key = "player_resources"
-                    total_key = "player_total_resources"
-                    event_owner = game.player_uid
                 else:
                     current_key = "ai_resources"
                     event_owner = game.ai_uid

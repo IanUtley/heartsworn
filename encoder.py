@@ -122,7 +122,7 @@ def encode_player_state_coll(buf, sizes, find_type, player_states):
     t_uid = ft("Game.Shared.UID")
     t_uint64 = ft("System.UInt64")
     t_int = ft("System.Int32")
-    t_string = ft("System.String")
+    ft("System.String")
     t_playerstate = ft("Game.Shared.PlayerState")
 
     w(str(len(player_states))); sep()
@@ -863,7 +863,7 @@ def encode_objfmt_response(type_names, fields, *, uppercase_hex=False):
         sizes[field_idx] = buf.tell() - f_start
 
     # Root header
-    root_start = buf.tell()
+    buf.tell()
     sizes.append(0)
 
     w("")

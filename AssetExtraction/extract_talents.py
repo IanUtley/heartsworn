@@ -253,7 +253,7 @@ def main():
             return
         bom_heads.add(ag)
         arec = abilities.get(ag, "")
-        var_map = _variables(arec)
+        _variables(arec)
         for order, (eg, duration) in enumerate(_effect_list(arec)):
             key = (ag, eg, order)
             if key not in seen_effects:

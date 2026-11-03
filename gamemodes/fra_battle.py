@@ -135,7 +135,6 @@ class FraBattleMixin:
                 for target in target_owners:
                     side = owners[target][0]
                     total_key = f"{side}_total_resources"
-                    current_key = f"{side}_resources"
                     charge_key = f"{side}_charges"
                     total_old = int(bstate.get(total_key, 0) or 0)
                     resource_amount = int(

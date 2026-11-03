@@ -152,7 +152,7 @@ class _Parser:
         return card
 
     def line_item(self) -> Binding | Step:
-        indent = self.take("indent")
+        self.take("indent")
         name = self.take("name")
         if self.peek().text == "<-":
             self.take("arrow_in")

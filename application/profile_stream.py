@@ -164,7 +164,7 @@ class ProfileStreamMixin:
                 try:
                     card_ids = _json.loads(dk.get("cards", "[]"))
                 except:
-                    card_ids = []
+                    pass
                 card_guids = []  # CardsInDeck kept empty in profile push
                 try:
                     deck_equipment = _json.loads(dk.get("equipment") or "[]")

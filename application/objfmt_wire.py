@@ -46,7 +46,6 @@ def parse_datawrapper(body, *, preserve_complex=False):
     type_names = type_part.split(";")
     root_type = type_names[0] if type_names else "?"
 
-    buf = memoryview(body)
     idx = 0
 
     def read_to_sep():
@@ -62,7 +61,7 @@ def parse_datawrapper(body, *, preserve_complex=False):
     def parse_one(name_hint, f_num):
         nonlocal idx
         name = read_to_sep()
-        f_size_idx = int(read_to_sep())
+        int(read_to_sep())
         f_type_idx = int(read_to_sep())
         num = int(read_to_sep())
         f_type = type_names[f_type_idx] if f_type_idx < len(type_names) else "?"
@@ -126,9 +125,9 @@ def parse_datawrapper(body, *, preserve_complex=False):
             count = int(read_to_sep())
             result_map = {}
             for index in range(count):
-                _entry_name = read_to_sep()
-                _entry_size = int(read_to_sep())
-                _entry_type = int(read_to_sep())
+                read_to_sep()
+                int(read_to_sep())
+                int(read_to_sep())
                 entry_props = int(read_to_sep())
                 entry = {}
                 for _ in range(entry_props):
@@ -144,8 +143,8 @@ def parse_datawrapper(body, *, preserve_complex=False):
             vals = []
             for _ in range(count):
                 ename = read_to_sep()  # element index (ignored)
-                esize = int(read_to_sep())
-                etype = int(read_to_sep())
+                int(read_to_sep())
+                int(read_to_sep())
                 enum = int(read_to_sep())
                 if elem_type == "System.UInt64":
                     v = struct.unpack("<Q", unhexlify(read_to_sep()))[0]
@@ -196,9 +195,9 @@ def parse_datawrapper(body, *, preserve_complex=False):
             return name, f"<unhandled type={f_type} num={num}>"
 
     # Root field: name, size_ref, type_ref, num_props
-    root_name = read_to_sep()
-    size_idx = int(read_to_sep())
-    type_idx = int(read_to_sep())
+    read_to_sep()
+    int(read_to_sep())
+    int(read_to_sep())
     num_props = int(read_to_sep())
 
     result = {"__type__": root_type}

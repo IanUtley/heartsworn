@@ -927,7 +927,7 @@ class TransactionsMixin:
             pl_t = _hc.game_engine.UID.make(244, my_pid)
             pids = db_game_session_pids(session.session_id)
             opp_pid = pids[0] if pids[1] == my_pid else pids[1]
-            opp_t = _hc.game_engine.UID.make(244, opp_pid)
+            _hc.game_engine.UID.make(244, opp_pid)
             from pvp_db import (db_rules_port_hand_rows,
                                 db_rules_port_redraw_hand)
             hand_rows = db_rules_port_hand_rows(session.session_id, my_pid)
@@ -1001,7 +1001,7 @@ class TransactionsMixin:
             if active_gems:
                 try:
                     import json as _gem_json
-                    deck_gems = _gem_json.loads(active_gems)
+                    _gem_json.loads(active_gems)
                 except Exception:
                     pass
 
@@ -1617,7 +1617,6 @@ class TransactionsMixin:
                 _hc.log_req(f"    AI defeated! ai_health={bstate['ai_health']}")
                 self._finish_battle_gameend(
                     session, True, winners=[pl_t], losers=[ai_t])
-                handled = True
                 self._push_transaction_ack(session)
                 return True
         elif cur_phase == _hc.game_engine.ETurnPhases.AssignFirstStrikeDamage:
@@ -1715,8 +1714,8 @@ class TransactionsMixin:
         import hconnect_server as _hc
         from rules_port import lifecycle as _be
         handled = False
-        pl_t = _hc.game_engine.UID.make(244, int(self.client_reck_id))
-        ai_t = _hc.game_engine.UID.make(_hc.game_engine.SERVICE_AI_UID_TYPE, 1000)
+        _hc.game_engine.UID.make(244, int(self.client_reck_id))
+        _hc.game_engine.UID.make(_hc.game_engine.SERVICE_AI_UID_TYPE, 1000)
         if (session.session_name or "").startswith("tourney-"):
             try:
                 from services.tournament_game import pvp_load_state, pvp_save_state
@@ -2014,7 +2013,6 @@ class TransactionsMixin:
                                 f"({item.get('ability_guid', '')[:8] or hex(item.get('source_uid') or 0)})")
                     else:
                         self._push_transaction_ack(session)
-                    handled = True
                 else:
                     # The player passed a stop phase: advance one phase, then
                     # auto-pass non-stop phases until the next stop phase.

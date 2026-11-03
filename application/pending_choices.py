@@ -921,7 +921,7 @@ class PendingChoicesMixin:
         bstate["_rules_port_attached"] = True
         # Mark the lifecycle phase while TurnStarted triggers resolve so
         # temporary current-resource gains can survive the later Prep refill.
-        _previous_phase = bstate.get("phase")
+        bstate.get("phase")
         bstate["phase"] = _hc.game_engine.ETurnPhases.StartTurn
         choice_context = EffectContext.from_rules_port(
             g, session, _hc._db, self, pl_t, ai_t, bstate,
