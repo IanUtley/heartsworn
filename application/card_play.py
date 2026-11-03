@@ -3,12 +3,19 @@
 # Sentinel for 'no persisted gem'; compared by identity, so it is shared with hconnect_server.
 _NO_PERSISTED_GEM = object()
 
+from typing import TYPE_CHECKING
 import json
 import sqlite3
 import struct
 
 
-class CardPlayMixin:
+if TYPE_CHECKING:
+    from application._host_surface import HostSurface as _HostBase
+else:
+    _HostBase = object
+
+
+class CardPlayMixin(_HostBase):
     """Methods of HCPHandler, mixed into it (see hconnect_server)."""
 
     def _extract_enum_int(self, inner_bytes, field):

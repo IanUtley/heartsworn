@@ -1,5 +1,6 @@
 """Prompts for triggers, deck search, revealed cards and conversations, and the resolution of the answers."""
 
+from typing import TYPE_CHECKING
 from collections.abc import Mapping
 from typing import Any
 from typing import cast
@@ -9,7 +10,13 @@ import re
 import struct
 
 
-class PendingChoicesMixin:
+if TYPE_CHECKING:
+    from application._host_surface import HostSurface as _HostBase
+else:
+    _HostBase = object
+
+
+class PendingChoicesMixin(_HostBase):
     """Methods of HCPHandler, mixed into it (see hconnect_server)."""
 
     def _resolve_shards_of_fate(self, game, session, pl_t, ai_t, bstate,

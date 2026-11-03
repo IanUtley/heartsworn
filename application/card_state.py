@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
 import json
 from dataclasses import replace
 from typing import Any, cast
@@ -10,7 +11,13 @@ import game_engine
 from rules_port.card_view import CardView
 
 
-class CardStateMixin:
+if TYPE_CHECKING:
+    from application._host_surface import HostSurface as _HostBase
+else:
+    _HostBase = object
+
+
+class CardStateMixin(_HostBase):
     """Methods of HCPHandler, mixed into it (see hconnect_server)."""
 
     # Set by the live handler's scene setup (CardPlayMixin); declared here for the type checker.

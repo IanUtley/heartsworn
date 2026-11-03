@@ -7,11 +7,18 @@ define inline. The callbacks there now pass their session (and port) through.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
 import game_engine
 from db import log_req
 
 
-class RulesPortProjectionMixin:
+if TYPE_CHECKING:
+    from application._host_surface import HostSurface as _HostBase
+else:
+    _HostBase = object
+
+
+class RulesPortProjectionMixin(_HostBase):
     def _rp_card_projection(self, session, kind, transaction):
         """Dispatch only the explicit typed card-play mutations."""
         if kind in ("play_troop", "play_artifact", "play_spell",

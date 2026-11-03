@@ -1,7 +1,15 @@
 """Chain and stack resolution, including the game-started chain and rules-port chain completion."""
 
 
-class ChainMixin:
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from application._host_surface import HostSurface as _HostBase
+else:
+    _HostBase = object
+
+
+class ChainMixin(_HostBase):
     """Methods of HCPHandler, mixed into it (see hconnect_server)."""
 
     def _is_choice_card(self, session, card_uid):

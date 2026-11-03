@@ -1,10 +1,17 @@
 """Player transaction handlers (mulligan, choose, pass priority, attack, defend, ability activation and more)."""
 
+from typing import TYPE_CHECKING
 import re
 import struct
 
 
-class TransactionsMixin:
+if TYPE_CHECKING:
+    from application._host_surface import HostSurface as _HostBase
+else:
+    _HostBase = object
+
+
+class TransactionsMixin(_HostBase):
     """Methods of HCPHandler, mixed into it (see hconnect_server)."""
 
     def _handle_priority_sync_transaction(self, session, transaction):

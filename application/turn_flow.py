@@ -1,5 +1,6 @@
 """Turn phases, priority advancement, rules-port turn steps and per-player stops."""
 
+from typing import TYPE_CHECKING
 from dataclasses import replace
 from typing import Any
 from typing import cast
@@ -8,7 +9,13 @@ import re
 import struct
 
 
-class TurnFlowMixin:
+if TYPE_CHECKING:
+    from application._host_surface import HostSurface as _HostBase
+else:
+    _HostBase = object
+
+
+class TurnFlowMixin(_HostBase):
     """Methods of HCPHandler, mixed into it (see hconnect_server)."""
 
     def _dispatch_native_trigger(self, game, session, pl_t, ai_t, bstate,

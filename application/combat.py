@@ -1,5 +1,6 @@
 """Attack and block declaration, combat damage, champion health and battle end."""
 
+from typing import TYPE_CHECKING
 import json
 import random
 
@@ -11,7 +12,13 @@ def discarding_player(bstate, ability_controller):
     return ability_controller if discarder is None else discarder
 
 
-class CombatMixin:
+if TYPE_CHECKING:
+    from application._host_surface import HostSurface as _HostBase
+else:
+    _HostBase = object
+
+
+class CombatMixin(_HostBase):
     """Methods of HCPHandler, mixed into it (see hconnect_server)."""
 
     def _clear_combat_damage(self, session, bstate):
