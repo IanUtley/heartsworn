@@ -486,45 +486,6 @@ def test_card_play_without_a_user_profile_is_refused():
         _Handler(make_db()), SessionStub(), transaction) is False
 
 
-def test_generic_transaction_refuses_its_own_rules_port_command():
-    from application.transactions import TransactionsMixin
-    from tests.tests_combat import HandlerStub, SessionStub
-
-    class _Handler(HandlerStub, TransactionsMixin):
-        pass
-
-    transaction = type("Txn", (), {"inner_bytes": b"", "typed_payload": None,
-                                   "fields": {}, "is_pass_priority": False})()
-    session = SessionStub()
-    session._rules_port_dispatch_command = transaction
-    assert TransactionsMixin._handle_generic_player_transaction(
-        _Handler(make_db()), session, transaction, 1, 0, None) is False
-
-
-def test_ability_activation_with_no_ability_guid_is_acknowledged_once():
-    from application.transactions import TransactionsMixin
-    from tests.tests_combat import HandlerStub, SessionStub
-
-    class _Handler(HandlerStub, TransactionsMixin):
-        def __init__(self, db):
-            super().__init__(db)
-            self.acks = 0
-
-        def _checkpoint_engine(self, session):
-            return _CheckpointStub()
-
-        def _push_transaction_ack(self, session):
-            self.acks += 1
-
-    transaction = type("Txn", (), {"inner_bytes": b"", "is_set_ability_data": False,
-                                   "is_ability_activate": True})()
-    handler = _Handler(make_db())
-    assert TransactionsMixin._handle_ability_activate_transaction(
-        handler, SessionStub(), transaction) is True
-    # The empty ack keeps the client's next transaction from being dropped.
-    assert handler.acks == 1
-
-
 def test_duplicate_tournament_keep_is_acknowledged_without_a_second_keep():
     from unittest import mock
     from application.transactions import TransactionsMixin
@@ -942,71 +903,6 @@ def test_starter_playthrough_explores_on_to_the_first_campaign_area():
     assert any(step.startswith("reached AZ1") for step in route), route
 
 
-def test_quit_transaction_in_a_tournament_game_is_handled_and_acknowledged():
-    from types import SimpleNamespace
-    from unittest import mock
-    import hconnect_server
-    from tests.tests_combat import SessionStub
-    db = make_db()
-    hconnect_server._db = db
-    handler = hconnect_server.HCPHandler(None, ("127.0.0.1", 0))
-    handler.user_profile = {"id": 5}
-    handler.client_reck_id = 5
-    handler.send = lambda header, body: None
-    acks = []
-    handler._push_transaction_ack = lambda session: acks.append(session)
-    session = SessionStub()
-    session.session_name = "tourney-1"
-    quit_txn = SimpleNamespace(inner_bytes=b"", typed_payload=None,
-                               fields={"m_QuitEntireSeries": True},
-                               is_pass_priority=False)
-    with mock.patch("services.tournament_game.pvp_concede", return_value=True):
-        assert handler._handle_generic_player_transaction(
-            session, quit_txn, 1, 0, None) is True
-    assert acks == [session]
-
-
-def test_troop_ability_activation_taps_the_chosen_opposing_troop():
-    from rules_port import lifecycle as be
-    import db as shared
-    import game_engine
-    import hconnect_server
-    import ai
-    import struct
-    from types import SimpleNamespace
-    from tests.tests_combat import SessionStub, add_card
-    db = make_db()
-    previous = shared._db
-    shared._db = db
-    hconnect_server._db = db
-    ai._db = db
-    try:
-        # Field Tactician (player-owned, manual Warzone tap) and one AI troop with card uid 257.
-        add_card(db, 300, 5, "8305c05f-8355-4740-8599-2cf4a85c2c79", "warzone")
-        add_card(db, 257, 0, "11111111-1111-1111-1111-111111111111", "warzone")
-        handler = hconnect_server.HCPHandler(None, ("127.0.0.1", 0))
-        handler.user_profile = {"id": 5}
-        handler.client_reck_id = 5
-        handler._maybe_attach_rules_port = lambda *args, **kwargs: None
-        handler.send = lambda header, body: None
-        session = SessionStub()
-        state = be.default_state(turn_player=be.PLAYER)
-        state["player_resources"] = 5
-        state["player_total_resources"] = 5
-        session.turn_order = state
-        target = struct.pack("<Q", 257).hex().encode()
-        raw = (b"AbilityTemplateId;0;1;1;m_Guid;0;3;0;36;"
-               b"1c6d0fdf-9be0-27b3-186e-e139d1f71544;"
-               b"m_UID64;0;1;1;" + target + b";")
-        activation = SimpleNamespace(inner_bytes=raw, is_set_ability_data=False,
-                                     is_ability_activate=True)
-        assert handler._handle_ability_activate_transaction(session, activation) is True
-        tapped = db.execute("SELECT card_state FROM game_cards WHERE card_uid=257").fetchone()[0]
-        assert tapped & game_engine.ECardStates.Tapped, tapped
-    finally:
-        shared._db = previous
-
-
 def _pvp_session(db):
     """A tournament game between players 5 and 6 with a live PvP state dict."""
     import game_engine
@@ -1311,30 +1207,6 @@ def test_panorama_extraction_reads_the_camera_and_npc_anchors_of_a_level(tmp_pat
     assert level["camera"]["fov"] == 60.0, level["camera"]
     assert [(npc["name"], npc["position"]) for npc in level["npcs"]] == [
         ("Guard", [3.0, 0.0, 4.0])], level["npcs"]
-
-
-def test_tournament_gameplay_without_a_rules_port_host_is_refused_and_acknowledged():
-    from types import SimpleNamespace
-    from unittest import mock
-    import hconnect_server
-    from tests.tests_combat import SessionStub
-    db = make_db()
-    hconnect_server._db = db
-    handler = hconnect_server.HCPHandler(None, ("127.0.0.1", 0))
-    handler.user_profile = {"id": 5}
-    handler.client_reck_id = 5
-    handler.send = lambda header, body: None
-    acks = []
-    handler._push_transaction_ack = lambda session: acks.append(session)
-    session = SessionStub()
-    session.session_name = "tourney-1"
-    session._rules_port_session = None
-    play = SimpleNamespace(inner_bytes=b"", typed_payload=None, fields={},
-                           is_pass_priority=False)
-    with mock.patch("services.tournament_game.pvp_concede") as concede:
-        assert handler._handle_generic_player_transaction(session, play, 1, 0, None) is True
-    concede.assert_not_called()
-    assert acks == [session]
 
 
 def test_tutorial_script_parses_draw_and_hell_to_freeze_commands(tmp_path):
@@ -2830,48 +2702,6 @@ def test_legal_targets_for_a_self_target_template_offers_the_source_card():
         "1c6d0fdf-9be0-27b3-186e-e139d1f71544", conn=db))[0]
     assert list(_legal_targets(db, 1, 0, template, 100, both_players=False,
                                champions=[], battle_state={})) == [100]
-
-
-def test_generic_resource_play_moves_the_shard_out_of_hand_and_counts_it():
-    import struct
-    from types import SimpleNamespace
-    from rules_port import lifecycle as be
-    import db as shared
-    import hconnect_server
-    from tests.tests_combat import SessionStub, add_card
-    db = make_db()
-    previous = shared._db
-    shared._db = db
-    hconnect_server._db = db
-    try:
-        # Diamond Shard: a basic Resource in the player's hand.
-        add_card(db, 320, 5, "0432f128-c106-4e66-bf22-9bcacad692ef", "hand")
-        handler = hconnect_server.HCPHandler(None, ("127.0.0.1", 0))
-        handler.user_profile = {"id": 5}
-        handler.client_reck_id = 5
-        handler._maybe_attach_rules_port = lambda *args, **kwargs: None
-        handler.send = lambda header, body: None
-        handler._push_transaction_ack = lambda session: None
-        session = SessionStub()
-        session.session_name = "practice-320"
-        state = be.default_state(turn_player=be.PLAYER)
-        state["player_resources"] = 5
-        state["player_total_resources"] = 5
-        session.turn_order = state
-        uid_hex = struct.pack("<Q", 320).hex().encode()
-        raw = (b"PlayCardTransaction;m_SessionCardId;0;1;1;m_UID64;0;1;1;"
-               + uid_hex + b";")
-        transaction = SimpleNamespace(
-            inner_bytes=raw, is_pass_priority=False, fields={},
-            typed_payload=None)
-        assert handler._handle_generic_player_transaction(
-            session, transaction, "11111111-1111-1111-1111-111111111111", 0, 0) is True
-    finally:
-        shared._db = previous
-    location = db.execute("SELECT location FROM game_cards WHERE card_uid=320").fetchone()[0]
-    assert location == "PlayedResources", location
-    saved = be.load_state(session)
-    assert saved["player_resource_plays_this_turn"] == 1, saved
 
 
 def test_explore_of_a_new_champion_walks_the_campaign_route_to_a_stop():

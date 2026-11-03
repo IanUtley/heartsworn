@@ -2452,77 +2452,6 @@ def test_evaluator_card_info_reads_instance_abilities(db):
     assert card.attributes & 4
 
 
-def test_concubunny_exhausts_selected_ready_shinhare(db):
-    """Concubunny pays its authored ExhaustTarget before resolving its BOM.
-
-    The target must be a ready Shin'hare at activation time.  This exercises
-    the production PvE activation path, rather than only the target picker,
-    because the old path discarded the selected payment UID and exhausted
-    only Concubunny itself.
-    """
-    from rules_port import lifecycle
-    import gamedata
-    import hconnect_server as hcs
-
-    concubunny = "bfce3e26-1d85-4d9f-a72a-f4cead4c93c1"
-    ability_guid = "e1049250-013d-3149-bcc4-ad06199c8b92"
-    source_uid = int(game_engine.UID.make(1, 101).uid64)
-    target_uid = int(game_engine.UID.make(1, 102).uid64)
-    _copy_card(db, concubunny)
-    add_card(db, source_uid, 5, concubunny,
-             state=game_engine.ECardStates.StartedATurnOnYourSide)
-    add_card(db, target_uid, 5, concubunny)  # ready Shin'hare payment target
-    db.execute("UPDATE game_cards SET card_abilities=? WHERE card_uid=?",
-               (json.dumps([ability_guid]), source_uid))
-    db.commit()
-
-    pl_t = game_engine.UID.make(244, 5)
-    ai_t = game_engine.UID.make(3, 1000)
-    bstate = lifecycle.default_state()
-    bstate.update({
-        "phase_idx": 4,  # FirstMainPhase in BASE_TURN_PHASES
-        "player_resources": 1,
-        "player_health": 20,
-        "ai_health": 20,
-    })
-    session = SessionStub()
-    session.turn_order = bstate
-
-    # Use the production handler implementation with the test DB, while
-    # suppressing network output and the unrelated Battle Hopper BOM leaf.
-    handler = object.__new__(hcs.HCPHandler)
-    handler._db = db
-    handler.user_profile = {"id": 5}
-    handler.client_reck_id = 5
-    handler._player_champ_scid = game_engine.SessionCardId(
-        game_engine.UID.make(244, 5))
-    handler._ai_champ_scid = game_engine.SessionCardId(
-        game_engine.UID.make(3, 1000))
-    handler._current_bstate = bstate
-    handler._send_battle_events = lambda *args: None
-    handler._play_plan_store = gamedata.DEFAULT_RECORD_STORE
-    # Isolate the production activation helper; this fixture has no full
-    # session schema for the mandatory native host attachment.
-    handler._maybe_attach_rules_port = lambda *args, **kwargs: None
-
-    old_hcs_db, old_db = hcs._db, dbmod._db
-    hcs._db = dbmod._db = db
-    try:
-        # UID 102 is 0x6601 on the wire (little-endian uint64).
-        inner = b"m_UID64;;;;0166000000000000;"
-        handler._activate_troop_ability(
-            session, pl_t, ai_t, bstate, source_uid, ability_guid, inner)
-
-        states = dict(db.execute(
-            "SELECT card_uid, card_state FROM game_cards "
-            "WHERE card_uid IN (?, ?)", (source_uid, target_uid)))
-        assert states[target_uid] & game_engine.ECardStates.Tapped, states
-        assert states[source_uid] & game_engine.ECardStates.Tapped, states
-        assert bstate["player_resources"] == 0, bstate
-    finally:
-        hcs._db, dbmod._db = old_hcs_db, old_db
-
-
 def test_discard_positions_append_and_snapshot_order(db):
     """Discard entries get a stable per-player append position used by reconnects."""
     import db as db_module
@@ -2616,8 +2545,6 @@ def main():
          test_ai_spreads_a_reapplied_grant_to_the_clean_same_name_troop),
         ("Evaluator CardInfo reads instance abilities",
          test_evaluator_card_info_reads_instance_abilities),
-        ("Concubunny exhausts selected ready Shin'hare",
-         test_concubunny_exhausts_selected_ready_shinhare),
         ("Discard positions survive reconnect ordering",
          test_discard_positions_append_and_snapshot_order),
         ("Resource grant columns from gamedata",

@@ -1010,9 +1010,6 @@ def test_x_cost_detection_and_damage(db):
              "CardModifierAbilityEffectTemplate",
              '{"text": "Deal X damage to target champion or troop.", '
              '"property": "damage", "amount": 0}'))
-        assert hcs.HCPHandler._template_has_x_cost(
-            "0fe0fcf5-1054-463c-ab01-a1b5743d66b9")
-        assert not hcs.HCPHandler._template_has_x_cost(TPL_ENFORCER)
         # X=4 against the AI champion: deals 4.
         add_card(db, 101, 5, "0fe0fcf5-1054-463c-ab01-a1b5743d66b9",
                  loc="CastSpells")

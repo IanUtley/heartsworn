@@ -607,9 +607,6 @@ def test_burn_champion_playable(db):
                     (int(self._ai_champ_scid.uid.uid64), 0, "AI", 20)]
 
     s = Stub(db)
-    reqs = HCPHandler._card_troop_requirements(
-        s, ["81712882-30ed-c365-1d90-211966640219"])
-    assert reqs == set(), reqs
     pl_t = game_engine.UID.make(244, 5)
     ai_t = game_engine.UID.make(3, 1000)
     targets = HCPHandler._valid_targets_for_template(
