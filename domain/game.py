@@ -1,6 +1,7 @@
 """CardDef, Game (event queue / tutorial engine), and script parser."""
 
 import random as _random
+from collections.abc import Sequence
 from typing import List, Dict, Any, Optional, Tuple, cast
 
 from domain.types import UID, ResourceId, SessionCardId, CombatId
@@ -696,7 +697,7 @@ class Game:
         ev.blocking_card_ids = list(blockers)
         self._push(ev)
 
-    def push_combat_listing(self, player_uid: UID, combats: List[SessionEventArgs]):
+    def push_combat_listing(self, player_uid: UID, combats: Sequence[SessionEventArgs]):
         ev = self._make_event(CombatListingSessionEventArgs)
         ev.player_id = player_uid
         ev.combats = list(combats)

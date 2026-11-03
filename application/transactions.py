@@ -1268,7 +1268,7 @@ class TransactionsMixin(_HostBase):
         # against its shared Combat objects.  Project that accepted map
         # directly; a second legacy can_block pass could discard a valid
         # blocker when its SQLite-derived state lagged the port snapshot.
-        port_blockers = {}
+        port_blockers: dict[Any, Any] = {}
         port_attackers = {}
         current_ai_attackers = {
             int(value) for value in (bstate.get("ai_attackers") or {})
@@ -1396,7 +1396,7 @@ class TransactionsMixin(_HostBase):
         # Extract the attacking card UIDs: every Card-type SessionCardId
         # in the transaction that is in the player's warzone. The
         # defender (AI champion) is not in the player's warzone.
-        attacker_uids = []
+        attacker_uids: list[Any] = []
         if declarations is not None:
             for _defender, attackers in declarations:
                 try:
@@ -1566,7 +1566,7 @@ class TransactionsMixin(_HostBase):
             # then order each attacker's blockers by their first
             # occurrence so resolve_combat assigns damage in that order.
             if assignments is not None:
-                seq = []
+                seq: list[Any] = []
                 for _combat_id, card_ids in assignments:
                     try:
                         seq.extend(int(card_id) for card_id in card_ids)

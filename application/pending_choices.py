@@ -1196,7 +1196,7 @@ class PendingChoicesMixin(_HostBase):
                 with two chosen targets must forward both so the resolver's
                 authored target indexes line up.
                 """
-                result: dict[str, Any] = {}
+                result: dict[int, list[int]] = {}
                 if not isinstance(raw, Mapping):
                     return result
                 for key, value in raw.items():
@@ -1760,12 +1760,15 @@ class PendingChoicesMixin(_HostBase):
             from rules_port import ir_exec
             from rules_port.context import EffectContext
             from rules_port.resolution import prompt_interpreted_reveal
-            if not picks:
+            if picks:
+                answer: int | list[int] = list(picks)
+                taken = set(picks)
+            else:
                 assert chosen_uid is not None  # the guard above admits only a picked or chosen card
-            answer = list(picks) if picks else int(chosen_uid)
+                answer = int(chosen_uid)
+                taken = {int(chosen_uid)}
             _hc.log_req(f"    Deck-search choice {answer}: resuming the interpreter")
             g = self._fresh_game(session, pl_t, ai_t, bstate)
-            taken = set(picks) if picks else {int(chosen_uid)}
             self._hide_candidates_to_deck(
                 g, session, pl_t, ai_t,
                 [cu for cu in pend["candidates"] if int(cu) not in taken])

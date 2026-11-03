@@ -477,7 +477,7 @@ def typed_payload_from_decoded(command, decoded):
                 return (int(value) if (value & 0xFF) == 1 else None), pos
             target, target_pos = labelled_card(b"DefendingCardId")
             attackers_pos = raw.find(b"AttackingCardIds")
-            attackers = None
+            attackers: tuple[int, ...] | None = None
             if attackers_pos >= 0:
                 # This is a List<SessionCardId>.  A no-attacks declaration is
                 # encoded as an empty list (the count field is zero), so it
@@ -800,17 +800,17 @@ def typed_payload_from_decoded(command, decoded):
         payload["quit_entire_series"] = bool_value(series)
 
     if getattr(command, "is_commit_attack", False):
-        declarations = find("Attacks", "m_Attacks", "declarations") or ()
+        attack_declarations = find("Attacks", "m_Attacks", "declarations") or ()
         # Only override the raw-recovered declarations when the typed parser
         # actually produced a declaration.  The nested AttackDeclaration does
         # not decode through the generic ObjFmt walker, so ``find`` returns
         # nothing; assigning an empty tuple here then clobbered the recovered
         # declaration in the ``raw_payload.update(payload)`` merge below and
         # the client's attack was silently dropped (stuck in Select Attackers).
-        if declarations:
+        if attack_declarations:
             payload["declarations"] = tuple(
                 (target, attackers)
-                for item in declarations if isinstance(item, Mapping)
+                for item in attack_declarations if isinstance(item, Mapping)
                 for target in (numeric_id(item.get("DefendingCardId",
                                                    item.get("defending_card_id"))),)
                 for attackers in (id_list(item.get("AttackingCardIds",

@@ -3,7 +3,7 @@
 # Sentinel for 'no persisted gem'; compared by identity, so it is shared with hconnect_server.
 _NO_PERSISTED_GEM = object()
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 import json
 import sqlite3
 import struct
@@ -480,8 +480,8 @@ class CardPlayMixin(_HostBase):
             for index, selected in (client_cost_map or {}).items()
             if selected
         }
-        used = set()
-        selections = []
+        used: set[Any] = set()
+        selections: list[tuple[dict[str, Any], Any]] = []
         if not play_plan.cost_instances:
             return selections, used
         def trace(reason, cost, available):
@@ -505,7 +505,7 @@ class CardPlayMixin(_HostBase):
                 self.user_profile["id"] if self.user_profile else 0,
                 source_uid, champions=self._champion_targets(),
                 battle_state=getattr(self, "_current_bstate", None)):
-            spec = {"kind": cost.kind, "target_guid": cost.guid,
+            spec: dict[str, Any] = {"kind": cost.kind, "target_guid": cost.guid,
                     "index": int(cost.index),
                     "cost_type": cost_type_for_kind(cost.kind),
                     "minimum": cost.minimum, "maximum": cost.maximum,
@@ -1340,7 +1340,7 @@ class CardPlayMixin(_HostBase):
             return reject(f"no-play-plan(template={row[0]})")
         ability_data = payload.get("ability_data") or ()
         targets = []
-        client_cost_uids = {}
+        client_cost_uids: dict[Any, Any] = {}
         x_cost = 0
         cast_ability_guids = {
             ability.ability_guid.lower()
@@ -2203,7 +2203,7 @@ class CardPlayMixin(_HostBase):
         if not ability_ids:
             return {}
         from rules_port.targeting import legal_targets_for
-        out = {}
+        out: dict[Any, Any] = {}
         for aid in ability_ids:
             ag = str(aid.guid)
             graph = _hc._records_ability_graph(self, ag)
@@ -2261,7 +2261,7 @@ class CardPlayMixin(_HostBase):
         "Void two ready troops you control")."""
         import hconnect_server as _hc
         from rules_port.costs import ability_cost_targets, cost_type_for_kind
-        out = {}
+        out: dict[Any, Any] = {}
         for aid in (ability_ids or []):
             ag = str(aid.guid)
             graph = _hc._records_ability_graph(self, ag)
@@ -2301,7 +2301,7 @@ class CardPlayMixin(_HostBase):
             if not req_list:
                 return True
             shard_fmt = {0:0, 1:4, 2:8, 3:16, 4:32, 5:64}
-            need = {}
+            need: dict[Any, Any] = {}
             for s in req_list:
                 flag = shard_fmt.get(s, s)
                 need[flag] = need.get(flag, 0) + 1

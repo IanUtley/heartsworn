@@ -871,7 +871,7 @@ class TurnFlowMixin(_HostBase):
                             db_card_play_info,
                             db_card_template_thresholds)
         playable = []
-        abilities = []
+        abilities: list[Any] = []
         owner_id = int(self.user_profile["id"])
         rows = list(db_hand_cards_with_templates(
             session.session_id, owner_id))
@@ -978,7 +978,7 @@ class TurnFlowMixin(_HostBase):
     def _extract_transaction_targets(self, inner_bytes, exclude_uid):
         """Extract Card-type UIDs from a 3029 transaction's TargetMap (the
         picked targets), excluding the source/played card."""
-        targets = []
+        targets: list[Any] = []
         if not isinstance(inner_bytes, bytes):
             return targets
         for m_du in re.finditer(rb'm_UID64;[^;]*;[^;]*;[^;]*;([0-9A-Fa-f]{16});', inner_bytes):
