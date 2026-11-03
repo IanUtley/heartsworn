@@ -1264,18 +1264,3 @@ def can_block(db, session_id, bstate, attacker_uid, blocker_uid):
         else:
             return False
     return True
-
-
-def apply_rage(db, session, handler, game, pl_t, ai_t, bstate, uid):
-    """Rage X: when a troop with Rage X attacks, it gets +X ATK permanently.
-    Returns the applied rage value (0 when the attacker has no Rage)."""
-    _atk, _def, _attrs, _flags, rage = effective_stats(
-        db, session.session_id, bstate, uid)
-    if rage and rage > 0:
-        from .stat_mod import apply_card_stat_mod
-        # The client's built-in RageAbility uses a Permanent attack modifier;
-        # it is not an end-of-turn combat bonus.
-        apply_card_stat_mod(game, session, db, handler, pl_t, ai_t, uid,
-                            rage, 0, this_turn=False)
-        return rage
-    return 0

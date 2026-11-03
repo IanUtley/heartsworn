@@ -1546,7 +1546,7 @@ def test_troop_artifact_can_attack(db):
 def test_unblockable_attacker_cannot_be_blocked(db):
     """Infiltrator Bot's activated "Unblockable" (CantBeBlocked) must stop
     blockers — can_block previously ignored the attribute."""
-    from abilities.framework.statics import can_block
+    from rules_port.combat_rules import can_block
     from tests.tests_cards_fixes import _copy_card, _copy_ability
     _copy_card(db, TPL_INFILTRATOR)
     _copy_card(db, "b7172b6a-ef85-4fef-91e1-81975b4ce7cd")

@@ -1795,3 +1795,26 @@ function moved unchanged into `rules_port/triggers.py`. Test callers import it
 from there. The trigger-related test files show the same pass count (128) and the
 same failures as before the move. Several of those failures are older: some tests
 still call `resolve_enters_play_triggers`, which no module defines.
+
+## Framework statics: first slice
+
+`abilities/framework/keywords/` (no importers) and the framework `apply_rage` are
+deleted; `rules_port/combat_effects.apply_rage` is the Rage implementation.
+Tests that check `can_block` and `controller_flags` now call the native
+functions.
+
+Checking the rest of `abilities/framework/statics.py` against the native
+`rules_port/static_rules.py` showed the framework functions are still the
+references the tests use for `effective_stats` and `effective_deltas`. Moving
+those tests to native produced four failures, which are native gaps to fix
+before the framework copies can go:
+- `effective_stats` does not scale Rage with champions (Endbringer) and does
+  not return an Oath of Valor stored name.
+- `effective_stats` imports `campaign_runtime.dungeon_buffs`, which is not on
+  the test `sys.path` (Lightning Armada raises `ModuleNotFoundError`).
+- `controller_flags` derives `double_damage` only from permanent rule modifiers,
+  not from a static aura such as Te'talca's (native returns no flag).
+
+`ability_variable_value` is the one framework function production still reaches
+(through `bom_fields.effect_field`). Replacing it needs a differential over every
+Records variable kind, which is the next step.

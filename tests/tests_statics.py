@@ -19,11 +19,8 @@ SRC = fresh_database()
 
 import game_engine
 
-from abilities.framework.statics import (
-    can_block,
-    effective_deltas,
-    effective_stats,
-)
+from abilities.framework.statics import effective_deltas, effective_stats
+from rules_port.combat_rules import can_block
 from rules_port.static_rules import global_flags
 
 
@@ -733,7 +730,7 @@ def test_can_block_rejects_cantblock(db):
     """A troop with 'can't attack or block' (CantBlock, e.g. Inner Peace /
     Inner Conflict) must not be able to block — mirrors the client's
     Card.CanBlock() which returns CantBlock for that attribute."""
-    from abilities.framework.statics import can_block
+    from rules_port.combat_rules import can_block
     card(db, 101, 5, TPL_PLAIN, "warzone")        # attacker
     card(db, 102, 0, TPL_PLAIN, "warzone")        # blocker
     db.execute(

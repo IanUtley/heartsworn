@@ -12,7 +12,6 @@ these modules resolve abilities; `rules_port` does (see `../README.md`).
 | `statics.py` | Continuous (WhileCardInPlay / Permanent) static evaluation |
 | `tac.py` | TAC v2 decoder (`tac_function`, `decode_tac`, ...) |
 | `effects/` | Counters, deck search, choice constants, visibility projection, zone-move projection |
-| `keywords/combat.py` | Rage adapter over `statics.apply_rage` |
 
 Several of these duplicate logic that also exists in `rules_port`
 (`rules_port/conditions.py` now covers condition evaluation; `rules_port/targeting.py` now holds target and filter evaluation). Prefer
