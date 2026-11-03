@@ -1610,7 +1610,7 @@ class CardPlayMixin(_HostBase):
         # The cast trigger queued above can put the AI first on the chain. No
         # client transaction follows for the AI's own response, so consume its
         # passes here, as the pass handler does for the Practice window.
-        if not (session.session_name or "").startswith("tourney-"):
+        if native_port is not None and not (session.session_name or "").startswith("tourney-"):
             from application.practice_flow import _is_practice_chain_follow_up
             for _follow_up in range(8):
                 follow_up = native_port.action_stack.peek()
@@ -1621,7 +1621,8 @@ class CardPlayMixin(_HostBase):
                     break
                 native_port.drive_until_input(max_steps=64)
         _be.save_state(session, bstate)
-        holder = getattr(native_port.action_stack.peek(), "priority_player_id", None)
+        top_item = native_port.action_stack.peek() if native_port is not None else None
+        holder = getattr(top_item, "priority_player_id", None)
         game.push_green_light(
             pl_t if holder is None or _hc._same_uid(holder, pl_t) else ai_t,
             _hc.game_engine.EPriorityContext.ResolveTopOfChain)
