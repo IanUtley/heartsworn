@@ -1634,10 +1634,26 @@ remain between the two paths, to decide per filter:
   (`_source_card`, shape "source") and the revealed card (`shape "revealed"`) take
   the template values. A target filter on attack therefore reads the current value in
   one path and the printed value in the other.
-- `rules_port/context.py` has the last card producers, for the bury filter and the
-  card-count variable. Both use template values (`cost` included), like the static
-  path; the bury candidate's `cost` is the template cost, not the effective cost the
-  condition layer uses for the same card.
+- `rules_port/context.py`'s card producers (the bury filter and the card-count
+  variable) build through `CardView`. Both use template values (`cost` included),
+  like the static path; the bury candidate's `cost` is the template cost, not the
+  effective cost the condition layer uses for the same card.
+- Not every card producer is converted yet. These 24 literal card dicts (12 files,
+  found by a scan for dict literals with a `card_uid` key) still build their cards by
+  hand, and each needs a builder and a shape before the filters can read a single
+  `CardView` type:
+- `abilities/framework/condition_engine.py`: lines 246, 285, 367, 390
+- `abilities/framework/cost_mod.py`: lines 68
+- `abilities/framework/effects/damage.py`: lines 109, 93, 102
+- `abilities/framework/targeting.py`: lines 328, 416, 289, 570
+- `application/card_state.py`: lines 364
+- `pvp_autoplay.py`: lines 234, 281
+- `rules_port/combat_rules.py`: lines 79
+- `rules_port/session.py`: lines 1603
+- `rules_port/static_rules.py`: lines 2363, 362
+- `rules_port/token_effects.py`: lines 373, 440
+- `rules_port/trace.py`: lines 75
+- `rules_port/transform_effects.py`: lines 518, 586
 
 ## Remaining work
 
