@@ -560,7 +560,8 @@ def test_damage_esc_variable(db):
 def test_champion_damage(db):
     """'Deal 2 damage to target champion' — champions are not game_cards rows;
     _deal_damage maps the champion SessionCardId to the champion's health."""
-    from abilities.framework.effects.damage import deal_damage as _deal_damage
+    from rules_port.context import EffectContext
+    from rules_port.damage_effects import deal_damage as _deal_damage
 
     class H:
         user_profile = {"id": 5}
@@ -580,11 +581,11 @@ def test_champion_damage(db):
     ai_t = game_engine.UID.make(3, 1000)
     game = game_engine.Game(1, pl_t, ai_t)
     bstate = {"player_health": 20, "ai_health": 20}
-    _deal_damage(game, S(), db, H(), pl_t, ai_t, bstate,
-                 int(H._ai_champ_scid.uid.uid64), 5)
+    context = EffectContext.from_rules_port(
+        game, S(), db, H(), pl_t, ai_t, bstate, "")
+    _deal_damage(context, int(H._ai_champ_scid.uid.uid64), 5)
     assert bstate["ai_health"] == 15, bstate
-    _deal_damage(game, S(), db, H(), pl_t, ai_t, bstate,
-                 int(H._player_champ_scid.uid.uid64), 3)
+    _deal_damage(context, int(H._player_champ_scid.uid.uid64), 3)
     assert bstate["player_health"] == 17, bstate
 
 

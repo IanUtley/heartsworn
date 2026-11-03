@@ -1766,3 +1766,23 @@ instead of a hand-written dict. A differential between HEAD and the moved module
 over 445 zone rows, 5,000 `cost_mod_delta` and 200 `dynamic_cost_mod_delta`
 evaluations (1,894 non-zero deltas, from 314 Records formulas) found no
 differences.
+
+## Framework death and damage modules removed
+
+`abilities/framework/kill_troop.py`, `abilities/framework/bom.py` and
+`abilities/framework/effects/damage.py` are deleted. Production had no callers
+left: death and damage run through `rules_port.death_effects` and
+`rules_port.damage_effects`. `controller_id_for_target` (the one helper
+`rules_port/context.py` still borrowed from `bom.py`) moved to
+`rules_port/runtime_helpers.py`.
+
+Migrating their tests showed two framework-only details:
+- The framework death path also pushed an explicit `CardMoved`. The native path
+  sends only `CardUpdated`; the client synthesizes the move from the collection
+  change. The Deploy-not-Deathcry test asserts the native contract.
+- The native Deathcry is queued on the chain, so the Expendable Lives test
+  drains the stack, as the chain would.
+
+The tests' stub handler returned the card type as a string, which made 11
+`tests_leaves` cases fail with `str & int`; the stub now returns
+`ECardTypes.Troop`, and all 20 cases pass.

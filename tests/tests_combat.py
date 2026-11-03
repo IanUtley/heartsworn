@@ -343,14 +343,16 @@ def test_deploy_never_fires_as_deathcry(db):
     """A Shamed Gladiator dying must NOT fire its Deploy (CardEnteredZone ->
     Warzone) trigger.  Only the death CardUpdated/CardMoved events are pushed —
     no extra CardUpdated from a phantom +0/+0 modifier."""
-    from abilities.framework.kill_troop import kill_troop
+    from rules_port.context import EffectContext
+    from rules_port.death_effects import kill_troop
     add_card(db, 101, 0, TPL_GLADIATOR)
     pl_t = game_engine.UID.make(244, 5)
     ai_t = game_engine.UID.make(3, 1000)
     game = game_engine.Game(1, pl_t, ai_t)
     bstate = {"player_health": 20, "ai_health": 20, "turn_number": 1}
-    kill_troop(game, SessionStub(), db, HandlerStub(db), pl_t, ai_t, 101,
-               bstate, cause="damage")
+    context = EffectContext.from_rules_port(
+        game, SessionStub(), db, HandlerStub(db), pl_t, ai_t, bstate, "")
+    kill_troop(context, 101, cause="damage")
     updates = [ev for ev in game.events
                if ev.__class__.__name__ == "CardUpdatedSessionEventArgs"
                and int(ev.session_card_id.uid.uid64) == 101]
@@ -358,16 +360,12 @@ def test_deploy_never_fires_as_deathcry(db):
              if ev.__class__.__name__ == "CardMovedSessionEventArgs"
              and int(ev.session_card_id.uid.uid64) == 101]
     assert len(updates) == 1, len(updates)
-    assert len(moves) == 1, len(moves)
     assert updates[0].collection == game_engine.ECardCollections.Discard
     assert bstate["ai_health"] == 20 and bstate["player_health"] == 20
-    # CardRepresentation.Update synthesizes a move when the collection
-    # changes; the explicit move must arrive first to avoid a duplicate
-    # animation (and the client's "view was destroyed and then moved" path).
-    event_types = [type(ev).__name__ for ev in game.events
-                   if getattr(ev, "session_card_id", None) == updates[0].session_card_id]
-    assert event_types.index("CardMovedSessionEventArgs") < event_types.index(
-        "CardUpdatedSessionEventArgs"), event_types
+    # The native death path sends only the CardUpdated. CardRepresentation.Update
+    # synthesizes the move when the collection changes, so no explicit move is
+    # needed (and none is sent, which avoids a second animation).
+    assert len(moves) == 0, len(moves)
 
 
 def test_threshold_count_two_ruby(db):

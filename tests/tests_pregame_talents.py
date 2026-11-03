@@ -102,7 +102,8 @@ def test_expendable_lives_grants_and_resolves_one_shot_deathcry():
     try:
         from abilities.framework.triggers import resolve_triggers
         from rules_port.resolution import resolve_port_trigger as resolve_stack_trigger
-        from abilities.framework.kill_troop import kill_troop
+        from rules_port.context import EffectContext
+        from rules_port.death_effects import kill_troop
         from tests.tests_combat import HandlerStub, SessionStub
         import game_engine
 
@@ -146,9 +147,15 @@ def test_expendable_lives_grants_and_resolves_one_shot_deathcry():
         ).fetchone()[0]
         assert EXPENDABLE_GRANT in json.loads(current), current
 
-        kill_troop(
-            game, session, db, handler, pl_t, ai_t, 10001, bstate,
-            cause="damage")
+        context = EffectContext.from_rules_port(
+            game, session, db, handler, pl_t, ai_t, bstate, "")
+        kill_troop(context, 10001, cause="damage")
+        # The native death path queues the Deathcry on the chain; drain it as the chain would.
+        for _ in range(4):
+            if not bstate.get("stack"):
+                break
+            resolve_stack_trigger(handler, game, session, db, pl_t, ai_t,
+                                  bstate, bstate["stack"].pop())
         location, current = db.execute(
             "SELECT location, card_abilities FROM game_cards "
             "WHERE card_uid=10001").fetchone()

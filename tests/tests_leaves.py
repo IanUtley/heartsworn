@@ -63,7 +63,7 @@ class HandlerStub:
         return 1
 
     def _card_full_data(self, game, scid, template_guid, instance_id=None):
-        return (template_guid, "Troop", "Card", 1, 1, 1, 0)
+        return (template_guid, game_engine.ECardTypes.Troop, "Card", 1, 1, 1, 0)
 
     def _sync_instance_card_data(self, session, card_uid, new_template_guid):
         pass
@@ -464,7 +464,8 @@ def test_combat_state_clear_keeps_tapped(db):
 def test_kill_resets_damage_and_temp(db):
     """A troop that dies loses its damage and temporary buffs (client's
     DeactivateCard -> ResetCardDamage) so a deathcry-transform returns fresh."""
-    from abilities.framework.kill_troop import kill_troop
+    from rules_port.context import EffectContext
+    from rules_port.death_effects import kill_troop
     add_card(db, 100, 5)
     db.execute(
         "UPDATE game_cards SET card_damage=3, "
@@ -473,8 +474,9 @@ def test_kill_resets_damage_and_temp(db):
         (game_engine.ECardStates.Tapped | game_engine.ECardStates.Attacking,))
     db.commit()
     pl_t, ai_t, game, bstate = new_game(db)
-    kill_troop(game, SessionStub(), db, HandlerStub(), pl_t, ai_t, 100,
-               bstate, cause="damage")
+    context = EffectContext.from_rules_port(
+        game, SessionStub(), db, HandlerStub(), pl_t, ai_t, bstate, "")
+    kill_troop(context, 100, cause="damage")
     row = db.execute(
         "SELECT card_damage, temporary_buffs, temporary_attributes, "
         "card_state, location FROM game_cards WHERE card_uid=100").fetchone()

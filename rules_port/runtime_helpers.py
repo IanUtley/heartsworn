@@ -354,3 +354,39 @@ def pvp_opponent_pid(battle_state, owner_id):
     pids = [int(pid) for pid in (battle_state or {}).get("pids", ())]
     owner_id = int(owner_id or 0)
     return next((pid for pid in pids if pid != owner_id), None)
+
+
+def controller_id_for_target(db, session, handler, bstate, target_uid):
+    """Return the DB player id that controls a card or champion target."""
+    from pvp_db import db_card_owner_id
+    card_owner = db_card_owner_id(
+        session.session_id, int(target_uid), conn=db)
+    if card_owner is not None:
+        return int(card_owner)
+    if (bstate or {}).get("pvp"):
+        for pid, cuid in ((bstate or {}).get("champ_map") or {}).items():
+            try:
+                if int(cuid) == int(target_uid):
+                    return int(pid)
+            except (TypeError, ValueError):
+                continue
+        # Headless PvP fixtures can have the handler's champion SessionCardIds
+        # before the live session has populated champ_map.  Resolve ownership
+        # from the fixture's player order in that narrow fallback case.
+        pids = (bstate or {}).get("pids") or []
+        if len(pids) >= 2:
+            player_champ = getattr(handler, "_player_champ_scid", None)
+            ai_champ = getattr(handler, "_ai_champ_scid", None)
+            if player_champ is not None and int(
+                    player_champ.uid.uid64) == int(target_uid):
+                return int(pids[0])
+            if ai_champ is not None and int(ai_champ.uid.uid64) == int(
+                    target_uid):
+                return int(pids[1])
+    for attr, owner in (("_player_champ_scid", handler.user_profile["id"]
+                         if handler.user_profile else 0),
+                        ("_ai_champ_scid", 0)):
+        champ = getattr(handler, attr, None)
+        if champ is not None and int(champ.uid.uid64) == int(target_uid):
+            return int(owner)
+    return None

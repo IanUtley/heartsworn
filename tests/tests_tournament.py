@@ -349,7 +349,8 @@ def test_pvp_result_is_published_before_game_over():
 
 
 def test_pvp_champion_damage_uses_target_player_health():
-    from abilities.framework.effects.damage import deal_damage as _deal_damage
+    from rules_port.context import EffectContext
+    from rules_port.damage_effects import deal_damage as _deal_damage
 
     class Session:
         session_id = 42765
@@ -370,10 +371,14 @@ def test_pvp_champion_damage_uses_target_player_health():
         "player_health": 20,
         "ai_health": 20,
     }
-    with mock.patch("abilities.framework.triggers.resolve_triggers",
-                    return_value=""):
-        _deal_damage(game, Session(), None, Handler(), player_uid,
-                     opponent_uid, state, 7002, 3)
+    import tempfile
+    from tests.test_db import build_baseline
+    production_db = sqlite3.connect(
+        build_baseline(os.path.join(tempfile.mkdtemp(), "damage.db")))
+    context = EffectContext.from_rules_port(
+        game, Session(), production_db, Handler(), player_uid, opponent_uid,
+        state, "")
+    _deal_damage(context, 7002, 3)
     assert state["player_health"] == 20
     assert state["ai_health"] == 17
     assert game.events[-1].player_id.uid64 == opponent_uid.uid64

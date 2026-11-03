@@ -3328,15 +3328,15 @@ class EffectContext:
             # HCPHandler._champion_targets labels the opposing champion with
             # the PvE synthetic owner 0. PvP must use persisted participant IDs
             # from champ_map/player order instead.
-            from abilities.framework.bom import _controller_id_for_target
+            from .runtime_helpers import controller_id_for_target
 
-            target_owner = _controller_id_for_target(
+            target_owner = controller_id_for_target(
                 self.db, self.session, self.handler, self.bstate, target)
         if is_champion or card_row is None:
-            from abilities.framework.bom import _controller_id_for_target
+            from .runtime_helpers import controller_id_for_target
 
             if target_owner is None:
-                target_owner = _controller_id_for_target(
+                target_owner = controller_id_for_target(
                     self.db, self.session, self.handler, self.bstate, target)
             if target_owner is not None:
                 from .death_effects import champion_would_lose
