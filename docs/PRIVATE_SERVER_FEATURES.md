@@ -148,7 +148,7 @@ Frost Ring Arena implementation details are in
 - [x] Shared executors for the current Records effect leaves, including
   discard/void, tap/untap, grant/play/fire-event/reveal/revert/store-targets,
   verdict, repeating effects, and typed variable/effect fields. See
-  [`abilities/ABILITIES.md`](../abilities/ABILITIES.md) and the field audit in
+  [`docs/ABILITIES.md`](ABILITIES.md) and the field audit in
   [`RULES_PORT_PARITY.md`](RULES_PORT_PARITY.md); leaf registration alone does
   not establish client or trigger-event parity.
 - [ ] Complete parity for every target filter and selection mode, including

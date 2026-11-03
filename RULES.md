@@ -3,7 +3,7 @@
 This is the canonical gameplay contract for the private server. It describes
 current behavior and intentional gaps without pretending that an unchecked
 parity feature is complete. `HOWTO.md` defines architecture and protocol;
-`docs/CLIENT_SERVER_PROTOCOL.md` and `abilities/ABILITIES.md` hold detailed
+`docs/CLIENT_SERVER_PROTOCOL.md` and `docs/ABILITIES.md` hold detailed
 wire and metadata evidence.
 
 Use these status words when adding a rule:
@@ -274,7 +274,7 @@ card/ability metadata -> legal targets and costs -> transaction
 Target lists must come from `AbilityTargetTemplate` filters, quantities, and
 relationships. Effects must use typed parameters, counters, variables, and
 durations where available. A custom adapter is a compatibility boundary for a
-known extraction/client gap and must be documented in `abilities/ABILITIES.md`.
+known extraction/client gap and must be documented in `docs/ABILITIES.md`.
 
 `CardCastEvent` uses the casting champion as its source and the played card as
 its target. Existing listeners can inspect the played card's type and cost,

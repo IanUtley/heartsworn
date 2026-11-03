@@ -27,8 +27,8 @@ Start with:
   commands.
 - [docs/FEATURE-FLAGS.md](docs/FEATURE-FLAGS.md) for server-configured client
   profile features such as the developer console and replay UI.
-- [abilities/README.md](abilities/README.md) for the gamedata-driven ability
-  framework and custom ability extension point.
+- [docs/ABILITIES.md](docs/ABILITIES.md) for the gamedata-driven ability
+  reference and custom ability extension point.
 
 The smaller package READMEs describe individual extension points:
 `domain/`, `services/`, `gamemodes/`, and `campaign_chains/`.

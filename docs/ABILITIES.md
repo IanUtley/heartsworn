@@ -3,7 +3,7 @@
 This document explains every field in the four `Ability*` record families under
 `hex-private/Records/`, how those fields map onto the C# classes under
 `hex-private/HexClient/Assembly-CSharp-firstpass/`, and how the Python ability code under
-`abilities/` should read a JSONL entry and implement an ability — its costs,
+`rules_port/` should read a JSONL entry and implement an ability — its costs,
 its duration, its targets, its conditions — **without hardcoding per-card
 logic**.
 

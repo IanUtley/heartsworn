@@ -67,7 +67,7 @@ full restart. The reloaded set is defined by `reload_runtime_modules()` in
   `gamemodes/tournament_engine.py`, `gamemodes/tournament_server.py`,
   `services/tournament_game.py`, `services/chat.py`, `services/arena.py`,
   `services/mail.py`.
-- Prefix match, every already-loaded module under: `abilities/`, `rules_port/`
+- Prefix match, every already-loaded module under: `rules_port/`
   (including `rules_port/static_rules.py`), `application/`, `services/`,
   `gamemodes/`, `campaign_runtime/`.
 

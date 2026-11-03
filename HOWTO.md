@@ -23,7 +23,7 @@ Use the sources in this order:
 4. Focused documents provide evidence and subsystem detail:
    `docs/CLIENT_SERVER_PROTOCOL.md`, `docs/GAMEDATA_MODEL.md`,
    `docs/CAMPAIGN.md`, `docs/FROST_RING_ARENA.md`,
-   `abilities/ABILITIES.md`, and `docs/PRIVATE_SERVER_FEATURES.md`.
+   `docs/ABILITIES.md`, and `docs/PRIVATE_SERVER_FEATURES.md`.
 5. Tests and the running code are the current executable check. If they
    disagree with a document, fix the implementation and the document together;
    do not silently establish a new rule in code.
@@ -176,7 +176,6 @@ or display text.
 | `game_session.py` | session lifecycle and DB-backed session state |
 | `ai.py` | AI turn, card-choice, and combat decisions |
 | `hexai/` | offline self-play capture, training (numpy or optional PyTorch/CUDA), and the opt-in runtime policy/value agent; see `hexai/README.md` |
-| `abilities/` | helpers (targeting, statics, conditions, counters, damage, death) that the RulesPort runtime and protocol host call; ability resolution itself lives in `rules_port/` |
 | `campaign.py` | campaign protocol and authored campaign state; campaign SQL migration into `pve_db` remains work in progress |
 | `campaign/campaign_runtime/` | runs zones whose `campaign/campaign_rules/<zone>.json` says `"runtime": "rules"` from the campaign editor's rules (shared rules loader, projection, progress in `campaign_progress`); see `docs/CAMPAIGN.md` "Rules runtime" |
 | `campaign_source.py` | adds the `campaign/` source root to Python's import path for server modules |
