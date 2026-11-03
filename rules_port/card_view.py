@@ -110,6 +110,9 @@ SHAPES: dict[str, tuple[str, ...]] = {
     # A template a random transform may turn a card into (rules_port/transform_effects.py).
     "transform_candidate": ("card_uid", "template_guid", "name", "card_type", "cost", "rarity",
                             "shards", "subtype", "attributes", "location", "user_id"),
+    # A setup card with a targeted encounter passive (application/card_state.py).
+    "scene_card": ("card_uid", "card_type", "location", "shards", "name", "user_id", "subtype",
+                   "attributes", "int_attrs", "src_owner_id"),
     "filter_champion": ("card_uid", "card_type", "location", "collection", "user_id", "owner_id",
                         "controller_id", "template_guid", "template_id", "name", "subtype",
                         "attack", "attributes", "defense", "counters", "counter_guids"),
@@ -157,6 +160,8 @@ class CardView:
     thresholds: list[int] | None = None
     template_candidate: bool = False
     rule_flags: Any = None
+    # A scene card's controller override; the shape lists it only when it is set.
+    src_owner_id: int | None = None
 
     # --- builders -------------------------------------------------------------------------
 
@@ -557,6 +562,15 @@ class CardView:
                    attack=0, defense=0)
 
     @classmethod
+    def scene_card(cls, card_uid: int, card_type: str, location: str, shards: list[int],
+                   name: str, owner: Any, subtype: str, attributes: int,
+                   int_attrs: dict) -> "CardView":
+        """A setup card a targeted encounter passive filters on (values as the producer computed them)."""
+        return cls(card_uid=card_uid, card_type=card_type, location=location, user_id=owner,
+                   state=0, attack=0, defense=0, name=name, cost=0, subtype=subtype,
+                   shards=shards, attributes=attributes, int_attrs=int_attrs)
+
+    @classmethod
     def champion(cls, side: str, user_id: int, health: int) -> "CardView":
         """The synthetic champion entry the static filters see for ``side`` ("ai" or "player")."""
         return cls(
@@ -610,6 +624,8 @@ class CardView:
             out[key] = value
         if shape == "projected" and self.thresholds is not None:
             out["thresholds"] = list(self.thresholds)
+        if shape == "scene_card" and self.src_owner_id is None:
+            del out["src_owner_id"]
         return out
 
     def as_mapping(self) -> dict[str, Any]:

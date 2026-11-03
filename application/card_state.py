@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 
 import game_engine
+from rules_port.card_view import CardView
 
 
 class CardStateMixin:
@@ -361,20 +363,14 @@ class CardStateMixin:
                 # controller.  This is important for filters such as
                 # IsControlledBy (the Taming Dire Toad passive means the
                 # controller's Dire Toads, not every Dire Toad in play).
-                scene_card = {
-                    "card_uid": scid.uid.uid64,
-                    "card_type": ct_name,
-                    "location": card_location,
-                    "shards": shards,
-                    "name": name,
-                    "user_id": card_owner_id,
-                    "subtype": card_subtype,
-                    "attributes": int(attributes | inst_attrs | temp_attrs),
-                    "int_attrs": scene_int_attrs,
-                }
+                scene_view = CardView.scene_card(
+                    scid.uid.uid64, ct_name, card_location, shards, name,
+                    card_owner_id, card_subtype,
+                    int(attributes | inst_attrs | temp_attrs), scene_int_attrs)
                 if scene_ag in (getattr(self, "_scene_targeted_ability_owners", {}) or {}):
-                    scene_card["src_owner_id"] = (
-                        self._scene_targeted_ability_owners[scene_ag])
+                    scene_view = replace(scene_view, src_owner_id=(
+                        self._scene_targeted_ability_owners[scene_ag]))
+                scene_card = scene_view.as_shape("scene_card")
                 qualifies = False
                 for target_id in target_ids:
                     filter_json = _hc.db_target_template_filter(

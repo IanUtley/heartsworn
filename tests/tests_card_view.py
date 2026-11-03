@@ -68,7 +68,8 @@ def test_every_shape_returns_exactly_its_keys():
         (7, "Troop", "warzone", 5, "tpl", 0, 3, 2, "Name", 2, "Robot", "{}", "[]", "{}",
          "Common", 0, 0, "", 0))
     for shape, keys in SHAPES.items():
-        assert set(view.as_shape(shape)) == set(keys), shape
+        expected = set(keys) - ({"src_owner_id"} if shape == "scene_card" else set())
+        assert set(view.as_shape(shape)) == expected, shape
     assert "thresholds" not in view.as_shape("projected")
     effective = view.with_effective([64], "Dwarf", (9, 8))
     projected = effective.as_shape("projected")

@@ -1638,22 +1638,26 @@ remain between the two paths, to decide per filter:
   variable) build through `CardView`. Both use template values (`cost` included),
   like the static path; the bury candidate's `cost` is the template cost, not the
   effective cost the condition layer uses for the same card.
-- Not every card producer is converted yet. These 24 literal card dicts (12 files,
-  found by a scan for dict literals with a `card_uid` key) still build their cards by
-  hand, and each needs a builder and a shape before the filters can read a single
-  `CardView` type:
-- `abilities/framework/condition_engine.py`: lines 246, 285, 367, 390
-- `abilities/framework/cost_mod.py`: lines 68
-- `abilities/framework/effects/damage.py`: lines 109, 93, 102
-- `abilities/framework/targeting.py`: lines 328, 416, 289, 570
-- `application/card_state.py`: lines 364
-- `pvp_autoplay.py`: lines 234, 281
-- `rules_port/combat_rules.py`: lines 79
-- `rules_port/session.py`: lines 1603
-- `rules_port/static_rules.py`: lines 2363, 362
-- `rules_port/token_effects.py`: lines 373, 440
-- `rules_port/trace.py`: lines 75
-- `rules_port/transform_effects.py`: lines 518, 586
+- Card producers, status (scan: dict literals with a `card_uid` key). Converted since
+  the last correction: the rules-port combat, champion, token, fuse and transform
+  candidates, and the setup scene card. Still literal, and a card view in every case
+  except the last three:
+  - `abilities/framework/condition_engine.py`: lines 246, 285, 367, 390. A parallel
+    copy of the condition layer (`rules_port/condition_context.py`, converted), with
+    extra `faction` and `src_owner_id` keys and `src_owner_side` taken from the ability
+    source rather than the owner.
+  - `abilities/framework/cost_mod.py`: line 68 (the cost-modifier card).
+  - `abilities/framework/effects/damage.py`: lines 93, 102, 109 (the typed-immunity view).
+  - `abilities/framework/targeting.py`: lines 289, 328, 416, 570. A parallel copy of the
+    target projection (`rules_port/targeting.py`, converted), with `faction`, `gem_count`
+    and `src_owner_id`.
+  - Not card views, so they stay literal: `pvp_autoplay.py` lines 234 and 281 (hand-tracker
+    rows), `rules_port/session.py` line 1603 (a play-queue entry) and
+    `rules_port/trace.py` line 75 (an audit record).
+
+  The framework copies duplicate the `rules_port` modules. Converting them adds more
+  shapes; replacing them with the `rules_port` producers removes them, but changes which
+  values some filters see, so each needs a decision.
 
 ## Remaining work
 
