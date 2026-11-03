@@ -1401,20 +1401,6 @@ def db_card_ability_state(session_id, card_uid, conn=None):
     ).fetchone()
 
 
-def db_card_filter_view(session_id, card_uid, conn=None):
-    """Return the projection consumed by typed damage/immunity filters."""
-    connection = conn or _db_layer._db
-    return connection.execute(
-        "SELECT gc.card_uid, gc.card_type, gc.location, gc.user_id, "
-        "gc.template_guid, gc.card_state, COALESCE(ct.attack,0), "
-        "COALESCE(ct.defense,0), ct.name, COALESCE(ct.cost,0), ct.subtype, "
-        "ct.threshold_json, gc.card_abilities, gc.permanent_buffs "
-        "FROM game_cards gc JOIN card_templates ct ON ct.guid=gc.template_guid "
-        "WHERE gc.session_id=? AND gc.card_uid=?",
-        (session_id, int(card_uid)),
-    ).fetchone()
-
-
 def db_card_damage_shield_fields(session_id, card_uid, conn=None):
     """Return the two serialized modifier stores used by damage shields."""
     return (conn or _db_layer._db).execute(
@@ -2391,17 +2377,6 @@ def db_static_card_rows(session_id, zones, conn=None):
         [session_id, *zones]).fetchall()
 
 
-def db_card_property_state(session_id, card_uid, conn=None):
-    """Return base/current stat fields used by typed CardPropertyVariable."""
-    return (conn or _db_layer._db).execute(
-        "SELECT COALESCE(ct.attack,0), COALESCE(ct.defense,0), "
-        "COALESCE(gc.card_attack_mod,0), COALESCE(gc.card_defense_mod,0), "
-        "gc.permanent_buffs, gc.temporary_buffs FROM game_cards gc "
-        "JOIN card_templates ct ON ct.guid=gc.template_guid "
-        "WHERE gc.session_id=? AND gc.card_uid=?",
-        (session_id, int(card_uid))).fetchone()
-
-
 def db_card_static_fields(session_id, card_uid, conn=None):
     """Return every column the static cost and threshold views read, in one row.
 
@@ -2429,15 +2404,6 @@ def db_card_static_fields(session_id, card_uid, conn=None):
     return dict(zip([column[0] for column in cursor.description], row))
 
 
-def db_card_cost_location_state(session_id, card_uid, conn=None):
-    """Return printed/instance cost fields and current zone."""
-    return (conn or _db_layer._db).execute(
-        "SELECT ct.cost, gc.card_cost_mod, gc.cost_mod_json, gc.location "
-        "FROM game_cards gc JOIN card_templates ct ON ct.guid=gc.template_guid "
-        "WHERE gc.session_id=? AND gc.card_uid=?",
-        (session_id, int(card_uid))).fetchone()
-
-
 def db_card_static_row(session_id, card_uid, conn=None):
     """Return full card/template combat state for static evaluation."""
     return (conn or _db_layer._db).execute(
@@ -2461,27 +2427,6 @@ def db_card_combat_state(session_id, card_uid, conn=None):
         (session_id, int(card_uid))).fetchone()
 
 
-def db_card_rage_lethal(session_id, card_uid, conn=None):
-    """Return optional printed Rage/Lethal metadata when present."""
-    connection = conn or _db_layer._db
-    try:
-        return connection.execute(
-            "SELECT ct.rage_value, ct.lethal FROM game_cards gc "
-            "JOIN card_templates ct ON ct.guid=gc.template_guid "
-            "WHERE gc.session_id=? AND gc.card_uid=?",
-            (session_id, int(card_uid))).fetchone()
-    except Exception:
-        try:
-            row = connection.execute(
-                "SELECT ct.rage_value FROM game_cards gc "
-                "JOIN card_templates ct ON ct.guid=gc.template_guid "
-                "WHERE gc.session_id=? AND gc.card_uid=?",
-                (session_id, int(card_uid))).fetchone()
-        except Exception:
-            return None
-        return (row[0], 0) if row else None
-
-
 def db_warzone_card_uids(session_id, owner_id=None, conn=None):
     """Return warzone card UIDs, optionally restricted to one controller."""
     connection = conn or _db_layer._db
@@ -2499,15 +2444,6 @@ def db_warzone_owner_ids(session_id, conn=None):
     return (conn or _db_layer._db).execute(
         "SELECT DISTINCT user_id FROM game_cards "
         "WHERE session_id=? AND location='warzone'", (session_id,)).fetchall()
-
-
-def db_card_type_threshold(session_id, card_uid, conn=None):
-    """Return a card's printed type and threshold metadata."""
-    return (conn or _db_layer._db).execute(
-        "SELECT ct.card_type, ct.threshold_json FROM game_cards gc "
-        "JOIN card_templates ct ON ct.guid=gc.template_guid "
-        "WHERE gc.session_id=? AND gc.card_uid=?",
-        (session_id, int(card_uid))).fetchone()
 
 
 def db_next_card_uid(session_id, conn=None):
@@ -3039,14 +2975,6 @@ def db_target_candidate_rows(session_id, zones, controller_uid=None,
         params.append(controller_uid)
     sql += " ORDER BY gc.user_id, gc.position" if top_n else " ORDER BY gc.position"
     return connection.execute(sql, params).fetchall()
-
-
-def db_gem_template_name(gem_type, conn=None):
-    """Return the persisted display name for a socketed gem type."""
-    row = (conn or _db_layer._db).execute(
-        "SELECT gem_type_name FROM gem_templates WHERE gem_type=?",
-        (int(gem_type),)).fetchone()
-    return row[0] if row else None
 
 
 def db_trace_card_rows(session_id, columns, conn=None):

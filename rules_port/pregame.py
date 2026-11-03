@@ -44,26 +44,6 @@ def register_condition(name):
     return deco
 
 
-@register_condition("pregame_shards_in_deck")
-def _cond_shards_in_deck(db, session, user_id, color, count):
-    from pvp_db import db_deck_shard_count
-    return db_deck_shard_count(session.session_id, user_id, color, conn=db) >= int(count)
-
-
-@register_condition("pregame_cards_in_deck")
-def _cond_cards_in_deck(db, session, user_id, count):
-    from pvp_db import db_deck_card_count
-    return db_deck_card_count(session.session_id, user_id, conn=db) >= int(count)
-
-
-@register_condition("pregame_is_dungeon")
-def _cond_is_dungeon(db, session, user_id):
-    # Campaign battles use the campaign ruleset, not the dungeon encounter
-    # ruleset.  In particular, Fearless is a dungeon-boss hand-size effect
-    # and must not change the Orc Warrior campaign opening hand.
-    return not (session and (session.session_name or "").startswith("camp_"))
-
-
 def _has_previous_dungeon_win(db, session):
     """Return whether the previous encounter in this dungeon was won.
 
@@ -257,20 +237,6 @@ def _target_filter_flags(value):
 
     visit(value)
     return card_types, zones
-
-
-def _target_template_flags_for_id(db, target_id):
-    from pvp_db import db_target_template_filter
-    value = db_target_template_filter(str(target_id), conn=db)
-    if not value:
-        return set(), set()
-    try:
-        value = json.loads(value or "{}")
-    except (TypeError, ValueError):
-        return set(), set()
-    return _target_filter_flags(value)
-
-
 
 
 def _condition_contains_previous_dungeon_win(condition):

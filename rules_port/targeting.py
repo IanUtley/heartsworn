@@ -11,7 +11,6 @@ from __future__ import annotations
 import copy
 import json
 import threading
-from typing import Any, cast
 
 from rules_port.card_view import CardView, threshold_shards as _shards
 from rules_port.filters import (records_filter_evaluator,
@@ -586,14 +585,6 @@ def _champion_subtype(guid):
 
 
 _RACE_SUBTYPE_NAMES = {"ShinHare": "Shin'hare"}
-
-
-def _parent_uid(serialized_buffs):
-    try:
-        value = json.loads(serialized_buffs or "{}")
-    except (TypeError, ValueError, json.JSONDecodeError):
-        return 0
-    return int(value.get("parent_uid", 0) or 0) if isinstance(value, dict) else 0
 
 
 ZONE_MAP = {
