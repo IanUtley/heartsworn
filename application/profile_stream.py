@@ -25,12 +25,18 @@ if TYPE_CHECKING:
     from hconnect_server import _db
 
 
+if TYPE_CHECKING:
+    from application._host_surface import HostSurface as _HostBase
+else:
+    _HostBase = object
+
+
 def bind_runtime_globals(namespace):
     """Bind legacy protocol/DB symbols after the server module is initialized."""
     globals().update(namespace)
 
 
-class ProfileStreamMixin:
+class ProfileStreamMixin(_HostBase):
     def __getattr__(self, name: str) -> Any:
         # The mixin is attached to HCPHandler after its runtime dependencies
         # and protocol state have been assembled.
@@ -170,7 +176,7 @@ class ProfileStreamMixin:
                     card_ids = _json.loads(dk.get("cards", "[]"))
                 except:
                     pass
-                card_guids = []  # CardsInDeck kept empty in profile push
+                card_guids: list[int] = []  # CardsInDeck kept empty in profile push
                 try:
                     deck_equipment = _json.loads(dk.get("equipment") or "[]")
                 except (TypeError, ValueError):

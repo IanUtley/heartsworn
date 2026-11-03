@@ -17,6 +17,7 @@ import functools
 import json
 import re
 import threading
+from collections.abc import Collection
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from types import SimpleNamespace
@@ -1893,7 +1894,8 @@ def _resolved_json(scope: Scope) -> dict[str, list[int]]:
     return {str(k): [int(uid) for uid in v] for k, v in scope.resolved_by_instance.items()}
 
 
-def resume_ability(continuation: dict[str, Any], answer: int | None, *, context: Any) -> bool:
+def resume_ability(continuation: dict[str, Any], answer: int | Collection[int] | None, *,
+                   context: Any) -> bool:
     """Resume a paused ability with the player's answer: the card chosen, or None for choosing none. The answer
     must be one of the candidates the pause offered (or None when the choice is optional). The invoking frames
     then resume after their invoke clauses, outermost last."""
@@ -1904,7 +1906,7 @@ def resume_ability(continuation: dict[str, Any], answer: int | None, *, context:
         if not continuation["optional"]:
             raise ValueError("this choice is not optional")
     else:
-        picks = [int(uid) for uid in answer] if isinstance(answer, (list, tuple, set)) else [int(answer)]
+        picks = [answer] if isinstance(answer, int) else [int(uid) for uid in answer]
         if len(set(picks)) != len(picks):
             raise ValueError("a card is picked twice")
         for uid in picks:

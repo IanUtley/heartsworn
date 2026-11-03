@@ -323,6 +323,7 @@ class PendingChoicesMixin(_HostBase):
         resume_order = int(parent.get(
             "resume_effect_order",
             int(bstate.get("resolving_effect_order", 0)) + 1))
+        continuation_cls: Any
         if bstate.get("_rules_port_attached"):
             from rules_port.abilities import AbilityContinuation as continuation_cls
         else:
@@ -1047,7 +1048,7 @@ class PendingChoicesMixin(_HostBase):
         _be = self._checkpoint_engine(session)
         inst_id = int(bstate.get("_next_instance_id", 1))
         bstate["_next_instance_id"] = inst_id + 1
-        pend = {
+        pend: dict[str, Any] = {
             "ability_guid": str(ability_guid),
             "source_uid": int(source_uid),
             "owner_id": int(owner_id),
@@ -1195,7 +1196,7 @@ class PendingChoicesMixin(_HostBase):
                 with two chosen targets must forward both so the resolver's
                 authored target indexes line up.
                 """
-                result = {}
+                result: dict[str, Any] = {}
                 if not isinstance(raw, Mapping):
                     return result
                 for key, value in raw.items():
@@ -1554,7 +1555,7 @@ class PendingChoicesMixin(_HostBase):
                 return valid
 
             valid_targets = owned_hand_cards(selected_uids)
-            wire_uids = ()
+            wire_uids: tuple[int, ...] = ()
             if not selected_uids:
                 # Some Mono builds omit TargetMap from the decoded wrapper but
                 # still serialize the selected SessionCardId in the original
@@ -1759,6 +1760,8 @@ class PendingChoicesMixin(_HostBase):
             from rules_port import ir_exec
             from rules_port.context import EffectContext
             from rules_port.resolution import prompt_interpreted_reveal
+            if not picks:
+                assert chosen_uid is not None  # the guard above admits only a picked or chosen card
             answer = list(picks) if picks else int(chosen_uid)
             _hc.log_req(f"    Deck-search choice {answer}: resuming the interpreter")
             g = self._fresh_game(session, pl_t, ai_t, bstate)
