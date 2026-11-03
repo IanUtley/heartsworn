@@ -747,17 +747,11 @@ def ai_declare_attackers(handler, game, session, ai_t, pl_t, battle_state):
         _dispatch_triggers(
             _db, handler, game, session, pl_t, ai_t, battle_state,
             "CardAttackedOrBlockedEvent", uid, 0)
-        # Rage is a native combat mutation in an attached RulesPort session.
-        if port is not None:
-            from rules_port.context import EffectContext
-            from rules_port.combat_effects import apply_rage
-            apply_rage(EffectContext.from_rules_port(
-                game, session, _db, handler, pl_t, ai_t, battle_state,
-                "", ability=None), uid)
-        else:
-            from abilities.framework.keywords.combat import apply_rage_keyword
-            apply_rage_keyword(_db, session, handler, game, pl_t, ai_t,
-                               battle_state, uid)
+        from rules_port.context import EffectContext
+        from rules_port.combat_effects import apply_rage
+        apply_rage(EffectContext.from_rules_port(
+            game, session, _db, handler, pl_t, ai_t, battle_state,
+            "", ability=None), uid)
         attackers[str(uid)] = str(player_champ_uid64)
         cs = game_engine.CombatSessionEventArgs()
         cs.player_id = ai_t
@@ -2061,10 +2055,7 @@ def _ai_pay_card_sacrifice(handler, game, session, ai_t, battle_state, card,
     template = str(row[0] or "") if row else ""
     if not template:
         return True
-    if getattr(session, "_rules_port_session", None) is not None:
-        from rules_port.targeting import legal_targets
-    else:
-        from abilities.framework.targeting import legal_targets
+    from rules_port.targeting import legal_targets
     owner = db_card_owner_id(session.session_id, int(card.card_uid), conn=_db)
     legal = {int(uid) for uid in legal_targets(
         _db, session.session_id, owner, template, int(card.card_uid),
@@ -2241,11 +2232,7 @@ def ai_tunnel_hand_troop(handler, game, session, ai_t, pl_t, battle_state,
     _be = _checkpoint_engine(session, battle_state)
     if not _be.stack_empty(battle_state):
         return
-    if (getattr(session, "_rules_port_session", None) is not None or
-            battle_state.get("_rules_port_attached")):
-        from rules_port.tunneling import tunneling_value
-    else:
-        from abilities.framework.effects.counters import tunneling_value
+    from rules_port.tunneling import tunneling_value
     from rules_port.zone_effects import (move_card_to_zone,
                                          project_card_runtime,
                                          state_after_zone_exit)
@@ -2314,15 +2301,9 @@ def ai_tunnel_hand_troop(handler, game, session, ai_t, pl_t, battle_state,
             ev_cur.delta = tunnel_cost
             ev_cur.new_value = resources
             game._push(ev_cur)
-        if (getattr(session, "_rules_port_session", None) is not None or
-                battle_state.get("_rules_port_attached")):
-            project_card_runtime(
-                game, session, _db, handler, pl_t, ai_t, battle_state,
-                int(card_uid), "underground")
-        else:
-            from abilities.framework.effects.utility import _push_card_in_zone
-            _push_card_in_zone(game, session, _db, handler, pl_t, ai_t,
-                               battle_state, int(card_uid), "underground")
+        project_card_runtime(
+            game, session, _db, handler, pl_t, ai_t, battle_state,
+            int(card_uid), "underground")
         _dispatch_triggers(
             _db, handler, game, session, pl_t, ai_t, battle_state,
             "CardExitedZoneEvent", int(card_uid),
@@ -3462,10 +3443,7 @@ def ai_use_champion_ability(handler, game, session, ai_t, pl_t, battle_state,
                 except (TypeError, ValueError):
                     target_template_ids = []
             if target_template_ids:
-                if getattr(session, "_rules_port_session", None) is not None:
-                    from rules_port.targeting import legal_targets
-                else:
-                    from abilities.framework.targeting import legal_targets
+                from rules_port.targeting import legal_targets
                 for target_template_id in target_template_ids:
                     filter_json = db_target_template_filter(
                         target_template_id, conn=_db)
@@ -3663,10 +3641,7 @@ def ai_use_champion_ability(handler, game, session, ai_t, pl_t, battle_state,
         sacrifice_uids = []
         cost_templates = getattr(handler, "_ability_cost_templates", None)
         if cost_templates is not None:
-            if getattr(session, "_rules_port_session", None) is not None:
-                from rules_port.targeting import legal_targets
-            else:
-                from abilities.framework.targeting import legal_targets
+            from rules_port.targeting import legal_targets
             used_targets = {int(target_uid)} if target_uid else set()
             candidates = []
             sacrifice_rows = []
@@ -3878,13 +3853,8 @@ def _ai_activation_condition_met(session, battle_state, ability_guid,
     graph = ability_graph(DEFAULT_RECORD_STORE, str(ability_guid).lower())
     if not (graph.ability_condition or graph.trigger_condition):
         return True
-    if (getattr(session, "_rules_port_session", None) is not None or
-            (battle_state or {}).get("_rules_port_attached")):
-        from rules_port.condition_context import ConditionContext
-        from rules_port.conditions import trigger_condition_met
-    else:
-        from abilities.framework.condition_engine import (
-            ConditionContext, trigger_condition_met)
+    from rules_port.condition_context import ConditionContext
+    from rules_port.conditions import trigger_condition_met
     cond_ctx = ConditionContext(
         _db, session, battle_state,
         ability_source_uid=int(source_uid),
@@ -3906,12 +3876,7 @@ def ai_use_warzone_ability(handler, game, session, ai_t, pl_t, battle_state,
     """
     import json as _j
     _be = _checkpoint_engine(session, battle_state)
-    if (getattr(session, "_rules_port_session", None) is not None or
-            (battle_state or {}).get("_rules_port_attached")):
-        from rules_port.triggers import trigger_collection_allows
-    else:
-        from abilities.framework.triggers import (
-            _trigger_collection_allows as trigger_collection_allows)
+    from rules_port.triggers import trigger_collection_allows
     ai_owner_id = int(ai_owner_id)
     player_instance_id = int(getattr(pl_t, "uid64", pl_t)) >> 8
     player_owner_id = (player_instance_id if player_owner_id is None else

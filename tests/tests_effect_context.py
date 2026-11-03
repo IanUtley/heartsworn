@@ -670,8 +670,9 @@ def test_subterranean_spy_visibility_reveals_only_the_controller_view():
 
 
 def test_tunneling_surface_queue_is_empty_without_underground_cards():
-    from abilities.framework.effects.counters import queue_tunneling_surfaces
-    from rules_port.tunneling import surface_source_is_underground
+    from types import SimpleNamespace
+
+    from rules_port.tunneling import queue_surfaces, surface_source_is_underground
 
     class EmptyCursor:
         def fetchall(self):
@@ -695,9 +696,9 @@ def test_tunneling_surface_queue_is_empty_without_underground_cards():
 
     bstate = {"stack": []}
     assert not surface_source_is_underground(EmptyDB(), Session(), 123)
-    assert queue_tunneling_surfaces(
-        EmptyDB(), Session(), Handler(), Game(), "player", "ai", bstate,
-        1001) == []
+    context = SimpleNamespace(db=EmptyDB(), session=Session(), handler=Handler(),
+                              game=Game(), bstate=bstate)
+    assert queue_surfaces(context, 1001) == []
     assert bstate["stack"] == []
 
 

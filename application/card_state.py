@@ -179,32 +179,10 @@ class CardStateMixin:
                 persisted_gem = irow[15]
         native_bstate = getattr(self, "_current_bstate", None)
         native_cost = None
-        if (scid is not None and isinstance(native_bstate, dict) and
-                native_bstate.get("_rules_port_attached")):
-            from rules_port.static_rules import effective_cost
-            native_cost = effective_cost(
-                _hc._db, game.session_id.uid64, native_bstate, scid.uid.uid64)
-            cost_mod = 0
-        else:
-            cost_mod = int(irow[7] or 0) if irow else 0
-            cost_mod_json = irow[8] if irow else None
-            if (scid is not None and cost_mod_json and
-                    str(cost_mod_json).strip() not in ("[]", "{}", "")):
-                from abilities.framework.cost_mod import cost_mod_delta
-                cost_mod += cost_mod_delta(_hc._db, game.session_id.uid64,
-                                           scid.uid.uid64, cost_mod_json)
-            elif scid is not None and card_location != "warzone":
-            # Some all-zone dynamic reductions are represented by a
-            # CardCreatedEvent in gamedata.  Cards that started in the deck
-            # never receive that event during this match, but their displayed
-            # and charged cost still needs to reflect the metadata formula
-            # (Pterobot is the canonical example).
-                try:
-                    from abilities.framework.cost_mod import dynamic_cost_mod_delta
-                    cost_mod += dynamic_cost_mod_delta(
-                        _hc._db, game.session_id.uid64, scid.uid.uid64)
-                except Exception:
-                    pass
+        from rules_port.static_rules import effective_cost
+        native_cost = effective_cost(
+            _hc._db, game.session_id.uid64, native_bstate, scid.uid.uid64)
+        cost_mod = 0
         if tpl_guid != "00000000-0000-0000-0000-000000000000":
             records_template = (records_template if records_template and
                                 str(records_template[0]).lower() ==
@@ -489,13 +467,7 @@ class CardStateMixin:
         # ECardAttributes bit. Keep it on CardDef so every CardUpdated carries
         # the same value the original client reads from CardTemplate.tac.
         try:
-            if ((getattr(getattr(game, "session", None),
-                         "_rules_port_session", None) is not None) or
-                    (getattr(self, "_current_bstate", None) or {}).get(
-                        "_rules_port_attached")):
-                from rules_port.tunneling import tunneling_value
-            else:
-                from abilities.framework.effects.counters import tunneling_value
+            from rules_port.tunneling import tunneling_value
             game.card_defs[scid].tunneling = tunneling_value(
                 _hc._db, tpl_guid, persisted_int_attrs)
         except Exception:

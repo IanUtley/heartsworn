@@ -659,17 +659,11 @@ class ChainMixin:
                 surface_owner = (self.user_profile["id"]
                                  if bstate.get("turn_player") == _be.PLAYER
                                  else 0)
-                if bstate.get("_rules_port_attached"):
-                    from rules_port.context import EffectContext
-                    from rules_port.tunneling import queue_surfaces
-                    queue_surfaces(EffectContext.from_rules_port(
-                        game, session, _hc._db, self, pl_t, ai_t, bstate,
-                        "", ability=None), surface_owner)
-                else:
-                    from abilities.framework.effects.counters import queue_tunneling_surfaces
-                    queue_tunneling_surfaces(
-                        _hc._db, session, self, game, pl_t, ai_t, bstate,
-                        surface_owner)
+                from rules_port.context import EffectContext
+                from rules_port.tunneling import queue_surfaces
+                queue_surfaces(EffectContext.from_rules_port(
+                    game, session, _hc._db, self, pl_t, ai_t, bstate,
+                    "", ability=None), surface_owner)
         # Champion state check: a spell/trigger that brought a champion to 0
         # health ends the game right here.
         self._check_champion_health(session, pl_t, ai_t, bstate)

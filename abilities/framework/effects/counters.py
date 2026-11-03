@@ -136,60 +136,6 @@ def add_card_counter(db, session_id, card_uid, name, amount=1):
     return counters[key]
 
 
-def queue_tunneling_surfaces(db, session, handler, game, pl_t, ai_t, bstate,
-                             owner_id):
-    """Queue thresholded underground cards as normal free Surface abilities."""
-    from rules_port import lifecycle as _be
-
-    owner_id = int(owner_id or 0)
-    if not _be.stack_empty(bstate):
-        return []
-    from pvp_db import db_underground_card_rows, db_card_mutation_field
-    rows = db_underground_card_rows(session.session_id, owner_id, conn=db)
-    queued = []
-    for card_uid, template_guid in rows:
-        # State-based actions are serialized.  Once one card has been put on
-        # the chain, stop here and let its resolution re-enter this function;
-        # otherwise several hidden Surface entries can be emitted together
-        # and the client presents a card-back/Resolve prompt for each one.
-        if not _be.stack_empty(bstate):
-            break
-        payload = db_card_mutation_field(session.session_id, int(card_uid),
-                                         "permanent_buffs", conn=db)
-        try:
-            saved = json.loads(payload or "{}")
-        except (TypeError, ValueError, json.JSONDecodeError):
-            saved = {}
-        threshold = tunneling_value(db, template_guid,
-                                    saved.get("int_attrs", {}))
-        count = card_counters(db, session.session_id, int(card_uid)).get(
-            "tunneling", 0)
-        if threshold <= 0 or count < threshold:
-            continue
-        old = count
-        # The original state-based action resets the counter before creating
-        # the Surface ability, so a response/cancel cannot make it requeue.
-        add_card_counter(db, session.session_id, int(card_uid), "tunneling",
-                         -old)
-        push_card_counters(game, session, db, handler, pl_t, ai_t,
-                           int(card_uid), bstate, changed_counter="tunneling",
-                           old_value=old)
-        instance_id = int(bstate.get("_next_instance_id", 1))
-        bstate["_next_instance_id"] = instance_id + 1
-        _be.stack_push(bstate, {
-            "kind": "ability", "ability_guid": SURFACE_ABILITY_GUID,
-            "source_uid": int(card_uid), "target_uid": int(card_uid),
-            "source_owner_uid": owner_id, "instance_id": instance_id,
-        })
-        scid = game_engine.SessionCardId(game_engine.UID(int(card_uid)))
-        game.push_ability_on_chain(
-            scid, game_engine.ResourceId.from_str(SURFACE_ABILITY_GUID),
-            ability_instance_id=instance_id, target_card_ids=[scid],
-            ignores_chain=False)
-        queued.append(int(card_uid))
-    return queued
-
-
 def _champion_uid_owner(handler, bstate, champion_uid):
     """Return the controller id for a champion SessionCardId.
 

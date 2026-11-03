@@ -1694,14 +1694,8 @@ class CardPlayMixin:
                 # RequiresSourcePassesFilterCondition(IsTapped) trigger
                 # condition — it is only activatable while the troop is tapped.
                 if graph.ability_condition or graph.trigger_condition:
-                    if bstate.get("_rules_port_attached"):
-                        from rules_port.condition_context import ConditionContext
-                        from rules_port.conditions import trigger_condition_met
-                    else:
-                        from abilities.framework.condition_engine import (
-                            ConditionContext,
-                            trigger_condition_met,
-                        )
+                    from rules_port.condition_context import ConditionContext
+                    from rules_port.conditions import trigger_condition_met
                     cond_ctx = ConditionContext(
                         _hc._db, session, bstate,
                         ability_source_uid=card_uid,

@@ -1498,17 +1498,11 @@ class TransactionsMixin:
                 self._dispatch_native_trigger(
                     game, session, pl_t, ai_t, bstate, event_type, u,
                     self.user_profile["id"])
-            # Rage X: when this attacks it gets a permanent attack modifier.
-            if authoritative_port is not None:
-                from rules_port.context import EffectContext
-                from rules_port.combat_effects import apply_rage
-                apply_rage(EffectContext.from_rules_port(
-                    game, session, _hc._db, self, pl_t, ai_t, bstate,
-                    "", ability=None), u)
-            else:
-                from abilities.framework.keywords.combat import apply_rage_keyword
-                apply_rage_keyword(_hc._db, session, self, game, pl_t, ai_t,
-                                   bstate, u)
+            from rules_port.context import EffectContext
+            from rules_port.combat_effects import apply_rage
+            apply_rage(EffectContext.from_rules_port(
+                game, session, _hc._db, self, pl_t, ai_t, bstate,
+                "", ability=None), u)
         if attackers:
             # The client raises one champion-scoped CardsAttackedEvent after
             # the complete attack declaration, carrying the total attacker

@@ -71,19 +71,6 @@ def owner_uid(owner_id, pl_t, ai_t, bstate=None):
     return pl_t if (owner_id or 0) != 0 else ai_t
 
 
-def pvp_champion_uid(bstate, owner_id):
-    """Return the authoritative champion SCID for a PvP player id."""
-    if not (bstate or {}).get("pvp"):
-        return None
-    for pid, uid in ((bstate or {}).get("champ_map") or {}).items():
-        try:
-            if int(pid) == int(owner_id):
-                return int(uid)
-        except (TypeError, ValueError):
-            continue
-    return None
-
-
 def pvp_opponent_pid(bstate, owner_id):
     """Return the other real player id in a PvP ability view."""
     if not (bstate or {}).get("pvp"):
