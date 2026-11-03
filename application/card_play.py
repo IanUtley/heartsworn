@@ -1724,10 +1724,7 @@ class CardPlayMixin:
             (tracked in game_cards.card_uses)
         """
         import hconnect_server as _hc
-        if bstate.get("_rules_port_attached"):
-            from rules_port import lifecycle as _be
-        else:
-            import battle_engine as _be
+        from rules_port import lifecycle as _be
         # This helper is also used while rebuilding option lists after a
         # priority resync.  During the AI's own turn the human must not retain
         # activation options from the previous player stop; the AI-turn
@@ -2067,10 +2064,7 @@ class CardPlayMixin:
         the client's picker will.
         """
         import hconnect_server as _hc
-        if bstate.get("_rules_port_attached"):
-            from rules_port import lifecycle as _be
-        else:
-            import battle_engine as _be
+        from rules_port import lifecycle as _be
         charges = bstate.get("player_charges", 0)
         sp = bstate.get("player_spell_points", 0)
         phase_bit = (1 << phase) if phase is not None else 0

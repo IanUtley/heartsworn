@@ -34,7 +34,7 @@ STATIC_PY = os.path.join(os.path.dirname(__file__), "..", "static.py")
 BEGIN_MARKER = "### BEGIN TALENT SEED"
 END_MARKER = "### END TALENT SEED"
 
-# Phase bitmask helpers (bit N = phase N); mirrors ability.py / battle_engine.
+# Phase bitmask helpers (bit N = phase N); mirrors rules_port.lifecycle.
 PHASE_PRE_GAME = 1 << 2            # 4
 PHASE_MAIN = (1 << 10) | (1 << 19)  # 525312  (FirstMain | SecondMain)
 

@@ -632,7 +632,7 @@ def test_phase_stop_packet_announces_each_phase_once(db):
 
 def test_basic_champion_power_is_not_activatable_on_chain(db):
     """Only manual champion powers are offered while a chain is pending."""
-    import battle_engine as be
+    from rules_port import lifecycle as be
     import db as dbmod
     from hconnect_server import HCPHandler
 
@@ -686,7 +686,7 @@ def test_basic_champion_power_is_not_activatable_on_chain(db):
 
 def test_game_started_chain_is_auto_passed(db):
     """GameStarted trigger items resolve without opening chain priority."""
-    import battle_engine as be
+    from rules_port import lifecycle as be
     from hconnect_server import HCPHandler
 
     handler = object.__new__(HCPHandler)
@@ -715,7 +715,7 @@ def test_game_started_chain_is_auto_passed(db):
 
 def test_ai_turn_chain_pass_resolves_before_resuming_ai(db):
     """A trigger raised during an AI phase must resolve before the AI resumes."""
-    import battle_engine as be
+    from rules_port import lifecycle as be
     from hconnect_server import HCPHandler
 
     handler = object.__new__(HCPHandler)

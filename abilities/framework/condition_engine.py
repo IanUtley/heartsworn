@@ -599,8 +599,8 @@ def evaluate_condition(node, ctx):
         current = (ctx.bstate or {}).get("phase")
         if current is None:
             try:
-                import battle_engine
-                current = battle_engine.current_phase(ctx.bstate)
+                from rules_port import lifecycle
+                current = lifecycle.current_phase(ctx.bstate)
             except Exception:
                 current = None
         return (str(current) == wanted or

@@ -24,7 +24,7 @@ Key files:
 - `campaign_editor/` — Campaign editor and authoring tools (edits `campaign`; see `campaign_editor/paths.py`)
 - `game_engine.py` — Game session event system (60+ SessionEventArgs)
 - `encoder.py` — ObjFmt binary encoder (19 encode functions)
-- `battle_engine.py` — DB-backed turn/priority engine (phase cycle, stops)
+- `rules_port/lifecycle.py` — battle checkpoint: phase cycle, stops, chain facade, load/save
 - `game_session.py` — Session state management
 - `static.py` — ALL DB DDL + seeded tables (fresh DBs; single source of truth)
 - `db.py` — Shared SQLite connection (`db._db`) + reusable `db_*` DML helpers
@@ -59,7 +59,7 @@ full restart. The reloaded set is defined by `reload_runtime_modules()` in
 - Explicitly listed: `domain/constants.py`, `db.py`, `pvp_db.py`,
   `profile_db.py`, `pve_db.py`, `chat_db.py`, `replay_db.py`,
   `tournament_db.py`, `campaign/campaign_rules.py`,
-  `campaign_playtest.py`, `game_engine.py`, `game_session.py`, `battle_engine.py`, `campaign.py`,
+  `campaign_playtest.py`, `game_engine.py`, `game_session.py`, `campaign.py`,
   `ai_eval.py`,
   `application/dispatcher.py`, `application/player_transactions.py`,
   `rules_port/wire.py`, `rules_port/runtime_adapter.py`,

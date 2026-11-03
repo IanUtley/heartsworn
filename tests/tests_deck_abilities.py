@@ -272,7 +272,7 @@ def test_prairie_scout_activation_gating(db):
     """Prairie Scout's 'target attacking troop' ability must NOT be activatable
     in a main phase with no attackers, and MUST be activatable during a combat
     step once a troop is actually attacking."""
-    import battle_engine as be
+    from rules_port import lifecycle as be
     import hconnect_server as hmod
     from hconnect_server import HCPHandler
 
@@ -332,7 +332,7 @@ def test_hand_tunnel_activation_gating(db):
     Minion of Yazukan is the exact BasicAction regression: it tunnels itself
     from hand for one Blood threshold and two resources.
     """
-    import battle_engine as be
+    from rules_port import lifecycle as be
     import hconnect_server as hcs
     from gamedata import DEFAULT_RECORD_STORE
     from hconnect_server import HCPHandler
@@ -418,7 +418,7 @@ def test_pregame_health_counts_only_heals(db):
 
 def test_escalation_preview_value(db):
     """CardDef carries the source card's persisted EscalationCount."""
-    import battle_engine as be
+    from rules_port import lifecycle as be
     import db as dbmod
     import hconnect_server as hmod
     from hconnect_server import HCPHandler

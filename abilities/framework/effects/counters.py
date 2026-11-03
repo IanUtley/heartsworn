@@ -147,7 +147,7 @@ def add_card_counter(db, session_id, card_uid, name, amount=1):
 def queue_tunneling_surfaces(db, session, handler, game, pl_t, ai_t, bstate,
                              owner_id):
     """Queue thresholded underground cards as normal free Surface abilities."""
-    import battle_engine as _be
+    from rules_port import lifecycle as _be
 
     owner_id = int(owner_id or 0)
     if not _be.stack_empty(bstate):

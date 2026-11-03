@@ -393,7 +393,7 @@ def test_fra_battle_setup_saves_the_starting_state_for_reconnect():
 
 
 class _CheckpointStub:
-    """The real battle_engine helpers, with state saves counted instead of stored."""
+    """The real checkpoint helpers, with state saves counted instead of stored."""
 
     def __init__(self):
         self.saved = 0
@@ -402,8 +402,8 @@ class _CheckpointStub:
         self.saved += 1
 
     def __getattr__(self, name):
-        import battle_engine
-        return getattr(battle_engine, name)
+        from rules_port import lifecycle
+        return getattr(lifecycle, name)
 
 
 def test_resolving_a_troop_with_no_source_pushes_the_chain_events_only():
@@ -685,7 +685,7 @@ def test_debug_draw_cheat_is_applied_and_consumed():
 
 def test_ai_turn_advances_through_its_phases_and_stops_at_a_player_stop():
     import ai
-    import battle_engine as be
+    from rules_port import lifecycle as be
     import game_engine
     import hconnect_server
     from tests.tests_combat import SessionStub
@@ -798,7 +798,7 @@ def test_add_deck_saves_the_named_deck_and_replies_with_it():
 
 
 def test_hand_troop_play_through_the_rules_port_seam_moves_it_to_cast_spells():
-    import battle_engine as be
+    from rules_port import lifecycle as be
     import db as shared
     import game_engine
     import hconnect_server
@@ -892,7 +892,7 @@ def test_encounter_extraction_reads_the_ai_deck_and_champion_of_a_scene():
 
 
 def test_fra_reconnect_snapshot_rebuilds_the_saved_board_for_the_player():
-    import battle_engine as be
+    from rules_port import lifecycle as be
     import hconnect_server
     from tests.tests_combat import SessionStub, add_card
     db = make_db()
@@ -916,7 +916,7 @@ def test_fra_reconnect_snapshot_rebuilds_the_saved_board_for_the_player():
 
 
 def test_advance_to_priority_auto_passes_to_the_players_first_stop():
-    import battle_engine as be
+    from rules_port import lifecycle as be
     import game_engine
     import hconnect_server
     from tests.tests_combat import SessionStub
@@ -938,7 +938,7 @@ def test_advance_to_priority_auto_passes_to_the_players_first_stop():
 
 
 def test_resolving_a_troop_from_the_chain_announces_the_chain_resolution():
-    import battle_engine as be
+    from rules_port import lifecycle as be
     import game_engine
     import hconnect_server
     from application.chain import ChainMixin
@@ -1003,7 +1003,7 @@ def test_quit_transaction_in_a_tournament_game_is_handled_and_acknowledged():
 
 
 def test_troop_ability_activation_taps_the_chosen_opposing_troop():
-    import battle_engine as be
+    from rules_port import lifecycle as be
     import db as shared
     import game_engine
     import hconnect_server
@@ -1108,7 +1108,7 @@ def test_dungeon_import_dry_run_reports_each_dungeon_without_writing(capsys):
 
 def test_practice_mulligan_keep_accepts_the_hand_and_replies_to_the_client():
     from types import SimpleNamespace
-    import battle_engine as be
+    from rules_port import lifecycle as be
     import hconnect_server
     from tests.tests_combat import SessionStub, add_card
     db = make_db()
@@ -1131,7 +1131,7 @@ def test_practice_mulligan_keep_accepts_the_hand_and_replies_to_the_client():
 
 
 def test_fra_champion_health_modification_sets_the_player_start_value():
-    import battle_engine as be
+    from rules_port import lifecycle as be
     import hconnect_server
     import game_engine
     from gamemodes.fra_battle import FraBattleMixin
@@ -1167,7 +1167,7 @@ def test_fra_champion_health_modification_sets_the_player_start_value():
 
 
 def test_resolving_a_spell_from_the_chain_sends_it_to_the_discard_pile():
-    import battle_engine as be
+    from rules_port import lifecycle as be
     import game_engine
     import hconnect_server
     from application.chain import ChainMixin
@@ -1691,7 +1691,7 @@ def test_opening_a_starter_pack_consumes_it_and_replies_to_the_client():
 
 def test_pending_choice_answer_plays_the_chosen_choice_token():
     import struct
-    import battle_engine as be
+    from rules_port import lifecycle as be
     import db as shared
     import hconnect_server
     import game_engine
@@ -1848,7 +1848,7 @@ def test_reconnect_request_with_no_game_is_answered_once():
 
 
 def test_resource_from_hand_is_played_into_the_played_resources_zone():
-    import battle_engine as be
+    from rules_port import lifecycle as be
     import game_engine
     import hconnect_server
     from types import SimpleNamespace
@@ -1971,7 +1971,7 @@ def test_declining_an_optional_trigger_cancels_it_for_the_table():
 
 def test_ai_hand_action_targets_the_opposing_troop_it_can_tap():
     import ai_eval
-    import battle_engine as be
+    from rules_port import lifecycle as be
     import db as shared
     import game_engine
     import hconnect_server
@@ -2108,7 +2108,7 @@ def test_audit_reports_a_heal_claim_that_no_effect_implements():
 
 
 def test_resolving_a_tap_ability_taps_its_chosen_target():
-    import battle_engine as be
+    from rules_port import lifecycle as be
     import db as shared
     import game_engine
     import hconnect_server
@@ -2293,7 +2293,7 @@ def test_saving_conversation_actions_records_them_for_the_ending(tmp_path, monke
 
 
 def test_affordable_troop_ability_becomes_an_activate_option_on_its_card():
-    import battle_engine as be
+    from rules_port import lifecycle as be
     import db as shared
     import game_engine
     import hconnect_server
@@ -2391,7 +2391,7 @@ def test_version_command_reports_the_release_version():
 
 
 def test_practice_session_attaches_an_authoritative_rules_host():
-    import battle_engine as be
+    from rules_port import lifecycle as be
     import db as shared
     import game_engine
     import game_session as gs
@@ -2871,7 +2871,7 @@ def test_legal_targets_for_a_self_target_template_offers_the_source_card():
 def test_generic_resource_play_moves_the_shard_out_of_hand_and_counts_it():
     import struct
     from types import SimpleNamespace
-    import battle_engine as be
+    from rules_port import lifecycle as be
     import db as shared
     import hconnect_server
     from tests.tests_combat import SessionStub, add_card

@@ -1012,7 +1012,7 @@ def test_ability_trace_records_authoritative_zone_and_event_deltas():
 
 
 def test_extra_combat_entries_extend_the_current_turn_after_second_main():
-    import battle_engine
+    from rules_port import lifecycle
     import game_engine
 
     state = {
@@ -1021,24 +1021,24 @@ def test_extra_combat_entries_extend_the_current_turn_after_second_main():
             "player": [{"ready_your_troops": True}],
         },
     }
-    phases = battle_engine.build_turn_phases(state)
+    phases = lifecycle.build_turn_phases(state)
     second_main = phases.index(game_engine.ETurnPhases.SecondMainPhase)
     assert phases[second_main + 1:second_main + 1 + len(
-        battle_engine.COMBAT_STEPS)] == battle_engine.COMBAT_STEPS
-    assert phases[second_main + 1 + len(battle_engine.COMBAT_STEPS)] == \
+        lifecycle.COMBAT_STEPS)] == lifecycle.COMBAT_STEPS
+    assert phases[second_main + 1 + len(lifecycle.COMBAT_STEPS)] == \
         game_engine.ETurnPhases.SecondMainPhase
 
 
 def test_pvp_extra_combat_entries_use_the_active_player_key():
     from services.tournament_game import _pvp_turn_phase_list
-    import battle_engine
+    from rules_port import lifecycle
     import game_engine
 
     phases = _pvp_turn_phase_list(
         {"extra_combats_this_turn": {"1001": [{}]}}, 1001, False)
     second_main = phases.index(game_engine.ETurnPhases.SecondMainPhase)
     assert phases[second_main + 1:second_main + 1 + len(
-        battle_engine.COMBAT_STEPS)] == battle_engine.COMBAT_STEPS
+        lifecycle.COMBAT_STEPS)] == lifecycle.COMBAT_STEPS
 
 
 def test_context_draw_preserves_owner_and_handler_boundary():

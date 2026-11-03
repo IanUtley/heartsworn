@@ -256,14 +256,9 @@ def test_reveal(db):
         "exhausts_on_use) VALUES ('test-ability',0,'','look at two "
         "random cards from your deck.','{}',0,0,0,0,0,'[]',0)")
     db.commit()
-    graph = SimpleNamespace(
-        targets=(), effects=())
-    from abilities.framework import bom
-    with mock.patch.object(bom, "ability_graph",
-                           lambda _store, _guid: graph):
-        _LEAFS["RevealCardsAbilityEffectTemplate"](
-            game, SessionStub(), db, HandlerStub(), pl_t, ai_t, bstate,
-            "e", json.dumps({"count": 2}))
+    _LEAFS["RevealCardsAbilityEffectTemplate"](
+        game, SessionStub(), db, HandlerStub(), pl_t, ai_t, bstate,
+        "e", json.dumps({"count": 2}))
     revealed = bstate.get("revealed_cards") or []
     assert len(revealed) == 2, revealed
     assert any(isinstance(ev, game_engine.CardsRevealedSessionEventArgs)
@@ -400,7 +395,7 @@ def test_store_name(db):
 
 
 def test_bonus_turn(db):
-    import battle_engine as be
+    from rules_port import lifecycle as be
     state = be.default_state()
     state["bonus_turn"] = be.PLAYER
     state["phase_idx"] = len(be.BASE_TURN_PHASES) - 1
@@ -411,7 +406,7 @@ def test_bonus_turn(db):
 
 def test_explicit_end_turn_handoff_consumes_bonus_turn(db):
     """The PvE driver's explicit handoff uses the same rule as phase advance."""
-    import battle_engine as be
+    from rules_port import lifecycle as be
     state = be.default_state()
     state["bonus_turn"] = be.PLAYER
     assert be.next_turn_player(state) == be.PLAYER
@@ -422,7 +417,7 @@ def test_explicit_end_turn_handoff_consumes_bonus_turn(db):
 def test_skip_combat_steps(db):
     """No attackers declared -> the turn skips the combat steps straight to
     the Second Main Phase."""
-    import battle_engine as be
+    from rules_port import lifecycle as be
     state = be.default_state()
     state["turn_phases"] = be.COMBAT_TURN_PHASES
     state["phase_idx"] = be.COMBAT_TURN_PHASES.index(
@@ -442,7 +437,7 @@ def test_combat_state_clear_keeps_tapped(db):
     """End-of-combat clears Attacking/Blocking bits from warzone troops but
     keeps Tapped (a Steadfast attacker stays untapped, so its 'attacking'
     visuals must not linger into the next turn)."""
-    import battle_engine as be
+    from rules_port import lifecycle as be
     add_card(db, 100, 5)
     bits = (game_engine.ECardStates.Attacking |
             game_engine.ECardStates.HasAttacked |

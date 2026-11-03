@@ -249,7 +249,7 @@ def _pvp_gain_threshold_trigger_game(handler, session, state, owner_id,
 
 
 # ── PvP state persistence (session.turn_order / turn_order_json) ────────────
-# Mirrors the battle_engine.load_state / save_state pattern but with a PvP-
+# Mirrors the rules_port.lifecycle load_state / save_state pattern with a PvP-
 # specific schema (two human players, no AI).  State lives in the DB so a
 # reconnect can resume.
 
@@ -3273,7 +3273,7 @@ def pvp_phase_is_stop(state, phase, turn_pid, opp_pid):
     """True if EITHER player wants to stop at `phase` during the turn player's
     turn: the turn player's self-stops (their own turn) OR the opponent's
     opponent-stops (the opponent's turn), falling back to the client defaults
-    when a player hasn't configured stops.  Mirrors battle_engine.is_self_stop
+    when a player hasn't configured stops.  Mirrors rules_port.lifecycle.is_self_stop
     / is_opp_stop."""
     return port_phase_is_stop(state, phase, turn_pid, opp_pid)
 
@@ -3831,7 +3831,7 @@ def _pvp_add_champion_options(g, session, state, pid, pl_t):
     appear and light up (CanActivateAbility -> State.CanUseAbility requires the
     champion in PlayerOptions.m_Targets).  Affordability mirrors PvE
     _filter_affordable_abilities but reads charges/thresholds from the PvP
-    state (chg_<pid> / thresh_<pid>) instead of a battle_engine bstate."""
+    state (chg_<pid> / thresh_<pid>) instead of a PvE battle-state checkpoint."""
     champ_map = state.get("champ_map") or {}
     cu = int(champ_map.get(str(pid), 0))
     if not cu:
@@ -5744,7 +5744,7 @@ def pvp_handle_discard(handler, session, inner_bytes):
     """Resolve one normal hand-discard transaction in tournament PvP.
 
     This must stay out of HCPHandler's human-vs-AI discard path: that path
-    loads a battle_engine state and can replace the persisted PvP state with a
+    loads a PvE checkpoint and can replace the persisted PvP state with a
     Practice-style turn, which is how a discard previously jumped back to
     First Main and could produce a false deck-out victory.
     """

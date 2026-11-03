@@ -58,7 +58,6 @@ def reload_runtime_modules():
     import encoder as en, db as dbm
     import game_engine as game_engine_module
     import game_session as game_session_module
-    import battle_engine as battle_engine_module
     import pvp_db as pvp_db_module
     import profile_db as profile_db_module
     import pve_db as pve_db_module
@@ -89,7 +88,7 @@ def reload_runtime_modules():
         [dbm],
         [pvp_db_module, profile_db_module, pve_db_module, chat_db_module,
          replay_db_module, tournament_db_module, campaign_rules_module],
-        [game_engine_module, game_session_module, battle_engine_module,
+        [game_engine_module, game_session_module,
          application_dispatcher, player_transactions, campaign,
          campaign_playtest_module],
         [rules_transactions, rules_runtime, rules_wire],
@@ -923,7 +922,7 @@ def handle_command(handler, cmd: str, room: str, username: str) -> str:
     # client after a debug command.
     if not is_tourney:
         try:
-            import battle_engine as _be
+            from rules_port import lifecycle as _be
             bstate = _be.load_state(session)
             phase = _be.current_phase(bstate)
             if bstate.get("turn_player") == _be.PLAYER:
@@ -1850,7 +1849,7 @@ def _dispatch(handler, action, args, session, pl_t, ai_t, room, username):
         uid = pl_t if target == "me" else ai_t
         # The client has no Colorless threshold counter, so a Colorless change crashes its threshold animation
         # (BattleAnimationSetChampionThreshold). Colorless keeps its stored value; the other colours still change.
-        import battle_engine as _be_colorless
+        from rules_port import lifecycle as _be_colorless
         stored = dict(_be_colorless.load_state(session).get(
             "player_threshold" if target == "me" else "ai_threshold") or {})
         vals[0] = int(stored.get(1, stored.get("1", 0)) or 0)
@@ -1863,7 +1862,7 @@ def _dispatch(handler, action, args, session, pl_t, ai_t, room, username):
             game_engine.ECardShards.Wild: vals[4],
             game_engine.ECardShards.Diamond: vals[5],
         }
-        import battle_engine as _be
+        from rules_port import lifecycle as _be
         bstate = _be.load_state(session)
         threshold_key = "player_threshold" if target == "me" else "ai_threshold"
         previous = dict(bstate.get(threshold_key) or {})
@@ -1908,7 +1907,7 @@ def _dispatch(handler, action, args, session, pl_t, ai_t, room, username):
             return f"Charges set to {val} for {target}"
 
         # Persist to battle state so playability/affordability reflects it.
-        import battle_engine as _be
+        from rules_port import lifecycle as _be
         bstate = _be.load_state(session)
         bstate["player_charges" if target == "me" else "ai_charges"] = val
         _be.save_state(session, bstate)
@@ -1929,7 +1928,7 @@ def _dispatch(handler, action, args, session, pl_t, ai_t, room, username):
             target = "me"
             val = int(args[0]) if args else 0
         uid = pl_t if target == "me" else ai_t
-        import battle_engine as _be
+        from rules_port import lifecycle as _be
         bstate = _be.load_state(session)
         bstate["player_spell_points" if target == "me" else "ai_spell_points"] = val
         _be.save_state(session, bstate)
@@ -1951,7 +1950,7 @@ def _dispatch(handler, action, args, session, pl_t, ai_t, room, username):
         uid = pl_t if target == "me" else ai_t
         # Write the authoritative battle state first, as the resource branch
         # does; a transient event alone is overwritten by the next damage.
-        import battle_engine as _be
+        from rules_port import lifecycle as _be
         from rules_port.runtime_helpers import set_game_champion_health
         bstate = _be.load_state(session)
         key = "player_health" if target == "me" else "ai_health"
@@ -1996,7 +1995,7 @@ def _dispatch(handler, action, args, session, pl_t, ai_t, room, username):
             _refresh_pvp_debug_options(_tg, session, state)
             return f"Resources: {avail}/{maxr} for {target}"
 
-        import battle_engine as _be
+        from rules_port import lifecycle as _be
         bstate = _be.load_state(session)
         current_key = "player_resources" if target == "me" else "ai_resources"
         total_key = "player_total_resources" if target == "me" else "ai_total_resources"
@@ -2120,28 +2119,15 @@ def _dispatch(handler, action, args, session, pl_t, ai_t, room, username):
             needed = []
         needed += [0] * (6 - len(needed))
         flags = [1, 4, 8, 16, 32, 64]
-        if is_tourney:
-            from services import tournament_game as _tg
-            state = _tg.pvp_load_state(session) or {}
-            current = dict(state.get(f"thresh_{owner}") or {})
-            for flag, count in zip(flags, needed):
-                current[flag] = max(int(current.get(flag, 0) or 0), count)
-            state[f"thresh_{owner}"] = {f: c for f, c in current.items() if c}
-            _tg.pvp_save_state(session, state)
-            _tg._pvp_sync_game_state(session)
-            _refresh_pvp_debug_options(_tg, session, state)
-        else:
-            import battle_engine as _be
-            bstate = _be.load_state(session)
-            threshold_key = "player_threshold" if owner == command_owner_id else "ai_threshold"
-            shard_keys = [game_engine.ECardShards.Colorless, game_engine.ECardShards.Blood,
-                          game_engine.ECardShards.Ruby, game_engine.ECardShards.Sapphire,
-                          game_engine.ECardShards.Wild, game_engine.ECardShards.Diamond]
-            current = dict(bstate.get(threshold_key) or {})
-            for key, count in zip(shard_keys, needed):
-                current[key] = max(int(current.get(key, 0) or 0), count)
-            bstate[threshold_key] = current
-            _be.save_state(session, bstate)
+        from services import tournament_game as _tg
+        state = _tg.pvp_load_state(session) or {}
+        current = dict(state.get(f"thresh_{owner}") or {})
+        for flag, count in zip(flags, needed):
+            current[flag] = max(int(current.get(flag, 0) or 0), count)
+        state[f"thresh_{owner}"] = {f: c for f, c in current.items() if c}
+        _tg.pvp_save_state(session, state)
+        _tg._pvp_sync_game_state(session)
+        _refresh_pvp_debug_options(_tg, session, state)
         _push_card_update(handler, db, session, pl_t, card_uid, user_id=owner,
                           collection_override=game_engine.ECardCollections.Hand)
         return (f"Gave {name} to {target}'s hand (card {card_uid}); "

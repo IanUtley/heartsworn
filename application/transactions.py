@@ -830,7 +830,7 @@ class TransactionsMixin:
                 and not is_ability_activate):
             # Tournament PvP has its own persisted two-player phase
             # state.  Never let a discard transaction fall through to
-            # the human-vs-AI battle_engine path: that would overwrite
+            # the human-vs-AI checkpoint path: that would overwrite
             # turn_order_json and can jump the clients back to First
             # Main or even emit a false deck-out victory.
             from services.tournament_game import pvp_handle_discard
@@ -840,10 +840,7 @@ class TransactionsMixin:
                 return True
         pl_t = _hc.game_engine.UID.make(244, int(self.client_reck_id))
         ai_t = _hc.game_engine.UID.make(_hc.game_engine.SERVICE_AI_UID_TYPE, 1000)
-        if getattr(session, "_rules_port_session", None) is not None:
-            from rules_port import lifecycle as _be
-        else:
-            import battle_engine as _be
+        from rules_port import lifecycle as _be
         gd = _hc.game_engine.Game(session.session_id, pl_t, ai_t)
         card_uids = []
         if card_uid is not None:
@@ -1126,7 +1123,7 @@ class TransactionsMixin:
                 handled = True
         # PvP transactions are fully handled by tournament_game (cards,
         # combat, resources, deck search).  The human-vs-AI fallback
-        # below must NOT run for them — it loads a battle_engine state
+        # below must NOT run for them — it loads a PvE checkpoint
         # (turn_player etc.) into turn_order_json, clobbering the PvP
         # state machine and desyncing GreenLight.
         if handled and session and (session.session_name or "").startswith("tourney-"):
@@ -1177,7 +1174,7 @@ class TransactionsMixin:
                         # compatibility projection moves the card out of the
                         # hand. This keeps an extra-resource card in hand
                         # when a stale client submits a now-illegal play.
-                        import battle_engine as _resource_be
+                        from rules_port import lifecycle as _resource_be
                         _resource_state = _resource_be.load_state(session)
                         from rules_port.resources import (
                             can_play_resource, resource_play_limit)
@@ -1224,7 +1221,7 @@ class TransactionsMixin:
             # Track resources in the DB battle state. Playing a basic
             # threshold gives: +1 total, +1 current, +1 threshold colour,
             # +1 champion charge. All state lives in turn_order_json.
-            import battle_engine as _be
+            from rules_port import lifecycle as _be
             bstate = _be.load_state(session)
             self._current_bstate = bstate
             pl_t = _hc.game_engine.UID.make(244, int(self.client_reck_id))
@@ -2473,7 +2470,7 @@ class TransactionsMixin:
         inner_bytes = transaction.inner_bytes
         from rules_port.persistence import load_state as load_checkpoint
         from rules_port.persistence import save_state as save_checkpoint
-        from rules_port.lifecycle import advance_checkpoint_phase as advance_checkpoint
+        from rules_port.lifecycle import advance_phase as advance_checkpoint
         pl_t = _hc.game_engine.UID.make(244, int(self.client_reck_id))
         ai_t = _hc.game_engine.UID.make(_hc.game_engine.SERVICE_AI_UID_TYPE, 1000)
         bstate = load_checkpoint(session)
@@ -2629,20 +2626,10 @@ class TransactionsMixin:
         """Resolve the client's combat damage assignment transaction."""
         import hconnect_server as _hc
         inner_bytes = transaction.inner_bytes
-        if native_combat:
-            from rules_port.persistence import (current_phase, load_state,
-                                                save_state)
-            from rules_port.lifecycle import advance_checkpoint_phase
-            load_checkpoint = load_state
-            save_checkpoint = save_state
-            current_checkpoint_phase = current_phase
-            advance_checkpoint = advance_checkpoint_phase
-        else:
-            import battle_engine as _be
-            load_checkpoint = _be.load_state
-            save_checkpoint = _be.save_state
-            current_checkpoint_phase = _be.current_phase
-            advance_checkpoint = _be.advance_phase
+        from rules_port.lifecycle import (
+            advance_phase as advance_checkpoint,
+            current_phase as current_checkpoint_phase,
+            load_state as load_checkpoint, save_state as save_checkpoint)
         pl_t = _hc.game_engine.UID.make(244, int(self.client_reck_id))
         ai_t = _hc.game_engine.UID.make(_hc.game_engine.SERVICE_AI_UID_TYPE, 1000)
         bstate = load_checkpoint(session)
@@ -2783,16 +2770,13 @@ class TransactionsMixin:
         """Record and apply the client's one-turn auto-pass choice."""
         import hconnect_server as _hc
         inner_bytes = transaction.inner_bytes
-        if getattr(session, "_rules_port_session", None) is not None:
-            from rules_port import lifecycle as _be
-        else:
-            import battle_engine as _be
+        from rules_port import lifecycle as _be
         import re
         handled = False
         pl_t = _hc.game_engine.UID.make(244, int(self.client_reck_id))
         ai_t = _hc.game_engine.UID.make(_hc.game_engine.SERVICE_AI_UID_TYPE, 1000)
         # Tournament PvP has its own persisted two-player priority
-        # state.  Do not feed its SetAutoPass through battle_engine:
+        # state.  Do not feed its SetAutoPass through the PvE checkpoint:
         # that is the PvE/AI state machine and can advance a stale
         # turn_order, causing the other client to miss its resolve
         # priority.  Record F10 on the PvP state and let the normal
@@ -2829,10 +2813,7 @@ class TransactionsMixin:
     def _handle_cancel_auto_pass_transaction(self, session, transaction):
         """Clear the client's one-turn auto-pass choice."""
         import hconnect_server as _hc
-        if getattr(session, "_rules_port_session", None) is not None:
-            from rules_port import lifecycle as _be
-        else:
-            import battle_engine as _be
+        from rules_port import lifecycle as _be
         handled = False
         pl_t = _hc.game_engine.UID.make(244, int(self.client_reck_id))
         ai_t = _hc.game_engine.UID.make(_hc.game_engine.SERVICE_AI_UID_TYPE, 1000)
@@ -2871,10 +2852,7 @@ class TransactionsMixin:
         try:
             raw_to = session.turn_order
             if isinstance(raw_to, dict) and "turn_player" in raw_to:
-                if getattr(session, "_rules_port_session", None) is not None:
-                    from rules_port import lifecycle as _bse
-                else:
-                    import battle_engine as _bse
+                from rules_port import lifecycle as _bse
                 bstate = _bse.load_state(session)
                 if self_stops is not None:
                     bstate["player_self_stops"] = self_stops
@@ -2930,10 +2908,7 @@ class TransactionsMixin:
         inner_bytes = transaction.inner_bytes
         pass_turn_phase = transaction.pass_turn_phase
         handled = False
-        if getattr(session, "_rules_port_session", None) is not None:
-            from rules_port import lifecycle as _be
-        else:
-            import battle_engine as _be
+        from rules_port import lifecycle as _be
         pl_t = _hc.game_engine.UID.make(244, int(self.client_reck_id))
         ai_t = _hc.game_engine.UID.make(_hc.game_engine.SERVICE_AI_UID_TYPE, 1000)
         # A pass arriving during setup (PreGame/PickGoesFirst/Mulligan,

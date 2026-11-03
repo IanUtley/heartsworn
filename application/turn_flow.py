@@ -806,10 +806,7 @@ class TurnFlowMixin:
         requirements are met.
         """
         import hconnect_server as _hc
-        if getattr(session, "_rules_port_session", None) is not None:
-            from rules_port import lifecycle as _be
-        else:
-            import battle_engine as _be
+        from rules_port import lifecycle as _be
         from abilities.framework._shared import owner_uid
         bstate = _be.load_state(session)
         self._current_bstate = bstate
@@ -1682,7 +1679,7 @@ class TurnFlowMixin:
         if bstate.get("_rules_port_attached"):
             return self._advance_rules_port_to_priority(
                 session, pl_t, ai_t, bstate)
-        import battle_engine as _be
+        from rules_port import lifecycle as _be
         while True:
             phase = _be.current_phase(bstate)
             if self._check_champion_health(session, pl_t, ai_t, bstate):

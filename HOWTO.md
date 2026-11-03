@@ -165,7 +165,6 @@ or display text.
 | `services/*.py` | one client-request family per module; new handlers validate input and call domain APIs |
 | `services/auction.py` | retained Auction House API surface; currently an intentional stub |
 | `game_engine.py` | session event types, event construction, and event serialization |
-| `battle_engine.py` | legacy rollback implementation for turn phases, priority, auto-pass, chain state, and phase persistence; normal live gameplay uses `rules_port/` |
 | `rules_port/` | Semantic port of hex-private/HexClient/Game.Shared rules; owns C#-ordered session/action, phase, priority, chain, combat, transaction, ability, trigger, and target primitives |
 | `game_session.py` | session lifecycle and DB-backed session state |
 | `ai.py` | AI turn, card-choice, and combat decisions |

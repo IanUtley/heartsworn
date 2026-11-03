@@ -19,10 +19,7 @@ class PendingChoicesMixin:
         deck and gains its threshold.  A HUMAN gets the class-39 choosing
         prompt (the shard stays in the deck); the AI auto-picks a random one."""
         import hconnect_server as _hc
-        if getattr(session, "_rules_port_session", None) is not None:
-            from rules_port import lifecycle as _be
-        else:
-            import battle_engine as _be
+        from rules_port import lifecycle as _be
         from rules_port.targeting import legal_targets as _lt
         candidates = _lt(_hc._db, session.session_id, owner_id, shard_tpl,
                          int(played_card_uid or 0), both_players=False,

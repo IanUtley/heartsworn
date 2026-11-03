@@ -636,11 +636,11 @@ def test_oakhenge_reveal_opens_one_selectable_picker(db):
     dbmod._db = db
     hcs._db = db
     try:
-        import battle_engine
+        from rules_port import lifecycle
 
         prompts = []
         handler = HandlerStub(db)
-        handler._checkpoint_engine = lambda session: battle_engine
+        handler._checkpoint_engine = lambda session: lifecycle
         handler._hide_candidates_to_deck = types.MethodType(
             hcs.HCPHandler._hide_candidates_to_deck, handler)
         handler._resolve_pending_revealed_choice = types.MethodType(
@@ -766,10 +766,10 @@ def test_oakhenge_single_revealed_troop_moves_without_a_picker(db):
     dbmod._db = db
     hcs._db = db
     try:
-        import battle_engine
+        from rules_port import lifecycle
 
         handler = HandlerStub(db)
-        handler._checkpoint_engine = lambda session: battle_engine
+        handler._checkpoint_engine = lambda session: lifecycle
         handler._hide_candidates_to_deck = types.MethodType(
             hcs.HCPHandler._hide_candidates_to_deck, handler)
         handler._resolve_pending_revealed_choice = types.MethodType(
@@ -827,7 +827,7 @@ def test_dream_eagle_one_of_them_offers_only_the_looked_at_cards(db):
 
     import hconnect_server as hcs
     import db as dbmod
-    import battle_engine
+    from rules_port import lifecycle
 
     EAGLE = "7f81a852-6f5e-4f37-b0a4-d9c13135daa7"
     EAGLE_AG = "3179e9db-f8cd-fc06-3b0b-93c13ec82cde"
@@ -848,7 +848,7 @@ def test_dream_eagle_one_of_them_offers_only_the_looked_at_cards(db):
     hcs._db = db
     try:
         handler = HandlerStub(db)
-        handler._checkpoint_engine = lambda session: battle_engine
+        handler._checkpoint_engine = lambda session: lifecycle
         handler._send_battle_events = lambda *args, **kwargs: True
         handler._push_transaction_ack = lambda *args, **kwargs: None
         handler._champion_targets = lambda: []
@@ -877,7 +877,7 @@ def test_interpreter_asks_for_one_of_them_from_the_look(db):
     import types
 
     import hconnect_server as hcs
-    import battle_engine
+    from rules_port import lifecycle
     from rules_port.resolution import run_interpreted_trigger
 
     EAGLE = "7f81a852-6f5e-4f37-b0a4-d9c13135daa7"
@@ -893,7 +893,7 @@ def test_interpreter_asks_for_one_of_them_from_the_look(db):
     db.commit()
 
     handler = HandlerStub(db)
-    handler._checkpoint_engine = lambda session: battle_engine
+    handler._checkpoint_engine = lambda session: lifecycle
     handler._send_battle_events = lambda *args, **kwargs: True
     handler._push_transaction_ack = lambda *args, **kwargs: None
     handler._champion_targets = lambda: []
@@ -923,7 +923,7 @@ def test_dream_eagle_look_reveals_then_offers_one_of_them(db):
     import types
 
     import hconnect_server as hcs
-    import battle_engine
+    from rules_port import lifecycle
     from rules_port.resolution import resolve_port_ability
 
     EAGLE = "7f81a852-6f5e-4f37-b0a4-d9c13135daa7"
@@ -943,7 +943,7 @@ def test_dream_eagle_look_reveals_then_offers_one_of_them(db):
     db.commit()
 
     handler = HandlerStub(db)
-    handler._checkpoint_engine = lambda session: battle_engine
+    handler._checkpoint_engine = lambda session: lifecycle
     handler._send_battle_events = lambda *args, **kwargs: True
     handler._push_transaction_ack = lambda *args, **kwargs: None
     handler._champion_targets = lambda: []
@@ -1118,10 +1118,10 @@ def test_revealed_cards_put_back_into_deck_are_hidden_again(db):
     dbmod._db = db
     hcs._db = db
     try:
-        import battle_engine
+        from rules_port import lifecycle
 
         handler = HandlerStub(db)
-        handler._checkpoint_engine = lambda session: battle_engine
+        handler._checkpoint_engine = lambda session: lifecycle
         handler._send_battle_events = lambda *args, **kwargs: True
         handler._push_transaction_ack = lambda *args, **kwargs: None
         pl_t = game_engine.UID.make(244, 5)
@@ -1164,13 +1164,13 @@ def test_revealed_choice_completion_reprojects_native_priority(db):
     projection left the client on the stale ResolveTopOfChain button, and its
     next click passed the unseen First Main straight into Second Main.
     """
-    import battle_engine
+    from rules_port import lifecycle
     import hconnect_server as hcs
     import types
     from rules_port import resolution as resolution_mod
 
     handler = HandlerStub(db)
-    handler._checkpoint_engine = lambda session: battle_engine
+    handler._checkpoint_engine = lambda session: lifecycle
     handler._hide_candidates_to_deck = lambda *args, **kwargs: None
     handler._send_battle_events = lambda *args, **kwargs: True
     acks = []
@@ -1235,7 +1235,7 @@ def test_discard_continuation_reprojects_native_chain_window(db):
     client stayed on a Normal pass button while the trigger waited on the
     chain and never resolved into its revert-and-play.
     """
-    import battle_engine
+    from rules_port import lifecycle
     import hconnect_server as hcs
     import db as dbmod
     import types
@@ -1247,7 +1247,7 @@ def test_discard_continuation_reprojects_native_chain_window(db):
     db.commit()
 
     handler = HandlerStub(db)
-    handler._checkpoint_engine = lambda session: battle_engine
+    handler._checkpoint_engine = lambda session: lifecycle
     handler._send_battle_events = lambda *args, **kwargs: True
     acks = []
     handler._push_transaction_ack = lambda *args, **kwargs: acks.append(1)
@@ -1705,7 +1705,7 @@ def test_shard_of_cunning_ai_plays_choice_and_gains_threshold(db):
     old_db = ai._db
     ai._db = db
     try:
-        with mock.patch("battle_engine.save_state"):
+        with mock.patch("rules_port.lifecycle.save_state"):
             ai.ai_play_resource(handler, game, SessionStub(), ai_t, bstate)
     finally:
         ai._db = old_db
@@ -1787,7 +1787,7 @@ def test_primal_shard_grants_the_thresholds_the_hand_needs(db):
     old_db = ai._db
     ai._db = db
     try:
-        with mock.patch("battle_engine.save_state"):
+        with mock.patch("rules_port.lifecycle.save_state"):
             ai.ai_play_resource(handler, game, SessionStub(), ai_t, bstate)
     finally:
         ai._db = old_db
@@ -1962,7 +1962,7 @@ def test_hidden_scene_static_resource_grant_runs_at_game_start(db):
     grant both champions their current and permanent resource.
     """
     from abilities.framework.triggers import resolve_triggers
-    from battle_engine import default_state
+    from rules_port.lifecycle import default_state
 
     early_sprouts = "1bbcc90a-0046-4d64-911b-b1ea69ee5b1c"
     early_sprouts_ability = "e80535ad-0f8c-832c-d042-0ea69068c638"
@@ -2008,7 +2008,7 @@ def test_battleboard_mod_summons_token_for_opposing_race_champion(db):
     ``game_cards`` row, so the race must come from the champion template in
     ``champ_guid_map``.
     """
-    from battle_engine import default_state
+    from rules_port.lifecycle import default_state
     from rules_port.resolution import resolve_port_ability
 
     flask_mod = "81e506df-f1f1-473d-a9a5-b8f7dd2995c4"
@@ -2460,7 +2460,7 @@ def test_concubunny_exhausts_selected_ready_shinhare(db):
     because the old path discarded the selected payment UID and exhausted
     only Concubunny itself.
     """
-    import battle_engine
+    from rules_port import lifecycle
     import gamedata
     import hconnect_server as hcs
 
@@ -2478,7 +2478,7 @@ def test_concubunny_exhausts_selected_ready_shinhare(db):
 
     pl_t = game_engine.UID.make(244, 5)
     ai_t = game_engine.UID.make(3, 1000)
-    bstate = battle_engine.default_state()
+    bstate = lifecycle.default_state()
     bstate.update({
         "phase_idx": 4,  # FirstMainPhase in BASE_TURN_PHASES
         "player_resources": 1,

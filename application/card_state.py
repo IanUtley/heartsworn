@@ -1002,10 +1002,7 @@ class CardStateMixin:
             if not trigger_condition_met(graph.source.to_dict(), cond_ctx):
                 _hc.log_req(f"    Troop ability {ability_guid[:8]}: ability condition not met")
                 return
-        if bstate.get("_rules_port_attached"):
-            from rules_port import lifecycle as _be
-        else:
-            import battle_engine as _be
+        from rules_port import lifecycle as _be
         phase = _be.current_phase(bstate)
         if casting != 64 and (
                 bstate.get("turn_player") != _be.PLAYER

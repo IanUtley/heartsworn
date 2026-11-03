@@ -1536,8 +1536,8 @@ def test_attached_rules_port_does_not_fall_back_for_unknown_conditions():
         raise AssertionError("unknown condition entered the legacy provider")
 
 
-def test_rules_port_and_battle_engine_share_attached_checkpoint():
-    import battle_engine
+def test_lifecycle_and_snapshot_share_attached_checkpoint():
+    from rules_port import lifecycle
 
     class Session:
         turn_order = {"turn_player": "player", "phase_idx": 3}
@@ -1549,16 +1549,50 @@ def test_rules_port_and_battle_engine_share_attached_checkpoint():
     session = Session()
     shared = {"turn_player": "player", "phase_idx": 3}
     session._rules_port_battle_state = shared
-    assert battle_engine.load_state(session) is shared
+    assert lifecycle.load_state(session) is shared
     snapshot = SQLiteRulesSnapshot(session)
     snapshot.save({"phase": "FirstMainPhase"})
-    assert battle_engine.load_state(session)["rules_port"]["phase"] == \
+    assert lifecycle.load_state(session)["rules_port"]["phase"] == \
         "FirstMainPhase"
     assert session._rules_port_battle_state is shared
-    assert session._rules_port_battle_state is battle_engine.load_state(session)
+    assert session._rules_port_battle_state is lifecycle.load_state(session)
 
 
-def test_native_checkpoint_helpers_do_not_require_battle_engine():
+def test_checkpoint_rules_merged_from_the_old_battle_engine():
+    """The four rules the old battle_engine copy decided differently."""
+    from rules_port import lifecycle
+
+    phases = game_engine.ETurnPhases
+    # A saved empty stop list means "no optional stops", not the defaults.
+    assert lifecycle.is_self_stop({"player_self_stops": None},
+                                  phases.FirstMainPhase)
+    assert not lifecycle.is_self_stop({"player_self_stops": []},
+                                      phases.FirstMainPhase)
+    assert lifecycle.is_self_stop({"player_self_stops": []},
+                                  phases.DeclareAttack)  # always a stop
+    # Wrapping past EndTurn honours a pending bonus turn and rebuilds phases.
+    state = lifecycle.default_state()
+    state["phase_idx"] = len(state["turn_phases"]) - 1
+    state["bonus_turn"] = lifecycle.PLAYER
+    state["player_has_ready_troop"] = True
+    assert lifecycle.advance_phase(state) == phases.StartTurn
+    assert state["turn_player"] == lifecycle.PLAYER
+    assert "bonus_turn" not in state
+    assert state["turn_phases"] == lifecycle.COMBAT_TURN_PHASES
+    # A stale (base) phase list still resolves an AI combat resume cursor.
+    held = lifecycle.ai_held_phase_context(
+        {"ai_turn_phase_idx": 12,
+         "turn_phases": list(lifecycle.BASE_TURN_PHASES)})
+    assert held[0] == lifecycle.COMBAT_TURN_PHASES[11], held
+    # No persisted checkpoint loads as a fresh default state.
+
+    class Fresh:
+        turn_order = None
+
+    assert lifecycle.load_state(Fresh()) == lifecycle.default_state()
+
+
+def test_native_checkpoint_helpers_read_the_persisted_checkpoint():
     class Session:
         turn_order = {"turn_player": "player", "phase_idx": 1,
                       "turn_phases": ["StartTurn", "Ready"]}

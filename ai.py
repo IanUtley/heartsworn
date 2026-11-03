@@ -50,13 +50,9 @@ from pvp_db import (db_set_card_state_or,
 
 
 def _checkpoint_engine(session, state):
-    """Select the checkpoint facade for the active rules authority."""
-    if (getattr(session, "_rules_port_session", None) is not None or
-            (state or {}).get("_rules_port_attached")):
-        from rules_port import lifecycle
-        return lifecycle
-    import battle_engine
-    return battle_engine
+    """Return the battle-checkpoint module (a seam tests replace)."""
+    from rules_port import lifecycle
+    return lifecycle
 
 
 def _queue_stack_item(session, state, item, owner_id=None):
@@ -526,14 +522,8 @@ def ai_discard_card(handler, game, session, pl_t, ai_t):
     # GetTheoriticalValue so future playability discounts value).  A shard is
     # still the preferred discard (it only ramps once per turn anyway).
     try:
-        if (getattr(session, "_rules_port_session", None) is not None or
-                (getattr(handler, "_current_bstate", None) or {}).get(
-                    "_rules_port_attached")):
-            from rules_port.persistence import load_state
-            load_checkpoint = load_state
-        else:
-            import battle_engine as _be
-            load_checkpoint = _be.load_state
+        from rules_port.persistence import load_state
+        load_checkpoint = load_state
         import ai_eval as _aieval
         bs = load_checkpoint(session)
         ev = _aieval.build_evaluator(handler, session, bs, ai_t, pl_t)
@@ -555,14 +545,8 @@ def ai_discard_card(handler, game, session, pl_t, ai_t):
                            template_id=tpl_guid)
     bstate = getattr(handler, "_current_bstate", None)
     if bstate is None:
-        if (getattr(session, "_rules_port_session", None) is not None or
-                (getattr(handler, "_current_bstate", None) or {}).get(
-                    "_rules_port_attached")):
-            from rules_port.persistence import load_state
-            bstate = load_state(session)
-        else:
-            import battle_engine as _be
-            bstate = _be.load_state(session)
+        from rules_port.persistence import load_state
+        bstate = load_state(session)
     _dispatch_triggers(
         _db, handler, game, session, pl_t, ai_t, bstate,
         "CardDiscardedEvent", int(card_uid), source_owner_uid=0,
@@ -598,11 +582,7 @@ def ai_declare_attackers(handler, game, session, ai_t, pl_t, battle_state):
             "    AI DeclareAttackers: reusing native declarations "
             f"{[hex(int(uid)) for uid in existing_attackers]}")
         return battle_state
-    if (getattr(session, "_rules_port_session", None) is not None or
-            (battle_state or {}).get("_rules_port_attached")):
-        from rules_port import lifecycle as _be
-    else:
-        import battle_engine as _be
+    from rules_port import lifecycle as _be
     import ai_eval as _aieval
     pers = personality(handler)
     alpha = pers.get("alpha_strike", True)
@@ -1017,11 +997,7 @@ def run_ai_turn(handler, session, pl_t, ai_t, battle_state, start_idx=0):
     The AI logs holding priority and passing it as its default action for
     every phase it has nothing to do in.
     """
-    if (getattr(session, "_rules_port_session", None) is not None or
-            (battle_state or {}).get("_rules_port_attached")):
-        from rules_port import lifecycle as be
-    else:
-        import battle_engine as be
+    from rules_port import lifecycle as be
     native_mode = (getattr(session, "_rules_port_session", None) is not None or
                    (battle_state or {}).get("_rules_port_attached"))
     # RulesPort uses the typed participant IDs established by the persisted

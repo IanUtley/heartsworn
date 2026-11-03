@@ -496,19 +496,10 @@ class HCPHandler(RulesPortProjectionMixin, ProfileStreamMixin, CardPlayMixin, Ca
         return session
 
     def _checkpoint_engine(self, session):
-        """Select the checkpoint adapter for this session.
-
-        Native RulesPort sessions and compatibility sessions share the same
-        projection handlers, so those handlers must not unconditionally import
-        the legacy battle engine.  Keeping the selection here makes the
-        boundary explicit while preserving the rollback path for old sessions.
-        """
+        """Return the battle-checkpoint module (a seam tests replace)."""
         self._bind_log_session(session)
-        if getattr(session, "_rules_port_session", None) is not None:
-            from rules_port import lifecycle
-            return lifecycle
-        import battle_engine
-        return battle_engine
+        from rules_port import lifecycle
+        return lifecycle
 
     def _maybe_attach_rules_port(self, session, game, battle_state):
         """Attach the authoritative Python rules host for a live session."""
