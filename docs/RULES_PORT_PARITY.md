@@ -1610,17 +1610,24 @@ a native acceptance test when its behavior is confirmed against the client:
 
 ## Card views: producer differences to check
 
-Static card filters now take a typed `CardView` (`rules_port/card_view.py`) built from
-the static query, whose output is unchanged. Other card producers still build their own
-dicts, and they disagree on what some keys mean:
+Both card producers in the rules port now build a typed `CardView`
+(`rules_port/card_view.py`): the static filters through `from_static_row` and the
+condition layer through `from_condition_row` / `from_condition_champion`. Each
+builder keeps its producer's values, so behaviour is unchanged. Differences that
+remain between the two paths, to decide per filter:
 
-- `attack` and `defense` are the template's values in the static query
-  (`db_static_card_rows`, which ignores `card_attack_mod` and the buff records), but
-  the condition-context card (`db_condition_card_row`, used by
-  `rules_port/condition_context.py`) adds the instance modifiers. A filter that reads
-  the current attack therefore sees different values depending on the path. Which value
-  each filter should read is a rules question that has not been checked against the
-  client; decide it per filter before converting the other producers.
+- `attack` and `defense`: the static path uses the template's values only, and the
+  condition path adds the card's instance modifiers (`card_attack_mod`,
+  `card_defense_mod`). A filter that reads the current attack sees different values
+  depending on the path.
+- `cost`: the static path uses the template cost; the condition path uses the
+  effective cost (`db_game_card_effective_cost`).
+- Subtype and thresholds: the static path applies the `permanent_buffs` overrides
+  (`subtype`, `thresholds`); the condition path reads the template's subtype and
+  threshold JSON and does not apply them.
+- Thresholds parse differently when a record has both a `list` and a `values` key:
+  `shards_from_threshold` (static) takes the first non-empty list, `_shards`
+  (condition) takes `list` whenever the key exists.
 
 ## Remaining work
 

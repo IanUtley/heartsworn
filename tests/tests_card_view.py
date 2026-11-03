@@ -37,8 +37,35 @@ def test_champion_entry_keeps_its_side_and_health():
     assert (player["card_uid"], player["user_id"], player["src_owner_side"]) == (-2, 5, "player")
 
 
+COND_ROW = (202, "Troop", "hand", 6, 1, 3, 2, "tpl-guid", "Named", 2, "Dwarf",
+            json.dumps({"list": [5]}), 4, 8, 1, -1, "{}", "[]", 3, "orig-guid", 7, "Rare", 9)
+
+
+def test_condition_card_adds_the_instance_modifiers_and_condition_fields():
+    view = CardView.from_condition_row(
+        COND_ROW, buffs={"int_attrs": {"Lethal": 1}, "tags": {"t": 1}}, card_abilities=["a"],
+        counters={"c": 2}, counter_guids={"c": "g"}, effective_cost=5,
+        damaged_opponent_this_turn=[7])
+    mapping = view.as_condition_mapping()
+    assert mapping["attack"] == 4 and mapping["defense"] == 1      # template + modifiers
+    assert mapping["cost"] == 5 and mapping["owner_id"] == mapping["controller_id"] == 6
+    assert mapping["socket_count"] == 9 and mapping["gems"] == 7 and mapping["position"] == 3
+    assert mapping["int_attrs"] == {"Lethal": 1} and mapping["tags"] == {"t": 1}
+    assert mapping["damaged_opponent_this_turn"] == [7]
+    assert "src_owner_side" not in mapping and "state" in mapping
+
+
+def test_condition_champion_has_its_own_key_set():
+    entry = CardView.from_condition_champion(10001, 5, None, 17, {}, {}, {}).as_condition_mapping()
+    assert entry["card_type"] == "Champion" and entry["location"] == "champions"
+    assert entry["name"] == "Champion" and entry["defense"] == 17
+    assert "state" not in entry and "damaged_opponent_this_turn" not in entry
+
+
 if __name__ == "__main__":
     test_row_maps_to_the_static_filter_mapping()
     test_permanent_buffs_override_subtype_and_thresholds_only()
     test_champion_entry_keeps_its_side_and_health()
+    test_condition_card_adds_the_instance_modifiers_and_condition_fields()
+    test_condition_champion_has_its_own_key_set()
     print("PASS card view")
