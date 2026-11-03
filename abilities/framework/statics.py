@@ -1144,7 +1144,7 @@ def effective_cost(db, session_id, bstate, card_uid):
     cost = (row[0] or 0) + (row[1] or 0)
     if row[2] and str(row[2]).strip() not in ("[]", "{}", ""):
         try:
-            from .cost_mod import cost_mod_delta
+            from rules_port.cost_mod import cost_mod_delta
             cost += cost_mod_delta(db, session_id, int(card_uid), row[2])
         except Exception:
             pass
@@ -1157,7 +1157,7 @@ def effective_cost(db, session_id, bstate, card_uid):
     if ((not row[2] or str(row[2]).strip() in ("[]", "{}", ""))
             and row[3] != "warzone"):
         try:
-            from .cost_mod import dynamic_cost_mod_delta
+            from rules_port.cost_mod import dynamic_cost_mod_delta
             cost += dynamic_cost_mod_delta(db, session_id, int(card_uid))
         except Exception:
             pass

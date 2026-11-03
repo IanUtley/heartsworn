@@ -486,7 +486,7 @@ def test_kill_resets_damage_and_temp(db):
 
 
 def test_dynamic_cost_formula(db):
-    from abilities.framework.cost_mod import cost_mod_delta, formula_from_raw
+    from rules_port.cost_mod import cost_mod_delta, formula_from_raw
     src = sqlite3.connect(SRC)
     raw = src.execute(
         "SELECT raw_json FROM card_abilities_meta WHERE ability_guid=?",

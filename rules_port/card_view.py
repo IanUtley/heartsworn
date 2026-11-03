@@ -91,6 +91,10 @@ SHAPES: dict[str, tuple[str, ...]] = {
     # A card counted by a card-count variable (rules_port/context.py: set_card_count_variable).
     "count_card": ("card_uid", "card_type", "location", "user_id", "state", "attack", "defense",
                    "name", "cost", "subtype"),
+    # A card a cost modifier's zone filter counts (rules_port/cost_mod.py).
+    "cost_filter": ("card_uid", "card_type", "location", "user_id", "state", "attack", "defense",
+                    "name", "cost", "subtype", "shards", "damaged_opponent_this_turn",
+                    "src_owner_side"),
     # Combat-rule evaluation of a battlefield card (rules_port/combat_rules.py).
     "combat_rule": ("card_uid", "card_type", "location", "user_id", "owner_id", "controller_id",
                     "template_guid", "shards", "attack", "defense", "attributes", "rule_flags"),
@@ -504,6 +508,27 @@ class CardView:
             name=row[7] or "",
             cost=int(row[8] or 0),
             subtype=row[9] or "",
+        )
+
+    @classmethod
+    def from_zone_row(cls, row: Sequence[Any]) -> "CardView":
+        """A card one zone query returns (``db_condition_cards_in_zones``), for a cost filter.
+
+        The values are the template's, with the card's threshold shards and side.
+        """
+        return cls(
+            card_uid=int(row[0]),
+            card_type=row[1],
+            location=row[2],
+            user_id=row[3],
+            state=int(row[4] or 0),
+            attack=row[5],
+            defense=row[6],
+            name=row[7] or "",
+            cost=row[8] or 0,
+            subtype=row[9] or "",
+            shards=threshold_shards(row[10]),
+            src_owner_side="player" if (row[3] or 0) else "ai",
         )
 
     @classmethod

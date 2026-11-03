@@ -7,7 +7,6 @@ these modules resolve abilities; `rules_port` does (see `../README.md`).
 |---|---|
 | `_shared.py` | Logging, card-state masks, zone/collection mapping, champion-owner helpers |
 | `bom.py` | `_push_card_state` and `_controller_id_for_target` (the remains of the old BOM module) |
-| `cost_mod.py` | Dynamic cost modifiers from ability variables |
 | `deathcry.py` | Deathcry filtering; resolution is delegated to `rules_port.resolution` |
 | `kill_troop.py` | Dead state, move to discard, replacement effects, Deathcry dispatch |
 | `resources.py` | Resource-ability entry points over RulesPort |

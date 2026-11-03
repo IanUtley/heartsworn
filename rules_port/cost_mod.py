@@ -17,11 +17,8 @@ current as the board changes (matching the client's recalculated variables).
 import json
 import re
 
-from rules_port.targeting import (
-    ZONE_MAP,
-    evaluate_card_filter,
-    shards_from_threshold,
-)
+from rules_port.card_view import CardView
+from rules_port.targeting import ZONE_MAP, evaluate_card_filter
 
 
 def formula_from_raw(raw_json):
@@ -64,24 +61,11 @@ def formula_from_raw(raw_json):
     }
 
 
-def _card_dict(row):
-    return {
-        "card_uid": int(row[0]), "card_type": row[1],
-        "location": row[2], "user_id": row[3],
-        "state": int(row[4] or 0), "attack": row[5],
-        "defense": row[6], "name": row[7] or "",
-        "cost": row[8] or 0, "subtype": row[9] or "",
-        "shards": shards_from_threshold(row[10]),
-        "damaged_opponent_this_turn": [],
-        "src_owner_side": "player" if (row[3] or 0) else "ai",
-    }
-
-
 def _cards_in_zones(db, session_id, owner_uid, zones):
     from pvp_db import db_condition_cards_in_zones
     rows = db_condition_cards_in_zones(
         session_id, zones, user_id=owner_uid, conn=db)
-    return [_card_dict(r) for r in rows]
+    return [CardView.from_zone_row(r).as_shape("cost_filter") for r in rows]
 
 
 def cost_mod_delta(db, session_id, card_uid, cost_mod_json):

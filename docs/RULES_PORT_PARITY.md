@@ -1757,3 +1757,12 @@ production callers (only two tests), so those tests now use the native
 `legal_targets`; both pass. `shards_from_threshold` moved to `card_view`'s
 `threshold_shards`, which now falls back to `values` when `list` is empty, as
 the framework did (no flag changes in Records).
+
+## Cost modifiers moved to rules_port
+
+`abilities/framework/cost_mod.py` is now `rules_port/cost_mod.py`. Its zone
+cards are built with `CardView.from_zone_row(...).as_shape("cost_filter")`
+instead of a hand-written dict. A differential between HEAD and the moved module
+over 445 zone rows, 5,000 `cost_mod_delta` and 200 `dynamic_cost_mod_delta`
+evaluations (1,894 non-zero deltas, from 314 Records formulas) found no
+differences.
