@@ -17,7 +17,6 @@ from domain.enums import EGemTypesNew
 from profile_db import db_add_collection
 from profile_db import db_campaign_deck_for_champion
 from profile_db import db_card_instance_art
-from profile_db import db_card_instance_template
 from profile_db import db_champion_last_deck
 from profile_db import db_champion_profile
 from profile_db import db_delete_champion

@@ -33,7 +33,7 @@ import json
 import sys
 from pathlib import Path
 
-from paths import CAMPAIGN_ROOT, HERE, REPO  # noqa: E402  (also sets sys.path)
+from paths import CAMPAIGN_ROOT, REPO
 
 import catalog  # noqa: E402
 import campaign_rules  # noqa: E402

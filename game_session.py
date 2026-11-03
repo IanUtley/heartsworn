@@ -33,7 +33,6 @@ without shared in-memory mutable state.
 import json
 import os
 import time
-from binascii import hexlify
 
 import db as connection_db
 import pvp_db as db_layer
@@ -59,8 +58,6 @@ _DB_PATH = os.environ.get(
 def make_uid(uid_type, inst):
     """Create a UID ulong from type and instance."""
     return (inst << 8) | uid_type
-
-
 
 
 class GameSession:

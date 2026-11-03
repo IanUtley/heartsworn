@@ -24,7 +24,6 @@ Event pushes (server → client):
 """
 
 import io, struct, time, traceback, sys
-from binascii import hexlify
 
 from db import log_req
 from profile_db import (db_get_friends, db_get_pending_friend_requests,
@@ -372,8 +371,6 @@ def push_friend_request_received(handler, sender_name, SERVICE_PROFILE_UID):
     _push_event(handler, 2192, args, SERVICE_PROFILE_UID)
 
 
-
-
 def push_friend_added(handler, reck_id, keepname, is_online, SERVICE_PROFILE_UID):
     """Push FriendAdded (2194) — a new friend was added."""
     log_req(f">>> PUSH FriendAdded {reck_id} ({keepname}) online={is_online}")
@@ -396,8 +393,6 @@ def push_friend_removed(handler, keepname, SERVICE_PROFILE_UID):
     b.field_guid("RequestHandlerSessionId", "00000000-0000-0000-0000-000000000000")
     args = b.finish(3)
     _push_event(handler, 2195, args, SERVICE_PROFILE_UID)
-
-
 
 
 def push_friend_come_online(handler, rek_id, SERVICE_PROFILE_UID):

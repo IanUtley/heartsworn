@@ -21,8 +21,7 @@ fresh_database()   # bind this process's database before ``db`` is imported
 
 import game_engine
 
-from tests.tests_combat import (make_db, add_card, HandlerStub, SessionStub,
-                                PromptHandlerStub, TPL_GLADIATOR)
+from tests.tests_combat import make_db, add_card, HandlerStub, SessionStub, TPL_GLADIATOR
 
 
 def _ag(seed):

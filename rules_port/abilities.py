@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 from collections.abc import Mapping
-from typing import Any, Callable, Optional
+from typing import Any, Optional
 
 from gamedata.play_plan import AbilityInstance as MetadataAbilityInstance
 from gamedata.play_plan import ActivationData

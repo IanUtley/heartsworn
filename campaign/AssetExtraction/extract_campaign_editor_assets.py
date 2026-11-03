@@ -30,10 +30,19 @@ import UnityPy  # pyright: ignore[reportMissingImports] -- optional extraction d
 
 import campaign_effects as effects
 
-from generate_az1_map import (DEFAULT_CLIENT_ROOT, Transform, apply_matrix,
-                              combine, component, game_object, local_transform,
-                              natural_key, qrotate, trs_matrix, transform_of,
-                              world_transform)
+from generate_az1_map import (
+    DEFAULT_CLIENT_ROOT,
+    Transform,
+    apply_matrix,
+    component,
+    game_object,
+    local_transform,
+    natural_key,
+    qrotate,
+    trs_matrix,
+    transform_of,
+    world_transform,
+)
 
 CAMPAIGN_ROOT = Path(__file__).resolve().parents[1]
 REPO_ROOT = CAMPAIGN_ROOT.parent
@@ -156,8 +165,6 @@ def _submesh_triangles(mesh, handler, vertex_count):
         result.append([tuple(part[i:i + 3]) for i in range(0, len(part) - 2, 3)
                        if all(v < vertex_count for v in part[i:i + 3])])
     return result
-
-
 
 
 def _fit_tile(world, uvs, vertex_ids):

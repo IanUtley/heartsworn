@@ -18,7 +18,7 @@ import json
 import sys
 from pathlib import Path
 
-from paths import CAMPAIGN_ROOT, HERE, REPO as ROOT  # noqa: E402  (also sets sys.path)
+from paths import CAMPAIGN_ROOT, REPO as ROOT
 
 import campaign_data  # noqa: E402
 

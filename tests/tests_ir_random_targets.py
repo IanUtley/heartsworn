@@ -6,7 +6,7 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 
 from tests.tests_builtin_counter_rules import SessionStub, _setup  # noqa: E402
-from tests.tests_combat import make_db, add_card  # noqa: E402  (the fixture reads make_db from this module)
+from tests.tests_combat import make_db
 
 # An Uncommon cost-2 troop: the random templates below filter on rarity, cost and the deck.
 RARE_TROOP = "0059eda0-e9a0-472c-adc2-021850b98c89"

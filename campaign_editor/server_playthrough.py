@@ -22,7 +22,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from paths import CAMPAIGN_ROOT, HERE, REPO  # noqa: E402  (also sets sys.path)
+from paths import CAMPAIGN_ROOT, REPO
 
 MAX_STEPS = 80
 RACE_IDS = {"Human": 1, "Elf": 2, "Coyotle": 3, "Orc": 4, "Dwarf": 5,

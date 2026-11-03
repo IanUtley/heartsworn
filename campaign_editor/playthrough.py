@@ -15,7 +15,7 @@ import sqlite3
 import sys
 from pathlib import Path
 
-from paths import CAMPAIGN_ROOT, HERE, REPO  # noqa: E402  (also sets sys.path)
+from paths import CAMPAIGN_ROOT, REPO
 
 import campaign_rules as engine   # noqa: E402
 import catalog                    # noqa: E402

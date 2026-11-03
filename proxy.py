@@ -8,7 +8,6 @@ import os
 import urllib.request
 from datetime import datetime
 from urllib.parse import urlparse, parse_qs
-from functools import partial
 
 # Local helpers
 import encryption  # hash_password / verify_password

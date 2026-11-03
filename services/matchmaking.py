@@ -5,7 +5,7 @@ and SendChallengeResponse (4017).
 """
 
 import io, struct, uuid, threading, sys
-from binascii import hexlify, unhexlify
+from binascii import unhexlify
 
 from encoder import encode_objfmt_response, compress_gzip, encode_datawrapper, make_uid
 from db import log_req
@@ -90,8 +90,6 @@ def _get_service_uid(handler):
     """Return the matchmaking service UID."""
     from hconnect_server import SERVICE_MATCHMAKING_UID
     return SERVICE_MATCHMAKING_UID
-
-
 
 
 def _extract_str(inner_bytes, field_name):

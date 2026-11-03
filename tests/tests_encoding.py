@@ -12,7 +12,7 @@ import gzip
 import struct
 import sys
 import os
-from binascii import hexlify, unhexlify
+from binascii import hexlify
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 

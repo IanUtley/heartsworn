@@ -8,7 +8,7 @@ combat declaration, blocker order and damage-allocation semantics only.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import IntEnum, IntFlag
+from enum import IntFlag
 from typing import Callable, Iterable, Optional
 
 

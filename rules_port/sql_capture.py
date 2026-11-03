@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from typing import Any, Iterable, Mapping
+from typing import Any, Mapping
 
 
 def _json(value: Any) -> dict[str, Any]:
