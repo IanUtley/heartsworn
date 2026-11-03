@@ -199,7 +199,7 @@ def effect_field(db, bstate, effect_guid, field_name, default=0):
     ability_guid = (bstate or {}).get("resolving_ability")
     if variable_name and ability_guid:
         try:
-            from abilities.framework.statics import ability_variable_value
+            from .static_rules import ability_variable_value
             resolved = ability_variable_value(
                 db, (bstate or {}).get("session_id", 0), bstate,
                 ability_guid, variable_name,

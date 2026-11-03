@@ -486,7 +486,7 @@ def test_counters_survive_stat_mod(db):
          '"counter_guids": {"incantation": "12a1bb1f-6308-650c-4d75-35a12cb4c5cd"}}',))
     db.commit()
     pl_t, ai_t, game, bstate = new_game(db)
-    from abilities.framework.stat_mod import apply_card_stat_mod
+    from rules_port.stat_mod import apply_card_stat_mod
     handler = HandlerStub()
     handler._db = db
     apply_card_stat_mod(game, SessionStub(), db, handler, pl_t, ai_t,
@@ -501,7 +501,7 @@ def test_deck_stat_mod_is_nulled(db):
     """A hidden deck-card update must not reveal its full representation."""
     add_card(db, 100, 5, "plain_troop", "deck")
     pl_t, ai_t, game, bstate = new_game(db)
-    from abilities.framework.stat_mod import apply_card_stat_mod
+    from rules_port.stat_mod import apply_card_stat_mod
     handler = HandlerStub()
     handler._db = db
 

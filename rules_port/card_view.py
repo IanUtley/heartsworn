@@ -45,7 +45,7 @@ _CARD_CORE = ("card_uid", "card_type", "location", "user_id", "owner_id", "contr
               "card_abilities", "counters", "counter_guids", "tags", "parent_uid",
               "original_template_guid")
 SHAPES: dict[str, tuple[str, ...]] = {
-    # The static card filters (abilities/framework/statics.py).
+    # The static card filters (rules_port/static_rules.py).
     "static": ("card_uid", "card_type", "location", "user_id", "state", "attack", "defense",
                "name", "cost", "subtype", "shards", "attributes", "damaged_opponent_this_turn",
                "src_owner_side"),

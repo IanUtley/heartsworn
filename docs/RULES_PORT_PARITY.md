@@ -1847,3 +1847,28 @@ against native `static_rules._expression_value` over every Records variable
   it (for example `RubyDiamondYouHave` for the AI side).
 - `CardIntegerVariable`, `HighestCardAbilityVariable` and `CardSumAbilityVariable`.
 Those need case-by-case review before the framework evaluator can be removed.
+
+## Framework statics removed: variable evaluation is native
+
+`rules_port/static_rules.ability_variable_value` now resolves the variable for
+`bom_fields.effect_field`, and `abilities/framework/statics.py` and
+`abilities/framework/stat_mod.py` are deleted. `stat_mod`'s
+`apply_card_stat_mod` moved to `rules_port/stat_mod.py`.
+
+The framework evaluator was compared with the native one over every Records
+variable (37,140 checks, two battle-state shapes), using each engine's effective
+value (the effect fallback when it returns `None`). The 505 remaining differences
+are where the framework is the weaker side:
+- Its dispatch has no branch for `HighestCardAbilityVariable`, `SourcePlayerCharge`
+  or `SourcePlayerResource`, so those returned `None`; the effect fell back to the
+  authored field value (0).
+- It ignores `m_CountUniques` and maps `Any` to flag 0 (`SourcePlayerThreshold`).
+- It ignores `m_OnlyIncludeDifferentRacesForFaction` (race counts).
+- `CardSum` reads the effect field's name as the stat; the native evaluator reads
+  the variable's own `m_Property`.
+The remaining `RandomNumber` rows agree once the authored default is the fallback.
+Native values were spot-checked against the authored fields for the highest-card,
+threshold and race cases.
+
+This changes live effect values for those kinds. Tests cover the paths they use,
+but no live game was run.

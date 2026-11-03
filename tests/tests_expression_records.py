@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Coverage test for every ExpressionAbilityVariable in extracted Records.
 
-This deliberately exercises the production ``_variable_value`` path with a
+This deliberately exercises the production ``_expression_value`` path with a
 small synthetic ability context.  The underlying variables are assigned a
 non-zero value so arithmetic, including division, is observable; ESC uses the
 same escalation state that live resolution uses.
@@ -19,7 +19,7 @@ from tests.test_db import fresh_database
 
 fresh_database()   # bind this process's database before ``db`` is imported
 
-from abilities.framework.statics import _variable_value
+from rules_port.static_rules import _expression_value
 from gamedata.records import deserialize_line
 
 
@@ -78,8 +78,8 @@ def test_all_records_expressions():
                         "m_DefaultValue": 7,
                     })
                 raw = json.dumps({"m_Variables": variables})
-                value = _variable_value(
-                    db, 1, {"player_escalation_uses": 2}, raw, name, 5, 0)
+                value = _expression_value(
+                    db, 1, {"player_escalation_uses": 2}, 0, 5, raw, name)
                 if value is None:
                     failures.append((line_number, name, text))
 

@@ -1211,7 +1211,7 @@ def test_lightning_armada_counts_only_your_hand(db):
     layer, so it summed both players' hands (22/22 instead of 2 + 2N)."""
     import db as dbmod
     from tests.tests_cards_fixes import _copy_ability
-    from abilities.framework.statics import _variable_value
+    from rules_port.static_rules import _expression_value
     _copy_ability(db, TID_LIGHTNING)
     for uid in (101, 102, 103):
         add_card(db, uid, 5, "b7172b6a-ef85-4fef-91e1-81975b4ce7cd",
@@ -1226,8 +1226,8 @@ def test_lightning_armada_counts_only_your_hand(db):
         raw = db.execute(
             "SELECT raw_json FROM card_abilities_meta WHERE ability_guid=?",
             (TID_LIGHTNING,)).fetchone()[0]
-        n = _variable_value(db, 1, {"player_health": 20, "ai_health": 20},
-                            raw, "CardInYourHand", 5, 999)
+        n = _expression_value(db, 1, {"player_health": 20, "ai_health": 20},
+                              999, 5, raw, "CardInYourHand")
         assert n == 3, f"player hand count should be 3, got {n}"
     finally:
         dbmod._db = old_db

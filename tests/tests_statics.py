@@ -1,5 +1,5 @@
 """Regression tests for the continuous static-ability layer
-(abilities/framework/statics.py): dynamic self-bonuses, auras, zone-wide cost
+(rules_port/static_rules.py): dynamic self-bonuses, auras, zone-wide cost
 modifiers, threshold-gated keywords, damage/block semantics and the global
 flags (Emberspire Witch / Te'talca / Enlightened Seeker)."""
 
@@ -380,11 +380,8 @@ def test_champion_draw_intattrs_map_to_flags():
     _CHAMPION_INTATTR_FLAGS.  Their card-level twins use _flag_from_typed_intattr.
     """
     from rules_port.static_rules import _CHAMPION_INTATTR_FLAGS
-    from abilities.framework.statics import _flag_from_typed_intattr
     assert _CHAMPION_INTATTR_FLAGS["cantdrawcards"] == "cant_draw_cards"
     assert _CHAMPION_INTATTR_FLAGS["skipsdrawphase"] == "skips_draw_phase"
-    assert _flag_from_typed_intattr("CantDrawCards") == {"cant_draw_cards"}
-    assert _flag_from_typed_intattr("SkipsDrawPhase") == {"skips_draw_phase"}
 
 
 def test_unblockable_except(db):
@@ -517,7 +514,7 @@ def test_electroid_combat_threshold_is_continuous(db):
 def test_damage_threshold_variable(db):
     """'Deal 1 damage to target troop for each [BLOOD] you have.' — the leaf
     amount is 0 and the value comes from the SourcePlayerThresholdAbilityVariable."""
-    from abilities.framework.statics import _leaf_numeric_value
+    from rules_port.static_rules import _expression_value
     src = sqlite3.connect(SRC)
     raw = src.execute(
         "SELECT raw_json FROM card_abilities_meta WHERE ability_guid=?",
@@ -526,7 +523,7 @@ def test_damage_threshold_variable(db):
     pm = {"property": "damage", "amount": 0,
           "text": "Deal 1 damage to target troop for each [BLOOD] you have."}
     bstate = {"player_threshold": {game_engine.ECardShards.Blood: 3}}
-    amount = _leaf_numeric_value(db, 1, bstate, pm, raw, 5, 0, "damage")
+    amount = _expression_value(db, 1, bstate, 0, 5, raw, "1ForEachBloodYouHave")
     assert amount == 3, amount
 
 
@@ -536,22 +533,22 @@ def test_count_list_attribute_uses_gamedata_list_name(db):
     Construction Plans names the variable separately from the
     ``ExhaustedCards`` list populated by its m_ExhaustTarget payment.
     """
-    from abilities.framework.statics import _variable_value
+    from rules_port.static_rules import _expression_value
     raw = json.dumps({"m_Variables": [{
         "_t": "Game.Shared.Mechanics.Abilities.CountListAttrAbilityVariable",
         "m_Name": "AForEachTroopExhaustedThisWay",
         "m_ListAttrName": "ExhaustedCards",
         "m_DefaultValue": 0,
     }]})
-    value = _variable_value(
+    value = _expression_value(
         db, 1, {"ability_lists": {"ExhaustedCards": [101, 102]}},
-        raw, "AForEachTroopExhaustedThisWay", 5, 101)
+        101, 5, raw, "AForEachTroopExhaustedThisWay")
     assert value == 2, value
 
 
 def test_damage_esc_variable(db):
     """'Deal ESC:2 damage' reads the active source card's escalation count."""
-    from abilities.framework.statics import _leaf_numeric_value
+    from rules_port.static_rules import _expression_value
     src = sqlite3.connect(SRC)
     raw = src.execute(
         "SELECT raw_json FROM card_abilities_meta WHERE ability_guid=?",
@@ -560,8 +557,7 @@ def test_damage_esc_variable(db):
     pm = {"property": "damage", "amount": 0, "text": "Deal ESC:2 damage"}
     for count, expected in ((1, 2), (2, 4), (3, 6)):
         bstate = {"escalation_counts_by_card": {"820801": count}}
-        amount = _leaf_numeric_value(
-            db, 1, bstate, pm, raw, 5, 820801, "damage")
+        amount = _expression_value(db, 1, bstate, 820801, 5, raw, "Esc2")
         assert amount == expected, (count, amount)
 
 

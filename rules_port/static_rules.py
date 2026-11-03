@@ -2656,3 +2656,22 @@ def global_flags(db, session_id, battle_state):
     for (owner,) in db_warzone_owner_ids(session_id, conn=db):
         flags |= controller_flags(db, session_id, battle_state, int(owner))
     return flags
+
+
+def ability_variable_value(db, session_id, battle_state, ability_guid, var_name,
+                           owner, source_uid, stat_prop=None):
+    """One named ability variable, resolved from the live battle state.
+
+    The effect-field resolver calls this with the resolving ability and source. A variable whose
+    kind the native evaluator does not own returns ``None``, and the caller falls back to the
+    authored field value. ``stat_prop`` is accepted for that caller; the variable's own
+    ``m_Property`` decides the stat a sum reads.
+    """
+    if not ability_guid or not var_name:
+        return None
+    from pvp_db import db_any_ability_raw_json
+    raw = db_any_ability_raw_json(ability_guid, conn=db)
+    if raw is None:
+        from .bom_fields import ability_record
+        raw = json.dumps(ability_record(db, ability_guid))
+    return _expression_value(db, session_id, battle_state, source_uid, owner, raw, var_name)

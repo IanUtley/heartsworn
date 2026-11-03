@@ -1,4 +1,4 @@
-"""Apply permanent or this-turn ATK/DEF modifiers to card instances.
+"""Apply permanent or this-turn ATK/DEF modifiers to card instances (native).
 
 Buffs live in two JSON columns on game_cards:
   - permanent_buffs  {"atk": N, "def": N}  — persist for the whole game
@@ -32,11 +32,10 @@ def apply_card_stat_mod(game, session, db, handler, pl_t, ai_t, card_uid,
     ``False`` writes to permanent_buffs.  Returns the card's new EFFECTIVE
     defense (<= 0 means it should die).
     """
-    from ._shared import (_log, _card_state_of, owner_uid,
-                          card_collection_for_location)
-
+    from db import log_req as _log
     from pvp_db import (db_card_source_info, db_card_mutation_field,
-                        db_set_card_mutation_field)
+                        db_set_card_mutation_field, db_card_state_value)
+    from .runtime_helpers import card_collection_for_location, owner_uid
     row = db_card_source_info(session.session_id, int(card_uid), conn=db)
     if not row:
         return None
@@ -58,7 +57,7 @@ def apply_card_stat_mod(game, session, db, handler, pl_t, ai_t, card_uid,
     game.push_card_updated(scid, owner, card_collection_for_location(location), ct,
                            template_id=tpl_guid, attack=atk, defense=def_,
                            attributes=attributes,
-                           state=_card_state_of(db, session, card_uid),
+                           state=db_card_state_value(session.session_id, int(card_uid), conn=db),
                            # Deck cards are face-down to every client. A
                            # stat change must not turn the targeted deck card
                            # face-up for the opponent (or leave a stale full
