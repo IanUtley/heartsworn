@@ -13,7 +13,10 @@ def int_attr_value(context: Any, card_uid: int, owner: int, attribute: str) -> i
     key = str(attribute or "")
     if parts and parts[0].lower().startswith("you"):
         champions = context.bstate.get("champ_map") or {}
-        uid = int(champions.get(int(owner), champions.get(str(int(owner)))))
+        champion = champions.get(int(owner), champions.get(str(int(owner))))
+        if champion is None:
+            raise LookupError(f"no champion recorded for owner {owner} in champ_map")
+        uid = int(champion)
         key = ">".join(parts[1:])
         parts = parts[1:]
     if len(parts) >= 2 and parts[0] == "CardStatsThisTurn":

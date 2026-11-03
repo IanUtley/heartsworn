@@ -319,8 +319,8 @@ def describe_transaction(transaction, session=None) -> str:
     activation_data = payload.get("activation_data")
     if isinstance(activation_data, Mapping):
         activations.append(activation_data)
-    target_map = {}
-    cost_map = {}
+    target_map: dict[Any, Any] = {}
+    cost_map: dict[Any, Any] = {}
     x_cost = 0
     for activation in activations:
         for source, destination in (("target_map", target_map),

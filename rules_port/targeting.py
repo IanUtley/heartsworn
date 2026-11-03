@@ -7,6 +7,7 @@ framework's static, cost and damage paths share.
 """
 
 from __future__ import annotations
+from typing import Any
 
 import copy
 import json
@@ -429,7 +430,7 @@ def implicit_champion_target(db, session, handler, battle_state, *,
 # Writes are the only thing that changes the projection inputs we can see;
 # the in-memory battle_state fields that a projection also reads are not
 # covered by that tag, so they must not change without a write.
-_CARD_MEMO = {}
+_CARD_MEMO: dict[Any, Any] = {}
 _CARD_MEMO_LOCK = threading.Lock()
 _CARD_MEMO_LIMIT = 50000
 _PLAIN_SCALARS = (str, int, float, bool, type(None))

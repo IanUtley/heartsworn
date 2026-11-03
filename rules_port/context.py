@@ -3509,8 +3509,8 @@ class EffectContext:
         sid = self.session.session_id
         responsible = int(self.bstate.get("resolving_owner_id", 0) or 0)
         target = self.resolved_target()
-        opponent = (int(self.target_owner(target, default=None))
-                    if target is not None else None)
+        owner = self.target_owner(target, default=None) if target is not None else None
+        opponent = int(owner) if owner is not None else None
         if opponent is None or opponent == responsible:
             opponent = _opposing_owner_in(self.bstate, responsible,
                                           self.handler)

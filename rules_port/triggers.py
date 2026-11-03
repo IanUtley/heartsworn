@@ -253,7 +253,7 @@ class NativeTriggerBackend:
             db_layer.log_req(f"    Trigger discovery {event_name}: {_discover_seconds:.3f}s")
         logs = []
         seen = set()
-        champions = []
+        champions: list[Any] = []
         champion_fn = getattr(handler, "_champion_targets", None)
         if callable(champion_fn):
             try:

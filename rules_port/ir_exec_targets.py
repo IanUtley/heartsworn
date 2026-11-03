@@ -181,7 +181,7 @@ def match_values(template: Any, template_guid: str, root_guid: str, scope: Any) 
     ability = _ability_shim(root_guid, scope)
     target_spec = SimpleNamespace(guid=template_guid)
     effect = {"secondary_target_index": instance_ref(_get(scope.clause, "m_SecondaryTargetIndex"))}
-    champions = getattr(context.handler, "_champion_targets", lambda: [])() or []
+    champions: list[Any] = getattr(context.handler, "_champion_targets", lambda: [])() or []
     return [int(uid) for uid in resolution._match_secondary_values(
         db, session_id, ability, effect, target_spec, bstate, champions=champions,
         resolved_by_instance=scope.resolved_by_instance)]

@@ -256,7 +256,7 @@ class MetadataCardTransactionExecutor(CardTransactionExecutor):
                     plan = self.play_plan_loader(
                         card.template_guid, int(cast(Any, card_uid)),
                         int(cast(Any, owner_id)))
-                    values = []
+                    values: list[Any] = []
                     cost_target_map: dict[int, list[int]] = {}
                     ability_data = payload.get("ability_data") or ()
                     cast_ability_guids = {

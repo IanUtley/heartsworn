@@ -796,7 +796,7 @@ def _card_candidates(template: MechanicsObject, scope: Scope) -> list[int]:
     # automatic target takes the same cards the live resolver takes.
     # Like the live pool, a champion with no game_cards row (synthetic: no name) comes after the cards, in the order the
     # handler lists the champions.
-    champions = (getattr(scope.context.handler, "_champion_targets", lambda: [])() or [])
+    champions: list[Any] = (getattr(scope.context.handler, "_champion_targets", lambda: [])() or [])
     champion_order = {int(champ[0]): index for index, champ in enumerate(champions)}
     cards = sorted((card for card in _battle_cards(scope)
                     if (not zones or card.zone in zones)
@@ -874,7 +874,7 @@ def _choice_candidates(root: MechanicsObject, index: int, scope: Scope) -> tuple
         # The chain items that target the player or the player's troops (the native port of this template).
         from rules_port.targeting import legal_targets
         context = scope.context
-        champions = getattr(context.handler, "_champion_targets", lambda: [])() or []
+        champions: list[Any] = getattr(context.handler, "_champion_targets", lambda: [])() or []
         candidates = [int(uid) for uid in legal_targets(
             context.db, context.session.session_id, int(scope.owner_uid), _guid(root.m_AbilityTargetTemplateIds[index]),
             int(scope.source_uid), both_players=True, champions=champions, battle_state=context.bstate)]
