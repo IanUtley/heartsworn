@@ -18,7 +18,6 @@ import json
 import sys
 from pathlib import Path
 
-from paths import CAMPAIGN_ROOT, REPO as ROOT
 
 import campaign_data  # noqa: E402
 

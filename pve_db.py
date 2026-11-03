@@ -17,7 +17,7 @@ from profile_db import (RECKONING_FLAG_ARENA_TIER1_PERFECT,
                         db_get_reckoning_flags,
                         db_set_reckoning_flag)
 
-from pvp_db import db_delete_game_session, db_champion_template_health
+from pvp_db import db_champion_template_health
 
 
 _FRA_CHALLENGE_COLUMNS = (

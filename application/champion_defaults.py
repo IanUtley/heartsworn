@@ -3,9 +3,6 @@
 import json
 import sqlite3
 
-from db import _db
-from pve_db import db_default_talents, db_talent_data_ability_guid
-
 
 def _talent_ability_guid(talent_guid: str) -> str | None:
     """Resolve a champion talent GUID to its actual ability GUID via DB."""

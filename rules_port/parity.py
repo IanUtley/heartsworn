@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import json
 from dataclasses import asdict, dataclass
-from pathlib import Path
 from typing import Any, Callable, Mapping
 
 
@@ -108,7 +107,5 @@ def replay_transactions(session, transactions, factory: Callable) -> None:
             raise ParityMismatch(f"transaction rejected during replay: {record!r}")
         if not session.handle_transaction():
             raise ParityMismatch(f"transaction was not handled during replay: {record!r}")
-
-
 
 

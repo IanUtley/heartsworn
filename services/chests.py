@@ -4,19 +4,6 @@ import random
 import threading
 from collections import namedtuple
 
-from az1_pack import CAMPAIGN_PACK_CONFIGS, generate_campaign_pack
-from db import _db, log_req, STARDUST_TEMPLATES
-from profile_db import (db_add_card, db_add_stardust,
-                        db_consume_inventory_row, db_create_card_instance,
-                        db_get_chest_by_id, db_inventory_item,
-                        db_next_card_instance_id, db_next_inventory_client_uid,
-                        db_open_chest, db_upsert_inventory_item)
-from services.card_pools import (
-    generate_booster as _generate_booster,
-    generate_crayburn_chest as _generate_crayburn_chest,
-    load_card_templates as _load_card_templates,
-)
-
 
 # The fixed client addresses every treasure chest by the InventoryItem UID the
 # server handed it, which comes from two spaces: ``9000 + treasure_chests.id``

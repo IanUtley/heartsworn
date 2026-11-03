@@ -14,7 +14,6 @@ import json
 import re
 import sqlite3
 import threading
-from pathlib import Path
 from typing import Any
 
 from campaign_runtime import offers

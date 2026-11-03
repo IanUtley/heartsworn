@@ -3,8 +3,6 @@
 Moved out of hconnect_server.HCPHandler._handle_service_request_legacy.
 """
 
-from db import log_req
-
 
 # Matchmaking — Ping (4001)
 def handle_ping_4001(handler, target, instance, data_type, reqid, comp, session_id,
@@ -34,7 +32,6 @@ def handle_sendchallengeresponse_4017(handler, target, instance, data_type, reqi
     handle_send_challenge_response(handler, target, instance, reqid, comp,
                                    session_id, conh, inner_obj, inner_bytes,
                                    log_req=_hc.log_req)
-
 
 
 LEGACY_HANDLERS = {

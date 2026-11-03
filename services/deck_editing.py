@@ -4,35 +4,9 @@ Registered in ``services/__init__.py``; each request type is routed to its
 handler by ``data_type`` through :data:`DECK_EDIT_HANDLERS`.
 """
 
-from application.champion_defaults import _RACE_DECK_MAP
-from application.champion_defaults import _default_talents_for_champion
-from application.response_encoding import compress_gzip
-from application.response_encoding import encode_datawrapper
-from application.response_encoding import encode_objfmt_response
 from binascii import hexlify
 from binascii import unhexlify
-from db import _db
-from db import log_req
 from domain.enums import EGemTypesNew
-from profile_db import db_add_collection
-from profile_db import db_campaign_deck_for_champion
-from profile_db import db_card_instance_art
-from profile_db import db_champion_last_deck
-from profile_db import db_champion_profile
-from profile_db import db_delete_champion
-from profile_db import db_find_deck_owner
-from profile_db import db_get_user_by_client_auth_id
-from profile_db import db_insert_card_instance
-from profile_db import db_insert_champion
-from profile_db import db_next_card_instance_for_user
-from profile_db import db_profile_card_instances
-from profile_db import db_purchase_exists
-from profile_db import db_record_purchase
-from profile_db import db_save_deck
-from profile_db import db_set_card_instance_extended_art
-from profile_db import db_set_champion_last_deck
-from profile_db import db_update_champion_talents
-from profile_db import db_update_deck
 import io
 import json
 import struct

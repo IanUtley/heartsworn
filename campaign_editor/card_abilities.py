@@ -29,7 +29,6 @@ import json
 import re
 import threading
 import uuid
-from pathlib import Path
 from typing import Any
 
 from paths import RECORDS, REPO  # noqa: E402  (also sets sys.path)

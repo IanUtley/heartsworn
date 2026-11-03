@@ -5,7 +5,6 @@ import random
 from typing import Any
 
 import db as _db_layer
-from replay_db import db_get_replay_match, db_get_tournament_signup_names
 
 
 def db_tournament_cleanup_old(age_days=1, conn=None):

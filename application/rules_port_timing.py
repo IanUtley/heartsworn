@@ -3,8 +3,6 @@
 import os
 import time
 
-from db import log_req
-
 
 def _rules_port_timing(label, started, **fields):
     """Emit opt-in timing evidence for a synchronous RulesPort boundary."""

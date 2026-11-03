@@ -13,9 +13,8 @@ from __future__ import annotations
 
 import sqlite3
 import sys
-from pathlib import Path
 
-from paths import CAMPAIGN_ROOT, REPO
+from paths import REPO
 
 import campaign_rules as engine   # noqa: E402
 import catalog                    # noqa: E402

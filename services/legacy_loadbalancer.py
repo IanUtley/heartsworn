@@ -3,63 +3,11 @@
 Moved out of hconnect_server.HCPHandler._handle_service_request_legacy.
 """
 
-from application.commands import JoinSessionCommand
-from application.commands import SetSessionStateCommand
-from application.commands import StartEncounterCommand
-from application.commands import StartSessionCommand
-from application.practice_flow import _push_pve_game_started
-from application.response_encoding import compress_gzip
-from application.response_encoding import encode_datawrapper
-from application.response_encoding import encode_objfmt_response
-from application.response_encoding import encode_sync_event
-from application.response_encoding import make_uid
 from binascii import hexlify
 from binascii import unhexlify
-from db import _db
-from db import log_req
-from domain.constants import SERVICE_AI_UID_TYPE
-from gamemodes.fra_arena import _fra_arena_session_state_data
-from gamemodes.fra_arena import _fra_arena_setup_values
-from gamemodes.tournament_engine import _tournament_session_flags
-from gamemodes.tournament_engine import player_decks
-from gamemodes.tournament_engine import player_handlers
-from gamemodes.tournament_engine import tournament_id_from_session_name
-from profile_db import db_deck_champion_name
-from profile_db import db_deck_sleeve
-from profile_db import db_get_user
-from profile_db import db_insert_card_instance
-from pve_db import db_campaign_identity_state
-from pve_db import db_campaign_owner_user_id
-from pve_db import db_champion_talents_for_deck
-from pve_db import db_champion_template_data_exists
-from pve_db import db_champion_template_name
-from pve_db import db_encounter_deck_sleeve
-from pve_db import db_extended_champion_health
-from pve_db import db_get_arena_state
-from pve_db import db_get_fra_challengers
-from pve_db import db_get_player_champion_guid
-from pve_db import db_talent_ability_rows
-from pvp_db import db_ability_effect_rows
-from pvp_db import db_ability_has_effect
-from pvp_db import db_ability_metadata
 from pvp_db import db_ability_target_template_ids
-from pvp_db import db_clear_session_cards
 from pvp_db import db_deck_active_gems
-from pvp_db import db_deck_cards_json
-from pvp_db import db_encounter_deck_cards
-from pvp_db import db_first_template_guid
-from pvp_db import db_gem_templates
-from pvp_db import db_get_charge_power
-from pvp_db import db_insert_game_cards
-from pvp_db import db_scene_mods
-from pvp_db import db_target_template_filter
-from pvp_db import db_template_ability_guids
-from pvp_db import db_template_card_info
-from pvp_db import db_template_exists
-from pvp_db import db_update_game_card_abilities
 from services.reconnect import _reconnect_declined_for_pid
-from services.reconnect import _record_reconnect_decline
-from tournament_db import db_tournament_room_for_game
 import campaign
 import encoder
 import game_session
@@ -2267,7 +2215,6 @@ def handle_readytocontinuegame_22025(handler, target, instance, data_type, reqid
     handle_ready_to_continue_game(handler, target, instance, reqid, comp,
                                   session_id, conh, inner_obj, inner_bytes,
                                   log_req=_hc.log_req)
-
 
 
 LEGACY_HANDLERS = {

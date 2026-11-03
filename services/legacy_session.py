@@ -3,19 +3,6 @@
 Moved out of hconnect_server.HCPHandler._handle_service_request_legacy.
 """
 
-from application.player_transactions import classify_player_transaction
-from application.player_transactions import typed_payload_from_decoded
-from application.practice_flow import _same_uid
-from application.response_encoding import compress_gzip
-from application.response_encoding import encode_datawrapper
-from application.response_encoding import encode_objfmt_response
-from application.response_encoding import make_uid
-from db import log_req
-from replay_db import db_complete_session_transaction
-from replay_db import db_record_session_transaction
-from replay_db import db_rules_port_state_snapshot
-from replay_db import db_session_state_snapshot
-from replay_db import set_session_transaction_trace_ids
 import game_session
 import hashlib
 import json
@@ -381,7 +368,6 @@ def handle_playertransaction_3029(handler, target, instance, data_type, reqid, c
                 post_rules_port_json=post_rules_port_json)
         except Exception as capture_error:
             _hc.log_req(f"    Transaction completion capture failed: {capture_error}")
-
 
 
 LEGACY_HANDLERS = {
