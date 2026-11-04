@@ -3225,3 +3225,676 @@ def pvp_push_main_phase_options(session, state):
     except Exception:
         offered_names = []
     log_req(f'    PvP main-phase options pushed to {turn_pid} ({len(playable)} playable, {resources} resources; offered={offered_names})')
+
+
+def _pvp_push_reconnect_snapshot(handler, session, pid):
+    """Restore the persisted PvP view for a reconnecting client.
+
+    The normal start packet cannot be reused here: it shuffles/deals the
+    decks.  ``game_cards`` and ``turn_order_json`` are the authoritative
+    mid-game state, so rebuild only client representations and current HUD /
+    priority data from those rows.
+    """
+    pids = _resolve('db_game_session_pids')(session.session_id)
+    if len(pids) < 2 or int(pid) not in pids:
+        return False
+    pid = int(pid)
+    opp_pid = pids[1] if pids[0] == pid else pids[0]
+    state = _resolve('pvp_load_state')(session) or {}
+    with _resolve('pvp_session_lock')(session):
+        latest_state = _resolve('pvp_load_state')(session)
+        if latest_state:
+            state = latest_state
+            _resolve('pvp_save_state')(session, state)
+    pl_uid = _ge.UID.make(244, pid)
+    opp_uid = _ge.UID.make(244, opp_pid)
+    champion_rows = {int(owner): row for owner, row in ((p, _resolve('db_game_champion')(session.session_id, p)) for p in (pid, opp_pid)) if row and row[0]}
+    champ_map = state.setdefault('champ_map', {})
+    guid_map = state.setdefault('champ_guid_map', {})
+    for owner, row in champion_rows.items():
+        champ_map[str(owner)] = int(row[0])
+        if len(row) > 1 and row[1]:
+            guid_map[str(owner)] = row[1]
+    reconnect_champions = {owner: int(champ_map.get(str(owner), 0)) for owner in (pid, opp_pid)}
+    invalid_champions = [owner for owner, card_uid in reconnect_champions.items() if card_uid <= 0 or card_uid & 255 == 0]
+    if invalid_champions:
+        log_req(f'    PvP reconnect aborted: missing valid champion SessionCardId for pid(s) {invalid_champions}')
+        return False
+    if champion_rows:
+        _resolve('pvp_save_state')(session, state)
+    g = _ge.Game(int(session.session_id), pl_uid, opp_uid)
+    g.player_champion_card_id = _ge.SessionCardId(_ge.UID(reconnect_champions[pid]))
+    g.ai_champion_card_id = _ge.SessionCardId(_ge.UID(reconnect_champions[opp_pid]))
+    _resolve('_pvp_populate_game_state')(g, state, pid, opp_pid)
+    from rules_port.visibility import apply_player_visibility_to_game, merge_underground_visibility_flags
+    state['player_visibility'] = merge_underground_visibility_flags(_resolve('_db'), session, handler, state, state.get('player_visibility'), owners=pids)
+    apply_player_visibility_to_game(g, state)
+    handler._current_bstate = state
+    player_added_inner = _resolve('encode_objfmt_response')(['Game.Shared.Network.GameSession.PlayerAddedEventArgs', 'Game.Shared.UID', 'Game.Shared.PlayerState', 'System.Int32'], [('RoutingPlayerId', 'uid', int(opp_uid.uid64)), ('PlayerState', 'struct', ('Game.Shared.PlayerState', [('PlayerId', 'uid', int(opp_uid.uid64)), ('PlayerPosition', 'int', 1)]))])
+    player_added_dw = _resolve('encode_datawrapper')(0, 3050, _resolve('compress_gzip')(player_added_inner), 1, _resolve('client_session_guid')(handler))
+    handler.scnt += 1
+    handler.send({'issuer': f'0.0.0.0.ServiceGameSession.246.{session.session_id}.{handler.scnt}', 'target': 'ServiceGameSession', 'instance': str(session.server_id), 'reqid': 0, 'c': 0, 'conh': 0, 'sid': handler.sid}, player_added_dw)
+    log_req(f'    PvP reconnect: added opponent pid {opp_pid}')
+    goes_first_pid = int(state.get('goes_first_pid', state.get('turn_pid', pid)))
+    if goes_first_pid not in pids:
+        goes_first_pid = pid
+    game_started_pids = [pid, opp_pid]
+    champion_template_ids = []
+    for game_pid in game_started_pids:
+        champion_row = _resolve('db_game_champion')(session.session_id, game_pid)
+        champion_template_ids.append(champion_row[1] if champion_row and champion_row[1] else '00000000-0000-0000-0000-000000000000')
+    player_champion_row = _resolve('db_game_champion')(session.session_id, pid)
+    opponent_champion_row = _resolve('db_game_champion')(session.session_id, opp_pid)
+    _resolve('_pvp_set_handler_champions')(handler, g.player_champion_card_id, g.ai_champion_card_id, player_champion_row[1] if player_champion_row else None, opponent_champion_row[1] if opponent_champion_row else None)
+    champion_names = [_resolve('db_tournament_player_name_for_session')(session.session_id, game_pid) or f'Player {index + 1}' for index, game_pid in enumerate(game_started_pids)]
+    g.push_game_started(champion_names=champion_names, champion_template_ids=champion_template_ids, player_first=goes_first_pid == pid)
+    g.push_first_player_dictated(_ge.UID.make(244, goes_first_pid))
+    g.push_player_updated(pl_uid, champ_id=g.player_champion_card_id)
+    g.push_player_updated(opp_uid, champ_id=g.ai_champion_card_id)
+    for card_uid, template_guid, owner, card_type, card_state, _abilities, _attrs in db_game_cards_at_location(session.session_id, 'champion'):
+        scid = _ge.SessionCardId(_ge.UID(int(card_uid)))
+        try:
+            handler._card_full_data(g, scid, template_guid)
+        except Exception:
+            pass
+        g.push_card_updated(scid, _ge.UID.make(244, int(owner)), _ECardCollections.None_, _ge.card_type_from_db(card_type), template_id=template_guid, state=int(card_state or 0))
+    g.push_champion_card_played(pl_uid, False, 'Player 1', g.player_champion_card_id)
+    g.push_champion_card_played(opp_uid, False, 'Player 2', g.ai_champion_card_id)
+    _resolve('pvp_push_warzone_updates')(session, state, game=g)
+    for zone, collection in (('discard', _ECardCollections.Discard), ('void', _ECardCollections.Void)):
+        for card_uid, template_guid, owner, card_type, card_state, _abilities, _attrs in db_game_cards_at_location(session.session_id, zone):
+            scid = _ge.SessionCardId(_ge.UID(int(card_uid)))
+            try:
+                handler._card_full_data(g, scid, template_guid)
+            except Exception:
+                pass
+            g.push_card_updated(scid, _ge.UID.make(244, int(owner)), collection, _ge.card_type_from_db(card_type), template_id=template_guid, state=int(card_state or 0))
+    for owner_pid in pids:
+        owner_uid = _ge.UID.make(244, owner_pid)
+        for card_uid, template_guid, owner, card_type, card_state, _abilities, _attrs in db_game_cards_at_location(session.session_id, 'deck', user_id=owner_pid):
+            scid = _ge.SessionCardId(_ge.UID(int(card_uid)))
+            try:
+                handler._card_full_data(g, scid, template_guid)
+            except Exception:
+                pass
+            g.push_card_updated(scid, owner_uid, _ECardCollections.Deck, _ge.card_type_from_db(card_type), template_id=template_guid, nulling=True)
+        g.push_deck_created(owner_uid)
+        for card_uid, template_guid, owner, card_type, card_state, _abilities, _attrs in db_game_cards_at_location(session.session_id, 'hand', user_id=owner_pid):
+            scid = _ge.SessionCardId(_ge.UID(int(card_uid)))
+            try:
+                handler._card_full_data(g, scid, template_guid)
+            except Exception:
+                pass
+            g.push_card_updated(scid, owner_uid, _ECardCollections.Hand, _ge.card_type_from_db(card_type), template_id=template_guid, state=int(card_state or 0), nulling=owner_pid != pid)
+    _resolve('_pvp_push_reconnect_underground')(g, session, handler, pid, pl_uid, opp_uid, state)
+    turn_pid = int(state.get('turn_pid', pid))
+    priority_pid = int(state.get('priority_pid', turn_pid))
+    phase = int(state.get('phase', _ge.ETurnPhases.FirstMainPhase))
+    priority_uid = _ge.UID.make(244, priority_pid)
+    turn_uid = _ge.UID.make(244, turn_pid)
+    priority_elapsed_seconds = _resolve('priority_elapsed_ticks')(state, priority_pid) // 10000000
+    g.push_green_light(priority_uid, _ge.EPriorityContext.Normal)
+    _pvp_push_turn_phase_with_elapsed(g, phase, turn_uid, priority_uid, priority_elapsed_seconds)
+    g.push_reconnect_done()
+    _resolve('_send_pvp_packet')(handler, session, g, pl_uid, 'reconnect-snapshot')
+    if priority_pid == pid:
+        if phase in (_ge.ETurnPhases.FirstMainPhase, _ge.ETurnPhases.SecondMainPhase):
+            _resolve('pvp_push_main_phase_options')(session, state)
+        elif phase == _ge.ETurnPhases.DeclareAttack:
+            _resolve('pvp_push_attack_options')(session, state)
+        elif phase == _ge.ETurnPhases.DeclareDefense:
+            pvp_push_blocker_options(session, state)
+        elif phase not in (3, 4, 5, 6, 7, 8, 9):
+            _resolve('pvp_push_phase_options')(session, state, pid=pid)
+    log_req(f'    PvP reconnect snapshot restored for pid {pid} (phase={phase}, priority={priority_pid})')
+    return True
+
+
+def _pvp_reassign_priority_after_disconnect(session, disconnected_pid, survivor_pid):
+    """Make a live PvP checkpoint usable by the still-connected player.
+
+    A socket disappearing must not leave the native RulesPort priority action
+    owned by that socket.  If the disconnected player owned priority, hand the
+    current window to the survivor and rebuild the private options packet.
+    If the survivor already owned priority, leave it untouched so their next
+    transaction remains valid.
+    """
+    try:
+        disconnected_pid = int(disconnected_pid)
+        survivor_pid = int(survivor_pid)
+    except (TypeError, ValueError):
+        return False
+    if not session or survivor_pid <= 0:
+        return False
+    with _resolve('pvp_session_lock')(session):
+        state = _resolve('pvp_load_state')(session) or {}
+        if not state.get('pvp'):
+            return False
+        pids = [int(pid) for pid in _resolve('db_game_session_pids')(session.session_id)]
+        if disconnected_pid not in pids or survivor_pid not in pids:
+            return False
+        old_priority = int(state.get('priority_pid') or 0)
+        phase = int(state.get('phase', 0) or 0)
+        if old_priority == disconnected_pid and phase >= int(_ge.ETurnPhases.FirstMainPhase):
+            state['priority_pid'] = survivor_pid
+            _resolve('port_reset_priority_interval')(state, survivor_pid)
+            _resolve('pvp_save_state')(session, state)
+            log_req(f'    PvP priority handed off: {disconnected_pid} -> {survivor_pid} phase={phase}')
+        else:
+            _resolve('flush_priority_clock')(state)
+            _resolve('pvp_save_state')(session, state)
+    survivor_handler = _resolve('player_handlers').get(survivor_pid)
+    if not survivor_handler:
+        return True
+    state = _resolve('pvp_load_state')(session) or {}
+    if int(state.get('priority_pid') or 0) != survivor_pid:
+        return True
+    opponent_pid = next((pid for pid in pids if pid != survivor_pid), disconnected_pid)
+    pl_uid = _ge.UID.make(244, survivor_pid)
+    opp_uid = _ge.UID.make(244, opponent_pid)
+    game = _ge.Game(int(session.session_id), pl_uid, opp_uid)
+    _resolve('_pvp_populate_game_state')(game, state, survivor_pid, opponent_pid)
+    _pvp_apply_visibility(game, state)
+    priority_uid = _ge.UID.make(244, survivor_pid)
+    turn_uid = _ge.UID.make(244, int(state.get('turn_pid') or survivor_pid))
+    game.push_green_light(priority_uid, _ge.EPriorityContext.Normal)
+    _pvp_push_turn_phase_with_elapsed(game, phase, turn_uid, priority_uid, _resolve('priority_elapsed_ticks')(state, survivor_pid) // 10000000)
+    _resolve('_send_pvp_packet')(survivor_handler, session, game, pl_uid, 'disconnect-priority')
+    if phase in (_ge.ETurnPhases.FirstMainPhase, _ge.ETurnPhases.SecondMainPhase):
+        _resolve('pvp_push_main_phase_options')(session, state)
+    elif phase == _ge.ETurnPhases.DeclareAttack:
+        _resolve('pvp_push_attack_options')(session, state)
+    elif phase == _ge.ETurnPhases.DeclareDefense:
+        pvp_push_blocker_options(session, state)
+    elif phase not in (3, 4, 5, 6, 7, 8, 9):
+        _resolve('pvp_push_phase_options')(session, state, pid=survivor_pid)
+    return True
+
+
+def _pvp_resolve_conversation(handler, session, inner_bytes, my_pid):
+    """Resume a metadata BOM after a class-55 encounter conversation."""
+    from application.player_transactions import extract_resource_guid
+    from rules_port import lifecycle as _be
+    state = _resolve('pvp_load_state')(session) or {}
+    pending = state.get('pending_conversation')
+    if not pending:
+        handler._push_transaction_ack(session)
+        return True
+    conversation_id = extract_resource_guid(inner_bytes, 'ConversationId')
+    expected = str(pending.get('conversation_id', '')).lower()
+    if conversation_id and conversation_id != expected:
+        log_req(f'    PvP conversation answer rejected: got {conversation_id}, expected {expected}')
+        handler._push_transaction_ack(session)
+        return True
+    owner_id = int(pending.get('owner_id', 0) or 0)
+    if int(my_pid) != owner_id:
+        log_req(f'    PvP conversation answer rejected: pid {my_pid} is not owner {owner_id}')
+        handler._push_transaction_ack(session)
+        return True
+    pids = _resolve('db_game_session_pids')(session.session_id)
+    if len(pids) < 2:
+        handler._push_transaction_ack(session)
+        return True
+    opp_pid = pids[0] if pids[1] == owner_id else pids[1]
+    state.pop('pending_conversation', None)
+    state.pop('resolution_paused', None)
+    pl_t = _ge.UID.make(244, owner_id)
+    ai_t = _ge.UID.make(244, opp_pid)
+    view = _resolve('_pvp_fra_view')(state, owner_id, opp_pid)
+    view.pop('pending_conversation', None)
+    view.pop('resolution_paused', None)
+    game = _ge.Game(int(session.session_id), pl_t, ai_t)
+    _resolve('_pvp_populate_game_state')(game, state, owner_id, opp_pid)
+    ability_owner_id = int(pending.get('ability_owner_id', owner_id) or owner_id)
+    _resolve('_pvp_resolve_ability')(handler, game, session, view, pl_t, ai_t, pending.get('ability_guid', ''), pending.get('source_uid'), ability_owner_id, target_map={int(k): v for k, v in (pending.get('target_map') or {}).items()}, variables=pending.get('variables') or {}, resume_from_order=int(pending.get('resume_effect_order', 0)))
+    state['stack'] = view.get('stack') or []
+    state['stack_player_passed'] = False
+    state['stack_ai_passed'] = False
+    state['stack_passed'] = []
+    _resolve('_pvp_sync_view_to_state')(state, view, owner_id, opp_pid)
+    persisted = _resolve('pvp_load_state')(session) or {}
+    for key in ('pending_trigger', 'pending_deck_search', 'pending_choice', 'pending_conversation'):
+        if persisted.get(key):
+            state[key] = persisted[key]
+    _resolve('pvp_save_state')(session, state)
+    _resolve('_pvp_send_same_events')(session, game, pl_t, ai_t)
+    pending_input = state.get('pending_conversation') or state.get('pending_choice') or state.get('pending_trigger') or state.get('pending_deck_search')
+    if pending_input:
+        log_req('    PvP conversation resumed into another pending input')
+        return True
+    if _be.stack_empty(state):
+        turn_pid = int(state.get('turn_pid') or owner_id)
+        state['priority_pid'] = turn_pid
+        _resolve('pvp_save_state')(session, state)
+        turn_h = _resolve('player_handlers').get(turn_pid)
+        if turn_h:
+            turn_uid = _ge.UID.make(244, turn_pid)
+            other_uid = _ge.UID.make(244, pids[1] if turn_pid == pids[0] else pids[0])
+            resume = _ge.Game(int(session.session_id), turn_uid, other_uid)
+            resume.push_chain_empty()
+            resume.push_green_light(turn_uid, _ge.EPriorityContext.Normal)
+            _resolve('_send_pvp_packet')(turn_h, session, resume, turn_uid, 'conversation-chain-empty')
+        phase = int(state.get('phase', 0))
+        if phase in (_ge.ETurnPhases.FirstMainPhase, _ge.ETurnPhases.SecondMainPhase):
+            _resolve('pvp_push_main_phase_options')(session, state)
+    else:
+        resume_pid = int(state.get('conversation_resume_priority_pid', owner_id) or owner_id)
+        next_pid = pids[1] if resume_pid == pids[0] else pids[0]
+        state['priority_pid'] = next_pid
+        _resolve('pvp_save_state')(session, state)
+        next_h = _resolve('player_handlers').get(next_pid)
+        if next_h:
+            next_uid = _ge.UID.make(244, next_pid)
+            other_uid = _ge.UID.make(244, pids[1] if next_pid == pids[0] else pids[0])
+            resume = _ge.Game(int(session.session_id), next_uid, other_uid)
+            resume.push_green_light(next_uid, _ge.EPriorityContext.ResolveTopOfChain)
+            _resolve('_send_pvp_packet')(next_h, session, resume, next_uid, 'conversation-chain-next')
+    handler._push_transaction_ack(session)
+    log_req(f'    PvP conversation resolved: {expected[:8]}')
+    return True
+
+
+def _pvp_resolve_discard_prompt(handler, session, inner_bytes, my_pid, typed_payload=None):
+    """Resolve the card selected for a pending class-23 discard prompt."""
+    state = _resolve('pvp_load_state')(session) or {}
+    native = state.get('pending_discard_continuation')
+    if isinstance(native, dict):
+        from gamedata import DEFAULT_RECORD_STORE, ability_graph
+        from rules_port.resolution import resolve_port_ability, resume_ability_continuation_parents
+        from rules_port.wire import extract_session_card_uids
+        from pvp_db import db_rules_port_hand_card
+        child_guid = str(native.get('ability_guid') or '').lower()
+        owner_id = int(native.get('owner_id', -1) or -1)
+        if not child_guid or owner_id != int(my_pid) or int(state.get('pending_discard_pid', my_pid) or my_pid) != int(my_pid):
+            return False
+        graph = _resolve("ability_graph")(DEFAULT_RECORD_STORE, child_guid)
+        if graph is None:
+            log_req(f'    PvP RulesPort discard ability missing: {child_guid}')
+            return True
+        target_guid = str(state.get('pending_discard_target_template') or '').lower()
+        target_index = next((index for index, target in enumerate(graph.targets) if str(target.guid).lower() == target_guid), None)
+        if target_index is None:
+            log_req('    PvP RulesPort discard target missing: ' + target_guid)
+            return True
+        activation = (typed_payload or {}).get('activation_data', {})
+        selected_map = activation.get('target_map', {}) if isinstance(activation, dict) else {}
+        selected = selected_map.get(target_index, selected_map.get(str(target_index), ())) if isinstance(selected_map, dict) else ()
+        if isinstance(selected, dict):
+            selected = selected.get('session_card_ids') or selected.get('SessionCardIds') or selected
+        if not isinstance(selected, (list, tuple, set)):
+            selected = (selected,) if selected is not None else ()
+
+        def card_uids(values):
+            result = []
+            for value in values:
+                while isinstance(value, dict):
+                    nested = next((value[key] for key in ('uid64', 'UID', 'm_UID64', 'value') if key in value), None)
+                    if nested is None or nested is value:
+                        break
+                    value = nested
+                value = getattr(value, 'uid64', value)
+                try:
+                    uid = _uid_int(value)
+                except (TypeError, ValueError):
+                    continue
+                if uid > 0 and uid & 255 == 1:
+                    result.append(uid)
+            return result
+        submitted = card_uids(selected)
+        if not submitted:
+            submitted = list(extract_session_card_uids(inner_bytes if isinstance(inner_bytes, bytes) else b'', exclude=(native.get('source_uid', 0),)))
+        valid = []
+        for uid in dict.fromkeys(submitted):
+            row = db_rules_port_hand_card(session.session_id, uid, owner_id)
+            if row:
+                valid.append(uid)
+        if len(submitted) != 1 or len(valid) != 1:
+            log_req(f'    PvP RulesPort discard continuation rejected: target_index={target_index} selected={submitted} valid_hand_cards={valid}')
+            return True
+        pids = [int(pid) for pid in _resolve('db_game_session_pids')(session.session_id)]
+        if len(pids) < 2 or owner_id not in pids:
+            return False
+        opponent_id = next((pid for pid in pids if pid != owner_id))
+        player_uid = _ge.UID.make(244, owner_id)
+        opponent_uid = _ge.UID.make(244, opponent_id)
+        target_map = {int(key): value for key, value in (native.get('target_map') or {}).items()}
+        target_map[target_index] = (valid[0],)
+        for key in ('pending_discard_continuation', 'pending_discard_continuation_instance_id', 'pending_discard_ability', 'pending_discard_ability_instance_id', 'pending_discard_target_template', 'pending_discard_source_uid', 'pending_discard_pid', 'pending_discard_scid'):
+            state.pop(key, None)
+        state.pop('resolution_paused', None)
+        state['rules_port_resume_effect_order'] = int(native.get('resume_effect_order', 0) or 0)
+        _resolve('pvp_save_state')(session, state)
+        game = _ge.Game(int(session.session_id), player_uid, opponent_uid)
+        _resolve('_pvp_populate_game_state')(game, state, owner_id, opponent_id)
+        result = resolve_port_ability(handler, game, session, _resolve('_db'), player_uid, opponent_uid, state, child_guid, native.get('source_uid'), owner_id, target_map=target_map, variables=native.get('variables') or {}, resume_from_order=int(native.get('resume_effect_order', 0) or 0), instance_id=int(native.get('instance_id', native.get('ability_instance_id', 1)) or 1))
+        resume_ability_continuation_parents(handler, game, session, _resolve('_db'), player_uid, opponent_uid, state, native)
+        state = _resolve('pvp_load_state')(session) or state
+        completed = 0
+        if not state.get('resolution_paused'):
+            completed = int(state.pop('paused_chain_instance_id', 0) or 0)
+            if completed:
+                state['completed_chain_instance_id'] = completed
+        _resolve('pvp_save_state')(session, state)
+        _resolve('_pvp_send_same_events')(session, game, player_uid, opponent_uid)
+        port = getattr(session, '_rules_port_session', None)
+        if completed and port is not None:
+            from rules_port.actions import AbilityResolutionState
+            if port.resolve_top_of_chain(completed) is not AbilityResolutionState.COMPLETED:
+                log_req(f'    PvP RulesPort discard chain item remains pending: instance={completed}')
+        elif not state.get('resolution_paused'):
+            phase = int(state.get('phase', _ge.ETurnPhases.FirstMainPhase))
+            priority_pid = int(state.get('turn_pid') or owner_id)
+            state['priority_pid'] = priority_pid
+            _resolve('pvp_save_state')(session, state)
+            turn_uid = _ge.UID.make(244, int(state.get('turn_pid') or owner_id))
+            priority_uid = _ge.UID.make(244, priority_pid)
+            for pid in pids:
+                recipient = _ge.UID.make(244, int(pid))
+                other = _ge.UID.make(244, next((value for value in pids if int(value) != int(pid))))
+                gp = _ge.Game(int(session.session_id), recipient, other)
+                gp.push_green_light(priority_uid, _ge.EPriorityContext.Normal)
+                _pvp_push_turn_phase_with_elapsed(gp, phase, turn_uid, priority_uid, _resolve('priority_elapsed_ticks')(state, priority_pid) // 10000000)
+                _resolve('_send_pvp_packet')(_resolve('player_handlers').get(int(pid)) or handler, session, gp, recipient, 'discard-priority')
+            if phase in (_ge.ETurnPhases.FirstMainPhase, _ge.ETurnPhases.SecondMainPhase):
+                _resolve('pvp_push_main_phase_options')(session, state)
+        log_req(f'    PvP RulesPort discard continuation: {valid[0]} -> {result}')
+        return True
+    child = state.get('pending_discard_ability')
+    if not child or int(state.get('pending_discard_pid', -1)) != int(my_pid):
+        return False
+    pids = _resolve('db_game_session_pids')(session.session_id)
+    if len(pids) < 2:
+        return True
+    selected_card_uids = _resolve('_pvp_transaction_card_uids')(inner_bytes)
+    card_uid = selected_card_uids[-1] if selected_card_uids else None
+    row = None
+    if card_uid is None:
+        return True
+    row = _resolve('db_hand_card_for_discard')(session.session_id, card_uid, my_pid, conn=_resolve('_db'))
+    if not row:
+        log_req(f'    PvP discard prompt rejected: uid={card_uid} pid={my_pid}')
+        return True
+    owner_pid = int(row[1])
+    if owner_pid not in pids:
+        owner_pid = int(my_pid)
+    _resolve('db_discard_card')(session.session_id, int(card_uid), owner_user_id=owner_pid, connection=_resolve('_db'))
+    opp_pid = pids[0] if pids[1] == int(my_pid) else pids[1]
+    my_uid = _ge.UID.make(244, int(my_pid))
+    opp_uid = _ge.UID.make(244, int(opp_pid))
+    g = _ge.Game(int(session.session_id), my_uid, opp_uid)
+    _resolve('_pvp_populate_game_state')(g, state, int(my_pid), int(opp_pid))
+    scid = _ge.SessionCardId(_ge.UID(int(card_uid)))
+    card_handler = _resolve('player_handlers').get(int(my_pid)) or handler
+    tpl_guid = row[2]
+    _tpl, card_type, _name, cost, attack, defense, gems = card_handler._card_full_data(g, scid, tpl_guid, row[3])
+    owner_uid = _ge.UID.make(244, owner_pid)
+    g.push_card_updated(scid, owner_uid, _ge.ECardCollections.Discard, card_type, template_id=tpl_guid, cost=cost, attack=attack, defense=defense, gems=gems)
+    for pid in pids:
+        uid = _ge.UID.make(244, int(pid))
+        cuid = int((state.get('champ_map') or {}).get(str(pid), 0))
+        g.push_player_updated(uid, champ_id=_ge.SessionCardId(_ge.UID(cuid)) if cuid else None)
+    state.pop('pending_discard_ability', None)
+    state.pop('pending_discard_target_template', None)
+    state.pop('pending_discard_source_uid', None)
+    state.pop('pending_discard_pid', None)
+    priority_pid = int(state.get('turn_pid') or my_pid)
+    priority_uid = _ge.UID.make(244, priority_pid)
+    state['priority_pid'] = priority_pid
+    _resolve('pvp_save_state')(session, state)
+    _resolve('_pvp_send_same_events')(session, g, my_uid, opp_uid)
+    phase = int(state.get('phase', _ge.ETurnPhases.FirstMainPhase))
+    turn_uid = _ge.UID.make(244, int(state.get('turn_pid', my_pid)))
+    for pid in pids:
+        recipient = _ge.UID.make(244, int(pid))
+        other = _ge.UID.make(244, int(opp_pid if int(pid) == int(my_pid) else my_pid))
+        h = _resolve('player_handlers').get(int(pid))
+        if not h:
+            continue
+        gp = _ge.Game(int(session.session_id), recipient, other)
+        gp.push_green_light(priority_uid, _ge.EPriorityContext.Normal)
+        _pvp_push_turn_phase_with_elapsed(gp, phase, turn_uid, priority_uid, _resolve('priority_elapsed_ticks')(state, priority_pid) // 10000000)
+        _resolve('_send_pvp_packet')(h, session, gp, recipient, 'discard-priority')
+    if phase in (_ge.ETurnPhases.FirstMainPhase, _ge.ETurnPhases.SecondMainPhase):
+        _resolve('pvp_push_main_phase_options')(session, state)
+    log_req(f'    PvP discard prompt resolved: {card_uid} -> discard')
+    return True
+
+
+def _pvp_resolve_trigger_target(handler, session, inner_bytes, my_pid, typed_payload=None):
+    """Resolve a PvP triggered-ability continuation.
+
+    The same path handles a target selection after an optional opt-in.  The
+    optional marker is removed by ``_pvp_resolve_optional_trigger`` before it
+    calls this function, so a no-target optional ability can resolve with an
+    empty TargetMap.
+    """
+    import re as _re
+    import struct as _st
+    pids = _resolve('db_game_session_pids')(session.session_id)
+    if len(pids) < 2:
+        return False
+    state = _resolve('pvp_load_state')(session) or {}
+    pend = state.get('pending_trigger')
+    if not pend:
+        return False
+    chosen_uid = None
+    activation_data = pend.get('activation_data')
+    activation_data = dict(activation_data) if isinstance(activation_data, dict) else {}
+    pending_target_map = activation_data.get('target_map') or {}
+    target_index = int(pend.get('target_index', 0) or 0)
+    if isinstance(pending_target_map, dict):
+        selected = pending_target_map.get(target_index, pending_target_map.get(str(target_index)))
+        values = selected if isinstance(selected, (list, tuple, set)) else (selected,) if selected is not None else ()
+        for value in values:
+            try:
+                uid = int(getattr(value, 'uid64', value))
+            except (TypeError, ValueError):
+                continue
+            if uid & 255 == 1:
+                chosen_uid = uid
+    if isinstance(inner_bytes, bytes):
+        for m_du in _re.finditer(b'm_UID64;[^;]*;[^;]*;[^;]*;([0-9A-Fa-f]{16});', inner_bytes):
+            try:
+                uid64 = _st.unpack('<Q', bytes.fromhex(m_du.group(1).decode()))[0]
+                if uid64 & 255 == 1:
+                    chosen_uid = int(uid64)
+            except Exception:
+                continue
+    if chosen_uid is None and isinstance(typed_payload, dict):
+        raw_activation = typed_payload.get('activation_data')
+        records = raw_activation if isinstance(raw_activation, (list, tuple)) else (raw_activation,)
+        for record in records:
+            if not isinstance(record, dict):
+                continue
+            target_map = record.get('target_map') or {}
+            selected = target_map.get(target_index, target_map.get(str(target_index))) if isinstance(target_map, dict) else None
+            values = selected if isinstance(selected, (list, tuple, set)) else (selected,) if selected is not None else ()
+            for value in values:
+                try:
+                    uid = int(getattr(value, 'uid64', value))
+                except (TypeError, ValueError):
+                    continue
+                if uid & 255 == 1:
+                    chosen_uid = uid
+    if isinstance(typed_payload, dict):
+        raw_activation = typed_payload.get('activation_data')
+        if isinstance(raw_activation, dict):
+            activation_data.update(raw_activation)
+            activation_data['target_map'] = dict(raw_activation.get('target_map') or activation_data.get('target_map') or {})
+    state.pop('pending_trigger', None)
+    _resolve('pvp_save_state')(session, state)
+    ag = str(pend['ability_guid'])
+    src = int(pend['source_uid'])
+    owner_id = int(pend.get('owner_id', my_pid))
+    opp_pid = pids[0] if pids[1] == owner_id else pids[1]
+    pl_t = _ge.UID.make(244, owner_id)
+    ai_t = _ge.UID.make(244, opp_pid)
+    view = _resolve('_pvp_fra_view')(state, owner_id, opp_pid)
+    view['pending_trigger'] = None
+    view['resolving_owner_id'] = owner_id
+    view['player_mod_target'] = chosen_uid
+    view['player_spell_target'] = chosen_uid
+    view['resolving_source_uid'] = src
+    g = _ge.Game(int(session.session_id), pl_t, ai_t)
+    _resolve('_pvp_populate_game_state')(g, state, owner_id, opp_pid)
+    try:
+        from rules_port.resolution import resolve_port_trigger, trigger_event_fields
+        resolve_port_trigger(handler, g, session, _resolve('_db'), pl_t, ai_t, view, {'kind': 'trigger', 'ability_guid': ag, 'source_uid': src, 'source_owner_uid': owner_id, 'target_uid': chosen_uid, 'trigger_target_uid': pend.get('trigger_target_uid'), **trigger_event_fields(pend), 'activation_data': activation_data, 'instance_id': int(pend.get('instance_id', 1))})
+    except Exception as e:
+        import traceback
+        log_req(f'    PvP trigger resolve error: {e}')
+        traceback.print_exc()
+    if view.get('player_health') is not None:
+        state[f'hp_{owner_id}'] = int(view['player_health'])
+    if view.get('ai_health') is not None:
+        state[f'hp_{opp_pid}'] = int(view['ai_health'])
+    _resolve('_pvp_sync_view_to_state')(state, view, owner_id, opp_pid)
+    _resolve('pvp_save_state')(session, state)
+    _resolve('_pvp_send_same_events')(session, g, pl_t, ai_t)
+    if _pvp_check_game_end(session, state):
+        return True
+    turn_pid = int(state.get('turn_pid') or owner_id)
+    state['priority_pid'] = turn_pid
+    state['passes'] = []
+    state['stack_passed'] = []
+    _resolve('pvp_save_state')(session, state)
+    turn_h = _resolve('player_handlers').get(turn_pid)
+    if turn_h:
+        turn_uid = _ge.UID.make(244, turn_pid)
+        other_pid = pids[1] if pids[0] == turn_pid else pids[0]
+        other_uid = _ge.UID.make(244, other_pid)
+        resume = _ge.Game(int(session.session_id), turn_uid, other_uid)
+        _resolve('_pvp_populate_game_state')(resume, state, turn_pid, other_pid)
+        resume.push_chain_empty()
+        resume.push_green_light(turn_uid, _ge.EPriorityContext.Normal)
+        _pvp_push_turn_phase_with_elapsed(resume, int(state.get('phase', 0)), turn_uid, turn_uid, _resolve('priority_elapsed_ticks')(state, turn_pid) // 10000000)
+        _resolve('_send_pvp_packet')(turn_h, session, resume, turn_uid, 'trigger-target-chain-empty')
+    phase = int(state.get('phase', 0))
+    if phase in (_ge.ETurnPhases.FirstMainPhase, _ge.ETurnPhases.SecondMainPhase):
+        _resolve('pvp_push_main_phase_options')(session, state)
+    elif phase == _ge.ETurnPhases.DeclareAttack:
+        _resolve('pvp_push_attack_options')(session, state)
+    elif phase == _ge.ETurnPhases.DeclareDefense:
+        pvp_push_blocker_options(session, state)
+    log_req(f"    PvP trigger resolved: {ag[:8]} -> {(hex(chosen_uid) if chosen_uid else 'none')}; priority -> {turn_pid}")
+    return True
+
+
+def _wire_pvp_state_based_handler(port, handler, session, game):
+    """Run PvP state-based actions before each native priority handoff."""
+
+    def state_based():
+        live = _resolve('pvp_load_state')(session) or getattr(port, '_pvp_state', None)
+        if not isinstance(live, dict) or not live.get('pvp'):
+            return False
+        pids = _resolve('db_game_session_pids')(session.session_id)
+        if len(pids) < 2:
+            pids = [int(pid) for pid in live.get('pids') or ()]
+        if len(pids) < 2:
+            return False
+        try:
+            owner_id = _uid_int(getattr(port, 'active_player_id', None))
+        except (TypeError, ValueError):
+            owner_id = 0
+        if owner_id not in {int(pid) for pid in pids}:
+            owner_id = int(live.get('turn_pid') or pids[0])
+        opponent_id = next((int(pid) for pid in pids if int(pid) != int(owner_id)))
+        current_handler = getattr(port, '_pvp_current_handler', None) or handler
+        projection = getattr(getattr(port, 'event_sink', None), 'game', None) or game
+        if current_handler is None or projection is None:
+            return False
+        host = _resolve('_PvpChainHost')(current_handler, session, live, owner_id, opponent_id)
+        return host.chain_state_based(session, live, projection, _ge.UID.make(244, owner_id), _ge.UID.make(244, opponent_id))
+    port.set_state_based_handler(state_based)
+
+
+@_pvp_locked
+def pvp_debug_draw(handler, session, count):
+    """Draw debug cards in PvP and send private/objective variants to both clients."""
+    if not session or not (session.session_name or '').startswith('tourney-'):
+        return 0
+    pids = _resolve('db_game_session_pids')(session.session_id)
+    if len(pids) < 2:
+        return 0
+    owner_pid = int(handler.client_reck_id)
+    if owner_pid not in pids:
+        return 0
+    opp_pid = pids[0] if pids[1] == owner_pid else pids[1]
+    owner_uid = _ge.UID.make(244, owner_pid)
+    opponent_uid = _ge.UID.make(244, opp_pid)
+    drawn_count = 0
+    for _ in range(max(0, int(count))):
+        top = _resolve('db_deck_top_card')(session.session_id, owner_pid, conn=_resolve('_db'))
+        if not top:
+            break
+        card_uid, tpl_guid, instance_id = top
+        g = _ge.Game(int(session.session_id), owner_uid, opponent_uid)
+        handler._player_draw_card(g, session, owner_uid, owner_pid)
+        loc = _resolve('db_card_location')(session.session_id, card_uid)
+        if loc == 'hand':
+            drawn_count += 1
+        if not g.events:
+            continue
+        g2 = _ge.Game(int(session.session_id), owner_uid, opponent_uid)
+        g2.events = []
+        g2.card_defs = dict(g.card_defs)
+        scid = _ge.SessionCardId(_ge.UID(int(card_uid)))
+        _tpl2, ct2, _name2, _cost2, _atk2, _def2, _gems2 = handler._card_full_data(g2, scid, tpl_guid, instance_id)
+        g2.push_card_updated(scid, owner_uid, _ge.ECardCollections.Hand, ct2, template_id=_tpl2, nulling=True)
+        for event in g.events:
+            if getattr(event, 'session_card_id', None) == scid and event.__class__.__name__ in ('CardMovedSessionEventArgs', 'CardDrawnSessionEventArgs', 'CardUpdatedSessionEventArgs'):
+                continue
+            g2._push(event)
+        _resolve('_send_pvp_packet')(handler, session, g, owner_uid, 'debug-draw')
+        other_h = _resolve('player_handlers').get(opp_pid)
+        if other_h:
+            _resolve('_send_pvp_packet')(other_h, session, g2, opponent_uid, 'debug-draw-opponent')
+    state = _resolve('pvp_load_state')(session) or {}
+    if state.get('stack'):
+        state['priority_pid'] = owner_pid
+        state['stack_passed'] = []
+        _resolve('pvp_save_state')(session, state)
+        for pid in pids:
+            h = _resolve('player_handlers').get(pid)
+            if not h:
+                continue
+            recipient = _ge.UID.make(244, pid)
+            other = _ge.UID.make(244, pids[0] if pids[1] == pid else pids[1])
+            gp = _ge.Game(int(session.session_id), recipient, other)
+            gp.push_green_light(owner_uid, _ge.EPriorityContext.ResolveTopOfChain)
+            _resolve('_send_pvp_packet')(h, session, gp, recipient, 'debug-draw-priority')
+        _resolve('pvp_push_phase_options')(session, state, pid=owner_pid)
+    elif int(state.get('phase', -1)) in (_ge.ETurnPhases.FirstMainPhase, _ge.ETurnPhases.SecondMainPhase):
+        _resolve('pvp_push_main_phase_options')(session, state)
+    return drawn_count
+
+
+def pvp_push_current_phase_options(session, state, pid=None):
+    """Push the PlayerOptionList the current phase requires (mirrors PvE
+    ``_push_phase_options``).
+
+    Single owner of the phase -> options contract: phase entry
+    (``_pvp_run_phase_start``), a client ``RequestPrioritySync``, and debug
+    state refreshes must all project the same list.  The client replaces its
+    whole option set on every push, so a resync answered with the generic
+    quick-action window during DeclareAttack/DeclareDefense clears
+    ``ECardUsage.Attack``/``Defend`` and makes every ready troop unselectable.
+
+    Main phases get the playable list, DeclareAttack the attack options,
+    DeclareDefense the blocker options; every OTHER stop phase gets hand
+    QuickActions + champion powers so instant-speed responses are possible in
+    any priority window.  A live chain item outranks all of them: the holder
+    responds to the chain instead of declaring combat.
+    """
+    if _pvp_chain_active(session, state):
+        _resolve('pvp_push_phase_options')(session, state, pid=pid)
+        return
+    phase = int(state.get('phase', 0) or 0)
+    if phase in (_ge.ETurnPhases.FirstMainPhase, _ge.ETurnPhases.SecondMainPhase):
+        _resolve('pvp_push_main_phase_options')(session, state)
+    elif phase == _ge.ETurnPhases.DeclareAttack:
+        _resolve('pvp_push_attack_options')(session, state)
+    elif phase == _ge.ETurnPhases.DeclareDefense:
+        pvp_push_blocker_options(session, state)
+    elif phase not in (3, 4, 5, 6, 7, 8, 9):
+        _resolve('pvp_push_phase_options')(session, state, pid=pid)
