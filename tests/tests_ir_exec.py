@@ -7,6 +7,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 
 from tests.tests_builtin_counter_rules import BURNING, TPL_GLADIATOR, SessionStub, _setup  # noqa: E402
 from tests.tests_combat import make_db, add_card  # noqa: E402  (the fixture reads make_db from this module)
+import db as dbmod
 
 DAZED = "9c98dace-4cac-0fda-8242-f7ef2c1d3cf0"
 VULNERABLE = "b01d4e3c-bae6-c55f-ff4e-db0513d74484"

@@ -25,6 +25,7 @@ import game_engine
 from tests.tests_combat import (  # noqa: E402
     make_db, add_card, HandlerStub, SessionStub, TPL_GLADIATOR,
 )
+import db as dbmod
 
 
 def test_ai_turn_resumes_from_native_phase_window_after_discard():

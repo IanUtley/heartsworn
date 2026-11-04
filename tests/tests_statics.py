@@ -22,6 +22,7 @@ import game_engine
 from rules_port.static_rules import effective_deltas, effective_stats
 from rules_port.combat_rules import can_block
 from rules_port.static_rules import global_flags
+import db as dbmod
 
 
 LIGHT = "fb84ad94-e6ed-f04b-353d-eda325e0ae43"   # +2/+2 per card in your hand

@@ -10,6 +10,7 @@ import pytest  # noqa: E402
 import tests.ir_equivalence as H  # noqa: E402
 import db as dbmod  # noqa: E402  (after the harness sets up the test database)
 from tests.tests_combat import SessionStub, add_card  # noqa: E402
+import db as dbmod
 
 TRANSCEND_ABILITY = "f0104d23-f3c2-b457-fef5-af6eaa9c9b05"  # "Play all Standard resources in your deck."
 RESOURCE_TEMPLATE = "b253393b-fdde-47c4-9288-4b8efb0698b1"  # Blood Shard (a Standard resource)

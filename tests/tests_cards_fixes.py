@@ -570,18 +570,22 @@ def test_crazed_squirrel_titan_ai_battles_a_legal_opposing_troop(db):
     # Lethal damage is applied by the chain's state-based step; use the real
     # production method so the troop that took lethal damage actually dies.
     import hconnect_server as _hcs
+    old_binding = dbmod._db
     dbmod._db = db  # the state-based step reads the server's database
-    handler.chain_state_based = (
-        lambda session, state, game_, p, a:
-        _hcs.HCPHandler.chain_state_based(handler, session, state, game_, p, a))
-    ability = SimpleNamespace(descriptor=descriptor, instance_id=17,
-                              ignores_chain=False)
-    result = resolve_chain_item(handler, None, SessionStub(), db, ability,
-                                pl_t, ai_t)
-    assert result is AbilityResolutionState.COMPLETED, result
-    location = db.execute(
-        "SELECT location FROM game_cards WHERE card_uid=332").fetchone()[0]
-    assert location == "discard", location
+    try:
+        handler.chain_state_based = (
+            lambda session, state, game_, p, a:
+            _hcs.HCPHandler.chain_state_based(handler, session, state, game_, p, a))
+        ability = SimpleNamespace(descriptor=descriptor, instance_id=17,
+                                  ignores_chain=False)
+        result = resolve_chain_item(handler, None, SessionStub(), db, ability,
+                                    pl_t, ai_t)
+        assert result is AbilityResolutionState.COMPLETED, result
+        location = db.execute(
+            "SELECT location FROM game_cards WHERE card_uid=332").fetchone()[0]
+        assert location == "discard", location
+    finally:
+        dbmod._db = old_binding
 
 
 def test_oakhenge_reveal_opens_one_selectable_picker(db):

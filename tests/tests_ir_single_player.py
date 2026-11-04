@@ -7,6 +7,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 
 from tests.tests_builtin_counter_rules import TPL_GLADIATOR, SessionStub, _setup  # noqa: E402
 from tests.tests_combat import make_db, add_card  # noqa: E402  (the fixture reads make_db from this module)
+import db as dbmod
 
 # Deals 2 damage to one target champion or troop; its one chosen target uses the SinglePlayer filter.
 SINGLE_PLAYER_ABILITY_GUID = "98d4ff63-0c21-e74b-0879-565a6e911e33"

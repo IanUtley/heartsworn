@@ -10,6 +10,7 @@ import pytest  # noqa: E402
 import tests.ir_equivalence as H  # noqa: E402
 import db as dbmod  # noqa: E402  (after the harness sets up the test database)
 from tests.tests_combat import SessionStub, add_card  # noqa: E402
+import db as dbmod
 
 DISCOMBOBULATE_ABILITY = "2e4efa51-f2d3-fa11-c9ea-d37eccdfd0ca"  # "Interrupt target card"
 SPELL_UID = 960

@@ -25,6 +25,7 @@ SRC = fresh_database()
 
 import game_engine
 import ai
+import db as dbmod
 
 
 TPL_GLADIATOR = "b7172b6a-ef85-4fef-91e1-81975b4ce7cd"

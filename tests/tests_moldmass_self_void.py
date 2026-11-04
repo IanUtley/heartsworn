@@ -18,6 +18,7 @@ SRC = fresh_database()
 
 import game_engine
 from tests.tests_combat import make_db, add_card, HandlerStub, SessionStub  # noqa: F401
+import db as dbmod
 
 TPL_MOLDMASS = "49a2b136-6ff9-4d2e-9a0d-ea8bfc566410"
 AG_MOLDMASS_DEPLOY = "9c5d3811-2b38-974f-7e1d-d930a261c4ec"

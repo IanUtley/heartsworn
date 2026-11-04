@@ -578,6 +578,7 @@ CHAMPION_SOURCE_EVENTS = {"GainChargeEvent", "ChampionHealedEvent", "FateweavedE
 SETUP_ZONES = {"GameStartedEvent": ("hand", "warzone"), "PreGameEvent": ("deck",)}
 # The live events the interpreter runs beyond the turn and zone events (rules_port/ir_triggers.py).
 from rules_port.ir_triggers import TRIGGER_EVENTS  # noqa: E402
+import db as dbmod
 # Turn-event abilities with a card template that the interpreter refuses (name, missing constructs).
 SKIPPED_BY_COVERAGE = []
 

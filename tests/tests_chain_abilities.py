@@ -29,6 +29,7 @@ import game_engine
 from tests.tests_cards_fixes import _copy_card, _copy_ability
 from tests.tests_combat import (make_db, add_card, HandlerStub, SessionStub,
                                 TPL_GLADIATOR)
+import db as dbmod
 
 
 TPL_BROOD_CREEPER = "5f2c8a4b-5f38-4743-aff8-a1bd5abd9ad5"
