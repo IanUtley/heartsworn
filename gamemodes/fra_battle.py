@@ -16,6 +16,8 @@ from pvp_db import db_template_card_info
 from profile_db import db_find_deck_owner
 from pvp_db import db_game_champion
 from pvp_db import db_template_name
+from pvp_db import db_zone_card_count
+from pvp_db import db_latest_deck_id_for_user
 
 
 class FraBattleMixin:
@@ -241,8 +243,8 @@ class FraBattleMixin:
                 for _ in range(amount):
                     scid = game._new_card_id()
                     card_uid = int(scid.uid.uid64)
-                    position = _hc.db_zone_card_count(
-                        session.session_id, owner_id, location, conn=db._db)
+                    position = db_zone_card_count(
+                    session.session_id, owner_id, location, conn=db._db)
                     db_insert_game_card(
                         session.session_id, owner_id, card_uid, template_guid,
                         location, card_type=card_type_name, position=position,
@@ -365,7 +367,7 @@ class FraBattleMixin:
             if db_find_deck_owner(arena_deck_id, conn=db._db) == uid:
                 return arena_deck_id
         if uid:
-            row = _hc.db_latest_deck_id_for_user(uid, conn=db._db)
+            row = db_latest_deck_id_for_user(uid, conn=db._db)
             if row:
                 return row
         return None

@@ -20,6 +20,15 @@ from az1_pack import CAMPAIGN_PACK_CONFIGS
 from az1_pack import generate_campaign_pack
 from profile_db import db_add_card
 from profile_db import db_next_card_instance_for_user
+from services.chests import _spin_client_chest
+from services.chests import _encode_spin_response
+from profile_db import db_pack_set_info
+from az1_pack import STARDUST_REPLACEMENT_RATE
+from profile_db import db_consume_inventory
+from services.chests import _grant_pack_inventory_rewards
+from services.chests import _roll_pack_chest_rarities
+from profile_db import db_create_treasure_chest
+from services.chests import _open_client_chests
 
 
 def handle_chest_spinning_2049(handler, target, instance, data_type, reqid, comp, session_id,
@@ -37,7 +46,7 @@ def handle_chest_spinning_2049(handler, target, instance, data_type, reqid, comp
 
     # A spin does not open the chest: it may award prizes, re-spins, or
     # upgrade the chest's rarity, and the player opens it afterwards.
-    spin = (_hc._spin_client_chest(handler, chest_uid)
+    spin = (_spin_client_chest(handler, chest_uid)
             if handler.user_profile else None)
     if spin is None:
         log_req(f"    No profile")
@@ -56,7 +65,7 @@ def handle_chest_spinning_2049(handler, target, instance, data_type, reqid, comp
         # The client refreshes PlayerProfile.Gold only from BalanceUpdate.
         if not spin["error"] and hasattr(handler, "push_balance_to_client"):
             handler.push_balance_to_client()
-        resp_inner = _hc._encode_spin_response(spin, chest_uid)
+        resp_inner = _encode_spin_response(spin, chest_uid)
 
     if not resp_inner:
         resp_inner = encode_objfmt_response(
@@ -107,7 +116,7 @@ def handle_opencardpack_2127(handler, target, instance, data_type, reqid, comp, 
     log_req(f">>> OpenCardPack: pack_guid={pack_guid} amount={open_amount}")
 
     # Map store item GUID to card set GUID — query pack_set_map table
-    row = _hc.db_pack_set_info(pack_guid, conn=db._db)
+    row = db_pack_set_info(pack_guid, conn=db._db)
     if row:
         set_guid, is_full_set, is_primal = row
     else:
@@ -165,7 +174,7 @@ def handle_opencardpack_2127(handler, target, instance, data_type, reqid, comp, 
             f"{sum(kind == 'equipment' for _, kind in pack_inventory_rewards)} "
             f"equipment, "
                 f"{sum(kind == 'stardust' for _, kind in pack_inventory_rewards)} "
-                f"stardust (replacement rate={_hc.STARDUST_REPLACEMENT_RATE:.0%})")
+                f"stardust (replacement rate={STARDUST_REPLACEMENT_RATE:.0%})")
         elif starter_pack:
             for _ in range(open_amount):
                 all_cards.extend(starter_pack["cards"])
@@ -195,8 +204,8 @@ def handle_opencardpack_2127(handler, target, instance, data_type, reqid, comp, 
             db_add_card(handler.user_profile["id"], guid)
     
         # Remove the booster pack from inventory
-        consumed = _hc.db_consume_inventory(
-            handler.user_profile["id"], pack_guid, open_amount, conn=db._db)
+        consumed = db_consume_inventory(
+        handler.user_profile["id"], pack_guid, open_amount, conn=db._db)
         if consumed:
             pack_client_uid, new_qty = consumed
             log_req(f"    Consumed {open_amount}x pack {pack_guid} from inventory (remaining={max(0, new_qty)})")
@@ -236,8 +245,8 @@ def handle_opencardpack_2127(handler, target, instance, data_type, reqid, comp, 
         # client.  Keeping the rewards in player_inventory also makes
         # them survive a reconnect.
         if pack_inventory_rewards:
-            pack_inventory_updates = _hc._grant_pack_inventory_rewards(
-                handler, pack_inventory_rewards)
+            pack_inventory_updates = _grant_pack_inventory_rewards(
+            handler, pack_inventory_rewards)
             db._db.commit()
 
         # Every booster pack contains one treasure chest
@@ -245,11 +254,11 @@ def handle_opencardpack_2127(handler, target, instance, data_type, reqid, comp, 
         # one.  Campaign packs already contain their two equipment/Stardust
         # slots and starter packs are decks; neither awards a chest.
         if not (campaign_pack_config or starter_pack):
-            for chest_rarity in _hc._roll_pack_chest_rarities(
-                    open_amount, is_primal):
-                chest_db_id = _hc.db_create_treasure_chest(
-                    handler.user_profile["id"], set_guid, chest_rarity,
-                    conn=db._db)
+            for chest_rarity in _roll_pack_chest_rarities(
+                open_amount, is_primal):
+                chest_db_id = db_create_treasure_chest(
+                handler.user_profile["id"], set_guid, chest_rarity,
+                conn=db._db)
                 new_chests.append((chest_rarity, chest_db_id))
             db._db.commit()
             log_req(f"    Generated {len(new_chests)} chests: "
@@ -335,7 +344,7 @@ def handle_reserved_for_chests_with_a_2129(handler, target, instance, data_type,
         error_val = 1  # InvalidChestID
         error_message = "Invalid chest ID"
     else:
-        summary = _hc._open_client_chests(handler, requested_ids)
+        summary = _open_client_chests(handler, requested_ids)
         if requested_ids and not summary["opened"]:
             error_val = 1
             error_message = "Invalid chest ID"

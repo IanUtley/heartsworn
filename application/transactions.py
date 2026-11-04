@@ -18,6 +18,11 @@ from gamemodes.tournament_engine import player_handlers
 from pve_db import db_get_arena_state
 from pvp_db import db_game_get_hand
 from pvp_db import db_game_draw_cards
+from application.practice_flow import _push_pve_mulligan_start
+from pvp_db import db_hand_cards_raw
+from pvp_db import db_hand_card_count
+from pvp_db import db_bulk_blocker_state
+from pvp_db import db_card_template_attrs_joined
 
 
 if TYPE_CHECKING:
@@ -445,9 +450,9 @@ class TransactionsMixin(_HostBase):
                     game.push_player_wishes_to_play_first(ai_t)
             play_first_is_player = bool(
                 self._pending_play_first_is_player)
-            ai_mulligan_done = _hc._push_pve_mulligan_start(
-                game, pl_t, ai_t, play_first_is_player,
-                lambda: self._resolve_ai_mulligan(session, game, ai_t))
+            ai_mulligan_done = _push_pve_mulligan_start(
+            game, pl_t, ai_t, play_first_is_player,
+            lambda: self._resolve_ai_mulligan(session, game, ai_t))
             if ai_mulligan_done:
                 encounter_data = dict(session.encounter_data or {})
                 encounter_data["_pve_ai_mulligan_done"] = True
@@ -568,7 +573,7 @@ class TransactionsMixin(_HostBase):
                 "_pve_player_draws_first",
                 getattr(self, "_pending_player_draws_first", None))
             # Get cards in hand
-            rows = _hc.db_hand_cards_raw(session.session_id, self.user_profile["id"])
+            rows = db_hand_cards_raw(session.session_id, self.user_profile["id"])
             hand_cards = []  # list of (scid, cost)
             for r in rows:
                 scid = game_engine.SessionCardId(game_engine.UID(r[0]))
@@ -902,7 +907,7 @@ class TransactionsMixin(_HostBase):
         # Only then advance to EndTurn.
         bstate = _be.load_state(session)
         self._current_bstate = bstate
-        hand_count = _hc.db_hand_card_count(session.session_id, self.user_profile["id"])
+        hand_count = db_hand_card_count(session.session_id, self.user_profile["id"])
         if bstate.get("pending_discard_native"):
             # Stargazer-style discard is a temporary native discard window,
             # not an end-of-turn hand-limit discard. Restore the phase and
@@ -1308,7 +1313,7 @@ class TransactionsMixin(_HostBase):
                                  for k, v in blockers_map.items()}
         block_uids = {b for v in blockers_map.values() for b in v}
         if block_uids:
-            _hc.db_bulk_blocker_state(session.session_id, list(block_uids))
+            db_bulk_blocker_state(session.session_id, list(block_uids))
         game = self._fresh_game(session, pl_t, ai_t, bstate)
         player_champ_scid = getattr(self, "_player_champ_scid", None) or game_engine.SessionCardId(pl_t)
         combats = []
@@ -1465,7 +1470,7 @@ class TransactionsMixin(_HostBase):
             combat_id = self._wire_combat_id_for_attacker(
                 session, pl_t, u, u & 0xFFFF)
             game.push_attack_declared(combat_id, pl_t, ai_champ_scid, cid)
-            trow = _hc.db_card_template_attrs_joined(session.session_id, int(u))
+            trow = db_card_template_attrs_joined(session.session_id, int(u))
             tpl_guid = trow[0] if trow else None
             # Effective attributes = template static + instance-granted
             # (a SHIFTED Steadfast lives in card_attributes, not the

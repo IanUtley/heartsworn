@@ -84,6 +84,7 @@ from services.tournament_game import (
     handle_ready_for_game_setup, handle_ready_for_game_events,
     player_handlers, player_handler_lock, _pvp_fra_view, pvp_shared_port,
 )
+from application.dispatcher import ApplicationCommandDispatcher
 
 # Optional HexAI instrumentation/agent.  Import failures must never break the
 # simulation: capture is opt-in via HEXAI_CAPTURE_DIR and the agent via
@@ -183,8 +184,8 @@ def _make_handler(pid, session, deck_personality=None):
     setattr(h, "_autoplay_drive_ai_turn", True)
     setattr(h, "_campaign_gameend", lambda *a, **k: None)
     # Native mode exercises the same PvP RulesPort attachment used by HConnect.
-    h._application = hcs.ApplicationCommandDispatcher(
-        event_publisher=h._publish_application_events)
+    h._application = ApplicationCommandDispatcher(
+    event_publisher=h._publish_application_events)
     h.send = lambda *a, **k: None
     h.send_and_cache = lambda *a, **k: None
     h._push_transaction_ack = lambda *a, **k: None

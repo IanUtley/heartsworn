@@ -15,6 +15,10 @@ from pvp_db import db_card_owner_id
 from pvp_db import db_card_zone_details
 from pvp_db import db_ability_effect_rows
 from pvp_db import db_game_session_pids
+from application.player_transactions import extract_resource_guid
+from pvp_db import db_card_positions
+from pvp_db import db_move_card_to_deck_top
+from pvp_db import db_move_card_to_deck
 
 
 if TYPE_CHECKING:
@@ -427,8 +431,8 @@ class PendingChoicesMixin(_HostBase):
         _be = self._checkpoint_engine(session)
         pending_state = _be.load_state(session)
         pending = pending_state.get("pending_conversation")
-        conversation_id = _hc.extract_resource_guid(
-            transaction.inner_bytes, "ConversationId")
+        conversation_id = extract_resource_guid(
+        transaction.inner_bytes, "ConversationId")
         if not pending:
             # FRA challenge conversations are queued directly by battle
             # setup, rather than by a BOM ability continuation.  The stock
@@ -1095,8 +1099,8 @@ class PendingChoicesMixin(_HostBase):
 
         def build_prompt(g, player_uid):
             from pickers import PickRequest, PickTarget, present_pick
-            rows = _hc.db_card_positions(
-                session.session_id, pend["revealed_cards"], conn=db._db)
+            rows = db_card_positions(
+            session.session_id, pend["revealed_cards"], conn=db._db)
             # The reveal is sent unless a controller-private PvP reveal already went out in its own packet.
             # The picker reuses the reveal the game already holds for these cards, if there is one.
             reveal = (None if (bstate or {}).get("private_reveal_sent")
@@ -2070,9 +2074,9 @@ class PendingChoicesMixin(_HostBase):
                 # Keep the card in the deck, but make it the next card drawn.
                 # Shift existing positions first so the ordering is unambiguous
                 # even when the revealed card was already at position zero.
-                _hc.db_move_card_to_deck_top(
-                    session.session_id, chosen, state_after_zone_exit(0),
-                    conn=db._db)
+                db_move_card_to_deck_top(
+                session.session_id, chosen, state_after_zone_exit(0),
+                conn=db._db)
                 db._db.commit()
                 row = db_card_zone_details(
                 session.session_id, chosen, conn=db._db)
@@ -2233,9 +2237,9 @@ class PendingChoicesMixin(_HostBase):
                 # deck projection to hide. Moving them to the deck emptied the
                 # hand and left the chosen card undiscardable.
                 continue
-            _hc.db_move_card_to_deck(
-                session.session_id, int(cu), state_after_zone_exit(0),
-                conn=db._db)
+            db_move_card_to_deck(
+            session.session_id, int(cu), state_after_zone_exit(0),
+            conn=db._db)
             owner = pl_t if (c_row[2] or 0) != 0 else ai_t
             _tpl2, ct2, _n2, _c2, _a2, _d2, _g2 = self._card_full_data(
                 game, c_scid, c_row[0], c_row[1])

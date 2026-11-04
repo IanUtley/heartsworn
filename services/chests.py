@@ -12,6 +12,13 @@ from az1_pack import generate_campaign_pack
 from profile_db import db_add_card
 from profile_db import db_add_stardust
 from profile_db import db_consume_inventory_row
+from profile_db import db_get_chest_by_id
+from profile_db import db_next_inventory_client_uid
+from profile_db import db_upsert_inventory_item
+from profile_db import db_chest_probabilities
+from profile_db import db_next_card_instance_id
+from profile_db import db_create_card_instance
+from profile_db import db_open_chest
 
 
 # The fixed client addresses every treasure chest by the InventoryItem UID the
@@ -60,8 +67,8 @@ def _resolve_client_chest(user_id, chest_uid):
         return ClientChest(chest_uid, row[1] or "", row[4] or "",
                            row[5] or "Promo", None, row[0])
     if chest_uid >= CLIENT_CHEST_UID_BASE:
-        row = _hc.db_get_chest_by_id(
-            chest_uid - CLIENT_CHEST_UID_BASE, user_id, conn=db._db)
+        row = db_get_chest_by_id(
+        chest_uid - CLIENT_CHEST_UID_BASE, user_id, conn=db._db)
         if row:
             return ClientChest(chest_uid, row[4] or "", row[1] or "",
                                row[2] or "Common", row[0], None)
@@ -114,13 +121,13 @@ def _grant_pack_inventory_rewards(handler, inventory_rewards):
     """
     import hconnect_server as _hc
     user_id = handler.user_profile["id"]
-    next_uid = _hc.db_next_inventory_client_uid(user_id, conn=db._db)
+    next_uid = db_next_inventory_client_uid(user_id, conn=db._db)
     updates = {}
     for template_guid, _kind in inventory_rewards:
         row = db_inventory_item(user_id, template_guid, conn=db._db)
         candidate_uid = next_uid if not row or not row[2] else 0
-        client_uid = _hc.db_upsert_inventory_item(
-            user_id, template_guid, 1, client_item_uid=candidate_uid, conn=db._db)
+        client_uid = db_upsert_inventory_item(
+        user_id, template_guid, 1, client_item_uid=candidate_uid, conn=db._db)
         if candidate_uid:
             next_uid += 1
         if template_guid in STARDUST_TEMPLATES.values():
@@ -143,7 +150,7 @@ def _roll_pack_chest_rarities(pack_count, is_primal=False, rng=None):
     import hconnect_server as _hc
     if is_primal:
         return ["Legendary"] * pack_count
-    probs = _hc.db_chest_probabilities(conn=db._db)
+    probs = db_chest_probabilities(conn=db._db)
     if not probs:
         return []
     rng = rng or random
@@ -159,11 +166,11 @@ def _grant_reward_cards(user_id, cards):
     """
     import hconnect_server as _hc
     granted = []
-    next_id = _hc.db_next_card_instance_id(user_id, conn=db._db)
+    next_id = db_next_card_instance_id(user_id, conn=db._db)
     for offset, (guid, name, cost, atk, def_) in enumerate(cards):
         instance_id = next_id + offset
         db_add_card(user_id, guid, conn=db._db)
-        _hc.db_create_card_instance(user_id, instance_id, guid, conn=db._db)
+        db_create_card_instance(user_id, instance_id, guid, conn=db._db)
         granted.append((guid, name, cost, atk, def_, instance_id, 0))
     return granted
 
@@ -302,7 +309,7 @@ def _open_client_chests(handler, chest_uids):
             summary["inventory_template_ids"].append(guid)
             summary["inventory_updates"].append((guid, item_uid, quantity))
         if chest.db_id is not None:
-            _hc.db_open_chest(chest.db_id, conn=db._db)
+            db_open_chest(chest.db_id, conn=db._db)
             remaining = 0
         else:
             remaining = db_consume_inventory_row(

@@ -26,6 +26,13 @@ from profile_db import db_consume_inventory_row
 from profile_db import db_update_deck
 from profile_db import db_save_deck
 from profile_db import db_card_instance_art
+from profile_db import db_campaign_deck_for_champion
+from profile_db import db_profile_card_instances
+from domain.enums import EGemTypesNew
+from profile_db import db_delete_champion
+from application.champion_defaults import _default_talents_for_champion
+from profile_db import db_insert_champion
+from profile_db import db_purchase_exists
 
 
 # CreateNewDeckFromTemplate (2091)
@@ -193,8 +200,8 @@ def handle_addnewdeck_2089(handler, target, instance, data_type, reqid, comp, se
     # continue through db_save_deck and may coexist as before.
     existing_campaign = None
     if pve_champion_uid:
-        existing_campaign = _hc.db_campaign_deck_for_champion(
-            user_id, pve_champion_uid, conn=db._db)
+        existing_campaign = db_campaign_deck_for_champion(
+        user_id, pve_champion_uid, conn=db._db)
     if existing_campaign:
         deck_db_id = existing_campaign[0]
         db_update_deck(
@@ -523,7 +530,7 @@ def handle_getplayercardidlist_2043(handler, target, instance, data_type, reqid,
     p = handler.user_profile
     db_cards = []
     if p:
-        db_cards = list(_hc.db_profile_card_instances(p["id"], conn=db._db))
+        db_cards = list(db_profile_card_instances(p["id"], conn=db._db))
     ctype_names = [
         "Game.Client.Network.Profile.GetPlayerCardIDListResponse",
         "System.Collections.Generic.List`1#Game.Shared.Domain.card_instance_bits",
@@ -577,7 +584,7 @@ def handle_getplayercardidlist_2043(handler, target, instance, data_type, reqid,
         f6v = cbuf.tell(); csizes.append(0)
         w("value__"); sep(); w(str(len(csizes)-1)); sep()
         w(str(ft("System.UInt64"))); sep(); w("0"); sep()
-        w(hexlify(struct.pack("<Q", _hc.EGemTypesNew.Unknown)).decode("ascii")); sep()
+        w(hexlify(struct.pack("<Q", EGemTypesNew.Unknown)).decode("ascii")); sep()
         csizes[-1] = cbuf.tell() - f6v; csizes[-2] = cbuf.tell() - f6
         f7 = cbuf.tell(); csizes.append(0)
         w("IsNotTradeable"); sep(); w(str(len(csizes)-1)); sep(); w(str(ft("System.Boolean"))); sep(); w("0"); sep()
@@ -610,7 +617,7 @@ def handle_deletechampion_2035(handler, target, instance, data_type, reqid, comp
     champ_id = int(inner_obj.get("ChampionId", 0))
     log_req(f">>> DeleteChampion: id={champ_id}")
     if handler.user_profile and champ_id > 0:
-        _hc.db_delete_champion(champ_id, handler.user_profile["id"], conn=db._db)
+        db_delete_champion(champ_id, handler.user_profile["id"], conn=db._db)
         db._db.commit()
         log_req(f"    Marked champion {champ_id} as deleted")
     
@@ -699,13 +706,13 @@ def handle_addchampion_2033(handler, target, instance, data_type, reqid, comp, s
     except: pass
     log_req(f">>> AddChampion: name={champ_name} pet={pet_name!r} race={race_val} class={cls_val} gender={gender_val}")
 
-    starting_talents = _hc._default_talents_for_champion(
-        race_val, cls_val, gender_val)
+    starting_talents = _default_talents_for_champion(
+    race_val, cls_val, gender_val)
 
     if handler.user_profile:
-        champ_db_id = _hc.db_insert_champion(
-            handler.user_profile["id"], champ_name, race_val, cls_val,
-            gender_val, pet_name, json.dumps(starting_talents), conn=db._db)
+        champ_db_id = db_insert_champion(
+        handler.user_profile["id"], champ_name, race_val, cls_val,
+        gender_val, pet_name, json.dumps(starting_talents), conn=db._db)
         db._db.commit()
 
         # Grant starter deck cards for this race (once only per race)
@@ -716,9 +723,9 @@ def handle_addchampion_2033(handler, target, instance, data_type, reqid, comp, s
             pve_template_guid = _hc._PVE_CHAMPION_GUIDS.get(race_name, "")
             already_granted = False
             if pve_template_guid:
-                if _hc.db_purchase_exists(
-                        handler.user_profile["id"], pve_template_guid,
-                        conn=db._db):
+                if db_purchase_exists(
+                    handler.user_profile["id"], pve_template_guid,
+                    conn=db._db):
                     already_granted = True
             if not already_granted:
                 cards_granted = 0

@@ -18,6 +18,10 @@ from pvp_db import db_card_instance_dynamic_projections
 from pvp_db import db_template_by_guid
 from pvp_db import db_card_basic
 from pvp_db import db_warzone_display_rows
+from pvp_db import db_ability_is_triggered
+from application.practice_flow import _uid_in
+from pvp_db import db_set_card_state_exact
+from application.practice_flow import _is_practice_chain_follow_up
 
 
 if TYPE_CHECKING:
@@ -380,8 +384,8 @@ class TurnFlowMixin(_HostBase):
             try:
                 ability_guid = str(payload.get("ability_template_id") or "").lower()
                 activation = payload.get("activation_data")
-                triggered = (_hc.db_ability_is_triggered(
-                    ability_guid, conn=db._db) if ability_guid else None)
+                triggered = (db_ability_is_triggered(
+                ability_guid, conn=db._db) if ability_guid else None)
                 if (triggered is False and
                         payload.get("source_card_id") is not None and
                         isinstance(activation, (dict, tuple, list))):
@@ -439,7 +443,7 @@ class TurnFlowMixin(_HostBase):
                 f" player={player_uid!r}"
                 f" coerced={intent_player!r}"
                 f" in_session="
-                f"{_hc._uid_in(intent_player, port.player_ids)}"
+                f"{_uid_in(intent_player, port.player_ids)}"
                 f" terminated={port.terminated}"
                 f" native_priority="
                 f"{port.action_stack.priority_player_id!r}"
@@ -1598,8 +1602,8 @@ class TurnFlowMixin(_HostBase):
                              game_engine.ECardStates.StartedATurnOnYourSide)
             if new_state == old_state:
                 continue
-            _hc.db_set_card_state_exact(
-                session.session_id, int(card_uid), new_state, conn=db._db)
+            db_set_card_state_exact(
+            session.session_id, int(card_uid), new_state, conn=db._db)
             changed += 1
             scid = game_engine.SessionCardId(game_engine.UID(int(card_uid)))
             _tpl, ct, _name, _cost, _atk, _def, _gem = \
@@ -1889,7 +1893,7 @@ class TurnFlowMixin(_HostBase):
         if not (session.session_name or "").startswith("tourney-"):
             for _ in range(8):
                 action = port.action_stack.peek()
-                if not _hc._is_practice_chain_follow_up(action, pl_t, True):
+                if not _is_practice_chain_follow_up(action, pl_t, True):
                     break
                 if not port.pass_player_priority(
                         action.priority_player_id):
