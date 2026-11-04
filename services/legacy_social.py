@@ -1,3 +1,4 @@
+from domain.uids import SERVICE_PROFILE_UID
 """Friend and social requests.
 
 Moved out of hconnect_server.HCPHandler._handle_service_request_legacy.
@@ -11,7 +12,7 @@ def handle_friend_social_2149(handler, target, instance, data_type, reqid, comp,
     from services.social import handle_add_friend
     handle_add_friend(handler, target, instance, reqid, comp, session_id,
                       conh, inner_obj, inner_bytes,
-                      SERVICE_PROFILE_UID=_hc.SERVICE_PROFILE_UID)
+                      SERVICE_PROFILE_UID=SERVICE_PROFILE_UID)
 
 
 def handle_request_2157(handler, target, instance, data_type, reqid, comp, session_id,
@@ -20,7 +21,7 @@ def handle_request_2157(handler, target, instance, data_type, reqid, comp, sessi
     from services.social import handle_accept_friend_request
     handle_accept_friend_request(handler, target, instance, reqid, comp,
                                  session_id, conh, inner_obj, inner_bytes,
-                                 SERVICE_PROFILE_UID=_hc.SERVICE_PROFILE_UID)
+                                 SERVICE_PROFILE_UID=SERVICE_PROFILE_UID)
 
 
 def handle_request_2159(handler, target, instance, data_type, reqid, comp, session_id,
@@ -29,7 +30,7 @@ def handle_request_2159(handler, target, instance, data_type, reqid, comp, sessi
     from services.social import handle_ignore_friend_request
     handle_ignore_friend_request(handler, target, instance, reqid, comp,
                                  session_id, conh, inner_obj, inner_bytes,
-                                 SERVICE_PROFILE_UID=_hc.SERVICE_PROFILE_UID)
+                                 SERVICE_PROFILE_UID=SERVICE_PROFILE_UID)
 
 
 def handle_request_2161(handler, target, instance, data_type, reqid, comp, session_id,
@@ -38,7 +39,7 @@ def handle_request_2161(handler, target, instance, data_type, reqid, comp, sessi
     from services.social import handle_remove_friend
     handle_remove_friend(handler, target, instance, reqid, comp, session_id,
                          conh, inner_obj, inner_bytes,
-                         SERVICE_PROFILE_UID=_hc.SERVICE_PROFILE_UID)
+                         SERVICE_PROFILE_UID=SERVICE_PROFILE_UID)
 
 
 def handle_request_2163(handler, target, instance, data_type, reqid, comp, session_id,
@@ -47,7 +48,7 @@ def handle_request_2163(handler, target, instance, data_type, reqid, comp, sessi
     from services.social import handle_ignore_player
     handle_ignore_player(handler, target, instance, reqid, comp, session_id,
                          conh, inner_obj, inner_bytes,
-                         SERVICE_PROFILE_UID=_hc.SERVICE_PROFILE_UID)
+                         SERVICE_PROFILE_UID=SERVICE_PROFILE_UID)
 
 
 def handle_request_2165(handler, target, instance, data_type, reqid, comp, session_id,
@@ -56,7 +57,7 @@ def handle_request_2165(handler, target, instance, data_type, reqid, comp, sessi
     from services.social import handle_unignore_player
     handle_unignore_player(handler, target, instance, reqid, comp, session_id,
                            conh, inner_obj, inner_bytes,
-                           SERVICE_PROFILE_UID=_hc.SERVICE_PROFILE_UID)
+                           SERVICE_PROFILE_UID=SERVICE_PROFILE_UID)
 
 
 

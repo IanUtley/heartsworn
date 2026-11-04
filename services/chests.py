@@ -5,6 +5,8 @@ import threading
 from collections import namedtuple
 from db import log_req
 import db
+from db import STARDUST_TEMPLATES
+from profile_db import db_inventory_item
 
 
 # The fixed client addresses every treasure chest by the InventoryItem UID the
@@ -82,7 +84,7 @@ def _generate_chest_rewards(chest, card_templates, rng=None):
         inventory_rewards = [(guid, "equipment")
                              for guid in reward.equipment_guids]
         inventory_rewards.extend(
-            (_hc.STARDUST_TEMPLATES[rarity.lower()], "stardust")
+            (STARDUST_TEMPLATES[rarity.lower()], "stardust")
             for rarity in reward.stardust_rarities)
         return list(reward.cards), inventory_rewards
     cards = _hc._generate_crayburn_chest(card_templates, chest.template_guid)
@@ -110,14 +112,14 @@ def _grant_pack_inventory_rewards(handler, inventory_rewards):
     next_uid = _hc.db_next_inventory_client_uid(user_id, conn=db._db)
     updates = {}
     for template_guid, _kind in inventory_rewards:
-        row = _hc.db_inventory_item(user_id, template_guid, conn=db._db)
+        row = db_inventory_item(user_id, template_guid, conn=db._db)
         candidate_uid = next_uid if not row or not row[2] else 0
         client_uid = _hc.db_upsert_inventory_item(
             user_id, template_guid, 1, client_item_uid=candidate_uid, conn=db._db)
         if candidate_uid:
             next_uid += 1
-        if template_guid in _hc.STARDUST_TEMPLATES.values():
-            rarity = next(key for key, value in _hc.STARDUST_TEMPLATES.items()
+        if template_guid in STARDUST_TEMPLATES.values():
+            rarity = next(key for key, value in STARDUST_TEMPLATES.items()
                           if value == template_guid)
             _hc.db_add_stardust(user_id, rarity, 1, conn=db._db)
         updates[template_guid] = (client_uid, int(row[1] or 0) + 1 if row else 1)

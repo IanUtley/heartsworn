@@ -10,6 +10,10 @@ import db
 from encoder import encode_datawrapper
 from encoder import compress_gzip
 import campaign
+from encoder import encode_sync_event
+from domain.uids import SERVICE_GAME_SESSION_UID
+from encoder import client_session_guid
+from pvp_db import db_card_instance_dynamic_projections
 
 
 if TYPE_CHECKING:
@@ -60,8 +64,8 @@ class TransactionsMixin(_HostBase):
                         pkt_ps = game_ps.make_network_packet(my_uid)
                         dw_ps = encode_datawrapper(
                         0, 3055,
-                        compress_gzip(_hc.encode_sync_event(pkt_ps)), 1,
-                        _hc.client_session_guid(self))
+                        compress_gzip(encode_sync_event(pkt_ps)), 1,
+                        client_session_guid(self))
                         self.scnt += 1
                         self.send({
                             "issuer": f"0.0.0.0.ServiceGameSession.246."
@@ -87,8 +91,8 @@ class TransactionsMixin(_HostBase):
                         pkt_ps = game_ps.make_network_packet(my_uid)
                         dw_ps = encode_datawrapper(
                         0, 3055,
-                        compress_gzip(_hc.encode_sync_event(pkt_ps)), 1,
-                        _hc.client_session_guid(self))
+                        compress_gzip(encode_sync_event(pkt_ps)), 1,
+                        client_session_guid(self))
                         self.scnt += 1
                         self.send({
                             "issuer": f"0.0.0.0.ServiceGameSession.246."
@@ -108,8 +112,8 @@ class TransactionsMixin(_HostBase):
                     pkt_ps = game_ps.make_network_packet(my_uid)
                     dw_ps = encode_datawrapper(
                     0, 3055,
-                    compress_gzip(_hc.encode_sync_event(pkt_ps)), 1,
-                    _hc.client_session_guid(self))
+                    compress_gzip(encode_sync_event(pkt_ps)), 1,
+                    client_session_guid(self))
                     self.scnt += 1
                     self.send({
                         "issuer": f"0.0.0.0.ServiceGameSession.246."
@@ -280,8 +284,8 @@ class TransactionsMixin(_HostBase):
                 hand_uids = [int(card_uid)
                              for hand in hands.values()
                              for card_uid, _template_guid in hand]
-                hand_projections = _hc.db_card_instance_dynamic_projections(
-                    session.session_id, hand_uids, conn=db._db)
+                hand_projections = db_card_instance_dynamic_projections(
+                session.session_id, hand_uids, conn=db._db)
                 for apid in pids:
                     h = _hc.player_handlers.get(apid)
                     if not h: continue
@@ -332,7 +336,7 @@ class TransactionsMixin(_HostBase):
                     g.push_turn_phase(game_engine.ETurnPhases.Mulligan,
                                       mulligan_uid, mulligan_uid)
                     pkt = g.make_network_packet(pl)
-                    dw = encode_datawrapper(0, 3055, compress_gzip(_hc.encode_sync_event(pkt)), 1,
+                    dw = encode_datawrapper(0, 3055, compress_gzip(encode_sync_event(pkt)), 1,
                                         "00000000-0000-0000-0000-000000000000")
                     h.scnt += 1
                     h.send({"issuer": f"0.0.0.0.ServiceGameSession.246.{session.session_id}.{h.scnt}",
@@ -405,11 +409,11 @@ class TransactionsMixin(_HostBase):
             player_hand = _hc.db_game_get_hand(session.session_id,
                                            self.user_profile["id"])
             ai_hand = _hc.db_game_get_hand(session.session_id, 0)
-            opening_hand_projections = _hc.db_card_instance_dynamic_projections(
-                session.session_id,
-                [int(card_uid) for hand in (player_hand, ai_hand)
-                 for card_uid, _template_guid in hand],
-                conn=db._db)
+            opening_hand_projections = db_card_instance_dynamic_projections(
+            session.session_id,
+            [int(card_uid) for hand in (player_hand, ai_hand)
+             for card_uid, _template_guid in hand],
+            conn=db._db)
             for idx, (cu, tg) in enumerate(player_hand):
                 scid = game_engine.SessionCardId(
                     game_engine.UID(int(cu)))
@@ -449,13 +453,13 @@ class TransactionsMixin(_HostBase):
                 session, game_engine.ETurnPhases.Mulligan, pl_t)
             if game.events:
                 pkt = game.make_network_packet(pl_t)
-                dw = encode_datawrapper(0, 3055, compress_gzip(_hc.encode_sync_event(pkt)), 1,
+                dw = encode_datawrapper(0, 3055, compress_gzip(encode_sync_event(pkt)), 1,
                                     "00000000-0000-0000-0000-000000000000")
                 self._game_scnt = max(self._game_scnt, self.scnt) + 1
                 self.scnt = self._game_scnt
                 gs_inst = str(session.server_id)
                 self.send({
-                    "issuer": f"0.0.0.0.ServiceGameSession.{_hc.SERVICE_GAME_SESSION_UID}.{gs_inst}.{self.scnt}",
+                    "issuer": f"0.0.0.0.ServiceGameSession.{SERVICE_GAME_SESSION_UID}.{gs_inst}.{self.scnt}",
                     "target": "ServiceGameSession", "instance": gs_inst,
                     "reqid": 0, "c": 0, "conh": 0, "sid": self.sid,
                 }, dw)
@@ -517,7 +521,7 @@ class TransactionsMixin(_HostBase):
                             g.push_accepted_starting_hand(
                                 pl_t, mulliganed=mulliganed)
                             pkt = g.make_network_packet(pl_t)
-                            dw = encode_datawrapper(0, 3055, compress_gzip(_hc.encode_sync_event(pkt)), 1,
+                            dw = encode_datawrapper(0, 3055, compress_gzip(encode_sync_event(pkt)), 1,
                                                  "00000000-0000-0000-0000-000000000000")
                             _keep_h.scnt += 1
                             _keep_h.send({
@@ -811,12 +815,12 @@ class TransactionsMixin(_HostBase):
             # Send the StartGame packet (one phase per packet).
             if game.events:
                 pkt = game.make_network_packet(pl_t)
-                dw = encode_datawrapper(0, 3055, compress_gzip(_hc.encode_sync_event(pkt)), 1, "00000000-0000-0000-0000-000000000000")
+                dw = encode_datawrapper(0, 3055, compress_gzip(encode_sync_event(pkt)), 1, "00000000-0000-0000-0000-000000000000")
                 self._game_scnt = max(self._game_scnt, self.scnt) + 1
                 self.scnt = self._game_scnt
                 gs_inst = str(session.server_id)
                 self.send({
-                    "issuer": f"0.0.0.0.ServiceGameSession.{_hc.SERVICE_GAME_SESSION_UID}.{session.session_id}.{self.scnt}",
+                    "issuer": f"0.0.0.0.ServiceGameSession.{SERVICE_GAME_SESSION_UID}.{session.session_id}.{self.scnt}",
                     "target": "ServiceGameSession", "instance": gs_inst, "reqid": 0, "c": 0, "conh": 0, "sid": self.sid,
                 }, dw)
                 self._event_q.append((self.scnt, dw, {}))
@@ -987,7 +991,7 @@ class TransactionsMixin(_HostBase):
                 # redraw state showing the old hand.
                 g.push_player_mulliganed_hand(pl_t, draw_count)
                 pkt = g.make_network_packet(p_uid)
-                dw = encode_datawrapper(0, 3055, compress_gzip(_hc.encode_sync_event(pkt)), 1,
+                dw = encode_datawrapper(0, 3055, compress_gzip(encode_sync_event(pkt)), 1,
                                     "00000000-0000-0000-0000-000000000000")
                 h.scnt += 1
                 h.send({"issuer": f"0.0.0.0.ServiceGameSession.246.{session.session_id}.{h.scnt}",
@@ -1060,12 +1064,12 @@ class TransactionsMixin(_HostBase):
 
             if game2.events:
                 pkt = game2.make_network_packet(pl_t)
-                dw = encode_datawrapper(0, 3055, compress_gzip(_hc.encode_sync_event(pkt)), 1, "00000000-0000-0000-0000-000000000000")
+                dw = encode_datawrapper(0, 3055, compress_gzip(encode_sync_event(pkt)), 1, "00000000-0000-0000-0000-000000000000")
                 self._game_scnt = max(self._game_scnt, self.scnt) + 1
                 self.scnt = self._game_scnt
                 gs_inst = str(session.server_id)
                 self.send({
-                    "issuer": f"0.0.0.0.ServiceGameSession.{_hc.SERVICE_GAME_SESSION_UID}.{session.session_id}.{self.scnt}",
+                    "issuer": f"0.0.0.0.ServiceGameSession.{SERVICE_GAME_SESSION_UID}.{session.session_id}.{self.scnt}",
                     "target": "ServiceGameSession", "instance": gs_inst, "reqid": 0, "c": 0, "conh": 0, "sid": self.sid,
                 }, dw)
                 self._event_q.append((self.scnt, dw, {}))

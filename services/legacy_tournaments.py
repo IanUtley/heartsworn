@@ -9,6 +9,15 @@ import db
 from encoder import encode_datawrapper
 from encoder import compress_gzip
 from encoder import encode_objfmt_response
+from domain.uids import SERVICE_MAIL_UID
+from tournament_db import db_tournament_room_for_game
+from gamemodes.tournament_engine import _is_corinth_room
+from tournament_db import db_tournament_pool
+from tournament_db import db_tournament_signup_by_player
+from tournament_db import db_tournament_signup_set_async_state
+from gamemodes.tournament_engine import CORINTH_SHARD_GUIDS
+from gamemodes.tournament_engine import player_handler_lock
+from tournament_db import db_tournament_match_session
 
 
 # ServiceTournaments — TryReconnection (25021)
@@ -40,16 +49,16 @@ def handle_tryreconnection_25021(handler, target, instance, data_type, reqid, co
         dw_bytes = encode_datawrapper(
         resp_reqid, data_type, resp_body, comp, session_id)
         handler.scnt += 1
-        handler.send({"issuer": f"0.0.0.0.ServiceTournaments.{_hc.SERVICE_MAIL_UID}.ServicePlayer.{handler.client_uid}.{resp_reqid}",
+        handler.send({"issuer": f"0.0.0.0.ServiceTournaments.{SERVICE_MAIL_UID}.ServicePlayer.{handler.client_uid}.{resp_reqid}",
                    "target": target, "instance": instance,
                    "reqid": resp_reqid, "c": comp, "conh": conh,
                    "sid": handler.sid}, dw_bytes)
         return
-    reconnect_room = _hc.db_tournament_room_for_game(
-        reconnect_tid, conn=db._db) if reconnect_tid else None
+    reconnect_room = db_tournament_room_for_game(
+    reconnect_tid, conn=db._db) if reconnect_tid else None
     reconnect_uid = int(handler.client_reck_id) if handler.client_reck_id else 0
-    reconnect_signup = (_hc.db_tournament_signup_by_player(
-        reconnect_tid, reconnect_uid, conn=db._db)
+    reconnect_signup = (db_tournament_signup_by_player(
+    reconnect_tid, reconnect_uid, conn=db._db)
         if reconnect_tid and reconnect_uid else None)
     # A persistent Corinth event can outlive an account identity
     # migration (for example, the old Name#discriminator identity to
@@ -57,7 +66,7 @@ def handle_tryreconnection_25021(handler, target, instance, data_type, reqid, co
     # reconnect rather than EnterTournament.  Re-enter through the
     # normal async slot logic when a previous run is no longer live.
     if (not reconnect_signup and reconnect_room and
-            _hc._is_corinth_room(reconnect_room) and
+            _is_corinth_room(reconnect_room) and
             str(reconnect_room.get("status", "")).lower() != "closed"):
         reconnect_name = (handler.user_profile.get("name", "Unknown")
                           if handler.user_profile else "Unknown")
@@ -65,8 +74,8 @@ def handle_tryreconnection_25021(handler, target, instance, data_type, reqid, co
             reconnect_tid, reconnect_uid, reconnect_name, deck_id=0,
             entry_group=0)
         if join_ok:
-            reconnect_signup = _hc.db_tournament_signup_by_player(
-                reconnect_tid, reconnect_uid, conn=db._db)
+            reconnect_signup = db_tournament_signup_by_player(
+            reconnect_tid, reconnect_uid, conn=db._db)
             log_req(f">>> TryReconnection: re-entered Corinth tid={reconnect_tid} "
                 f"player={reconnect_uid}")
     reconnect_live = bool(
@@ -76,7 +85,7 @@ def handle_tryreconnection_25021(handler, target, instance, data_type, reqid, co
     reconnect_ok = bool(
         reconnect_room and reconnect_signup and
         str(reconnect_room.get("status", "")).lower() != "closed" and
-        _hc._is_corinth_room(reconnect_room) and
+        _is_corinth_room(reconnect_room) and
         (reconnect_signup.get("status") == "active" or
          not reconnect_live))
     if reconnect_ok:
@@ -87,20 +96,20 @@ def handle_tryreconnection_25021(handler, target, instance, data_type, reqid, co
         if reconnect_signup.get("status") != "active":
             _hc.db_tournament_signup_set_status(
                 reconnect_tid, reconnect_uid, "active", conn=db._db)
-            _hc.db_tournament_signup_set_async_state(
-                reconnect_tid, reconnect_uid,
-                deck_ready=False, searching=False, conn=db._db)
+            db_tournament_signup_set_async_state(
+            reconnect_tid, reconnect_uid,
+            deck_ready=False, searching=False, conn=db._db)
             db._db.commit()
-        with _hc.player_handler_lock:
+        with player_handler_lock:
             _hc.player_handlers[reconnect_uid] = handler
-        reconnect_pool = _hc.db_tournament_pool(
-            reconnect_tid, reconnect_uid, conn=db._db)
-        if len(reconnect_pool) != len(_hc.CORINTH_SHARD_GUIDS) * 4:
+        reconnect_pool = db_tournament_pool(
+        reconnect_tid, reconnect_uid, conn=db._db)
+        if len(reconnect_pool) != len(CORINTH_SHARD_GUIDS) * 4:
             _hc.db_seed_tournament_pool(
                 reconnect_tid, reconnect_uid,
-                _hc.CORINTH_SHARD_GUIDS * 4, conn=db._db)
-            reconnect_pool = _hc.db_tournament_pool(
-                reconnect_tid, reconnect_uid, conn=db._db)
+                CORINTH_SHARD_GUIDS * 4, conn=db._db)
+            reconnect_pool = db_tournament_pool(
+            reconnect_tid, reconnect_uid, conn=db._db)
         _hc._push_corinth_deck_construction(
             handler, reconnect_tid, reconnect_pool)
         log_req(f">>> TryReconnection: resumed Corinth tid={reconnect_tid} "
@@ -119,7 +128,7 @@ def handle_tryreconnection_25021(handler, target, instance, data_type, reqid, co
     resp_body = compress_gzip(resp_inner) if comp else resp_inner
     resp_reqid = reqid | 1
     dw_bytes = encode_datawrapper(resp_reqid, data_type, resp_body, comp, session_id)
-    issuer_str = f"0.0.0.0.ServiceTournaments.{_hc.SERVICE_MAIL_UID}.ServicePlayer.{handler.client_uid}.{resp_reqid}"
+    issuer_str = f"0.0.0.0.ServiceTournaments.{SERVICE_MAIL_UID}.ServicePlayer.{handler.client_uid}.{resp_reqid}"
     handler.scnt += 1
     handler.send({
         "issuer": issuer_str,
@@ -152,7 +161,7 @@ def handle_ladderrecord_70023(handler, target, instance, data_type, reqid, comp,
     resp_body = compress_gzip(resp_inner) if comp else resp_inner
     dw_bytes = encode_datawrapper(reqid | 1, data_type, resp_body, comp, session_id)
     handler.scnt += 1
-    handler.send({"issuer": f"0.0.0.0.ServiceTournaments.{_hc.SERVICE_MAIL_UID}.ServicePlayer.{handler.client_uid}.{reqid|1}",
+    handler.send({"issuer": f"0.0.0.0.ServiceTournaments.{SERVICE_MAIL_UID}.ServicePlayer.{handler.client_uid}.{reqid|1}",
                "target": target, "instance": instance, "reqid": reqid | 1, "c": comp, "conh": conh, "sid": handler.sid}, dw_bytes)
     log_req(f"    Sent LadderRecord response ({len(dw_bytes)}b)")
 
@@ -167,7 +176,7 @@ def handle_request_70027(handler, target, instance, data_type, reqid, comp, sess
     resp_body = compress_gzip(resp_inner) if comp else resp_inner
     dw_bytes = encode_datawrapper(reqid | 1, data_type, resp_body, comp, session_id)
     handler.scnt += 1
-    handler.send({"issuer": f"0.0.0.0.ServiceTournaments.{_hc.SERVICE_MAIL_UID}.ServicePlayer.{handler.client_uid}.{reqid|1}",
+    handler.send({"issuer": f"0.0.0.0.ServiceTournaments.{SERVICE_MAIL_UID}.ServicePlayer.{handler.client_uid}.{reqid|1}",
                "target": target, "instance": instance, "reqid": reqid | 1, "c": comp, "conh": conh, "sid": handler.sid}, dw_bytes)
     log_req(f"    Sent LadderTierRewardsList response ({len(dw_bytes)}b)")
 
@@ -183,7 +192,7 @@ def handle_request_70028(handler, target, instance, data_type, reqid, comp, sess
     resp_body = compress_gzip(resp_inner) if comp else resp_inner
     dw_bytes = encode_datawrapper(reqid | 1, data_type, resp_body, comp, session_id)
     handler.scnt += 1
-    handler.send({"issuer": f"0.0.0.0.ServiceTournaments.{_hc.SERVICE_MAIL_UID}.ServicePlayer.{handler.client_uid}.{reqid|1}",
+    handler.send({"issuer": f"0.0.0.0.ServiceTournaments.{SERVICE_MAIL_UID}.ServicePlayer.{handler.client_uid}.{reqid|1}",
                "target": target, "instance": instance, "reqid": reqid | 1, "c": comp, "conh": conh, "sid": handler.sid}, dw_bytes)
     log_req(f"    Sent LadderRankingList response ({len(dw_bytes)}b)")
 
@@ -197,7 +206,7 @@ def handle_request_70015(handler, target, instance, data_type, reqid, comp, sess
     resp_body = compress_gzip(resp_inner) if comp else resp_inner
     dw_bytes = encode_datawrapper(reqid | 1, data_type, resp_body, comp, session_id)
     handler.scnt += 1
-    handler.send({"issuer": f"0.0.0.0.ServiceTournaments.{_hc.SERVICE_MAIL_UID}.ServicePlayer.{handler.client_uid}.{reqid|1}",
+    handler.send({"issuer": f"0.0.0.0.ServiceTournaments.{SERVICE_MAIL_UID}.ServicePlayer.{handler.client_uid}.{reqid|1}",
                "target": target, "instance": instance, "reqid": reqid | 1, "c": comp, "conh": conh, "sid": handler.sid}, dw_bytes)
 
 
@@ -216,7 +225,7 @@ def handle_request_25019(handler, target, instance, data_type, reqid, comp, sess
     resp_body = compress_gzip(resp_inner) if comp else resp_inner
     dw_bytes = encode_datawrapper(reqid | 1, data_type, resp_body, comp, session_id)
     handler.scnt += 1
-    handler.send({"issuer": f"0.0.0.0.ServiceTournaments.{_hc.SERVICE_MAIL_UID}.ServicePlayer.{handler.client_uid}.{reqid|1}",
+    handler.send({"issuer": f"0.0.0.0.ServiceTournaments.{SERVICE_MAIL_UID}.ServicePlayer.{handler.client_uid}.{reqid|1}",
                "target": target, "instance": instance, "reqid": reqid | 1, "c": comp, "conh": conh, "sid": handler.sid}, dw_bytes)
     log_req(f"    Sent CreateWaitingRoom response ({len(dw_bytes)}b)")
 
@@ -247,7 +256,7 @@ def handle_testtournamententry_25027(handler, target, instance, data_type, reqid
     resp_body = compress_gzip(resp_inner) if comp else resp_inner
     dw_bytes = encode_datawrapper(reqid | 1, data_type, resp_body, comp, session_id)
     handler.scnt += 1
-    handler.send({"issuer": f"0.0.0.0.ServiceTournaments.{_hc.SERVICE_MAIL_UID}.ServicePlayer.{handler.client_uid}.{reqid|1}",
+    handler.send({"issuer": f"0.0.0.0.ServiceTournaments.{SERVICE_MAIL_UID}.ServicePlayer.{handler.client_uid}.{reqid|1}",
                "target": target, "instance": instance, "reqid": reqid | 1, "c": comp, "conh": conh, "sid": handler.sid}, dw_bytes)
     log_req(f"    Sent TestTournamentEntry ({len(dw_bytes)}b)")
 
@@ -262,27 +271,27 @@ def handle_entertournament_25029(handler, target, instance, data_type, reqid, co
     player_name = (handler.user_profile.get("name", "Unknown") if handler.user_profile else "Unknown")
     deck_id = _hc.uid_instance(inner_bytes, "DeckId")
     entry_group = int(inner_obj.get("EntryGroup", 0) or 0)
-    entry_room = _hc.db_tournament_room_for_game(
-        tournament_id, conn=db._db)
-    if not _hc._is_corinth_room(entry_room or {}):
+    entry_room = db_tournament_room_for_game(
+    tournament_id, conn=db._db)
+    if not _is_corinth_room(entry_room or {}):
         _hc.tournament_server.leave_all(player_uid)
     ok, count, target_p, type_id = _hc.tournament_server.join_tournament(
         tournament_id, player_uid, player_name, deck_id=deck_id, entry_group=entry_group)
     if not ok:
-        signup = _hc.db_tournament_signup_by_player(tournament_id, player_uid)
+        signup = db_tournament_signup_by_player(tournament_id, player_uid)
         if signup:
             log_req(f"    Player already signed up")
             is_waiting_room = False
         else:
             dw_bytes = _hc._encode_enter_tournament_error(comp, session_id, tournament_id, "InvalidTouranmentError")
             handler.scnt += 1
-            handler.send({"issuer": f"0.0.0.0.ServiceTournaments.{_hc.SERVICE_MAIL_UID}.ServicePlayer.{handler.client_uid}.{reqid|1}",
+            handler.send({"issuer": f"0.0.0.0.ServiceTournaments.{SERVICE_MAIL_UID}.ServicePlayer.{handler.client_uid}.{reqid|1}",
                        "target": target, "instance": instance, "reqid": reqid | 1, "c": comp, "conh": conh, "sid": handler.sid}, dw_bytes)
             return
     else:
         is_waiting_room = target_p > 1
         log_req(f"    Player {player_name} joined room {tournament_id} ({count}/{target_p}) type={type_id}")
-    with _hc.player_handler_lock:
+    with player_handler_lock:
         _hc.player_handlers[player_uid] = handler
     if deck_id:
         _hc.player_decks[player_uid] = deck_id
@@ -290,7 +299,7 @@ def handle_entertournament_25029(handler, target, instance, data_type, reqid, co
     log_req(f"    EntryGroup: {entry_group}")
     for stype_id in (2, 3):
         if type_id == stype_id:
-            row = _hc.db_tournament_room_for_game(tournament_id, conn=db._db)
+            row = db_tournament_room_for_game(tournament_id, conn=db._db)
             if row:
                 set_id = row.get("set_id") or "set01"
                 if stype_id == 2:
@@ -310,7 +319,7 @@ def handle_entertournament_25029(handler, target, instance, data_type, reqid, co
     resp_body = compress_gzip(resp_inner) if comp else resp_inner
     dw_bytes = encode_datawrapper(reqid | 1, data_type, resp_body, comp, session_id)
     handler.scnt += 1
-    handler.send({"issuer": f"0.0.0.0.ServiceTournaments.{_hc.SERVICE_MAIL_UID}.ServicePlayer.{handler.client_uid}.{reqid|1}",
+    handler.send({"issuer": f"0.0.0.0.ServiceTournaments.{SERVICE_MAIL_UID}.ServicePlayer.{handler.client_uid}.{reqid|1}",
                "target": target, "instance": instance, "reqid": reqid | 1, "c": comp, "conh": conh, "sid": handler.sid}, dw_bytes)
     log_req(f"    Sent EnterTournament response ({len(dw_bytes)}b)")
     for s in _hc.db_tournament_signups_by_tournament(tournament_id):
@@ -339,27 +348,27 @@ def handle_entertournament_25029(handler, target, instance, data_type, reqid, co
                 ti_dw = encode_datawrapper(0, 25058, ti_body, 1, "00000000-0000-0000-0000-000000000000")
                 handler.scnt += 1
                 handler.send({
-                    "issuer": f"0.0.0.0.ServiceTournaments.{_hc.SERVICE_MAIL_UID}.ServicePlayer.{handler.client_uid}.{handler.scnt}",
+                    "issuer": f"0.0.0.0.ServiceTournaments.{SERVICE_MAIL_UID}.ServicePlayer.{handler.client_uid}.{handler.scnt}",
                     "target": target, "instance": instance,
                     "reqid": 0, "c": 0, "conh": 0, "sid": handler.sid,
                 }, ti_dw)
                 log_req(f"    Pushed TournamentInfo (25058) for tid={tournament_id} from EnterTournament")
             except Exception: pass
-    corinth_entry = _hc._is_corinth_room(entry_room or {})
+    corinth_entry = _is_corinth_room(entry_room or {})
     if ((corinth_entry and count >= 1) or
             (target_p > 0 and count >= target_p)):
         if corinth_entry:
             # Corinth is a persistent async event: entry itself
             # starts deck construction, while a later matchmaking
             # pass creates the two-player battle session.
-            pool = _hc.db_tournament_pool(
-                tournament_id, player_uid, conn=db._db)
-            if len(pool) != len(_hc.CORINTH_SHARD_GUIDS) * 4:
+            pool = db_tournament_pool(
+            tournament_id, player_uid, conn=db._db)
+            if len(pool) != len(CORINTH_SHARD_GUIDS) * 4:
                 _hc.db_seed_tournament_pool(
                     tournament_id, player_uid,
-                    _hc.CORINTH_SHARD_GUIDS * 4, conn=db._db)
-                pool = _hc.db_tournament_pool(
-                    tournament_id, player_uid, conn=db._db)
+                    CORINTH_SHARD_GUIDS * 4, conn=db._db)
+                pool = db_tournament_pool(
+                tournament_id, player_uid, conn=db._db)
             _hc._push_corinth_deck_construction(
                 handler, tournament_id, pool)
             log_req(f"    >>> Corinth entry: deck construction "
@@ -371,7 +380,7 @@ def handle_entertournament_25029(handler, target, instance, data_type, reqid, co
         # request; a shared-registry lookup can otherwise lose one
         # of the two recipients during a reconnect/concurrent join.
         room_handlers = {player_uid: handler}
-        with _hc.player_handler_lock:
+        with player_handler_lock:
             for signup in _hc.db_tournament_signups_by_tournament(tournament_id):
                 signup_pid = int(signup["player_uid"])
                 room_handlers.setdefault(
@@ -389,11 +398,11 @@ def handle_request_25039(handler, target, instance, data_type, reqid, comp, sess
     player_uid = int(handler.client_reck_id) if handler.client_reck_id else 0
     tournament_id = int(inner_obj.get("TournamentID", 0) or 0)
     searching = bool(inner_obj.get("searching", False))
-    room = _hc.db_tournament_room_for_game(tournament_id, conn=db._db)
-    pool = _hc.db_tournament_pool(tournament_id, player_uid, conn=db._db)
+    room = db_tournament_room_for_game(tournament_id, conn=db._db)
+    pool = db_tournament_pool(tournament_id, player_uid, conn=db._db)
     main_ids = [card_uid for card_uid, _guid, location in pool
                 if int(location) == 0]
-    corinth_entry = _hc._is_corinth_room(room or {})
+    corinth_entry = _is_corinth_room(room or {})
     ok = bool(room and (int(room.get("format") or 0) &
                         int(_hc.ETournamentFormats.Iconoclast)))
     match = None
@@ -406,15 +415,15 @@ def handle_request_25039(handler, target, instance, data_type, reqid, comp, sess
             # do not put them back into the queue (the matcher will
             # correctly exclude them) and do not leave searching=1
             # falsely displayed in the lobby.
-            active_match = _hc.db_tournament_match_session(
-                tournament_id, player_uid, conn=db._db)
+            active_match = db_tournament_match_session(
+            tournament_id, player_uid, conn=db._db)
             if active_match:
                 other_pid = next(
                     (int(pid) for pid in _hc.db_game_session_pids(
                         int(active_match[0])) if int(pid) != player_uid),
                     0)
-                other_signup = _hc.db_tournament_signup_by_player(
-                    tournament_id, other_pid, conn=db._db)
+                other_signup = db_tournament_signup_by_player(
+                tournament_id, other_pid, conn=db._db)
                 other_searching = bool(
                     other_signup and other_signup.get("status") == "active"
                     and int(other_signup.get("searching", 0) or 0))
@@ -434,9 +443,9 @@ def handle_request_25039(handler, target, instance, data_type, reqid, comp, sess
                 else:
                     # Wait for the opponent's explicit new-search
                     # request; do not silently reconnect this client.
-                    _hc.db_tournament_signup_set_async_state(
-                        tournament_id, player_uid,
-                        deck_ready=True, searching=True, conn=db._db)
+                    db_tournament_signup_set_async_state(
+                    tournament_id, player_uid,
+                    deck_ready=True, searching=True, conn=db._db)
                     db._db.commit()
                     ok = True
                     active_match = None
@@ -456,31 +465,31 @@ def handle_request_25039(handler, target, instance, data_type, reqid, comp, sess
                     # LeaveTournament marks the signup withdrawn, but
                     # an explicit Play Game/Find Player action is a
                     # new search request and must re-enter that queue.
-                    signup = _hc.db_tournament_signup_by_player(
-                        tournament_id, player_uid, conn=db._db)
+                    signup = db_tournament_signup_by_player(
+                    tournament_id, player_uid, conn=db._db)
                     if signup and signup.get("status") != "active":
                         _hc.db_tournament_signup_set_status(
                             tournament_id, player_uid, "active", conn=db._db)
-                    _hc.db_tournament_signup_set_async_state(
-                        tournament_id, player_uid,
-                        deck_ready=True, searching=True,
-                        conn=db._db)
+                    db_tournament_signup_set_async_state(
+                    tournament_id, player_uid,
+                    deck_ready=True, searching=True,
+                    conn=db._db)
                     db._db.commit()
                     _hc.try_start_corinth_match(
                         tournament_id, handler_override=handler)
         else:
             # Cancelling the search leaves the saved deck/pool
             # intact but removes this entrant from the match queue.
-            _hc.db_tournament_signup_set_async_state(
-                tournament_id, player_uid, searching=False, conn=db._db)
+            db_tournament_signup_set_async_state(
+            tournament_id, player_uid, searching=False, conn=db._db)
             db._db.commit()
         # Searching is a valid asynchronous state even when no
         # opponent is available yet; the match transition is pushed
         # later when the second ready player arrives.
     elif searching:
         ok = ok and len(main_ids) == 20
-        match = (_hc.db_tournament_match_session(
-            tournament_id, player_uid, conn=db._db)
+        match = (db_tournament_match_session(
+        tournament_id, player_uid, conn=db._db)
                   if ok else None)
         ok = ok and bool(match)
         if ok:
@@ -496,7 +505,7 @@ def handle_request_25039(handler, target, instance, data_type, reqid, comp, sess
                               comp, session_id)
     handler.scnt += 1
     handler.send({
-        "issuer": f"0.0.0.0.ServiceTournaments.{_hc.SERVICE_MAIL_UID}.ServicePlayer.{handler.client_uid}.{reqid | 1}",
+        "issuer": f"0.0.0.0.ServiceTournaments.{SERVICE_MAIL_UID}.ServicePlayer.{handler.client_uid}.{reqid | 1}",
         "target": target, "instance": instance, "reqid": reqid | 1,
         "c": comp, "conh": conh, "sid": handler.sid,
     }, dw_bytes)
@@ -523,8 +532,8 @@ def handle_request_25011(handler, target, instance, data_type, reqid, comp, sess
         deck = inner_obj
     main_cards = _hc._tournament_deck_card_ids(deck, "CardsInDeck")
     side_cards = _hc._tournament_deck_card_ids(deck, "CardsInSideboard")
-    room = _hc.db_tournament_room_for_game(tournament_id, conn=db._db)
-    pool = _hc.db_tournament_pool(tournament_id, player_uid, conn=db._db)
+    room = db_tournament_room_for_game(tournament_id, conn=db._db)
+    pool = db_tournament_pool(tournament_id, player_uid, conn=db._db)
     pool_by_id = {card_uid: template for card_uid, template, _loc in pool}
     submitted = main_cards + side_cards
     submitted_ids = [card_uid for card_uid, _guid in submitted]
@@ -542,10 +551,10 @@ def handle_request_25011(handler, target, instance, data_type, reqid, comp, sess
             [(card_uid, guid, 0) for card_uid, guid in main_cards] +
             [(card_uid, guid, 1) for card_uid, guid in side_cards],
             conn=db._db)
-        if _hc._is_corinth_room(room or {}):
-            _hc.db_tournament_signup_set_async_state(
-                tournament_id, player_uid,
-                deck_ready=True, searching=False, conn=db._db)
+        if _is_corinth_room(room or {}):
+            db_tournament_signup_set_async_state(
+            tournament_id, player_uid,
+            deck_ready=True, searching=False, conn=db._db)
     log_req(f">>> SaveTournamentDeck (dt=25011) tid={tournament_id} "
         f"player={player_uid} main={len(main_cards)} "
         f"side={len(side_cards)} valid={valid}")
@@ -558,7 +567,7 @@ def handle_request_25011(handler, target, instance, data_type, reqid, comp, sess
                               comp, session_id)
     handler.scnt += 1
     handler.send({
-        "issuer": f"0.0.0.0.ServiceTournaments.{_hc.SERVICE_MAIL_UID}.ServicePlayer.{handler.client_uid}.{reqid | 1}",
+        "issuer": f"0.0.0.0.ServiceTournaments.{SERVICE_MAIL_UID}.ServicePlayer.{handler.client_uid}.{reqid | 1}",
         "target": target, "instance": instance, "reqid": reqid | 1,
         "c": comp, "conh": conh, "sid": handler.sid,
     }, dw_bytes)
@@ -573,7 +582,7 @@ def handle_request_25005(handler, target, instance, data_type, reqid, comp, sess
     resp_body = compress_gzip(resp_inner) if comp else resp_inner
     dw_bytes = encode_datawrapper(reqid | 1, data_type, resp_body, comp, session_id)
     handler.scnt += 1
-    handler.send({"issuer": f"0.0.0.0.ServiceTournaments.{_hc.SERVICE_MAIL_UID}.ServicePlayer.{handler.client_uid}.{reqid|1}",
+    handler.send({"issuer": f"0.0.0.0.ServiceTournaments.{SERVICE_MAIL_UID}.ServicePlayer.{handler.client_uid}.{reqid|1}",
                "target": target, "instance": instance, "reqid": reqid | 1, "c": comp, "conh": conh, "sid": handler.sid}, dw_bytes)
     log_req(f"    Sent UnsubscribeDescriptionListener response ({len(dw_bytes)}b)")
 
@@ -596,7 +605,7 @@ def handle_request_25007(handler, target, instance, data_type, reqid, comp, sess
     resp_body = compress_gzip(resp_inner) if comp else resp_inner
     dw_bytes = encode_datawrapper(reqid | 1, data_type, resp_body, comp, session_id)
     handler.scnt += 1
-    handler.send({"issuer": f"0.0.0.0.ServiceTournaments.{_hc.SERVICE_MAIL_UID}.ServicePlayer.{handler.client_uid}.{reqid|1}",
+    handler.send({"issuer": f"0.0.0.0.ServiceTournaments.{SERVICE_MAIL_UID}.ServicePlayer.{handler.client_uid}.{reqid|1}",
                "target": target, "instance": instance, "reqid": reqid | 1, "c": comp, "conh": conh, "sid": handler.sid}, dw_bytes)
     log_req(f"    Sent GetTournamentInfo response ({len(dw_bytes)}b)")
 
@@ -611,7 +620,7 @@ def handle_request_25035(handler, target, instance, data_type, reqid, comp, sess
     resp_body = compress_gzip(resp_inner) if comp else resp_inner
     dw_bytes = encode_datawrapper(reqid | 1, data_type, resp_body, comp, session_id)
     handler.scnt += 1
-    handler.send({"issuer": f"0.0.0.0.ServiceTournaments.{_hc.SERVICE_MAIL_UID}.ServicePlayer.{handler.client_uid}.{reqid|1}",
+    handler.send({"issuer": f"0.0.0.0.ServiceTournaments.{SERVICE_MAIL_UID}.ServicePlayer.{handler.client_uid}.{reqid|1}",
                "target": target, "instance": instance, "reqid": reqid | 1, "c": comp, "conh": conh, "sid": handler.sid}, dw_bytes)
     log_req(f"    Sent LeaveWaitingRoom response ({len(dw_bytes)}b)")
 
@@ -622,8 +631,8 @@ def handle_request_25031(handler, target, instance, data_type, reqid, comp, sess
     log_req(">>> LeaveTournament")
     player_uid = int(handler.client_reck_id) if handler.client_reck_id else 0
     tournament_id = int(inner_obj.get("TournamentID", 0) or 0)
-    active_tournament_session = _hc.db_tournament_match_session(
-        tournament_id, player_uid, conn=db._db) if tournament_id else None
+    active_tournament_session = db_tournament_match_session(
+    tournament_id, player_uid, conn=db._db) if tournament_id else None
     forfeit_recorded = bool(
         tournament_id and _hc.record_tournament_forfeit(
             tournament_id, player_uid, handler))
@@ -652,7 +661,7 @@ def handle_request_25031(handler, target, instance, data_type, reqid, comp, sess
     resp_body = compress_gzip(resp_inner) if comp else resp_inner
     dw_bytes = encode_datawrapper(reqid | 1, data_type, resp_body, comp, session_id)
     handler.scnt += 1
-    handler.send({"issuer": f"0.0.0.0.ServiceTournaments.{_hc.SERVICE_MAIL_UID}.ServicePlayer.{handler.client_uid}.{reqid|1}",
+    handler.send({"issuer": f"0.0.0.0.ServiceTournaments.{SERVICE_MAIL_UID}.ServicePlayer.{handler.client_uid}.{reqid|1}",
                "target": target, "instance": instance, "reqid": reqid | 1, "c": comp, "conh": conh, "sid": handler.sid}, dw_bytes)
     log_req(f"    Sent LeaveTournament response ({len(dw_bytes)}b)")    
 

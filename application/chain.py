@@ -8,6 +8,11 @@ import db
 from encoder import encode_datawrapper
 from encoder import compress_gzip
 from application.practice_flow import _same_uid
+from encoder import encode_sync_event
+from domain.uids import SERVICE_GAME_SESSION_UID
+from pvp_db import db_card_owner_id
+from pvp_db import db_card_with_template
+from pvp_db import db_card_owner_zone_state
 
 if TYPE_CHECKING:
     from application._host_surface import HostSurface as _HostBase
@@ -30,8 +35,8 @@ class ChainMixin(_HostBase):
         if not card_uid:
             return False
         import hconnect_server as _hc
-        row = _hc.db_card_with_template(
-            session.session_id, int(card_uid), conn=db._db)
+        row = db_card_with_template(
+        session.session_id, int(card_uid), conn=db._db)
         return bool(row) and "choice" in str(row[1] or "").lower()
 
     def _completed_rules_port_chain(self, session, bstate):
@@ -128,13 +133,13 @@ class ChainMixin(_HostBase):
             pl_t = game_engine.UID.make(244, int(self.client_reck_id))
             game = game_engine.Game(session.session_id, pl_t, game_engine.UID.make(game_engine.SERVICE_AI_UID_TYPE, 1000))
             pkt = game.make_network_packet(pl_t)  # no events -> empty packet
-            dw = encode_datawrapper(0, 3055, compress_gzip(_hc.encode_sync_event(pkt)), 1,
+            dw = encode_datawrapper(0, 3055, compress_gzip(encode_sync_event(pkt)), 1,
                                 "00000000-0000-0000-0000-000000000000")
             self._game_scnt = max(self._game_scnt, self.scnt) + 1
             self.scnt = self._game_scnt
             gs_inst = str(session.server_id)
             self.send({
-                "issuer": f"0.0.0.0.ServiceGameSession.{_hc.SERVICE_GAME_SESSION_UID}.{session.session_id}.{self.scnt}",
+                "issuer": f"0.0.0.0.ServiceGameSession.{SERVICE_GAME_SESSION_UID}.{session.session_id}.{self.scnt}",
                 "target": "ServiceGameSession", "instance": gs_inst, "reqid": 0, "c": 0, "conh": 0, "sid": self.sid,
             }, dw)
             self._event_q.append((self.scnt, dw, {}))
@@ -400,8 +405,8 @@ class ChainMixin(_HostBase):
                 # must be present when CardEnteredZoneEvent is dispatched.
                 from rules_port.resolution import \
                     resolve_port_played_permanent
-                owner_id = int(_hc.db_card_owner_id(
-                    session.session_id, uid, conn=db._db) or 0)
+                owner_id = int(db_card_owner_id(
+                session.session_id, uid, conn=db._db) or 0)
                 resolve_port_played_permanent(
                     game, session, db._db, self, pl_t, ai_t, bstate, item,
                     owner_id)
@@ -411,10 +416,10 @@ class ChainMixin(_HostBase):
                 scid = game_engine.SessionCardId(game_engine.UID(uid))
                 _hc.db_card_set_warzone_arrival(session.session_id, uid)
                 _hc.db_set_card_resolved_at(session.session_id, uid, self._next_resolve_counter(session))
-                crow2 = _hc.db_card_with_template(session.session_id, uid)
+                crow2 = db_card_with_template(session.session_id, uid)
                 if crow2:
-                    owner_id = _hc.db_card_owner_id(
-                        session.session_id, uid, conn=db._db) or 0
+                    owner_id = db_card_owner_id(
+                    session.session_id, uid, conn=db._db) or 0
                     owner_sid = pl_t if (owner_id or 0) != 0 else ai_t
                     # Populate the CardDef (cost/atk/def/thresholds/abilities)
                     # so the re-pushed CardUpdated renders the full card — without
@@ -451,8 +456,8 @@ class ChainMixin(_HostBase):
             # Countermagic/interrupt already moved it to the graveyard while it
             # waited for the stack — skip its BOM so a countered spell never
             # also draws/buffs/damages (the client's interrupted card fizzles).
-            loc_details = _hc.db_card_owner_zone_state(
-                session.session_id, uid, conn=db._db)
+            loc_details = db_card_owner_zone_state(
+            session.session_id, uid, conn=db._db)
             loc = loc_details[1] if loc_details else "discard"
             if loc != "CastSpells":
                 log_req(f"    Spell {uid} already left the chain "
@@ -527,7 +532,7 @@ class ChainMixin(_HostBase):
                         (loc_details[0] if loc_details else 0),
                         event_source_collection="CastSpells",
                         event_destination_collection="discard")
-                    crow2 = _hc.db_card_with_template(session.session_id, uid)
+                    crow2 = db_card_with_template(session.session_id, uid)
                     if crow2:
                         card_owner = (loc_details[0] if loc_details else 0)
                         owner_sid = pl_t if (card_owner or 0) != 0 else ai_t
@@ -573,8 +578,8 @@ class ChainMixin(_HostBase):
                         and int(src_uid) == int(a_scid.uid.uid64):
                     bstate["resolving_owner_id"] = 0
                 else:
-                    source_owner = _hc.db_card_owner_id(
-                        session.session_id, int(src_uid or 0), conn=db._db)
+                    source_owner = db_card_owner_id(
+                    session.session_id, int(src_uid or 0), conn=db._db)
                     bstate["resolving_owner_id"] = (
                         int(source_owner) if source_owner is not None else
                         (self.user_profile["id"] if self.user_profile else 0))

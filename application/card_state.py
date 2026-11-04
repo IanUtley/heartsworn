@@ -11,6 +11,12 @@ import game_engine
 from rules_port.card_view import CardView
 from db import log_req
 import db
+from pvp_db import db_ability_effect_rows
+from pvp_db import db_gem_ability_guids
+from application.card_play import _NO_PERSISTED_GEM
+from pvp_db import db_template_by_guid
+from application.records_projection import _records_card_projection
+from pvp_db import db_card_template_thresholds
 
 
 if TYPE_CHECKING:
@@ -39,7 +45,7 @@ class CardStateMixin(_HostBase):
         import hconnect_server as _hc
         if not template_guid:
             return None
-        return _hc.db_template_by_guid(template_guid)
+        return db_template_by_guid(template_guid)
 
     def _resolve_card_ref(self, card_ref, user_id=None):
         """Resolve a game_cards.card_template_id to card template info.
@@ -102,11 +108,11 @@ class CardStateMixin(_HostBase):
             if (joined_guid and
                     (not requested_guid or
                      joined_guid.lower() == requested_guid.lower())):
-                records_template = _hc._records_card_projection(joined_guid)
+                records_template = _records_card_projection(joined_guid)
                 if records_template:
                     t = records_template[:6]
         if t is None:
-            records_template = _hc._records_card_projection(template_guid)
+            records_template = _records_card_projection(template_guid)
             if records_template:
                 t = records_template[:6]
         if t is None:
@@ -147,7 +153,7 @@ class CardStateMixin(_HostBase):
         card_location = None
         card_owner_id = None
         card_instance_ref = None
-        persisted_gem = _hc._NO_PERSISTED_GEM
+        persisted_gem = _NO_PERSISTED_GEM
         if scid is not None:
             if irow:
                 inst_abilities_json = irow[0]
@@ -207,7 +213,7 @@ class CardStateMixin(_HostBase):
                         records_template[8])
             else:
                 lethal = bool(_hc.db_card_template_lethal(tpl_guid))
-                srow = _hc.db_card_template_thresholds(tpl_guid)
+                srow = db_card_template_thresholds(tpl_guid)
             if srow:
                 if srow[0]:
                     try:
@@ -277,7 +283,7 @@ class CardStateMixin(_HostBase):
             # combined value as one legacy gem enum.
             display_gems |= _hc.EMPTY_SOCKET_GEMS
         if gem_type:
-            gem_guids = _hc.db_gem_ability_guids(gem_type, conn=db._db)
+            gem_guids = db_gem_ability_guids(gem_type, conn=db._db)
             for gem_guid in gem_guids:
                 gem_guid = str(gem_guid).lower()
                 if gem_guid not in ability_guids:
@@ -324,7 +330,7 @@ class CardStateMixin(_HostBase):
             scene_int_attrs = {}
             scene_int_attrs.update(persisted_int_attrs)
             for _ag in ability_guids:
-                for _eg, _et, _ep in _hc.db_ability_effect_rows(_ag, conn=db._db):
+                for _eg, _et, _ep in db_ability_effect_rows(_ag, conn=db._db):
                     if _et != "CardModifierAbilityEffectTemplate":
                         continue
                     try:
@@ -497,8 +503,8 @@ class CardStateMixin(_HostBase):
                 _has_untamed = any(
                     _et == "CardModifierAbilityEffectTemplate" and
                     "untamed" in str(_ep or "").lower()
-                    for _eg, _et, _ep in _hc.db_ability_effect_rows(
-                        _ag, conn=db._db))
+                    for _eg, _et, _ep in db_ability_effect_rows(
+                    _ag, conn=db._db))
                 if _has_untamed:
                     untamed = True
                     break
@@ -621,7 +627,7 @@ class CardStateMixin(_HostBase):
         key = str(template_guid).lower()
         if key in cache:
             return cache[key]
-        row = _hc.db_card_template_thresholds(template_guid)
+        row = db_card_template_thresholds(template_guid)
         if not row:
             cache[key] = None
             return None

@@ -7,6 +7,9 @@ import db
 from encoder import encode_datawrapper
 from encoder import compress_gzip
 from encoder import encode_objfmt_response
+from encoder import encode_sync_event
+from domain.uids import SERVICE_GAME_SESSION_UID
+from encoder import client_session_guid
 
 
 class FraBattleMixin:
@@ -454,7 +457,7 @@ class FraBattleMixin:
             packet = game.make_network_packet(player_uid)
             body = encode_datawrapper(
             0, 3055,
-            compress_gzip(_hc.encode_sync_event(packet)), 1,
+            compress_gzip(encode_sync_event(packet)), 1,
             "00000000-0000-0000-0000-000000000000")
             self._game_scnt = max(
                 int(getattr(self, "_game_scnt", 0) or 0),
@@ -462,7 +465,7 @@ class FraBattleMixin:
             self.scnt = self._game_scnt
             self.send({
                 "issuer": (f"0.0.0.0.ServiceGameSession."
-                           f"{_hc.SERVICE_GAME_SESSION_UID}.{session.session_id}."
+                           f"{SERVICE_GAME_SESSION_UID}.{session.session_id}."
                            f"{self.scnt}"),
                 "target": "ServiceGameSession",
                 "instance": str(session.server_id),
@@ -482,7 +485,7 @@ class FraBattleMixin:
              ("PlayerPosition", "int", 1),
          ]))])
         added_dw = encode_datawrapper(
-        0, 3050, compress_gzip(added), 1, _hc.client_session_guid(self))
+        0, 3050, compress_gzip(added), 1, client_session_guid(self))
         self.scnt += 1
         self.send({
             "issuer": (f"0.0.0.0.ServiceGameSession.246."

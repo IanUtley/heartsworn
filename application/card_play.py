@@ -11,6 +11,14 @@ from db import log_req
 import game_engine
 import db
 from application.practice_flow import _same_uid
+from pvp_db import db_card_owner_id
+from pvp_db import db_card_zone_details
+from db import card_label
+from pvp_db import db_deck_active_gems
+from pvp_db import db_card_sacrifice_info
+from pvp_db import db_card_owner_zone_state
+from pvp_db import db_gem_ability_guids
+from pvp_db import db_card_uids_in_zone
 
 
 if TYPE_CHECKING:
@@ -301,8 +309,8 @@ class CardPlayMixin(_HostBase):
             return
         for opt in last_ev.options:
             card_uid = opt.card.uid.uid64
-            card_details = _hc.db_card_zone_details(
-                session.session_id, card_uid, conn=db._db)
+            card_details = db_card_zone_details(
+            session.session_id, card_uid, conn=db._db)
             if not card_details:
                 continue
             play_plan = self._card_play_plan(card_details[0], card_uid,
@@ -493,13 +501,13 @@ class CardPlayMixin(_HostBase):
             # candidates the legal cost pool, so a refused play can be
             # replayed without the raw ObjFmt envelope.
             log_req(f"    Card cost selection reject: "
-                f"card={_hc.card_label(session.session_id, source_uid)} "
+                f"card={card_label(session.session_id, source_uid)} "
                 f"kind={cost.kind} guid={cost.guid} "
                 f"reason={reason} "
-                f"selected={[_hc.card_label(session.session_id, uid) for uid in selected_uids]} "
-                f"available={[_hc.card_label(session.session_id, uid) for uid in available]} "
+                f"selected={[card_label(session.session_id, uid) for uid in selected_uids]} "
+                f"available={[card_label(session.session_id, uid) for uid in available]} "
                 f"candidates({len(cost.candidates)})="
-                f"{[_hc.card_label(session.session_id, uid) for uid in list(cost.candidates)[:8]]} "
+                f"{[card_label(session.session_id, uid) for uid in list(cost.candidates)[:8]]} "
                 f"minimum={cost.minimum} maximum={cost.maximum} "
                 f"source_auto={cost.is_source_auto_target} "
                 f"best_effort={cost.allow_best_effort_minimum}")
@@ -643,8 +651,8 @@ class CardPlayMixin(_HostBase):
             if spec.get("kind") != "sacrifice":
                 continue
             for uid in selected:
-                row = _hc.db_card_sacrifice_info(
-                    session.session_id, int(uid), conn=db._db)
+                row = db_card_sacrifice_info(
+                session.session_id, int(uid), conn=db._db)
                 if not row:
                     return False
                 owner_id, location, card_type = row
@@ -738,8 +746,8 @@ class CardPlayMixin(_HostBase):
 
         source_owner_id = expected_owner_id
         if source_owner_id is None and source_uid is not None:
-            source_owner = _hc.db_card_owner_id(
-                session.session_id, int(source_uid), conn=db._db)
+            source_owner = db_card_owner_id(
+            session.session_id, int(source_uid), conn=db._db)
             if source_owner is not None:
                 source_owner_id = int(source_owner)
 
@@ -751,8 +759,8 @@ class CardPlayMixin(_HostBase):
             kind = spec["kind"]
             for uid in selected:
                 uid = int(uid)
-                row = _hc.db_card_owner_zone_state(
-                    session.session_id, uid, conn=db._db)
+                row = db_card_owner_zone_state(
+                session.session_id, uid, conn=db._db)
                 if not row:
                     continue
                 owner_id = int(row[0] or 0)
@@ -872,7 +880,7 @@ class CardPlayMixin(_HostBase):
                 continue
             if gem <= 0:
                 continue
-            abilities = _hc.db_gem_ability_guids(gem, conn=db._db)
+            abilities = db_gem_ability_guids(gem, conn=db._db)
             if abilities:
                 out[str(inst)] = abilities
         return out
@@ -888,8 +896,8 @@ class CardPlayMixin(_HostBase):
         """
         import hconnect_server as _hc
         if instance_id is None and scid is not None:
-            card_details = _hc.db_card_zone_details(
-                game.session_id.uid64, scid.uid.uid64, conn=db._db)
+            card_details = db_card_zone_details(
+            game.session_id.uid64, scid.uid.uid64, conn=db._db)
             if card_details and card_details[1]:
                 try:
                     instance_id = int(card_details[1])
@@ -905,8 +913,8 @@ class CardPlayMixin(_HostBase):
         # would overwrite the AI's persisted socket with 0.
         owner_is_player = True
         if scid is not None:
-            controller = _hc.db_card_owner_id(
-                game.session_id.uid64, scid.uid.uid64, conn=db._db)
+            controller = db_card_owner_id(
+            game.session_id.uid64, scid.uid.uid64, conn=db._db)
             owner_is_player = (
                 controller is None or
                 int(controller) == int(self.user_profile["id"]))
@@ -919,7 +927,7 @@ class CardPlayMixin(_HostBase):
                 arena = _hc.db_get_arena_state(
                     self.user_profile["id"], initialize=False)
                 deck_id = self._resolve_fra_deck_id(arena["deck_id"]) or 0
-                active_gems_json = _hc.db_deck_active_gems(deck_id, conn=db._db)
+                active_gems_json = db_deck_active_gems(deck_id, conn=db._db)
                 if active_gems_json:
                     try:
                         gems = json.loads(active_gems_json)
@@ -1296,7 +1304,7 @@ class CardPlayMixin(_HostBase):
 
         def reject(reason):
             log_req(f"    Card play reject: "
-                f"card={_hc.card_label(session.session_id, card_uid)} "
+                f"card={card_label(session.session_id, card_uid)} "
                 f"kind={kind or '-'} reason={reason}")
             return False
 
@@ -1904,9 +1912,9 @@ class CardPlayMixin(_HostBase):
                             if hasattr(filt, "to_dict"):
                                 filt = filt.to_dict()
                             if not filt:
-                                others = [r[0] for r in _hc.db_card_uids_in_zone(
-                                    session.session_id, self.user_profile["id"],
-                                    "warzone", conn=db._db)]
+                                others = [r[0] for r in db_card_uids_in_zone(
+                                session.session_id, self.user_profile["id"],
+                                "warzone", conn=db._db)]
                         tgt = game._make_event(game_engine.TargetInstanceSessionEventArgs)
                         tgt.target_index = i
                         tgt.target_id = game_engine.ResourceId.from_str(tid)
@@ -1953,9 +1961,9 @@ class CardPlayMixin(_HostBase):
                     child_ability, discard_target = discard_prompt
                     hand = [
                         game_engine.SessionCardId(game_engine.UID(int(uid)))
-                        for (uid,) in _hc.db_card_uids_in_zone(
-                            session.session_id, self.user_profile["id"],
-                            "hand", conn=db._db)]
+                        for (uid,) in db_card_uids_in_zone(
+                        session.session_id, self.user_profile["id"],
+                        "hand", conn=db._db)]
                     if hand:
                         child = game._make_event(
                             game_engine.OptionInstanceSessionEventArgs)

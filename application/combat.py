@@ -10,6 +10,13 @@ from encoder import encode_datawrapper
 from encoder import compress_gzip
 from application.practice_flow import _same_uid
 import campaign
+from domain.uids import SERVICE_MAIL_UID
+from encoder import encode_sync_event
+from domain.uids import UID_TYPE
+from domain.uids import SERVICE_GAME_SESSION_UID
+from pvp_db import db_card_owner_id
+from pvp_db import db_card_zone_details
+from pvp_db import db_card_sacrifice_info
 
 
 def discarding_player(bstate, ability_controller):
@@ -246,8 +253,8 @@ class CombatMixin(_HostBase):
                 raw_sid = getattr(getattr(sid, "uid", sid), "uid64", sid)
                 if raw_sid is None:
                     continue
-                owner_id = _hc.db_card_owner_id(
-                    session.session_id, int(raw_sid), conn=db._db)
+                owner_id = db_card_owner_id(
+                session.session_id, int(raw_sid), conn=db._db)
                 if owner_id is None:
                     continue
                 projected_owner = owner_uid(owner_id, game.player_uid,
@@ -271,13 +278,13 @@ class CombatMixin(_HostBase):
                 if type(e).__name__ == "TurnPhaseUpdatedSessionEventArgs" else "")
             for e in batch))
             pkt = game.make_network_packet(pl_t)
-            dw = encode_datawrapper(0, 3055, compress_gzip(_hc.encode_sync_event(pkt)), 1,
+            dw = encode_datawrapper(0, 3055, compress_gzip(encode_sync_event(pkt)), 1,
                                 "00000000-0000-0000-0000-000000000000")
             self._game_scnt = max(self._game_scnt, self.scnt) + 1
             self.scnt = self._game_scnt
             gs_inst = str(session.server_id)
             self.send({
-                "issuer": f"0.0.0.0.ServiceGameSession.{_hc.SERVICE_GAME_SESSION_UID}.{session.session_id}.{self.scnt}",
+                "issuer": f"0.0.0.0.ServiceGameSession.{SERVICE_GAME_SESSION_UID}.{session.session_id}.{self.scnt}",
                 "target": "ServiceGameSession", "instance": gs_inst,
                 "reqid": 0, "c": 0, "conh": 0, "sid": self.sid,
             }, dw)
@@ -523,8 +530,8 @@ class CombatMixin(_HostBase):
             if not (attrs & game_engine.ECardAttributes.Steadfast):
                 state_bits |= game_engine.ECardStates.Tapped
             _hc.db_card_set_attacking_state(session.session_id, u, state_bits)
-            card_details = _hc.db_card_zone_details(
-                session.session_id, u, conn=db._db)
+            card_details = db_card_zone_details(
+            session.session_id, u, conn=db._db)
             tpl_guid = card_details[0] if card_details else None
             self._card_full_data(game, scid, tpl_guid)
             pushed_state = db_card_state_raw(session.session_id, u) or state_bits
@@ -661,11 +668,11 @@ class CombatMixin(_HostBase):
             winners=winners, losers=losers)
         if prepared is not None:
             campaign.publish_fra_battle_gameend(
-                self, prepared, _hc.SERVICE_MAIL_UID)
+                self, prepared, SERVICE_MAIL_UID)
         else:
             campaign.handle_battle_gameend(
-                self, db._db, session, won, _hc.SERVICE_MAIL_UID,
-                _hc.UID_TYPE["ServiceCampaign"])
+                self, db._db, session, won, SERVICE_MAIL_UID,
+                UID_TYPE["ServiceCampaign"])
         return prepared
 
     def _check_champion_health(self, session, pl_t, ai_t, bstate):
@@ -940,8 +947,8 @@ class CombatMixin(_HostBase):
         # activating player.  Re-check the authoritative row immediately
         # before mutating it: a stale TargetMap or a cross-player UID must
         # never move an opponent's permanent into the wrong graveyard.
-        card_row = _hc.db_card_sacrifice_info(
-            session.session_id, int(card_uid), conn=db._db)
+        card_row = db_card_sacrifice_info(
+        session.session_id, int(card_uid), conn=db._db)
         if not card_row:
             log_req(f"    Sacrifice rejected missing card {int(card_uid)}")
             return False
@@ -1174,8 +1181,8 @@ class CombatMixin(_HostBase):
             if not blocker_values:
                 continue
             for blocker_uid in blocker_values:
-                blocker_owner = _hc.db_card_owner_id(
-                    session.session_id, blocker_uid, conn=db._db)
+                blocker_owner = db_card_owner_id(
+                session.session_id, blocker_uid, conn=db._db)
                 self._dispatch_native_trigger(
                     game, session, pl_t, ai_t, bstate, "CardBlockedEvent",
                     blocker_uid, blocker_owner, target_card_id=attacker_uid)
@@ -1186,4 +1193,4 @@ class CombatMixin(_HostBase):
             self._dispatch_native_trigger(
                 game, session, pl_t, ai_t, bstate, "CardWasBlockedEvent",
                 attacker_uid,
-                _hc.db_card_owner_id(session.session_id, attacker_uid, conn=db._db))
+                db_card_owner_id(session.session_id, attacker_uid, conn=db._db))

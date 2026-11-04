@@ -13,6 +13,7 @@ from application.commands import (ClaimMailCommand, DeleteMailCommand,
                                   MarkMailReadCommand)
 from encoder import encode_objfmt_response, compress_gzip, encode_datawrapper
 from objfmt_builder import ObjFmtBuilder
+from domain.uids import SERVICE_MAIL_UID
 
 
 def _send_response(handler, data_type, resp_inner, comp, session_id,
@@ -552,7 +553,7 @@ def _ping_mail_server(handler, target, instance, data_type, reqid, comp, session
     resp_body = compress_gzip(resp_inner) if comp else resp_inner
     resp_reqid = reqid | 1
     dw_bytes = encode_datawrapper(resp_reqid, data_type, resp_body, comp, session_id)
-    issuer_str = f"0.0.0.0.ServiceMail.{_hc.SERVICE_MAIL_UID}.ServicePlayer.{handler.client_uid}.{resp_reqid}"
+    issuer_str = f"0.0.0.0.ServiceMail.{SERVICE_MAIL_UID}.ServicePlayer.{handler.client_uid}.{resp_reqid}"
     handler.scnt += 1
     handler.send({
         "issuer": issuer_str,

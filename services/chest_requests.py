@@ -12,6 +12,10 @@ import db
 from encoder import encode_datawrapper
 from encoder import compress_gzip
 from encoder import encode_objfmt_response
+from domain.uids import SERVICE_PROFILE_UID
+from db import STARDUST_TEMPLATES
+from profile_db import db_inventory_item
+from profile_db import db_insert_card_instance
 
 
 def handle_chest_spinning_2049(handler, target, instance, data_type, reqid, comp, session_id,
@@ -58,7 +62,7 @@ def handle_chest_spinning_2049(handler, target, instance, data_type, reqid, comp
     resp_body = compress_gzip(resp_inner) if comp else resp_inner
     resp_reqid = reqid | 1
     dw_bytes = encode_datawrapper(resp_reqid, data_type, resp_body, comp, session_id)
-    issuer_str = f"0.0.0.0.ServiceProfile.{_hc.SERVICE_PROFILE_UID}.ServicePlayer.{handler.client_uid}.{resp_reqid}"
+    issuer_str = f"0.0.0.0.ServiceProfile.{SERVICE_PROFILE_UID}.ServicePlayer.{handler.client_uid}.{resp_reqid}"
     handler.scnt += 1
     handler.send({
         "issuer": issuer_str, "target": target, "instance": instance,
@@ -112,8 +116,8 @@ def handle_opencardpack_2127(handler, target, instance, data_type, reqid, comp, 
     pack_error = None
     pack_error_code = 0
     if handler.user_profile:
-        existing = _hc.db_inventory_item(
-            handler.user_profile["id"], pack_guid, conn=db._db)
+        existing = db_inventory_item(
+        handler.user_profile["id"], pack_guid, conn=db._db)
         if not existing or existing[1] < open_amount:
             pack_error = "NotEnoughInventory"
             pack_error_code = 5
@@ -150,7 +154,7 @@ def handle_opencardpack_2127(handler, target, instance, data_type, reqid, comp, 
                     (guid, "equipment")
                     for guid in reward.equipment_guids)
                 pack_inventory_rewards.extend(
-                    (_hc.STARDUST_TEMPLATES[rarity.lower()], "stardust")
+                    (STARDUST_TEMPLATES[rarity.lower()], "stardust")
                     for rarity in reward.stardust_rarities)
                 log_req(
                 f"    Campaign pack: {len(all_cards)} cards, "
@@ -208,8 +212,8 @@ def handle_opencardpack_2127(handler, target, instance, data_type, reqid, comp, 
         new_card_data = []
         for i, (guid, name, cost, atk, def_) in enumerate(all_cards):
             cid = next_id + i
-            _hc.db_insert_card_instance(
-                handler.user_profile["id"], cid, guid, conn=db._db)
+            db_insert_card_instance(
+            handler.user_profile["id"], cid, guid, conn=db._db)
             new_card_data.append((guid, name, cost, atk, def_, cid, 0))
             card_instance_ids[i] = cid  # Update for response encoding
         db._db.commit()
@@ -286,7 +290,7 @@ def handle_opencardpack_2127(handler, target, instance, data_type, reqid, comp, 
     resp_body = compress_gzip(resp_inner) if comp else resp_inner
     resp_reqid = reqid | 1
     dw_bytes = encode_datawrapper(resp_reqid, data_type, resp_body, comp, session_id)
-    issuer_str = f"0.0.0.0.ServiceProfile.{_hc.SERVICE_PROFILE_UID}.ServicePlayer.{handler.client_uid}.{resp_reqid}"
+    issuer_str = f"0.0.0.0.ServiceProfile.{SERVICE_PROFILE_UID}.ServicePlayer.{handler.client_uid}.{resp_reqid}"
     handler.scnt += 1
     handler.send({
         "issuer": issuer_str, "target": target, "instance": instance,
@@ -355,7 +359,7 @@ def handle_reserved_for_chests_with_a_2129(handler, target, instance, data_type,
     dw_bytes = encode_datawrapper(
     resp_reqid, data_type, resp_body, comp, session_id)
     issuer_str = (
-        f"0.0.0.0.ServiceProfile.{_hc.SERVICE_PROFILE_UID}."
+        f"0.0.0.0.ServiceProfile.{SERVICE_PROFILE_UID}."
         f"ServicePlayer.{handler.client_uid}.{resp_reqid}")
     handler.scnt += 1
     handler.send({

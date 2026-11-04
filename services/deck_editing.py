@@ -14,6 +14,11 @@ import db
 from encoder import encode_datawrapper
 from encoder import compress_gzip
 from encoder import encode_objfmt_response
+from domain.uids import SERVICE_PROFILE_UID
+from db import STARDUST_TEMPLATES
+from profile_db import db_set_champion_last_deck
+from profile_db import db_inventory_item
+from profile_db import db_insert_card_instance
 
 
 # CreateNewDeckFromTemplate (2091)
@@ -40,7 +45,7 @@ def handle_createnewdeckfromtemplate_2091(handler, target, instance, data_type, 
     resp_body = compress_gzip(resp_inner) if comp else resp_inner
     resp_reqid = reqid | 1
     dw_bytes = encode_datawrapper(resp_reqid, data_type, resp_body, comp, session_id)
-    issuer_str = f"0.0.0.0.ServiceProfile.{_hc.SERVICE_PROFILE_UID}.ServicePlayer.{handler.client_uid}.{resp_reqid}"
+    issuer_str = f"0.0.0.0.ServiceProfile.{SERVICE_PROFILE_UID}.ServicePlayer.{handler.client_uid}.{resp_reqid}"
     handler.scnt += 1
     handler.send({
         "issuer": issuer_str, "target": target, "instance": instance,
@@ -159,7 +164,7 @@ def handle_addnewdeck_2089(handler, target, instance, data_type, reqid, comp, se
         err_body = compress_gzip(err_inner) if comp else err_inner
         err_reqid = reqid | 1
         dw_err = encode_datawrapper(err_reqid, data_type, err_body, comp, session_id)
-        issuer_err = f"0.0.0.0.ServiceProfile.{_hc.SERVICE_PROFILE_UID}.ServicePlayer.{handler.client_uid}.{err_reqid}"
+        issuer_err = f"0.0.0.0.ServiceProfile.{SERVICE_PROFILE_UID}.ServicePlayer.{handler.client_uid}.{err_reqid}"
         handler.scnt += 1
         handler.send({
             "issuer": issuer_err, "target": target, "instance": instance,
@@ -209,8 +214,8 @@ def handle_addnewdeck_2089(handler, target, instance, data_type, reqid, comp, se
     # the champion UID = (db_id << 8) | 12).
     if pve_champion_uid:
         champ_db_id = pve_champion_uid >> 8
-        _hc.db_set_champion_last_deck(
-            champ_db_id, deck_db_id, conn=db._db)
+        db_set_champion_last_deck(
+        champ_db_id, deck_db_id, conn=db._db)
         log_req(f"    Set champion {champ_db_id} last_deck_id={deck_db_id}")
     deck_uid64 = (deck_uid << 8) | 17  # UID.Type.Deck=17
     # Build deck_bits manually with all 23 fields (skip ActiveGems)
@@ -333,7 +338,7 @@ def handle_addnewdeck_2089(handler, target, instance, data_type, reqid, comp, se
     resp_body = compress_gzip(resp_inner) if comp else resp_inner
     resp_reqid = reqid | 1
     dw_bytes = encode_datawrapper(resp_reqid, data_type, resp_body, comp, session_id)
-    issuer_str = f"0.0.0.0.ServiceProfile.{_hc.SERVICE_PROFILE_UID}.ServicePlayer.{handler.client_uid}.{resp_reqid}"
+    issuer_str = f"0.0.0.0.ServiceProfile.{SERVICE_PROFILE_UID}.ServicePlayer.{handler.client_uid}.{resp_reqid}"
     handler.scnt += 1
     handler.send({
         "issuer": issuer_str, "target": target, "instance": instance,
@@ -480,8 +485,8 @@ def handle_updatedeck_2095(handler, target, instance, data_type, reqid, comp, se
         # is the champion UID = (db_id << 8) | 12).
         if pve_champion_id:
             champ_db_id = pve_champion_id >> 8
-            _hc.db_set_champion_last_deck(
-                champ_db_id, deck_id, conn=db._db)
+            db_set_champion_last_deck(
+            champ_db_id, deck_id, conn=db._db)
             log_req(f"    Set champion {champ_db_id} last_deck_id={deck_id}")
 
     # Only report a real deck UID; on failure return invalid (updated=False
@@ -496,7 +501,7 @@ def handle_updatedeck_2095(handler, target, instance, data_type, reqid, comp, se
     resp_body = compress_gzip(resp_inner) if comp else resp_inner
     resp_reqid = reqid | 1
     dw_bytes = encode_datawrapper(resp_reqid, data_type, resp_body, comp, session_id)
-    issuer_str = f"0.0.0.0.ServiceProfile.{_hc.SERVICE_PROFILE_UID}.ServicePlayer.{handler.client_uid}.{resp_reqid}"
+    issuer_str = f"0.0.0.0.ServiceProfile.{SERVICE_PROFILE_UID}.ServicePlayer.{handler.client_uid}.{resp_reqid}"
     handler.scnt += 1
     handler.send({"issuer": issuer_str, "target": target, "instance": instance,
         "reqid": resp_reqid, "c": comp, "conh": conh, "sid": handler.sid}, dw_bytes)
@@ -584,7 +589,7 @@ def handle_getplayercardidlist_2043(handler, target, instance, data_type, reqid,
     resp_body = compress_gzip(resp_inner) if comp else resp_inner
     resp_reqid = reqid | 1
     dw_bytes = encode_datawrapper(resp_reqid, data_type, resp_body, comp, session_id)
-    issuer_str = f"0.0.0.0.ServiceProfile.{_hc.SERVICE_PROFILE_UID}.ServicePlayer.{handler.client_uid}.{resp_reqid}"
+    issuer_str = f"0.0.0.0.ServiceProfile.{SERVICE_PROFILE_UID}.ServicePlayer.{handler.client_uid}.{resp_reqid}"
     handler.scnt += 1
     handler.send({"issuer": issuer_str, "target": target, "instance": instance,
         "reqid": resp_reqid, "c": comp, "conh": conh, "sid": handler.sid}, dw_bytes)
@@ -646,7 +651,7 @@ def handle_deletechampion_2035(handler, target, instance, data_type, reqid, comp
     resp_body = compress_gzip(resp_inner) if comp else resp_inner
     resp_reqid = reqid | 1
     dw_bytes = encode_datawrapper(resp_reqid, data_type, resp_body, comp, session_id)
-    issuer_str = f"0.0.0.0.ServiceProfile.{_hc.SERVICE_PROFILE_UID}.ServicePlayer.{handler.client_uid}.{resp_reqid}"
+    issuer_str = f"0.0.0.0.ServiceProfile.{SERVICE_PROFILE_UID}.ServicePlayer.{handler.client_uid}.{resp_reqid}"
     handler.scnt += 1
     handler.send({
         "issuer": issuer_str, "target": target, "instance": instance,
@@ -723,9 +728,9 @@ def handle_addchampion_2033(handler, target, instance, data_type, reqid, comp, s
                     handler.user_profile["id"], conn=db._db)
                 for card_guid, count in deck["cards"]:
                     for _ in range(count):
-                        _hc.db_insert_card_instance(
-                            handler.user_profile["id"], cid, card_guid,
-                            conn=db._db)
+                        db_insert_card_instance(
+                        handler.user_profile["id"], cid, card_guid,
+                        conn=db._db)
                         cid += 1
                 # Record as a free grant in store_purchases
                 if pve_template_guid:
@@ -750,8 +755,8 @@ def handle_addchampion_2033(handler, target, instance, data_type, reqid, comp, s
                 f"{champ_name}'s {race_name} Deck",
                 cards_json,
                 pve_champion_id=champ_db_id)
-            _hc.db_set_champion_last_deck(
-                champ_db_id, deck_db_id, conn=db._db)
+            db_set_champion_last_deck(
+            champ_db_id, deck_db_id, conn=db._db)
             log_req(f"    Auto-created deck id={deck_db_id} for champion {champ_db_id}")
     else:
         champ_db_id = 1
@@ -887,7 +892,7 @@ def handle_addchampion_2033(handler, target, instance, data_type, reqid, comp, s
     resp_body = compress_gzip(resp_inner) if comp else resp_inner
     resp_reqid = reqid | 1
     dw_bytes = encode_datawrapper(resp_reqid, data_type, resp_body, comp, session_id)
-    issuer_str = f"0.0.0.0.ServiceProfile.{_hc.SERVICE_PROFILE_UID}.ServicePlayer.{handler.client_uid}.{resp_reqid}"
+    issuer_str = f"0.0.0.0.ServiceProfile.{SERVICE_PROFILE_UID}.ServicePlayer.{handler.client_uid}.{resp_reqid}"
     handler.scnt += 1
     handler.send({
         "issuer": issuer_str, "target": target, "instance": instance,
@@ -934,8 +939,8 @@ def handle_updatechampiondeckid_2187(handler, target, instance, data_type, reqid
     champ_db_id = champ_uid >> 8 if champ_uid > 0xff else champ_uid
     log_req(f"    ChampionID={champ_uid} (db={champ_db_id}) LastDeckID={deck_id}")
     if handler.user_profile and champ_db_id > 0:
-        _hc.db_set_champion_last_deck(
-            champ_db_id, deck_id, handler.user_profile["id"], conn=db._db)
+        db_set_champion_last_deck(
+        champ_db_id, deck_id, handler.user_profile["id"], conn=db._db)
         log_req(f"    Updated champion {champ_db_id} last_deck_id={deck_id}")
     # Return success response with Error=Ok
     resp_inner = encode_objfmt_response(
@@ -945,7 +950,7 @@ def handle_updatechampiondeckid_2187(handler, target, instance, data_type, reqid
     resp_body = compress_gzip(resp_inner) if comp else resp_inner
     resp_reqid = reqid | 1
     dw_bytes = encode_datawrapper(resp_reqid, data_type, resp_body, comp, session_id)
-    issuer_str = f"0.0.0.0.ServiceProfile.{_hc.SERVICE_PROFILE_UID}.ServicePlayer.{handler.client_uid}.{resp_reqid}"
+    issuer_str = f"0.0.0.0.ServiceProfile.{SERVICE_PROFILE_UID}.ServicePlayer.{handler.client_uid}.{resp_reqid}"
     handler.scnt += 1
     handler.send({"issuer": issuer_str, "target": target, "instance": instance,
         "reqid": resp_reqid, "c": comp, "conh": conh, "sid": handler.sid}, dw_bytes)
@@ -1103,7 +1108,7 @@ def handle_updatechampiontalents_2037(handler, target, instance, data_type, reqi
     resp_body = compress_gzip(resp_inner) if comp else resp_inner
     resp_reqid = reqid | 1
     dw_bytes = encode_datawrapper(resp_reqid, data_type, resp_body, comp, session_id)
-    issuer_str = f"0.0.0.0.ServiceProfile.{_hc.SERVICE_PROFILE_UID}.ServicePlayer.{handler.client_uid}.{resp_reqid}"
+    issuer_str = f"0.0.0.0.ServiceProfile.{SERVICE_PROFILE_UID}.ServicePlayer.{handler.client_uid}.{resp_reqid}"
     handler.scnt += 1
     handler.send({"issuer": issuer_str, "target": target, "instance": instance,
         "reqid": resp_reqid, "c": comp, "conh": conh, "sid": handler.sid}, dw_bytes)
@@ -1135,8 +1140,8 @@ def _spend_extended_art_stardust(handler, user_id, card_rarity):
     key = _EXTENDED_ART_STARDUST_KEY.get(str(card_rarity or ""))
     if key is None:
         return None
-    template_guid = _hc.STARDUST_TEMPLATES[key]
-    row = _hc.db_inventory_item(user_id, template_guid, conn=db._db)
+    template_guid = STARDUST_TEMPLATES[key]
+    row = db_inventory_item(user_id, template_guid, conn=db._db)
     if not row or int(row[1] or 0) < 1:
         return None
     client_uid = int(row[2] or 0)
@@ -1187,7 +1192,7 @@ def handle_upgradeextendedartoncard_2185(handler, target, instance, data_type, r
     resp_body = compress_gzip(resp_inner) if comp else resp_inner
     resp_reqid = reqid | 1
     dw_bytes = encode_datawrapper(resp_reqid, data_type, resp_body, comp, session_id)
-    issuer_str = f"0.0.0.0.ServiceProfile.{_hc.SERVICE_PROFILE_UID}.ServicePlayer.{handler.client_uid}.{resp_reqid}"
+    issuer_str = f"0.0.0.0.ServiceProfile.{SERVICE_PROFILE_UID}.ServicePlayer.{handler.client_uid}.{resp_reqid}"
     handler.scnt += 1
     handler.send({
         "issuer": issuer_str, "target": target, "instance": instance,

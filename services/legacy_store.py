@@ -2,6 +2,7 @@ from db import log_req
 from encoder import encode_datawrapper
 from encoder import compress_gzip
 from encoder import encode_objfmt_response
+from domain.uids import SERVICE_MAIL_UID
 """Store requests (item listing, redeem codes) still served by the legacy fallback.
 
 Moved out of hconnect_server.HCPHandler._handle_service_request_legacy.
@@ -18,7 +19,7 @@ def handle_getstoreitems_6009(handler, target, instance, data_type, reqid, comp,
     resp_body = compress_gzip(resp_inner) if comp else resp_inner
     resp_reqid = reqid | 1
     dw_bytes = encode_datawrapper(resp_reqid, data_type, resp_body, comp, session_id)
-    issuer_str = f"0.0.0.0.ServiceEscrow.{_hc.SERVICE_MAIL_UID}.ServicePlayer.{handler.client_uid}.{resp_reqid}"
+    issuer_str = f"0.0.0.0.ServiceEscrow.{SERVICE_MAIL_UID}.ServicePlayer.{handler.client_uid}.{resp_reqid}"
     handler.scnt += 1
     handler.send({
         "issuer": issuer_str,
@@ -63,7 +64,7 @@ def handle_redeemcode_6013(handler, target, instance, data_type, reqid, comp, se
         resp_body = compress_gzip(resp_inner) if comp else resp_inner
         resp_reqid = reqid | 1
         dw_bytes = encode_datawrapper(resp_reqid, data_type, resp_body, comp, session_id)
-        issuer_str = f"0.0.0.0.ServiceEscrow.{_hc.SERVICE_MAIL_UID}.ServicePlayer.{handler.client_uid}.{resp_reqid}"
+        issuer_str = f"0.0.0.0.ServiceEscrow.{SERVICE_MAIL_UID}.ServicePlayer.{handler.client_uid}.{resp_reqid}"
         handler.scnt += 1
         handler.send({
             "issuer": issuer_str, "target": target, "instance": instance,
@@ -119,7 +120,7 @@ def handle_redeemcode_6013(handler, target, instance, data_type, reqid, comp, se
         resp_body = compress_gzip(resp_inner) if comp else resp_inner
         resp_reqid = reqid | 1
         dw_bytes = encode_datawrapper(resp_reqid, data_type, resp_body, comp, session_id)
-        issuer_str = f"0.0.0.0.ServiceEscrow.{_hc.SERVICE_MAIL_UID}.ServicePlayer.{handler.client_uid}.{resp_reqid}"
+        issuer_str = f"0.0.0.0.ServiceEscrow.{SERVICE_MAIL_UID}.ServicePlayer.{handler.client_uid}.{resp_reqid}"
         handler.scnt += 1
         handler.send_and_cache({
             "issuer": issuer_str, "target": target, "instance": instance,

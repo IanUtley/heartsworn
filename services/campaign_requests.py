@@ -10,6 +10,9 @@ from encoder import encode_datawrapper
 from encoder import compress_gzip
 from encoder import encode_objfmt_response
 import campaign
+from domain.uids import SERVICE_MAIL_UID
+from domain.uids import SERVICE_PROFILE_UID
+from domain.uids import UID_TYPE
 
 
 # ServiceCampaign Siege (150000)
@@ -31,7 +34,7 @@ def handle_servicecampaign_siege_150000(handler, target, instance, data_type, re
     resp_body = compress_gzip(resp_inner) if comp else resp_inner
     resp_reqid = reqid | 1
     dw_bytes = encode_datawrapper(resp_reqid, data_type, resp_body, comp, session_id)
-    issuer_str = f"0.0.0.0.ServiceCampaign.{_hc.SERVICE_MAIL_UID}.ServicePlayer.{handler.client_uid}.{resp_reqid}"
+    issuer_str = f"0.0.0.0.ServiceCampaign.{SERVICE_MAIL_UID}.ServicePlayer.{handler.client_uid}.{resp_reqid}"
     handler.scnt += 1
     handler.send({
         "issuer": issuer_str,
@@ -52,7 +55,7 @@ def handle_campaign_adventure_system_110000(handler, target, instance, data_type
     campaign.handle_campaign_request(handler, db._db, inner_obj, comp,
                                        session_id, reqid,
                                        target, instance, conh,
-                                       _hc.SERVICE_MAIL_UID)
+                                       SERVICE_MAIL_UID)
 
 
 # Cluster pick (140000) — resolve service UIDs
@@ -62,10 +65,10 @@ def handle_resolve_service_uids_140000(handler, target, instance, data_type, req
     log_req(f">>> Cluster pick (dt=140000) target={target}")
     # UID format in C#: [FieldOffset(0)] public ulong m_UID64 = type | (instance << 8)
     if target == "ServiceCampaign":
-        service_uid = _hc.UID_TYPE["ServiceCampaign"]  # 253
+        service_uid = UID_TYPE["ServiceCampaign"]  # 253
         log_req(f"    Returning ServiceCampaign UID: {service_uid}")
     else:
-        service_uid = _hc.UID_TYPE["ServiceGameSession"]  # 246
+        service_uid = UID_TYPE["ServiceGameSession"]  # 246
         log_req(f"    Returning ServiceGameSession UID: {service_uid}")
     env_json = json.dumps({"Kind": "pickres", "ServiceID": {"m_UID64": service_uid}})
     resp_inner = encode_objfmt_response(
@@ -74,7 +77,7 @@ def handle_resolve_service_uids_140000(handler, target, instance, data_type, req
     resp_body = compress_gzip(resp_inner) if comp else resp_inner
     resp_reqid = reqid | 1
     dw_bytes = encode_datawrapper(resp_reqid, data_type, resp_body, comp, session_id)
-    issuer_str = f"0.0.0.0.ServiceProfile.{_hc.SERVICE_PROFILE_UID}.ServicePlayer.{handler.client_uid}.{resp_reqid}"
+    issuer_str = f"0.0.0.0.ServiceProfile.{SERVICE_PROFILE_UID}.ServicePlayer.{handler.client_uid}.{resp_reqid}"
     handler.scnt += 1
     handler.send({"issuer": issuer_str, "target": target, "instance": instance,
         "reqid": resp_reqid, "c": comp, "conh": conh, "sid": handler.sid}, dw_bytes)

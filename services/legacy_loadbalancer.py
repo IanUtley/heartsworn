@@ -16,6 +16,19 @@ from encoder import encode_datawrapper
 from encoder import compress_gzip
 from encoder import encode_objfmt_response
 import campaign
+from domain.uids import SERVICE_MAIL_UID
+from encoder import encode_sync_event
+from domain.uids import UID_TYPE
+from domain.uids import SERVICE_GAME_SESSION_UID
+from domain.uids import make_uid
+from pvp_db import db_ability_effect_rows
+from tournament_db import db_tournament_room_for_game
+from gamemodes.fra_arena import _fra_arena_setup_values
+from pvp_db import db_deck_active_gems
+from profile_db import db_insert_card_instance
+from gamemodes.fra_arena import _fra_arena_session_state_data
+from domain.constants import SERVICE_AI_UID_TYPE
+from pvp_db import db_template_ability_guids
 
 
 # ServiceLoadBalancer — QuitOnReconnectionGame (22011)
@@ -33,8 +46,8 @@ def handle_quitonreconnectiongame_22011(handler, target, instance, data_type, re
             from services.tournament_game import (
                 pvp_load_state, pvp_save_state, pvp_session_lock,
             )
-            fra_setup = _hc._fra_arena_setup_values(
-                getattr(reconnect_session, "encounter_data", None))
+            fra_setup = _fra_arena_setup_values(
+            getattr(reconnect_session, "encounter_data", None))
             if getattr(reconnect_session, "state", "") == "ended":
                 log_req(
                 f">>> QuitOnReconnectionGame: ignored ended session "
@@ -92,8 +105,8 @@ def handle_tryreconnectiontodisconnectedgame_22013(handler, target, instance, da
     if probe_id not in probe_ids:
         probe_ids.add(probe_id)
     fra_arena_screen_probe = len(probe_ids) > 1
-    fra_setup = (_hc._fra_arena_setup_values(
-        getattr(reconnect_session, "encounter_data", None))
+    fra_setup = (_fra_arena_setup_values(
+    getattr(reconnect_session, "encounter_data", None))
         if reconnect_session else None)
     saved_battle_state = (getattr(reconnect_session, "turn_order", None)
                           if reconnect_session else None)
@@ -150,7 +163,7 @@ def handle_tryreconnectiontodisconnectedgame_22013(handler, target, instance, da
         if is_fra_reconnect:
             reconnect_flags = int(fra_setup["flags"])
             reconnect_encounter_data = \
-                _hc._fra_arena_session_state_data(fra_setup)[1]
+                _fra_arena_session_state_data(fra_setup)[1]
         elif is_campaign_reconnect:
             reconnect_encounter_data = _campaign_encounter_struct(reconnect_session)
         else:
@@ -159,8 +172,8 @@ def handle_tryreconnectiontodisconnectedgame_22013(handler, target, instance, da
                     reconnect_session.session_name)
             except (IndexError, ValueError):
                 tournament_id = 0
-            tournament_room = _hc.db_tournament_room_for_game(
-                tournament_id, conn=db._db)
+            tournament_room = db_tournament_room_for_game(
+            tournament_id, conn=db._db)
             reconnect_flags = _hc._tournament_session_flags({
                 "format": tournament_room.get("format", 0)
                 if tournament_room else 0
@@ -234,7 +247,7 @@ def handle_tryreconnectiontodisconnectedgame_22013(handler, target, instance, da
     resp_body = compress_gzip(resp_inner) if comp else resp_inner
     resp_reqid = reqid | 1
     dw_bytes = encode_datawrapper(resp_reqid, data_type, resp_body, comp, session_id)
-    issuer_str = f"0.0.0.0.ServiceLoadBalancer.{_hc.SERVICE_MAIL_UID}.ServicePlayer.{handler.client_uid}.{resp_reqid}"
+    issuer_str = f"0.0.0.0.ServiceLoadBalancer.{SERVICE_MAIL_UID}.ServicePlayer.{handler.client_uid}.{resp_reqid}"
     handler.scnt += 1
     handler.send({
         "issuer": issuer_str,
@@ -292,7 +305,7 @@ def _campaign_resume_session(player_pid):
 def handle_findsession_22019(handler, target, instance, data_type, reqid, comp, session_id,
                              conh, inner_obj, inner_bytes, raw_data_wrapper_bytes):
     import hconnect_server as _hc
-    player_uid = _hc.make_uid(_hc.UID_TYPE["ServicePlayer"], int(handler.client_reck_id))
+    player_uid = make_uid(UID_TYPE["ServicePlayer"], int(handler.client_reck_id))
     resume = _campaign_resume_session(int(handler.client_reck_id))
     if resume is not None:
         # A live campaign battle: the client joins it, rather than starting a new encounter.
@@ -326,7 +339,7 @@ def handle_findsession_22019(handler, target, instance, data_type, reqid, comp, 
     resp_body = compress_gzip(resp_inner) if comp else resp_inner
     resp_reqid = reqid | 1
     dw_bytes = encode_datawrapper(resp_reqid, data_type, resp_body, comp, session_id)
-    issuer_str = f"0.0.0.0.ServiceLoadBalancer.{_hc.SERVICE_MAIL_UID}.ServicePlayer.{handler.client_uid}.{resp_reqid}"
+    issuer_str = f"0.0.0.0.ServiceLoadBalancer.{SERVICE_MAIL_UID}.ServicePlayer.{handler.client_uid}.{resp_reqid}"
     handler.scnt += 1
     handler.send({
         "issuer": issuer_str,
@@ -345,7 +358,7 @@ def handle_startsession_22015(handler, target, instance, data_type, reqid, comp,
                               conh, inner_obj, inner_bytes, raw_data_wrapper_bytes):
     import hconnect_server as _hc
     log_req(">>> StartSession (dt=22015) -> creating session")
-    player_uid = _hc.make_uid(_hc.UID_TYPE["ServicePlayer"], int(handler.client_reck_id))
+    player_uid = make_uid(UID_TYPE["ServicePlayer"], int(handler.client_reck_id))
     session_name = inner_obj.get("SessionName", "session")
     session = handler._application.execute(_hc.StartSessionCommand(
         session_name=session_name,
@@ -373,7 +386,7 @@ def handle_startsession_22015(handler, target, instance, data_type, reqid, comp,
     resp_body = compress_gzip(resp_inner) if comp else resp_inner
     resp_reqid = reqid | 1
     dw_bytes = encode_datawrapper(resp_reqid, data_type, resp_body, comp, session_id)
-    issuer_str = f"0.0.0.0.ServiceLoadBalancer.{_hc.SERVICE_MAIL_UID}.ServicePlayer.{handler.client_uid}.{resp_reqid}"
+    issuer_str = f"0.0.0.0.ServiceLoadBalancer.{SERVICE_MAIL_UID}.ServicePlayer.{handler.client_uid}.{resp_reqid}"
     handler.scnt += 1
     handler.send({
         "issuer": issuer_str, "target": target, "instance": instance,
@@ -387,7 +400,7 @@ def handle_startencounter_22017(handler, target, instance, data_type, reqid, com
                                 conh, inner_obj, inner_bytes, raw_data_wrapper_bytes):
     import hconnect_server as _hc
     log_req(">>> Respond StartEncounter -> creating session")
-    player_uid = _hc.make_uid(_hc.UID_TYPE["ServicePlayer"], int(handler.client_reck_id))
+    player_uid = make_uid(UID_TYPE["ServicePlayer"], int(handler.client_reck_id))
     session_name = inner_obj.get("SessionName", "tutorial")
     encounter_data_raw = inner_obj.get("EncounterData", {})
     session = handler._application.execute(_hc.StartEncounterCommand(
@@ -405,7 +418,7 @@ def handle_startencounter_22017(handler, target, instance, data_type, reqid, com
     # that makes UIBattle fall back to an invalid (zero) EncounterDeck
     # and can leave the scene on the starfield.
     response_encounter_data = ("class", "Game.Shared.SessionStateEncounterData")
-    fra_setup = _hc._fra_arena_setup_values(encounter_data_raw)
+    fra_setup = _fra_arena_setup_values(encounter_data_raw)
     if str(session_name).startswith("camp_"):
         scene_guid = campaign._last_encounter_scene.get(str(session_name))
         if scene_guid:
@@ -432,8 +445,8 @@ def handle_startencounter_22017(handler, target, instance, data_type, reqid, com
         # registers that handler once; adding them here registered it
         # twice, so one conversation objective event produced two
         # identical rows in the battle challenge panel.
-        response_encounter_data = _hc._fra_arena_session_state_data(
-            fra_setup, flags=0)
+        response_encounter_data = _fra_arena_session_state_data(
+        fra_setup, flags=0)
 
     resp_inner = encode_objfmt_response(
     ["Game.Shared.Network.LoadBalancer.StartEncounterResponseArgs",
@@ -459,7 +472,7 @@ def handle_startencounter_22017(handler, target, instance, data_type, reqid, com
     resp_body = compress_gzip(resp_inner) if comp else resp_inner
     resp_reqid = reqid | 1
     dw_bytes = encode_datawrapper(resp_reqid, data_type, resp_body, comp, session_id)
-    issuer_str = f"0.0.0.0.ServiceLoadBalancer.{_hc.SERVICE_MAIL_UID}.ServicePlayer.{handler.client_uid}.{resp_reqid}"
+    issuer_str = f"0.0.0.0.ServiceLoadBalancer.{SERVICE_MAIL_UID}.ServicePlayer.{handler.client_uid}.{resp_reqid}"
     handler.scnt += 1
     handler.send({
         "issuer": issuer_str,
@@ -478,7 +491,7 @@ def handle_joinsession_22021(handler, target, instance, data_type, reqid, comp, 
                              conh, inner_obj, inner_bytes, raw_data_wrapper_bytes):
     import hconnect_server as _hc
     log_req(">>> JoinSession (dt=22021)")
-    player_uid = _hc.make_uid(_hc.UID_TYPE["ServicePlayer"], int(handler.client_reck_id))
+    player_uid = make_uid(UID_TYPE["ServicePlayer"], int(handler.client_reck_id))
     # JoinSession carries the client's phase-stop preferences.  Keep
     # them for the first battle checkpoint; previously only a later
     # SetTurnPhasesTransaction populated the RulesPort state, so the
@@ -558,7 +571,7 @@ def handle_joinsession_22021(handler, target, instance, data_type, reqid, comp, 
     resp_body = compress_gzip(resp_inner) if comp else resp_inner
     resp_reqid = reqid | 1
     dw_bytes = encode_datawrapper(resp_reqid, data_type, resp_body, comp, session_id)
-    issuer_str = f"0.0.0.0.ServiceLoadBalancer.{_hc.SERVICE_MAIL_UID}.ServicePlayer.{handler.client_uid}.{resp_reqid}"
+    issuer_str = f"0.0.0.0.ServiceLoadBalancer.{SERVICE_MAIL_UID}.ServicePlayer.{handler.client_uid}.{resp_reqid}"
     handler.scnt += 1
     handler.send({
         "issuer": issuer_str, "target": target, "instance": instance,
@@ -572,7 +585,7 @@ def handle_readyforgameevents_22029(handler, target, instance, data_type, reqid,
                                     conh, inner_obj, inner_bytes, raw_data_wrapper_bytes):
     import hconnect_server as _hc
     log_req(">>> ReadyForGameEvents (dt=22029)")
-    player_uid = _hc.make_uid(_hc.UID_TYPE["ServicePlayer"], int(handler.client_reck_id))
+    player_uid = make_uid(UID_TYPE["ServicePlayer"], int(handler.client_reck_id))
     session = _hc.game_session.find_session_by_player(player_uid)
     # Tournament sessions
     if session and (session.session_name or "").startswith("tourney-"):
@@ -608,16 +621,16 @@ def handle_readyforgamesetup_22027(handler, target, instance, data_type, reqid, 
                                    conh, inner_obj, inner_bytes, raw_data_wrapper_bytes):
     import hconnect_server as _hc
     log_req(">>> ReadyForGameSetup (dt=22027)")
-    player_uid = _hc.make_uid(_hc.UID_TYPE["ServicePlayer"], int(handler.client_reck_id))
-    _hc.make_uid(_hc.SERVICE_AI_UID_TYPE, 1000)
+    player_uid = make_uid(UID_TYPE["ServicePlayer"], int(handler.client_reck_id))
+    make_uid(SERVICE_AI_UID_TYPE, 1000)
     session = handler._application.execute(_hc.SetSessionStateCommand(
         player_uid=player_uid,
         state="setup",
     )).value
     if session:
-        fra_setup = _hc._fra_arena_setup_values(session.encounter_data)
+        fra_setup = _fra_arena_setup_values(session.encounter_data)
         setup_encounter_data = (
-            _hc._fra_arena_session_state_data(fra_setup)
+            _fra_arena_session_state_data(fra_setup)
             if fra_setup is not None else
             ("class", "Game.Shared.SessionStateEncounterData"))
         resp_inner = encode_objfmt_response(
@@ -691,7 +704,7 @@ def handle_readyforgamesetup_22027(handler, target, instance, data_type, reqid, 
     resp_body = compress_gzip(resp_inner) if comp else resp_inner
     resp_reqid = reqid | 1
     dw_bytes = encode_datawrapper(resp_reqid, data_type, resp_body, comp, session_id)
-    issuer_str = f"0.0.0.0.ServiceLoadBalancer.{_hc.SERVICE_MAIL_UID}.ServicePlayer.{handler.client_uid}.{resp_reqid}"
+    issuer_str = f"0.0.0.0.ServiceLoadBalancer.{SERVICE_MAIL_UID}.ServicePlayer.{handler.client_uid}.{resp_reqid}"
     handler.scnt += 1
     handler.send({
         "issuer": issuer_str, "target": target, "instance": instance,
@@ -704,7 +717,7 @@ def handle_readyforgamesetup_22027(handler, target, instance, data_type, reqid, 
 def handle_readytostartgame_22031(handler, target, instance, data_type, reqid, comp, session_id,
                                   conh, inner_obj, inner_bytes, raw_data_wrapper_bytes):
     import hconnect_server as _hc
-    player_uid = _hc.make_uid(_hc.UID_TYPE["ServicePlayer"], int(handler.client_reck_id))
+    player_uid = make_uid(UID_TYPE["ServicePlayer"], int(handler.client_reck_id))
     log_req(f"    Player UID: reck={handler.client_reck_id}, uid={player_uid:#x}")
     session = _hc.game_session.find_session_by_player(player_uid)
     if not session:
@@ -757,7 +770,7 @@ def handle_readytostartgame_22031(handler, target, instance, data_type, reqid, c
         rts_body = compress_gzip(rts_resp) if comp else rts_resp
         rts_dw = encode_datawrapper(reqid | 1, 22031, rts_body, comp and 1 or 0, "00000000-0000-0000-0000-000000000000")
         handler.send({
-            "issuer": f"0.0.0.0.ServiceLoadBalancer.{_hc.SERVICE_MAIL_UID}.ServicePlayer.{handler.client_uid}.{reqid | 1}",
+            "issuer": f"0.0.0.0.ServiceLoadBalancer.{SERVICE_MAIL_UID}.ServicePlayer.{handler.client_uid}.{reqid | 1}",
             "target": target, "instance": instance,
             "reqid": reqid | 1, "c": comp, "conh": conh, "sid": handler.sid,
         }, rts_dw)
@@ -803,7 +816,7 @@ def handle_readytostartgame_22031(handler, target, instance, data_type, reqid, c
     rts_body = compress_gzip(rts_resp) if comp else rts_resp
     rts_dw = encode_datawrapper(reqid | 1, 22031, rts_body, comp and 1 or 0, "00000000-0000-0000-0000-000000000000")
     handler.send({
-        "issuer": f"0.0.0.0.ServiceLoadBalancer.{_hc.SERVICE_MAIL_UID}.ServicePlayer.{handler.client_uid}.{reqid | 1}",
+        "issuer": f"0.0.0.0.ServiceLoadBalancer.{SERVICE_MAIL_UID}.ServicePlayer.{handler.client_uid}.{reqid | 1}",
         "target": target, "instance": instance,
         "reqid": reqid | 1, "c": comp, "conh": conh, "sid": handler.sid,
     }, rts_dw)
@@ -826,7 +839,7 @@ def handle_readytostartgame_22031(handler, target, instance, data_type, reqid, c
     rfg_w(""); rfg_sp(); rfg_w("0"); rfg_sp(); rfg_w(str(rfg_ft(rfg_types[0]))); rfg_sp(); rfg_w("9"); rfg_sp()
     # Fields in alphabetical order: DeckId, DeckTemplateId, OpponentsInfo, SessionState, TurnOrder, seedW, seedZ, Error, ErrorMessage
     pl_uid_val = (int(handler.client_reck_id) << 8) | 244  # ServicePlayer type
-    ai_uid_val = (1000 << 8) | _hc.SERVICE_AI_UID_TYPE  # ServiceAI
+    ai_uid_val = (1000 << 8) | SERVICE_AI_UID_TYPE  # ServiceAI
     
     # DeckId (UID.Invalid — client keeps its selected deck)
     fd = rfg_buf.tell(); rfg_sz.append(0)
@@ -877,7 +890,7 @@ def handle_readytostartgame_22031(handler, target, instance, data_type, reqid, c
     rfg_sz[fps_idx] = rfg_buf.tell()-fps
     rfg_sz[foi_idx] = rfg_buf.tell()-foi
     
-    rfg_fra_setup = _hc._fra_arena_setup_values(session.encounter_data)
+    rfg_fra_setup = _fra_arena_setup_values(session.encounter_data)
     if rfg_fra_setup is not None:
         log_req("    ReadyForGameSetup FRA data: "
             f"flags={rfg_fra_setup['flags']} "
@@ -1009,7 +1022,7 @@ def handle_readytostartgame_22031(handler, target, instance, data_type, reqid, c
     rfg_dw = encode_datawrapper(0, 22027, rfg_body, comp and 1 or 0, "00000000-0000-0000-0000-000000000000")
     handler.scnt += 1
     handler.send({
-        "issuer": f"0.0.0.0.ServiceLoadBalancer.{_hc.SERVICE_MAIL_UID}.ServicePlayer.{handler.client_uid}.{handler.scnt}",
+        "issuer": f"0.0.0.0.ServiceLoadBalancer.{SERVICE_MAIL_UID}.ServicePlayer.{handler.client_uid}.{handler.scnt}",
         "target": "ServiceLoadBalancer", "instance": "Shared",
         "reqid": 0, "c": 0, "conh": 0, "sid": handler.sid,
     }, rfg_dw)
@@ -1029,7 +1042,7 @@ def handle_readytostartgame_22031(handler, target, instance, data_type, reqid, c
     gs_dw = encode_datawrapper(0, 3053, gs_body, 1, "00000000-0000-0000-0000-000000000000")
     handler.scnt += 1
     handler.send({
-        "issuer": f"0.0.0.0.ServiceGameSession.{_hc.SERVICE_GAME_SESSION_UID}.{session.session_id}.{handler.scnt}",
+        "issuer": f"0.0.0.0.ServiceGameSession.{SERVICE_GAME_SESSION_UID}.{session.session_id}.{handler.scnt}",
         "target": "ServiceGameSession", "instance": gs_instance,
         "reqid": 0, "c": 0, "conh": 0, "sid": handler.sid,
     }, gs_dw)
@@ -1039,7 +1052,7 @@ def handle_readytostartgame_22031(handler, target, instance, data_type, reqid, c
     pl_uid_t = game_engine.UID.make(244, int(handler.client_reck_id))
     ai_uid_t = game_engine.UID.make(game_engine.SERVICE_AI_UID_TYPE, 1000)
     pl_uid_val = (int(handler.client_reck_id) << 8) | 244
-    ai_uid_val = (1000 << 8) | _hc.SERVICE_AI_UID_TYPE
+    ai_uid_val = (1000 << 8) | SERVICE_AI_UID_TYPE
     sess_tutorial = game_engine.UID(session.session_id)
     player_name = handler.user_profile["name"] if handler.user_profile else "TestPlayer"
     log_req(f"    SESS: raw={session.session_id:#x}, tut={sess_tutorial.uid64:#x}")
@@ -1415,8 +1428,8 @@ def handle_readytostartgame_22031(handler, target, instance, data_type, reqid, c
     deck_gem_abilities = {}
     deck_gem_types = {}
     if deck_db_id:
-        active_gems_json = _hc.db_deck_active_gems(
-            deck_db_id, conn=db._db)
+        active_gems_json = db_deck_active_gems(
+        deck_db_id, conn=db._db)
         if active_gems_json:
             try:
                 active_gems = _gemj.loads(active_gems_json) or {}
@@ -1550,9 +1563,9 @@ def handle_readytostartgame_22031(handler, target, instance, data_type, reqid, c
             fallback = _hc.db_first_template_guid(conn=db._db)
             if fallback:
                 tpl_guid = fallback
-                _hc.db_insert_card_instance(
-                    handler.user_profile["id"], instance_id, tpl_guid,
-                    conn=db._db)
+                db_insert_card_instance(
+                handler.user_profile["id"], instance_id, tpl_guid,
+                conn=db._db)
         # Effective attributes = static template attributes + any
         # granted by the card's own abilities (passives), so attribute
         # icons show in hand from the first CardUpdated.
@@ -1603,8 +1616,8 @@ def handle_readytostartgame_22031(handler, target, instance, data_type, reqid, c
         # card and the current socketed-gem abilities.
         active_gems = {}
         if deck_db_id:
-            active_gems_json = _hc.db_deck_active_gems(
-                deck_db_id, conn=db._db)
+            active_gems_json = db_deck_active_gems(
+            deck_db_id, conn=db._db)
             if active_gems_json:
                 try:
                     active_gems = _aj.loads(active_gems_json) or {}
@@ -1714,8 +1727,8 @@ def handle_readytostartgame_22031(handler, target, instance, data_type, reqid, c
                 Sprouts' resource grant).
                 """
                 import hconnect_server as _hc
-                card_abilities_json = _hc.db_template_ability_guids(
-                    card_guid, conn=db._db)
+                card_abilities_json = db_template_ability_guids(
+                card_guid, conn=db._db)
                 try:
                     ability_guids = _aj.loads(
                         card_abilities_json or "[]")
@@ -1729,8 +1742,8 @@ def handle_readytostartgame_22031(handler, target, instance, data_type, reqid, c
                             ("GameStartedEvent" in (meta[1] or "") or
                              not (meta[1] or ""))):
                         return True
-                    for _eg, effect_type, raw_param in _hc.db_ability_effect_rows(
-                            ability_guid, conn=db._db):
+                    for _eg, effect_type, raw_param in db_ability_effect_rows(
+                        ability_guid, conn=db._db):
                         if effect_type != "GrantAbilityEffectTemplate":
                             continue
                         try:
@@ -1773,15 +1786,15 @@ def handle_readytostartgame_22031(handler, target, instance, data_type, reqid, c
                         # Resolve controller-only grants (for example
                         # the Untamed Dire Toad passive) and apply them
                         # later to matching visible troops.
-                        _mcard_json = _hc.db_template_ability_guids(
-                            mg, conn=db._db)
+                        _mcard_json = db_template_ability_guids(
+                        mg, conn=db._db)
                         try:
                             _mags = _aj.loads(_mcard_json or "[]")
                         except (TypeError, ValueError):
                             _mags = []
                         for _mag in _mags:
-                            for _meg, _met, _mep in _hc.db_ability_effect_rows(
-                                    _mag, conn=db._db):
+                            for _meg, _met, _mep in db_ability_effect_rows(
+                                _mag, conn=db._db):
                                 if _met != "GrantAbilityEffectTemplate":
                                     continue
                                 _granted = str(_mep or "").lower()
@@ -1815,15 +1828,15 @@ def handle_readytostartgame_22031(handler, target, instance, data_type, reqid, c
                     # do not infer it from display text.
                     if (mg and mg_key not in targeted_scene_mod_guids
                             and mg_key not in scene_setup_card_guids):
-                        _abilities_json = _hc.db_template_ability_guids(
-                            mg, conn=db._db)
+                        _abilities_json = db_template_ability_guids(
+                        mg, conn=db._db)
                         try:
                             _ags = _aj.loads(_abilities_json or "[]")
                         except (TypeError, ValueError):
                             _ags = []
                         for _ag in _ags:
-                            for _eg, _etype, _param in _hc.db_ability_effect_rows(
-                                    _ag, conn=db._db):
+                            for _eg, _etype, _param in db_ability_effect_rows(
+                                _ag, conn=db._db):
                                 if _etype != "GrantAbilityEffectTemplate":
                                     continue
                                 try:
@@ -2142,11 +2155,11 @@ def handle_readytostartgame_22031(handler, target, instance, data_type, reqid, c
             log_req("    FRA challenge conversation queued internally: "
                 + ",".join(value[:8] for value in conversation_ids))
     pkt = game.make_network_packet(pl_uid_t)
-    evt_bytes = compress_gzip(_hc.encode_sync_event(pkt))
+    evt_bytes = compress_gzip(encode_sync_event(pkt))
     evt_dw = encode_datawrapper(0, 3055, evt_bytes, 1, "00000000-0000-0000-0000-000000000000")
     handler.scnt += 1
     handler._game_scnt = handler.scnt  # Save game scnt for subsequent events
-    handler.send({"issuer": f"0.0.0.0.ServiceGameSession.{_hc.SERVICE_GAME_SESSION_UID}.{session.session_id}.{handler.scnt}", "target": "ServiceGameSession", "instance": gs_instance, "reqid": 0, "c": 0, "conh": 0, "sid": handler.sid}, evt_dw)
+    handler.send({"issuer": f"0.0.0.0.ServiceGameSession.{SERVICE_GAME_SESSION_UID}.{session.session_id}.{handler.scnt}", "target": "ServiceGameSession", "instance": gs_instance, "reqid": 0, "c": 0, "conh": 0, "sid": handler.sid}, evt_dw)
     log_req(f"    Pushed game init (decks, no hands yet) + PreGame ({len(evt_dw)}b)")
 
     if coin_winner_is_player:
@@ -2172,11 +2185,11 @@ def handle_readytostartgame_22031(handler, target, instance, data_type, reqid, c
             handler._sync_rules_port_setup_checkpoint(
                 session, game_engine.ETurnPhases.PickGoesFirst, pl_uid_t)
             pkt2 = game2.make_network_packet(pl_uid_t)
-            evt_bytes2 = compress_gzip(_hc.encode_sync_event(pkt2))
+            evt_bytes2 = compress_gzip(encode_sync_event(pkt2))
             evt_dw2 = encode_datawrapper(0, 3055, evt_bytes2, 1, "00000000-0000-0000-0000-000000000000")
             handler.scnt += 1
             handler._game_scnt = handler.scnt  # Save game scnt for subsequent events
-            handler.send({"issuer": f"0.0.0.0.ServiceGameSession.{_hc.SERVICE_GAME_SESSION_UID}.{session.session_id}.{handler.scnt}", "target": "ServiceGameSession", "instance": gs_instance, "reqid": 0, "c": 0, "conh": 0, "sid": handler.sid}, evt_dw2)
+            handler.send({"issuer": f"0.0.0.0.ServiceGameSession.{SERVICE_GAME_SESSION_UID}.{session.session_id}.{handler.scnt}", "target": "ServiceGameSession", "instance": gs_instance, "reqid": 0, "c": 0, "conh": 0, "sid": handler.sid}, evt_dw2)
             log_req(f"    Pushed PickGoesFirst phase ({len(evt_dw2)}b)")
     else:
         # The AI won the toss. It plays first 90% of the time and

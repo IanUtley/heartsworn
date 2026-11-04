@@ -11,6 +11,11 @@ from db import log_req
 import game_engine
 import db
 from application.practice_flow import _same_uid
+from pvp_db import db_card_zone_details
+from db import card_label
+from debug_runtime import trace_rules_port
+from pvp_db import db_card_instance_dynamic_projections
+from pvp_db import db_template_by_guid
 
 
 if TYPE_CHECKING:
@@ -777,8 +782,8 @@ class TurnFlowMixin(_HostBase):
                     battle_state, owner,
                     "CanIgnoreCardsThresholds") <= 0:
                 return False
-        card_details = _hc.db_card_zone_details(
-            session.session_id, card_uid, conn=db._db)
+        card_details = db_card_zone_details(
+        session.session_id, card_uid, conn=db._db)
         play_plan = self._card_play_plan(
             card_details[0] if card_details else "", card_uid,
             self.user_profile["id"] if self.user_profile else 0,
@@ -891,7 +896,7 @@ class TurnFlowMixin(_HostBase):
                 if info:
                     threshold_row = db_card_template_thresholds(
                         info[0], conn=db._db)
-                    top_template = _hc.db_template_by_guid(info[0])
+                    top_template = db_template_by_guid(info[0])
                     rows.append((
                         top_uid, top_template[3] if top_template else 0, info[1],
                         threshold_row[0] if threshold_row else None,
@@ -926,7 +931,7 @@ class TurnFlowMixin(_HostBase):
                 playable.append(scid)
             else:
                 log_req(f"    Playability: skip "
-                    f"{_hc.card_label(session.session_id, card_uid)} "
+                    f"{card_label(session.session_id, card_uid)} "
                     f"type {ct} "
                     f"(cost {cost} > resources {resources} / thresholds / no troop target)")
         game2 = game or self._fresh_game(session, pl_t, ai_t, bstate)
@@ -1193,8 +1198,8 @@ class TurnFlowMixin(_HostBase):
                          for i in ((bstate or {}).get("stack") or [])
                          if i.get("source_uid")}
         rows = _hc.db_warzone_display_rows(session.session_id, conn=db._db)
-        projections = _hc.db_card_instance_dynamic_projections(
-            session.session_id, [row[0] for row in rows], conn=db._db)
+        projections = db_card_instance_dynamic_projections(
+        session.session_id, [row[0] for row in rows], conn=db._db)
         for card_uid, tpl_guid, user_id, cstate, _card_type in rows:
             if int(card_uid) in chain_sources:
                 continue
@@ -1706,7 +1711,7 @@ class TurnFlowMixin(_HostBase):
         # ``_announce_champion_board_cards``).
         setattr(session, "_client_in_battle",
                 getattr(session, "session_id", None))
-        _hc.trace_rules_port(log_req, "project-before", port, bstate)
+        trace_rules_port(log_req, "project-before", port, bstate)
         current = load_state(session, default=lambda: dict(bstate))
         # An authored prompt that already owns the client's UI state must not
         # be replaced by the ordinary phase/priority projection.  A trigger
@@ -1746,7 +1751,7 @@ class TurnFlowMixin(_HostBase):
                 ai_idx = int(current.get("phase_idx", 0) or 0)
             self._run_ai_turn(session, pl_t, ai_t, bstate,
                               start_idx=ai_idx)
-            _hc.trace_rules_port(log_req, "project-after-ai", port, bstate)
+            trace_rules_port(log_req, "project-after-ai", port, bstate)
             return False
         if _same_uid(priority, ai_t):
             # During a human attack the human remains the native active
@@ -1801,8 +1806,8 @@ class TurnFlowMixin(_HostBase):
                     return False
                 port.drive_until_input(max_steps=64)
                 port.persist()
-                _hc.trace_rules_port(log_req, "project-after-ai-defense",
-                                 port, current)
+                trace_rules_port(log_req, "project-after-ai-defense",
+                             port, current)
                 return self._project_rules_port_priority(
                     session, pl_t, ai_t, current)
             log_req(
@@ -1840,7 +1845,7 @@ class TurnFlowMixin(_HostBase):
         if phase != game_engine.ETurnPhases.DeclareAttack:
             self._push_warzone_card_updates(game, session, pl_t, ai_t)
         self._send_battle_events(session, game, pl_t)
-        _hc.trace_rules_port(log_req, "project-human", port, bstate)
+        trace_rules_port(log_req, "project-human", port, bstate)
         if phase in (game_engine.ETurnPhases.FirstMainPhase,
                      game_engine.ETurnPhases.SecondMainPhase):
             self._push_main_phase_options(
@@ -1862,7 +1867,7 @@ class TurnFlowMixin(_HostBase):
         port = getattr(session, "_rules_port_session", None)
         if port is None:
             return False
-        _hc.trace_rules_port(log_req, "drive-before", port, bstate)
+        trace_rules_port(log_req, "drive-before", port, bstate)
         if (port.current_turn_phase == game_engine.ETurnPhases.StartTurn and
                 port.action_stack.count == 0 and
                 int(getattr(port, "total_turns_taken", 0) or 0) == 0):
@@ -1888,7 +1893,7 @@ class TurnFlowMixin(_HostBase):
                         action.priority_player_id):
                     break
                 port.drive_until_input(max_steps=64)
-        _hc.trace_rules_port(log_req, "drive-after", port, bstate)
+        trace_rules_port(log_req, "drive-after", port, bstate)
         return self._project_rules_port_priority(
             session, pl_t, ai_t, bstate)
 

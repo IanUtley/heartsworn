@@ -11,6 +11,9 @@ import struct
 from db import log_req
 import game_engine
 import db
+from pvp_db import db_card_owner_id
+from pvp_db import db_card_zone_details
+from pvp_db import db_ability_effect_rows
 
 
 if TYPE_CHECKING:
@@ -127,8 +130,8 @@ class PendingChoicesMixin(_HostBase):
         if prompt_owner_id is None:
             prompt_owner_id = bstate.get("resolving_owner_id")
         if prompt_owner_id is None:
-            prompt_owner_id = _hc.db_card_owner_id(
-                session.session_id, source_uid, conn=db._db)
+            prompt_owner_id = db_card_owner_id(
+            session.session_id, source_uid, conn=db._db)
         if prompt_owner_id is None:
             prompt_owner_id = 0
         prompt_owner_id = int(prompt_owner_id)
@@ -580,8 +583,8 @@ class PendingChoicesMixin(_HostBase):
             # generic hand-card click.
             for cu in pend["candidates"]:
                 c_scid = game_engine.SessionCardId(game_engine.UID(int(cu)))
-                c_row = _hc.db_card_zone_details(
-                    session.session_id, int(cu), conn=db._db)
+                c_row = db_card_zone_details(
+                session.session_id, int(cu), conn=db._db)
                 if not c_row:
                     continue
                 c_tpl = c_row[0]
@@ -1068,8 +1071,8 @@ class PendingChoicesMixin(_HostBase):
         # The continuation must follow the authored child effect.  In
         # particular, Starsphere moves the selected card to the top of the
         # deck; Oakhenge-style effects move their selected card to hand.
-        move_row = next((row[2] for row in _hc.db_ability_effect_rows(
-            ability_guid, conn=db._db)
+        move_row = next((row[2] for row in db_ability_effect_rows(
+        ability_guid, conn=db._db)
                          if row[1] == "MoveCardToZoneEffectTemplate"), None)
         try:
             move_spec = json.loads(move_row or "{}") if move_row else {}
@@ -2070,8 +2073,8 @@ class PendingChoicesMixin(_HostBase):
                     session.session_id, chosen, state_after_zone_exit(0),
                     conn=db._db)
                 db._db.commit()
-                row = _hc.db_card_zone_details(
-                    session.session_id, chosen, conn=db._db)
+                row = db_card_zone_details(
+                session.session_id, chosen, conn=db._db)
                 if row:
                     scid = game_engine.SessionCardId(game_engine.UID(chosen))
                     owner = pl_t if (row[2] or 0) != 0 else ai_t
@@ -2211,8 +2214,8 @@ class PendingChoicesMixin(_HostBase):
         from rules_port.zone_effects import state_after_zone_exit
         for cu in uids:
             c_scid = game_engine.SessionCardId(game_engine.UID(int(cu)))
-            c_row = _hc.db_card_zone_details(
-                session.session_id, int(cu), conn=db._db)
+            c_row = db_card_zone_details(
+            session.session_id, int(cu), conn=db._db)
             if not c_row:
                 continue
             if str(c_row[3] or "").lower() == "discard":

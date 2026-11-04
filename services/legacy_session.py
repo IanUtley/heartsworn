@@ -12,6 +12,9 @@ from encoder import encode_datawrapper
 from encoder import compress_gzip
 from encoder import encode_objfmt_response
 from application.practice_flow import _same_uid
+from domain.uids import UID_TYPE
+from domain.uids import SERVICE_GAME_SESSION_UID
+from domain.uids import make_uid
 
 
 # ServiceGameSession ReplayFetch (160000)
@@ -41,7 +44,7 @@ def handle_servicegamesession_replayfetch_160000(handler, target, instance, data
     resp_reqid = reqid | 1
     dw_bytes = encode_datawrapper(resp_reqid, data_type, resp_body, comp, session_id)
     issuer_str = (
-        f"0.0.0.0.ServiceGameSession.{_hc.SERVICE_GAME_SESSION_UID}."
+        f"0.0.0.0.ServiceGameSession.{SERVICE_GAME_SESSION_UID}."
         f"{instance}.{resp_reqid}"
     )
     handler.scnt += 1
@@ -56,7 +59,7 @@ def handle_servicegamesession_replayfetch_160000(handler, target, instance, data
 def handle_playertransaction_3029(handler, target, instance, data_type, reqid, comp, session_id,
                                   conh, inner_obj, inner_bytes, raw_data_wrapper_bytes):
     import hconnect_server as _hc
-    player_uid = _hc.make_uid(_hc.UID_TYPE["ServicePlayer"], int(handler.client_reck_id))
+    player_uid = make_uid(UID_TYPE["ServicePlayer"], int(handler.client_reck_id))
     session = _hc.game_session.find_session_by_player(player_uid)
     sync_packets_before = int(getattr(
         handler, "_game_sync_send_count", 0))
