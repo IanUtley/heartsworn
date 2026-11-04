@@ -45,127 +45,6 @@ from tournament_db import db_tournament_retire_player_run
 
 
 # ServiceTournaments — TryReconnection (25021)
-def handle_tryreconnection_25021(handler, target, instance, data_type, reqid, comp, session_id,
-                                 conh, inner_obj, inner_bytes, raw_data_wrapper_bytes):
-    import hconnect_server as _hc
-    # The client sends this while restoring an asynchronous tournament
-    # lobby after a reconnect.  An empty response leaves TournamentManager
-    # in its TournamentLobby recovery loop, so an active Corinth signup
-    # must be resumed by replaying the deck-construction event.
-    reconnect_tid = int(inner_obj.get("forceReconnectToAsynch", 0) or 0)
-    # On a fresh socket the client may restore the tournament UI
-    # before sending auth.  Do not query the database with the
-    # handler's placeholder ReckID; retry once auth binds the real
-    # account identity.
-    if not handler.authenticated:
-        handler._pending_tournament_reconnect = reconnect_tid
-        reconnect_ok = bool(reconnect_tid)
-        log_req(f">>> TryReconnection: deferred until auth "
-            f"tid={reconnect_tid}")
-        resp_inner = encode_objfmt_response(
-        ["Game.Shared.Network.Tournaments.TryReconnectionToDisconnectedTournamentResponseArgs"],
-        [("Error", "enum1", (
-            "Game.Shared.Network.Tournaments.ETryReconnectionToDisconnectedTournamentError",
-            0 if reconnect_ok else -1)),
-         ("ErrorMessage", "string", "")])
-        resp_body = compress_gzip(resp_inner) if comp else resp_inner
-        resp_reqid = reqid | 1
-        dw_bytes = encode_datawrapper(
-        resp_reqid, data_type, resp_body, comp, session_id)
-        handler.scnt += 1
-        handler.send({"issuer": f"0.0.0.0.ServiceTournaments.{SERVICE_MAIL_UID}.ServicePlayer.{handler.client_uid}.{resp_reqid}",
-                   "target": target, "instance": instance,
-                   "reqid": resp_reqid, "c": comp, "conh": conh,
-                   "sid": handler.sid}, dw_bytes)
-        return
-    reconnect_room = db_tournament_room_for_game(
-    reconnect_tid, conn=db._db) if reconnect_tid else None
-    reconnect_uid = int(handler.client_reck_id) if handler.client_reck_id else 0
-    reconnect_signup = (db_tournament_signup_by_player(
-    reconnect_tid, reconnect_uid, conn=db._db)
-        if reconnect_tid and reconnect_uid else None)
-    # A persistent Corinth event can outlive an account identity
-    # migration (for example, the old Name#discriminator identity to
-    # the canonical non-Steam name).  In that case the client sends
-    # reconnect rather than EnterTournament.  Re-enter through the
-    # normal async slot logic when a previous run is no longer live.
-    if (not reconnect_signup and reconnect_room and
-            _is_corinth_room(reconnect_room) and
-            str(reconnect_room.get("status", "")).lower() != "closed"):
-        reconnect_name = (handler.user_profile.get("name", "Unknown")
-                          if handler.user_profile else "Unknown")
-        join_ok, _count, _target, _type_id = tournament_server.join_tournament(
-            reconnect_tid, reconnect_uid, reconnect_name, deck_id=0,
-            entry_group=0)
-        if join_ok:
-            reconnect_signup = db_tournament_signup_by_player(
-            reconnect_tid, reconnect_uid, conn=db._db)
-            log_req(f">>> TryReconnection: re-entered Corinth tid={reconnect_tid} "
-                f"player={reconnect_uid}")
-    reconnect_live = bool(
-        reconnect_signup and
-        db_tournament_player_run_live(
-        reconnect_tid, reconnect_uid, conn=db._db))
-    reconnect_ok = bool(
-        reconnect_room and reconnect_signup and
-        str(reconnect_room.get("status", "")).lower() != "closed" and
-        _is_corinth_room(reconnect_room) and
-        (reconnect_signup.get("status") == "active" or
-         not reconnect_live))
-    if reconnect_ok:
-        # A disconnected client can keep requesting recovery after a
-        # previous LeaveTournament marked its signup withdrawn.  A
-        # persistent Corinth event is explicitly re-enterable once
-        # that player's old run is no longer live.
-        if reconnect_signup.get("status") != "active":
-            db_tournament_signup_set_status(
-            reconnect_tid, reconnect_uid, "active", conn=db._db)
-            db_tournament_signup_set_async_state(
-            reconnect_tid, reconnect_uid,
-            deck_ready=False, searching=False, conn=db._db)
-            db._db.commit()
-        with player_handler_lock:
-            player_handlers[reconnect_uid] = handler
-        reconnect_pool = db_tournament_pool(
-        reconnect_tid, reconnect_uid, conn=db._db)
-        if len(reconnect_pool) != len(CORINTH_SHARD_GUIDS) * 4:
-            db_seed_tournament_pool(
-            reconnect_tid, reconnect_uid,
-            CORINTH_SHARD_GUIDS * 4, conn=db._db)
-            reconnect_pool = db_tournament_pool(
-            reconnect_tid, reconnect_uid, conn=db._db)
-        _push_corinth_deck_construction(
-        handler, reconnect_tid, reconnect_pool)
-        log_req(f">>> TryReconnection: resumed Corinth tid={reconnect_tid} "
-            f"player={reconnect_uid}")
-    else:
-        log_req(f">>> TryReconnection: no active tournament "
-            f"tid={reconnect_tid} player={reconnect_uid}")
-    resp_inner = encode_objfmt_response(
-    ["Game.Shared.Network.Tournaments.TryReconnectionToDisconnectedTournamentResponseArgs"],
-    [("Error", "enum1", (
-        "Game.Shared.Network.Tournaments.ETryReconnectionToDisconnectedTournamentError",
-        0 if reconnect_ok else -1)),
-     ("ErrorMessage", "string", "" if reconnect_ok else
-      "No active tournament")]
-)
-    resp_body = compress_gzip(resp_inner) if comp else resp_inner
-    resp_reqid = reqid | 1
-    dw_bytes = encode_datawrapper(resp_reqid, data_type, resp_body, comp, session_id)
-    issuer_str = f"0.0.0.0.ServiceTournaments.{SERVICE_MAIL_UID}.ServicePlayer.{handler.client_uid}.{resp_reqid}"
-    handler.scnt += 1
-    handler.send({
-        "issuer": issuer_str,
-        "target": target,
-        "instance": instance,
-        "reqid": resp_reqid,
-        "c": comp,
-        "conh": conh,
-        "sid": handler.sid,
-    }, dw_bytes)
-    log_req(f"    Sent Tournament reconnect response ({len(dw_bytes)}b)")
-
-
 # ServiceTournaments — LadderRecord (70023)
 # ServiceTournaments — TestTournamentEntry (25027)
 # ServiceTournaments — EnterTournament (25029)
@@ -427,7 +306,6 @@ def handle_request_25039(handler, target, instance, data_type, reqid, comp, sess
 
 
 LEGACY_HANDLERS = {
-    25021: handle_tryreconnection_25021,
     25029: handle_entertournament_25029,
     25039: handle_request_25039,
 }

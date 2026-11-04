@@ -65,6 +65,7 @@ _SERVICE_TABLE = {
     25027: ("services.tournaments", "handle_test_tournament_entry", {"data_type": 25027}),
     25031: ("services.tournaments", "handle_leave_tournament", {"data_type": 25031}),
     25011: ("services.tournaments", "handle_save_tournament_deck", {"data_type": 25011}),
+    25021: ("services.tournaments", "handle_try_reconnection_tournament", {"data_type": 25021}),
     160000: ("services.replay", "handle_replay_fetch_request", {"data_type": 160000}),
     22013: ("services.loadbalancer", "handle_try_reconnection", {"data_type": 22013}),
 

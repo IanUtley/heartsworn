@@ -14,12 +14,16 @@ from gamemodes.tournament_engine import record_tournament_forfeit
 from pvp_db import db_delete_game_session
 from application.protocol_wire import tournament_deck_card_ids
 from domain.enums import ETournamentFormats
-from gamemodes.tournament_engine import _is_corinth_room
-from tournament_db import (db_tournament_by_id, db_tournament_match_session,
+from gamemodes.tournament_engine import (CORINTH_SHARD_GUIDS, _is_corinth_room,
+                                         _push_corinth_deck_construction, player_handler_lock,
+                                         player_handlers)
+from tournament_db import (db_seed_tournament_pool, db_tournament_by_id,
+                           db_tournament_match_session, db_tournament_player_run_live,
                            db_tournament_pool, db_tournament_pool_replace,
-                           db_tournament_retire_player_run,
-                           db_tournament_room_for_game,
-                           db_tournament_signup_set_async_state, db_tournament_status)
+                           db_tournament_retire_player_run, db_tournament_room_for_game,
+                           db_tournament_signup_by_player,
+                           db_tournament_signup_set_async_state,
+                           db_tournament_signup_set_status, db_tournament_status)
 
 
 # Waiting rooms created by CreateWaitingRoom, keyed by room id, and the lock and
@@ -280,3 +284,99 @@ def handle_save_tournament_deck(handler, target, instance, reqid, comp, session_
         [("Success", "bool", bool(valid))])
     _send(handler, target, instance, reqid, comp, session_id, conh, data_type,
           resp_inner, "SaveTournamentDeck", SERVICE_MAIL_UID)
+
+
+def handle_try_reconnection_tournament(handler, target, instance, reqid, comp, session_id,
+                                       conh, inner_obj, inner_bytes,
+                                       *, SERVICE_MAIL_UID, log_req, data_type, **_kw):
+    """Resume an active Corinth tournament lobby for a reconnecting player."""
+    # The client sends this while restoring an asynchronous tournament
+    # lobby after a reconnect.  An empty response leaves TournamentManager
+    # in its TournamentLobby recovery loop, so an active Corinth signup
+    # must be resumed by replaying the deck-construction event.
+    reconnect_tid = int(inner_obj.get("forceReconnectToAsynch", 0) or 0)
+    # On a fresh socket the client may restore the tournament UI
+    # before sending auth.  Do not query the database with the
+    # handler's placeholder ReckID; retry once auth binds the real
+    # account identity.
+    if not handler.authenticated:
+        handler._pending_tournament_reconnect = reconnect_tid
+        reconnect_ok = bool(reconnect_tid)
+        log_req(f">>> TryReconnection: deferred until auth tid={reconnect_tid}")
+        resp_inner = encode_objfmt_response(
+            ["Game.Shared.Network.Tournaments.TryReconnectionToDisconnectedTournamentResponseArgs"],
+            [("Error", "enum1", (
+                "Game.Shared.Network.Tournaments.ETryReconnectionToDisconnectedTournamentError",
+                0 if reconnect_ok else -1)),
+             ("ErrorMessage", "string", "")])
+        _send(handler, target, instance, reqid, comp, session_id, conh, data_type,
+              resp_inner, None, SERVICE_MAIL_UID)
+        return
+    reconnect_room = db_tournament_room_for_game(
+        reconnect_tid, conn=db._db) if reconnect_tid else None
+    reconnect_uid = int(handler.client_reck_id) if handler.client_reck_id else 0
+    reconnect_signup = (db_tournament_signup_by_player(
+        reconnect_tid, reconnect_uid, conn=db._db)
+        if reconnect_tid and reconnect_uid else None)
+    # A persistent Corinth event can outlive an account identity
+    # migration (for example, the old Name#discriminator identity to
+    # the canonical non-Steam name).  In that case the client sends
+    # reconnect rather than EnterTournament.  Re-enter through the
+    # normal async slot logic when a previous run is no longer live.
+    if (not reconnect_signup and reconnect_room and
+            _is_corinth_room(reconnect_room) and
+            str(reconnect_room.get("status", "")).lower() != "closed"):
+        reconnect_name = (handler.user_profile.get("name", "Unknown")
+                          if handler.user_profile else "Unknown")
+        join_ok, _count, _target, _type_id = tournament_server.join_tournament(
+            reconnect_tid, reconnect_uid, reconnect_name, deck_id=0,
+            entry_group=0)
+        if join_ok:
+            reconnect_signup = db_tournament_signup_by_player(
+                reconnect_tid, reconnect_uid, conn=db._db)
+            log_req(f">>> TryReconnection: re-entered Corinth tid={reconnect_tid} "
+                    f"player={reconnect_uid}")
+    reconnect_live = bool(
+        reconnect_signup and
+        db_tournament_player_run_live(reconnect_tid, reconnect_uid, conn=db._db))
+    reconnect_ok = bool(
+        reconnect_room and reconnect_signup and
+        str(reconnect_room.get("status", "")).lower() != "closed" and
+        _is_corinth_room(reconnect_room) and
+        (reconnect_signup.get("status") == "active" or
+         not reconnect_live))
+    if reconnect_ok:
+        # A disconnected client can keep requesting recovery after a
+        # previous LeaveTournament marked its signup withdrawn.  A
+        # persistent Corinth event is explicitly re-enterable once
+        # that player's old run is no longer live.
+        if reconnect_signup.get("status") != "active":
+            db_tournament_signup_set_status(
+                reconnect_tid, reconnect_uid, "active", conn=db._db)
+            db_tournament_signup_set_async_state(
+                reconnect_tid, reconnect_uid,
+                deck_ready=False, searching=False, conn=db._db)
+            db._db.commit()
+        with player_handler_lock:
+            player_handlers[reconnect_uid] = handler
+        reconnect_pool = db_tournament_pool(reconnect_tid, reconnect_uid, conn=db._db)
+        if len(reconnect_pool) != len(CORINTH_SHARD_GUIDS) * 4:
+            db_seed_tournament_pool(
+                reconnect_tid, reconnect_uid,
+                CORINTH_SHARD_GUIDS * 4, conn=db._db)
+            reconnect_pool = db_tournament_pool(
+                reconnect_tid, reconnect_uid, conn=db._db)
+        _push_corinth_deck_construction(handler, reconnect_tid, reconnect_pool)
+        log_req(f">>> TryReconnection: resumed Corinth tid={reconnect_tid} "
+                f"player={reconnect_uid}")
+    else:
+        log_req(f">>> TryReconnection: no active tournament "
+                f"tid={reconnect_tid} player={reconnect_uid}")
+    resp_inner = encode_objfmt_response(
+        ["Game.Shared.Network.Tournaments.TryReconnectionToDisconnectedTournamentResponseArgs"],
+        [("Error", "enum1", (
+            "Game.Shared.Network.Tournaments.ETryReconnectionToDisconnectedTournamentError",
+            0 if reconnect_ok else -1)),
+         ("ErrorMessage", "string", "" if reconnect_ok else "No active tournament")])
+    _send(handler, target, instance, reqid, comp, session_id, conh, data_type,
+          resp_inner, "Tournament reconnect", SERVICE_MAIL_UID)
