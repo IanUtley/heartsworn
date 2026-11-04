@@ -20,7 +20,6 @@ from tests.test_db import fresh_database  # noqa: E402
 fresh_database()
 
 from services import dispatch as service_dispatch  # noqa: E402
-from services import legacy_session  # noqa: E402
 
 REQUEST_ID = 9000
 # Pinned from the legacy handler. Each entry: (issuer, body sha256).
@@ -58,9 +57,7 @@ def _packet(envelope):
                inner_obj=inner, inner_bytes=b"", SERVICE_MAIL_UID=252,
                SERVICE_PROFILE_UID=0, log_req=lambda *_a, **_k: True, **extra)
         else:
-            legacy_session.LEGACY_HANDLERS[160000](
-                handler, "target", 3, 160000, REQUEST_ID, False, "session-x",
-                "conh-1", inner, b"", b"")
+            raise AssertionError("160000 is not registered")
     headers, body = handler.sent[-1]
     return headers["issuer"], hashlib.sha256(body).hexdigest()
 

@@ -22,7 +22,7 @@ from tests.test_db import fresh_database  # noqa: E402
 fresh_database()
 
 from services import dispatch as service_dispatch  # noqa: E402
-from services import legacy_session  # noqa: E402
+import game_session  # noqa: E402
 
 REQUEST_ID = 9000
 CAMP_SESSION = SimpleNamespace(session_id=7, session_name="camp_1", state="", encounter_data={})
@@ -63,8 +63,7 @@ def _run(session, marker):
     handler = _RecordingHandler()
     inner = marker or b""
     entry = service_dispatch(3029)
-    with mock.patch.object(legacy_session.game_session, "find_session_by_player",
-                           return_value=session):
+    with mock.patch.object(game_session, "find_session_by_player", return_value=session):
         if entry:
             module_name, fn_name, extra = entry
             fn = getattr(importlib.import_module(module_name), fn_name)
@@ -72,9 +71,7 @@ def _run(session, marker):
                inner_obj={}, inner_bytes=inner, SERVICE_MAIL_UID=252,
                SERVICE_PROFILE_UID=0, log_req=lambda *_a, **_k: True, **extra)
         else:
-            legacy_session.LEGACY_HANDLERS[3029](
-                handler, "target", 3, 3029, REQUEST_ID, False, "session-x", "conh-1",
-                {}, inner, b"")
+            raise AssertionError("3029 is not registered")
     return handler.calls
 
 
@@ -98,8 +95,38 @@ def test_session_quit_is_routed_to_the_rules_port_dispatch():
     ]
 
 
+def test_replay_session_capture_records_the_real_wrapper_bytes():
+    """Replay traces keep the request's wrapper bytes, which the dispatch now carries."""
+    replay_session = SimpleNamespace(session_id=8, session_name="tourney-4", state="",
+                                     encounter_data={})
+    recorded = {}
+
+    def record_transaction(*args, **kwargs):
+        recorded["raw_data_wrapper_bytes"] = kwargs.get("raw_data_wrapper_bytes")
+        return 1
+
+    with mock.patch("services.transactions.db_session_state_snapshot", return_value="{}"), \
+         mock.patch("services.transactions.db_rules_port_state_snapshot", return_value="{}"), \
+         mock.patch("services.transactions.db_record_session_transaction",
+                    side_effect=record_transaction), \
+         mock.patch("services.transactions.set_session_transaction_trace_ids"):
+        from application.service_dispatch import dispatch_service
+        handler = _RecordingHandler()
+        handler._application = SimpleNamespace(
+            dispatch_request=lambda command, run: run(command))
+        with mock.patch.object(game_session, "find_session_by_player",
+                               return_value=replay_session):
+            dispatch_service(handler, 3029, "target", 3, REQUEST_ID, False, "session-x",
+                             "conh-1", {}, PASS_MARKER,
+                             service_uids={"mail": 252, "profile": 0},
+                             log_req=lambda *_a, **_k: True,
+                             raw_data_wrapper_bytes=b"WRAPPER")
+    assert recorded.get("raw_data_wrapper_bytes") == b"WRAPPER"
+
+
 if __name__ == "__main__":
     test_no_session_transaction_is_not_routed()
     test_session_pass_priority_is_routed_to_the_rules_port_dispatch()
     test_session_quit_is_routed_to_the_rules_port_dispatch()
-    print("PASS tests_legacy_player_transaction: 3 checks")
+    test_replay_session_capture_records_the_real_wrapper_bytes()
+    print("PASS tests_legacy_player_transaction: 4 checks")

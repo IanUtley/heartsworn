@@ -69,6 +69,7 @@ _SERVICE_TABLE = {
     25029: ("services.tournaments", "handle_enter_tournament", {"data_type": 25029}),
     25039: ("services.tournaments", "handle_game_entrance", {"data_type": 25039}),
     160000: ("services.replay", "handle_replay_fetch_request", {"data_type": 160000}),
+    3029: ("services.transactions", "handle_player_transaction", {"data_type": 3029}),
     22013: ("services.loadbalancer", "handle_try_reconnection", {"data_type": 22013}),
 
     # Matchmaking and direct challenges

@@ -431,12 +431,14 @@ _PVE_CHAMPION_GUIDS = {
 
 
 def _dispatch_service(handler, data_type, target, instance, reqid, comp,
-                      session_id, conh, inner_obj, inner_bytes):
+                      session_id, conh, inner_obj, inner_bytes,
+                      raw_data_wrapper_bytes=b""):
     return dispatch_service(
         handler, data_type, target, instance, reqid, comp, session_id, conh,
         inner_obj, inner_bytes,
         service_uids={"mail": SERVICE_MAIL_UID, "profile": SERVICE_PROFILE_UID},
-        log_req=log_req)
+        log_req=log_req,
+        raw_data_wrapper_bytes=raw_data_wrapper_bytes)
 
 
 class HCPHandler(RulesPortProjectionMixin, ProfileStreamMixin, CardPlayMixin, CardStateMixin, CombatMixin, ChainMixin, TurnFlowMixin, PendingChoicesMixin, TransactionsMixin, FraBattleMixin):
@@ -2460,7 +2462,8 @@ class HCPHandler(RulesPortProjectionMixin, ProfileStreamMixin, CardPlayMixin, Ca
         # === Dispatch to service modules (Layer 2: extract logic) ===
         try:
             if _dispatch_service(self, data_type, target, instance, reqid, comp,
-                                 session_id, conh, inner_obj, inner_bytes):
+                                 session_id, conh, inner_obj, inner_bytes,
+                                 raw_data_wrapper_bytes):
                 return
         except Exception as e:
             log_req(f"    Dispatch error for dt={data_type}: {e}")

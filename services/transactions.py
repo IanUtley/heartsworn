@@ -1,35 +1,29 @@
-"""Replay fetch and game-session player transactions.
+"""PlayerTransaction (3029): decode a transaction, capture it, and route it to the rules port.
 
-Moved out of hconnect_server.HCPHandler._handle_service_request_legacy.
+Served through the services registry. The routing is moved unchanged from the
+legacy session module; the wrapper bytes arrive through the dispatch so trace
+capture keeps the real bytes.
 """
 
 import hashlib
-import json
 import os
-from db import log_req
+
 import game_engine
-from encoder import encode_datawrapper
-from encoder import compress_gzip
-from encoder import encode_objfmt_response
-from application.practice_flow import _same_uid
-from domain.uids import UID_TYPE
-from domain.uids import SERVICE_GAME_SESSION_UID
-from domain.uids import make_uid
-from application.player_transactions import classify_player_transaction
-from replay_db import set_session_transaction_trace_ids
-from replay_db import db_session_state_snapshot
-from replay_db import db_rules_port_state_snapshot
-from application.player_transactions import typed_payload_from_decoded
-from replay_db import db_record_session_transaction
-from replay_db import db_complete_session_transaction
 import game_session
+from application.player_transactions import (classify_player_transaction,
+                                             typed_payload_from_decoded)
+from application.practice_flow import _same_uid
+from domain.uids import UID_TYPE, make_uid
+from replay_db import (db_complete_session_transaction,
+                       db_record_session_transaction,
+                       db_rules_port_state_snapshot, db_session_state_snapshot,
+                       set_session_transaction_trace_ids)
 
 
-# ServiceGameSession ReplayFetch (160000)
-# GameSession Service — PlayerTransaction (3029)
-def handle_playertransaction_3029(handler, target, instance, data_type, reqid, comp, session_id,
-                                  conh, inner_obj, inner_bytes, raw_data_wrapper_bytes):
-    import hconnect_server as _hc
+def handle_player_transaction(handler, target, instance, reqid, comp, session_id,
+                              conh, inner_obj, inner_bytes, *, SERVICE_MAIL_UID,
+                              log_req, data_type, raw_data_wrapper_bytes=b"", **_kw):
+    """Route one PlayerTransaction (3029) through capture and the rules-port dispatch."""
     player_uid = make_uid(UID_TYPE["ServicePlayer"], int(handler.client_reck_id))
     session = game_session.find_session_by_player(player_uid)
     sync_packets_before = int(getattr(
@@ -347,8 +341,3 @@ def handle_playertransaction_3029(handler, target, instance, data_type, reqid, c
             post_rules_port_json=post_rules_port_json)
         except Exception as capture_error:
             log_req(f"    Transaction completion capture failed: {capture_error}")
-
-
-LEGACY_HANDLERS = {
-    3029: handle_playertransaction_3029,
-}

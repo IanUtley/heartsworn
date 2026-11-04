@@ -8,7 +8,7 @@ from services import dispatch as service_dispatch
 
 def dispatch_service(handler, data_type, target, instance, reqid, comp,
                      session_id, conh, inner_obj, inner_bytes,
-                     *, service_uids, log_req):
+                     *, service_uids, log_req, raw_data_wrapper_bytes=b""):
     entry = service_dispatch(data_type)
     if not entry:
         return False
@@ -24,6 +24,7 @@ def dispatch_service(handler, data_type, target, instance, reqid, comp,
         target=target, instance=instance, data_type=data_type,
         request_id=reqid, compressed=comp, session_id=session_id,
         connection_handle=conh, inner_object=inner_obj, inner_bytes=inner_bytes,
+        raw_data_wrapper_bytes=raw_data_wrapper_bytes,
     )
     handler._application.dispatch_request(
         command,
@@ -31,6 +32,7 @@ def dispatch_service(handler, data_type, target, instance, reqid, comp,
             handler, request.target, request.instance, request.request_id,
             request.compressed, request.session_id, request.connection_handle,
             inner_obj=request.inner_object, inner_bytes=request.inner_bytes,
+            raw_data_wrapper_bytes=request.raw_data_wrapper_bytes,
             **kwargs),
     )
     return True
