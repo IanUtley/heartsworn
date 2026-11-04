@@ -9,6 +9,7 @@ import threading
 import gamemodes.tournament_server as tournament_server
 from encoder import compress_gzip, encode_datawrapper, encode_objfmt_response
 from db import log_req
+from tournament_db import db_tournament_by_id
 
 
 # Waiting rooms created by CreateWaitingRoom, keyed by room id, and the lock and
@@ -157,3 +158,30 @@ def handle_create_waiting_room(handler, target, instance, reqid, comp, session_i
         ["Game.Shared.Network.Tournaments.CreateWaitingRoomResponseArgs"], [])
     _send(handler, target, instance, reqid, comp, session_id, conh, data_type,
           resp_inner, "CreateWaitingRoom", SERVICE_MAIL_UID)
+
+
+def handle_test_tournament_entry(handler, target, instance, reqid, comp, session_id,
+                                 conh, inner_obj, inner_bytes,
+                                 *, SERVICE_MAIL_UID, log_req, data_type, **_kw):
+    """Say whether the player may enter the tournament: an open one, not closed."""
+    tournament_id = int(inner_obj.get("TournamentID", 0) or 0)
+    is_wr = bool(inner_obj.get("IsWaitingRoom", False))
+    log_req(f">>> TestTournamentEntry: tid={tournament_id} wr={is_wr}")
+    room = db_tournament_by_id(tournament_id)
+    # Corinth is a persistent async catalog entry.  It remains in
+    # ``started`` status while individual runs are matched, but its
+    # registration is still open and has no entry fee.
+    room_status = str(room.get("status", "")).lower() if room else ""
+    room_style = str(room.get("style", "")).lower() if room else ""
+    success = bool(
+        room and room_status != "closed" and
+        (room_status == "waiting" or
+         room_style in {"async", "asynchronous"}))
+    resp_inner = encode_objfmt_response(
+        ["Game.Shared.Network.Tournaments.TestTournamentEntryResponseArgs"],
+        [("success", "bool", success),
+         ("qualifyingEntryGroups", "intlist", ("System.Collections.Generic.List`1#System.Int32", 0, [])),
+         ("Error", "enum1", ("Game.Shared.Network.Tournaments.ETestTournamentEntryError", 0)),
+         ("ErrorMessage", "string", "")])
+    _send(handler, target, instance, reqid, comp, session_id, conh, data_type,
+          resp_inner, "TestTournamentEntry", SERVICE_MAIL_UID)

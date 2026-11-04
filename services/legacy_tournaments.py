@@ -168,36 +168,6 @@ def handle_tryreconnection_25021(handler, target, instance, data_type, reqid, co
 
 # ServiceTournaments — LadderRecord (70023)
 # ServiceTournaments — TestTournamentEntry (25027)
-def handle_testtournamententry_25027(handler, target, instance, data_type, reqid, comp, session_id,
-                                     conh, inner_obj, inner_bytes, raw_data_wrapper_bytes):
-    import hconnect_server as _hc
-    tournament_id = int(inner_obj.get("TournamentID", 0) or 0)
-    is_wr = bool(inner_obj.get("IsWaitingRoom", False))
-    log_req(f">>> TestTournamentEntry: tid={tournament_id} wr={is_wr}")
-    room = db_tournament_by_id(tournament_id)
-    # Corinth is a persistent async catalog entry.  It remains in
-    # ``started`` status while individual runs are matched, but its
-    # registration is still open and has no entry fee.
-    room_status = str(room.get("status", "")).lower() if room else ""
-    room_style = str(room.get("style", "")).lower() if room else ""
-    success = bool(
-        room and room_status != "closed" and
-        (room_status == "waiting" or
-         room_style in {"async", "asynchronous"}))
-    resp_inner = encode_objfmt_response(
-    ["Game.Shared.Network.Tournaments.TestTournamentEntryResponseArgs"],
-    [("success", "bool", success),
-     ("qualifyingEntryGroups", "intlist", ("System.Collections.Generic.List`1#System.Int32", 0, [])),
-     ("Error", "enum1", ("Game.Shared.Network.Tournaments.ETestTournamentEntryError", 0)),
-     ("ErrorMessage", "string", "")])
-    resp_body = compress_gzip(resp_inner) if comp else resp_inner
-    dw_bytes = encode_datawrapper(reqid | 1, data_type, resp_body, comp, session_id)
-    handler.scnt += 1
-    handler.send({"issuer": f"0.0.0.0.ServiceTournaments.{SERVICE_MAIL_UID}.ServicePlayer.{handler.client_uid}.{reqid|1}",
-               "target": target, "instance": instance, "reqid": reqid | 1, "c": comp, "conh": conh, "sid": handler.sid}, dw_bytes)
-    log_req(f"    Sent TestTournamentEntry ({len(dw_bytes)}b)")
-
-
 # ServiceTournaments — EnterTournament (25029)
 def handle_entertournament_25029(handler, target, instance, data_type, reqid, comp, session_id,
                                  conh, inner_obj, inner_bytes, raw_data_wrapper_bytes):
@@ -553,7 +523,6 @@ def handle_request_25031(handler, target, instance, data_type, reqid, comp, sess
 
 LEGACY_HANDLERS = {
     25021: handle_tryreconnection_25021,
-    25027: handle_testtournamententry_25027,
     25029: handle_entertournament_25029,
     25039: handle_request_25039,
     25011: handle_request_25011,
