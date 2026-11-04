@@ -31,6 +31,10 @@ EXPECTED = {
                 "f2ee41f616814e28d2bd9417c15bc6faced436f79ba4217c6d573dafa3919a28"),
     "campaign_offer": ("0.0.0.0.ServiceLoadBalancer.252.ServicePlayer.5.9001",
                        "d536bab3084fcb2f02a723be289af0f6994ee3424d27f85efef525a8071997b9"),
+    "fra_offer": ("0.0.0.0.ServiceLoadBalancer.252.ServicePlayer.5.9003",
+                  "839399620b892a318fd585178840976e85677774571aa3cf7de7581e7dceffa1"),
+    "tournament_offer": ("0.0.0.0.ServiceLoadBalancer.252.ServicePlayer.5.9001",
+                         "14d27c73f7cd5137b8bebf5941c7b7c7cfe97cbf80f9b7217236663bacda028e"),
     "campaign_declined": ("0.0.0.0.ServiceLoadBalancer.252.ServicePlayer.5.9001",
                         "f2ee41f616814e28d2bd9417c15bc6faced436f79ba4217c6d573dafa3919a28"),
 }
@@ -49,20 +53,24 @@ class _StubHandler:
     def send(self, headers, body=b""):
         self.sent.append((headers, body))
 
+    def _resolve_fra_deck_id(self, deck_id):
+        return deck_id
 
-def _packet(session, rules_state, reqid=9000):
-    handler = _StubHandler()
+
+def _packet(session, rules_state, reqid=9000, fra=False, tournament_pvp=None, handler=None):
+    handler = handler or _StubHandler()
     lock = mock.MagicMock()
     with mock.patch.object(hc.game_session, "find_session_by_player", return_value=session), \
          mock.patch("services.tournament_game.campaign_session_reconnectable",
-                    return_value=session is not None), \
+                    return_value=session is not None and not fra and tournament_pvp is None), \
+         mock.patch("services.tournament_game.fra_session_reconnectable", return_value=fra), \
+         mock.patch("services.tournament_game.pvp_load_state", return_value=tournament_pvp or {}), \
          mock.patch("services.tournament_game.pvp_session_lock", return_value=lock), \
          mock.patch("rules_port.persistence.load_state", return_value=rules_state):
         lb.handle_tryreconnectiontodisconnectedgame_22013(
             handler, "target", 3, 22013, reqid, False, "session-x", "conh-1",
             {}, b"", b"")
-    assert len(handler.sent) == 1, handler.sent
-    headers, body = handler.sent[0]
+    headers, body = handler.sent[-1]  # the last response on this connection
     return headers["issuer"], hashlib.sha256(body).hexdigest()
 
 
@@ -74,6 +82,27 @@ def test_campaign_offer_branch_matches_the_snapshot():
     assert _packet(CAMPAIGN_SESSION, {}) == EXPECTED["campaign_offer"]
 
 
+FRA_SESSION = SimpleNamespace(
+    session_id=7007, session_name="fra_3", state="",
+    encounter_data={"SessionFlags": 128, "ArenaInstance": 3},
+    turn_order={"checkpoint": 1})
+TOURNAMENT_SESSION = SimpleNamespace(
+    session_id=7008, session_name="tourney-4", state="", encounter_data={},
+    turn_order=None)
+
+
+def test_fra_checkpoint_branch_matches_the_snapshot():
+    # The FRA offer waits for the arena-screen probe: the second distinct
+    # request on the same connection. The first request answers "no game".
+    connection = _StubHandler()
+    _packet(FRA_SESSION, {}, fra=True, reqid=9000, handler=connection)
+    assert _packet(FRA_SESSION, {}, fra=True, reqid=9002, handler=connection) == EXPECTED["fra_offer"]
+
+
+def test_tournament_pvp_branch_matches_the_snapshot():
+    assert _packet(TOURNAMENT_SESSION, {}, tournament_pvp={"pvp": True}) == EXPECTED["tournament_offer"]
+
+
 def test_campaign_declined_branch_matches_the_snapshot():
     declined = {}
     _record_reconnect_decline(declined, PLAYER_ID)
@@ -82,5 +111,7 @@ def test_campaign_declined_branch_matches_the_snapshot():
 if __name__ == "__main__":
     test_no_game_branch_matches_the_snapshot()
     test_campaign_offer_branch_matches_the_snapshot()
+    test_fra_checkpoint_branch_matches_the_snapshot()
+    test_tournament_pvp_branch_matches_the_snapshot()
     test_campaign_declined_branch_matches_the_snapshot()
-    print("PASS tests_legacy_try_reconnection: 3 checks")
+    print("PASS tests_legacy_try_reconnection: 5 checks")
