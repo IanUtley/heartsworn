@@ -17,7 +17,7 @@ from tests.test_db import fresh_database  # noqa: E402
 fresh_database()
 
 import hconnect_server as hc  # noqa: E402
-from services import legacy_loadbalancer as lb  # noqa: E402
+from services import dispatch as service_dispatch  # noqa: E402
 
 PLAYER_ID = 67890
 SESSION_ID = 7002
@@ -49,12 +49,17 @@ class _StubHandler:
 
 
 def _run(session_name):
+    """Drive the request through the services registry, as the hub does."""
+    import importlib
+    module_name, fn_name, extra = service_dispatch(22017)
+    fn = getattr(importlib.import_module(module_name), fn_name)
     handler = _StubHandler()
     with mock.patch.object(hc.campaign, "_last_encounter_scene",
                            {"camp_7": CAMPAIGN_SCENE}):
-        lb.handle_startencounter_22017(
-            handler, "target", 3, 22017, 9000, False, "session-x", "conh-1",
-            {"SessionName": session_name, "EncounterData": {}}, b"", b"")
+        fn(handler, "target", 3, 9000, False, "session-x", "conh-1",
+           inner_obj={"SessionName": session_name, "EncounterData": {}},
+           inner_bytes=b"", SERVICE_MAIL_UID=252, SERVICE_PROFILE_UID=0,
+           log_req=lambda *_a, **_k: True, **extra)
     return handler
 
 

@@ -1,8 +1,11 @@
 """ServiceLoadBalancer session requests, served through the services registry."""
 
-from application.commands import StartSessionCommand
+import campaign
+import game_engine
+from application.commands import StartEncounterCommand, StartSessionCommand
 from domain.uids import UID_TYPE, make_uid
 from encoder import compress_gzip, encode_datawrapper, encode_objfmt_response
+from gamemodes.fra_arena import _fra_arena_session_state_data, _fra_arena_setup_values
 
 
 def handle_start_session(handler, target, instance, reqid, comp, session_id,
@@ -46,3 +49,94 @@ def handle_start_session(handler, target, instance, reqid, comp, session_id,
         "reqid": resp_reqid, "c": comp, "conh": conh, "sid": handler.sid,
     }, dw_bytes)
     log_req(f"    Sent StartSession sid={sess_id} ({len(dw_bytes)}b)")
+
+
+def handle_start_encounter(handler, target, instance, reqid, comp, session_id,
+                         conh, inner_obj, inner_bytes, *, SERVICE_MAIL_UID,
+                         log_req, data_type):
+    """Create an encounter session and answer with its StartEncounter packet."""
+    log_req(">>> Respond StartEncounter -> creating session")
+    player_uid = make_uid(UID_TYPE["ServicePlayer"], int(handler.client_reck_id))
+    session_name = inner_obj.get("SessionName", "tutorial")
+    encounter_data_raw = inner_obj.get("EncounterData", {})
+    session = handler._application.execute(StartEncounterCommand(
+    session_name=session_name,
+    encounter_data=encounter_data_raw,
+    player_uid=player_uid,
+)).value
+    sess_id = session.session_id
+    server_id = session.server_id
+
+    # Preserve the encounter scene in the SessionState returned by
+    # StartEncounter.  The campaign notification already carries it,
+    # but the fixed client replaces its battle context with this
+    # response and otherwise receives a null EncounterData object;
+    # that makes UIBattle fall back to an invalid (zero) EncounterDeck
+    # and can leave the scene on the starfield.
+    response_encounter_data = ("class", "Game.Shared.SessionStateEncounterData")
+    fra_setup = _fra_arena_setup_values(encounter_data_raw)
+    if str(session_name).startswith("camp_"):
+        scene_guid = campaign._last_encounter_scene.get(str(session_name))
+        if scene_guid:
+            response_encounter_data = ("struct", (
+                "Game.Shared.SessionStateEncounterData", [
+                    ("SceneTemplateId", "struct", (
+                        "Game.Shared.ResourceId", [
+                            ("m_Guid", "guid", str(scene_guid))])),
+                    ("SessionFlags", "enum1", (
+                        "Game.Shared.ESessionFlags",
+                        game_engine.ESessionFlags.IsEncounter |
+                        game_engine.ESessionFlags.IsPvE)),
+                ]))
+    elif fra_setup is not None:
+        # The client replaces its arena battle context with this
+        # StartEncounter response. Preserve the arena IDs for the
+        # client-side challenge UI and reconnect path; live battle
+        # mods are loaded internally by the authoritative setup below.
+        # Do NOT advertise IsPvE/IsPvEArena on this transient session:
+        # GameClient.OnStartEncounter and GameClient.OnReadyForGameSetup
+        # each call UIBattle.OnSessionCreated, which appends its
+        # challenge-event handler on every PvE session. The
+        # ReadyForGameSetup session below carries the live flags and
+        # registers that handler once; adding them here registered it
+        # twice, so one conversation objective event produced two
+        # identical rows in the battle challenge panel.
+        response_encounter_data = _fra_arena_session_state_data(
+        fra_setup, flags=0)
+
+    resp_inner = encode_objfmt_response(
+    ["Game.Shared.Network.LoadBalancer.StartEncounterResponseArgs",
+     "Game.Shared.UID", "System.Boolean", "Game.Shared.SessionState",
+     "Game.Shared.UID", "System.String",
+     "System.Int32", "System.Int32",
+         "Game.Shared.SessionStateEncounterData", "System.Boolean",
+         "Game.Shared.ResourceId", "System.Guid", "Game.Shared.ESessionFlags", "System.Int32",
+     "Game.Shared.UID", "System.UInt64"],
+    [("RoutingPlayerId", "uid", player_uid),
+     ("Success", "bool", True),
+     ("SessionState", "struct", ("Game.Shared.SessionState", [
+         ("SessionId", "uid", sess_id),
+         ("SessionName", "string", session_name),
+         ("MinimumPlayerCount", "int", 2),
+         ("MaximumPlayerCount", "int", 2),
+         ("EncounterData", response_encounter_data[0], response_encounter_data[1]),
+         ("JoinInsteadOfReconnect", "bool", False),
+     ])),
+     ("SessionID", "uid", sess_id),
+     ("ServerID", "uid", server_id)]
+)
+    resp_body = compress_gzip(resp_inner) if comp else resp_inner
+    resp_reqid = reqid | 1
+    dw_bytes = encode_datawrapper(resp_reqid, data_type, resp_body, comp, session_id)
+    issuer_str = f"0.0.0.0.ServiceLoadBalancer.{SERVICE_MAIL_UID}.ServicePlayer.{handler.client_uid}.{resp_reqid}"
+    handler.scnt += 1
+    handler.send({
+        "issuer": issuer_str,
+        "target": target,
+        "instance": instance,
+        "reqid": resp_reqid,
+        "c": comp,
+        "conh": conh,
+        "sid": handler.sid,
+    }, dw_bytes)
+    log_req(f"    Sent StartEncounter session={session_name} sid={session_id} ({len(dw_bytes)}b)")
