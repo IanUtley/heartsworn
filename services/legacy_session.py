@@ -19,6 +19,8 @@ from application.player_transactions import classify_player_transaction
 from replay_db import set_session_transaction_trace_ids
 from replay_db import db_session_state_snapshot
 from replay_db import db_rules_port_state_snapshot
+from application.player_transactions import typed_payload_from_decoded
+from replay_db import db_record_session_transaction
 
 
 # ServiceGameSession ReplayFetch (160000)
@@ -77,10 +79,10 @@ def handle_playertransaction_3029(handler, target, instance, data_type, reqid, c
     # Run labeled recovery even when nested ObjFmt parsing failed,
     # then reclassify with the real command flags so combat and
     # continuation-specific raw recovery rules are available.
-    decoded_payload = _hc.typed_payload_from_decoded(
-        transaction,
-        inner_obj if isinstance(inner_obj, dict)
-        else {"__raw__": inner_bytes})
+    decoded_payload = typed_payload_from_decoded(
+    transaction,
+    inner_obj if isinstance(inner_obj, dict)
+    else {"__raw__": inner_bytes})
     if decoded_payload:
         transaction = classify_player_transaction(
         inner_bytes, typed_payload=decoded_payload)
@@ -191,18 +193,18 @@ def handle_playertransaction_3029(handler, target, instance, data_type, reqid, c
             pre_state_json = db_session_state_snapshot(
             session.session_id)
             pre_rules_port_json = db_rules_port_state_snapshot(session)
-            transaction_capture_id = _hc.db_record_session_transaction(
-                session.session_id, player_uid, reqid, data_type, comp,
-                txn_id_int,
-                inner_obj.get("__type__", "")
-                if isinstance(inner_obj, dict) else "",
-                classification, inner_bytes,
-                hashlib.sha256(pre_state_json.encode("utf-8")).hexdigest()
-                if pre_state_json else "",
-                raw_data_wrapper_bytes=raw_data_wrapper_bytes,
-                decoded_intent=decoded_payload or {},
-                pre_state_json=pre_state_json,
-                pre_rules_port_json=pre_rules_port_json)
+            transaction_capture_id = db_record_session_transaction(
+            session.session_id, player_uid, reqid, data_type, comp,
+            txn_id_int,
+            inner_obj.get("__type__", "")
+            if isinstance(inner_obj, dict) else "",
+            classification, inner_bytes,
+            hashlib.sha256(pre_state_json.encode("utf-8")).hexdigest()
+            if pre_state_json else "",
+            raw_data_wrapper_bytes=raw_data_wrapper_bytes,
+            decoded_intent=decoded_payload or {},
+            pre_state_json=pre_state_json,
+            pre_rules_port_json=pre_rules_port_json)
             set_session_transaction_trace_ids(
             transaction_row_id=transaction_capture_id)
         except Exception as capture_error:

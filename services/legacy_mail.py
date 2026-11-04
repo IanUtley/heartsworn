@@ -12,6 +12,8 @@ from encoder import encode_datawrapper
 from encoder import compress_gzip
 from encoder import encode_objfmt_response
 from domain.uids import SERVICE_MAIL_UID
+from encoder import encode_get_unread_mail_count_response
+from profile_db import db_claim_mail_for_user
 
 
 # GetUnreadMailCount (60007)
@@ -27,7 +29,7 @@ def handle_getunreadmailcount_60007(handler, target, instance, data_type, reqid,
         log_req(">>> Client ready (mail check received)")
     
     log_req(f">>> Respond GetUnreadMailCount -> {count}")
-    resp_inner = _hc.encode_get_unread_mail_count_response(count)
+    resp_inner = encode_get_unread_mail_count_response(count)
     resp_body = compress_gzip(resp_inner) if comp else resp_inner
     resp_reqid = reqid | 1
     dw_bytes = encode_datawrapper(resp_reqid, data_type, resp_body, comp, session_id)
@@ -311,7 +313,7 @@ def handle_claim_attachments_from_a_mail_60003(handler, target, instance, data_t
     gold_granted = 0
     plat_granted = 0
     if eid > 0 and p:
-        claim = _hc.db_claim_mail_for_user(p["id"], eid)
+        claim = db_claim_mail_for_user(p["id"], eid)
         if claim is not None:
             gold_granted = claim["gold"]
             plat_granted = claim["platinum"]
