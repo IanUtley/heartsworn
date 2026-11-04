@@ -2572,16 +2572,6 @@ def db_set_card_attribute_value(session_id, card_uid, field, value, conn=None):
         (int(value), session_id, int(card_uid)))
 
 
-def db_deck_shard_count(session_id, user_id, color, conn=None):
-    """Count authored shard cards in one player's deck."""
-    row = (conn or _db_layer._db).execute(
-        "SELECT COUNT(*) FROM game_cards gc JOIN card_templates ct "
-        "ON ct.guid=gc.template_guid WHERE gc.session_id=? AND gc.user_id=? "
-        "AND gc.location='deck' AND ct.name LIKE ?",
-        (session_id, int(user_id), f"%{color} Shard%")).fetchone()
-    return int(row[0] if row else 0)
-
-
 def db_deck_card_count(session_id, user_id, conn=None):
     """Count cards currently in one player's deck."""
     row = (conn or _db_layer._db).execute(

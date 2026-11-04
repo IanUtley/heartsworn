@@ -11,7 +11,6 @@ def _push_pve_mulligan_start(game, player_uid, ai_uid,
     the human. A human redraw keeps the active phase and is handled by the
     transaction path without calling this setup transition again.
     """
-    import hconnect_server as _hc
     first_uid = player_uid if play_first_is_player else ai_uid
     game.push_green_light(first_uid, game_engine.EPriorityContext.Normal)
     game.push_turn_phase(game_engine.ETurnPhases.Mulligan,
@@ -75,12 +74,3 @@ def _is_practice_chain_follow_up(action, client_id, practice_window):
         action.priority_player_id is not None and
         not _same_uid(action.priority_player_id, client_id))
 
-
-def _target_count_from_text(game_text):
-    """Parse how many targets a "X troops you control" cost/target template
-    needs: "a troop" = 1, "two/three/... troops" = the number. Defaults to 1."""
-    import re as _re
-    words = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
-             "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10}
-    m = _re.search(r'\b(one|two|three|four|five|six|seven|eight|nine|ten)\b', (game_text or "").lower())
-    return words[m.group(1)] if m else 1

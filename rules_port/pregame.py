@@ -38,13 +38,6 @@ def _effect_template_json(effect_guid):
 
 _CONDITIONS: dict[str, Callable[..., Any]] = {}
 
-def register_condition(name):
-    def deco(fn):
-        _CONDITIONS[name] = fn
-        return fn
-    return deco
-
-
 def _has_previous_dungeon_win(db, session):
     """Return whether the previous encounter in this dungeon was won.
 

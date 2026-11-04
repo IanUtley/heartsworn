@@ -60,13 +60,3 @@ def _records_card_projection(template_guid):
         record.lethal,
     )
 
-
-def _records_target_spec(handler, target_guid):
-    resolver = getattr(handler, "_current_target_spec", None)
-    if callable(resolver):
-        return resolver(target_guid)
-    from gamedata import DEFAULT_RECORD_STORE
-    store = (getattr(handler, "_play_plan_store", None)
-             or DEFAULT_RECORD_STORE)
-    target = store.get("AbilityTargetTemplate", str(target_guid).lower())
-    return target.target_spec if target is not None else None

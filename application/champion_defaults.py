@@ -3,14 +3,7 @@
 import json
 import sqlite3
 import db
-from pve_db import db_talent_data_ability_guid
 from pve_db import db_default_talents
-
-
-def _talent_ability_guid(talent_guid: str) -> str | None:
-    """Resolve a champion talent GUID to its actual ability GUID via DB."""
-    import hconnect_server as _hc
-    return db_talent_data_ability_guid(talent_guid, conn=db._db)
 
 
 # ERace enum value -> deck name key
@@ -31,7 +24,6 @@ _CHAMPION_GENDER_MAP = {1: "Male", 2: "Female", 3: "Other"}
 
 def _default_talents_for_champion(race_val, class_val, gender_val):
     """Return the authored default talent list for a player template."""
-    import hconnect_server as _hc
     race_name = _RACE_DECK_MAP.get(int(race_val))
     class_name = _CHAMPION_CLASS_MAP.get(int(class_val))
     gender_name = _CHAMPION_GENDER_MAP.get(int(gender_val))
