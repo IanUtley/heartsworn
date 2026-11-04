@@ -2,6 +2,7 @@
 
 
 from typing import TYPE_CHECKING
+from db import log_req
 
 if TYPE_CHECKING:
     from application._host_surface import HostSurface as _HostBase
@@ -63,8 +64,8 @@ class ChainMixin(_HostBase):
         from rules_port.actions import AbilityResolutionState
         result = port.resolve_top_of_chain(instance_id)
         if result is not AbilityResolutionState.COMPLETED:
-            _hc.log_req("    RulesPort completed choice did not finish chain item "
-                    f"instance={instance_id} state={result!r}")
+            log_req("    RulesPort completed choice did not finish chain item "
+                f"instance={instance_id} state={result!r}")
         return result is AbilityResolutionState.COMPLETED
 
     def _priority_context_for(self, phase, bstate=None):
@@ -132,9 +133,9 @@ class ChainMixin(_HostBase):
                 "target": "ServiceGameSession", "instance": gs_inst, "reqid": 0, "c": 0, "conh": 0, "sid": self.sid,
             }, dw)
             self._event_q.append((self.scnt, dw, {}))
-            _hc.log_req(f"    Pushed transaction ack (empty 3055, {len(dw)}b)")
+            log_req(f"    Pushed transaction ack (empty 3055, {len(dw)}b)")
         except Exception as e:
-            _hc.log_req(f"    Transaction ack failed: {e}")
+            log_req(f"    Transaction ack failed: {e}")
 
     def _autopass_game_started_chain(self, session, pl_t, ai_t, bstate,
                                      game):
@@ -172,8 +173,8 @@ class ChainMixin(_HostBase):
                         break
                 port.persist()
                 if resolved:
-                    _hc.log_req(f"    Auto-passed {resolved} native GameStarted "
-                            "chain action(s)")
+                    log_req(f"    Auto-passed {resolved} native GameStarted "
+                        "chain action(s)")
                 return resolved
             if bstate.get("stack"):
                 # A native session must not silently downgrade setup to the
@@ -205,10 +206,10 @@ class ChainMixin(_HostBase):
             resolved += 1
 
         if resolved >= max_items and not _be.stack_empty(bstate):
-            _hc.log_req("    GameStarted chain exceeded 256 items; leaving "
-                    "remaining items for normal priority")
+            log_req("    GameStarted chain exceeded 256 items; leaving "
+                "remaining items for normal priority")
         elif resolved:
-            _hc.log_req(f"    Auto-passed {resolved} GameStarted chain item(s)")
+            log_req(f"    Auto-passed {resolved} GameStarted chain item(s)")
 
         if (had_chain and _be.stack_empty(bstate) and
                 not bstate.get("pending_choice") and
@@ -385,8 +386,8 @@ class ChainMixin(_HostBase):
             if uid:
                 loc = _hc.db_card_location(session.session_id, uid, conn=_hc._db)
                 if loc != "CastSpells":
-                    _hc.log_req(f"    Troop {uid} already left the chain "
-                            f"(loc={loc}) — skipped")
+                    log_req(f"    Troop {uid} already left the chain "
+                        f"(loc={loc}) — skipped")
                     _be.save_state(session, bstate)
                     return game
                 # Permanent cast abilities resolve before the card enters
@@ -449,8 +450,8 @@ class ChainMixin(_HostBase):
                 session.session_id, uid, conn=_hc._db)
             loc = loc_details[1] if loc_details else "discard"
             if loc != "CastSpells":
-                _hc.log_req(f"    Spell {uid} already left the chain "
-                        f"(loc={loc}) — countered/interrupted, BOM skipped")
+                log_req(f"    Spell {uid} already left the chain "
+                    f"(loc={loc}) — countered/interrupted, BOM skipped")
                 _be.save_state(session, bstate)
                 return game
             # Track actions cast this turn (for ChampionActionsCastThisTurn).
@@ -541,8 +542,8 @@ class ChainMixin(_HostBase):
                 result = resolve_surface(EffectContext.from_rules_port(
                     game, session, _hc._db, self, pl_t, ai_t, bstate, str(ag),
                     ability=None), item.get("source_uid"))
-                _hc.log_req(f"    Tunneling Surface {item.get('source_uid')}: "
-                        f"{result}")
+                log_req(f"    Tunneling Surface {item.get('source_uid')}: "
+                    f"{result}")
                 ag = ""
             if ag:
                 # The activation's chosen target (e.g. Dimmid's Lifedrain troop)
@@ -626,10 +627,10 @@ class ChainMixin(_HostBase):
                 game.push_champion_health_changed_if_missing(
                     ai_t, ability_ai_health_before,
                     ability_ai_health_after, since=ability_event_start)
-                _hc.log_req(f"    Champion ability BOM {str(ag)[:8]}: "
-                        f"{ability_log} health="
-                        f"{ability_player_health_before}->{ability_player_health_after}/"
-                        f"{ability_ai_health_before}->{ability_ai_health_after}")
+                log_req(f"    Champion ability BOM {str(ag)[:8]}: "
+                    f"{ability_log} health="
+                    f"{ability_player_health_before}->{ability_player_health_after}/"
+                    f"{ability_ai_health_before}->{ability_ai_health_after}")
                 if self._bom_has_discard(
                         ag, native=bool(bstate.get("_rules_port_attached"))):
                     self._push_discard_prompt(
@@ -700,8 +701,8 @@ class ChainMixin(_HostBase):
             "pending_conversation", "pending_discard_ability")
             if (pending_checkpoint or {}).get(key)]
         if pending_input:
-            _hc.log_req("    RequestPrioritySync: held for pending client input: "
-                        + ",".join(pending_input))
+            log_req("    RequestPrioritySync: held for pending client input: "
+                    + ",".join(pending_input))
             pl_t = _hc.game_engine.UID.make(244, int(self.client_reck_id))
             ai_t = _hc.game_engine.UID.make(_hc.game_engine.SERVICE_AI_UID_TYPE, 1000)
             if pending_checkpoint.get("pending_trigger"):
@@ -717,7 +718,7 @@ class ChainMixin(_HostBase):
         priority = getattr(
             getattr(port, "action_stack", None), "priority_player_id", None)
         if priority is None:
-            _hc.log_req("    RequestPrioritySync: native chain has no priority owner")
+            log_req("    RequestPrioritySync: native chain has no priority owner")
             return False
 
         if (session.session_name or "").startswith("tourney-"):
@@ -729,14 +730,14 @@ class ChainMixin(_HostBase):
             pids = [int(value) for value in (state.get("pids") or ())]
             my_pid = int(self.client_reck_id)
             if len(pids) != 2 or my_pid not in pids:
-                _hc.log_req(
-                    "    RequestPrioritySync: no PvP participants for native chain")
+                log_req(
+                "    RequestPrioritySync: no PvP participants for native chain")
                 return False
             priority_pid = next((pid for pid in pids if _hc._same_uid(
                 priority, _hc.game_engine.UID.make(244, pid))), None)
             if priority_pid is None:
-                _hc.log_req(
-                    "    RequestPrioritySync: unknown PvP native chain owner")
+                log_req(
+                "    RequestPrioritySync: unknown PvP native chain owner")
                 return False
 
             other_pid = next(pid for pid in pids if pid != my_pid)
@@ -757,9 +758,9 @@ class ChainMixin(_HostBase):
             _send_pvp_packet(
                 target_handler, session, window, target_uid,
                 "rules-port-chain-priority-sync")
-            _hc.log_req(
-                "    RequestPrioritySync: restored PvP native chain window "
-                f"priority={priority_pid} phase={phase}")
+            log_req(
+            "    RequestPrioritySync: restored PvP native chain window "
+            f"priority={priority_pid} phase={phase}")
             return True
 
         player_uid = _hc.game_engine.UID.make(244, int(self.client_reck_id))
@@ -769,8 +770,8 @@ class ChainMixin(_HostBase):
                              else ai_uid if _hc._same_uid(priority, ai_uid)
                              else None)
         if sync_priority_uid is None:
-            _hc.log_req(
-                "    RequestPrioritySync: unknown Practice native chain owner")
+            log_req(
+            "    RequestPrioritySync: unknown Practice native chain owner")
             return False
         checkpoint = self._checkpoint_engine(session).load_state(session)
         self._current_bstate = checkpoint
@@ -791,7 +792,7 @@ class ChainMixin(_HostBase):
                 session, player_uid, ai_uid, game=game, send=False,
                 refresh_warzone=False)
         self._send_battle_events(session, game, player_uid)
-        _hc.log_req(
-            "    RequestPrioritySync: restored Practice native chain window "
-            f"priority={sync_priority_uid!r} phase={port.current_turn_phase}")
+        log_req(
+        "    RequestPrioritySync: restored Practice native chain window "
+        f"priority={sync_priority_uid!r} phase={port.current_turn_phase}")
         return True

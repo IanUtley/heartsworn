@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any
 import json
 import sqlite3
 import struct
+from db import log_req
 
 
 if TYPE_CHECKING:
@@ -130,7 +131,7 @@ class CardPlayMixin(_HostBase):
                 requirements.append(targets_available)
         if requirements and ((choice_card and not any(requirements)) or
                              (not choice_card and not all(requirements))):
-            _hc.log_req("    Playability: no legal target for required card ability")
+            log_req("    Playability: no legal target for required card ability")
             return False
         return True
 
@@ -488,17 +489,17 @@ class CardPlayMixin(_HostBase):
             # Rejection-only trace: selected names the client's TargetMap,
             # candidates the legal cost pool, so a refused play can be
             # replayed without the raw ObjFmt envelope.
-            _hc.log_req(f"    Card cost selection reject: "
-                    f"card={_hc.card_label(session.session_id, source_uid)} "
-                    f"kind={cost.kind} guid={cost.guid} "
-                    f"reason={reason} "
-                    f"selected={[_hc.card_label(session.session_id, uid) for uid in selected_uids]} "
-                    f"available={[_hc.card_label(session.session_id, uid) for uid in available]} "
-                    f"candidates({len(cost.candidates)})="
-                    f"{[_hc.card_label(session.session_id, uid) for uid in list(cost.candidates)[:8]]} "
-                    f"minimum={cost.minimum} maximum={cost.maximum} "
-                    f"source_auto={cost.is_source_auto_target} "
-                    f"best_effort={cost.allow_best_effort_minimum}")
+            log_req(f"    Card cost selection reject: "
+                f"card={_hc.card_label(session.session_id, source_uid)} "
+                f"kind={cost.kind} guid={cost.guid} "
+                f"reason={reason} "
+                f"selected={[_hc.card_label(session.session_id, uid) for uid in selected_uids]} "
+                f"available={[_hc.card_label(session.session_id, uid) for uid in available]} "
+                f"candidates({len(cost.candidates)})="
+                f"{[_hc.card_label(session.session_id, uid) for uid in list(cost.candidates)[:8]]} "
+                f"minimum={cost.minimum} maximum={cost.maximum} "
+                f"source_auto={cost.is_source_auto_target} "
+                f"best_effort={cost.allow_best_effort_minimum}")
 
         for cost in card_cost_targets(
                 play_plan, _hc._db, session.session_id,
@@ -740,7 +741,7 @@ class CardPlayMixin(_HostBase):
                 source_owner_id = int(source_owner)
 
         if not self._card_costs_valid(session, selections, source_owner_id):
-            _hc.log_req(f"    Card cost rejected before mutation: owner={source_owner_id}")
+            log_req(f"    Card cost rejected before mutation: owner={source_owner_id}")
             return False
 
         for spec, selected in selections:
@@ -1226,7 +1227,7 @@ class CardPlayMixin(_HostBase):
             game, session, _hc._db, self, pl_t, ai_t, bstate,
             card_uid, resource_owner)
         if granted_logs:
-            _hc.log_req("    RulesPort resource grants: " + "; ".join(granted_logs))
+            log_req("    RulesPort resource grants: " + "; ".join(granted_logs))
         if resource_choice_ability:
             from rules_port.resolution import resolve_port_ability
             resolve_port_ability(
@@ -1240,7 +1241,7 @@ class CardPlayMixin(_HostBase):
             skip_guids=({resource_choice_ability}
                         if resource_choice_ability else ()))
         if printed_logs:
-            _hc.log_req("    RulesPort resource abilities: " + "; ".join(printed_logs))
+            log_req("    RulesPort resource abilities: " + "; ".join(printed_logs))
         _be.save_state(session, bstate)
         waiting_for_input = any(bstate.get(key) for key in (
             "pending_choice", "pending_trigger", "pending_deck_search",
@@ -1257,7 +1258,7 @@ class CardPlayMixin(_HostBase):
             # The resource event packet already carried the picker/continuation;
             # do not overwrite it with ordinary main-phase options.
             self._send_battle_events(session, game, pl_t)
-            _hc.log_req("    RulesPort resource waiting for continuation")
+            log_req("    RulesPort resource waiting for continuation")
         else:
             # A threshold/charge trigger placed an item on the chain.  Expose
             # only response options and the resolve checkpoint in the same
@@ -1267,9 +1268,9 @@ class CardPlayMixin(_HostBase):
             game.push_green_light(
                 pl_t, _hc.game_engine.EPriorityContext.ResolveTopOfChain)
             self._send_battle_events(session, game, pl_t)
-        _hc.log_req(f"    RulesPort resource applied uid={card_uid} "
-                f"resources={bstate['player_resources']} "
-                f"threshold={bstate.get('player_threshold', {})}")
+        log_req(f"    RulesPort resource applied uid={card_uid} "
+            f"resources={bstate['player_resources']} "
+            f"threshold={bstate.get('player_threshold', {})}")
         return True
 
     def _handle_rules_port_card_play(self, session, transaction):
@@ -1291,9 +1292,9 @@ class CardPlayMixin(_HostBase):
         kind = str(getattr(transaction, "kind", ""))
 
         def reject(reason):
-            _hc.log_req(f"    Card play reject: "
-                    f"card={_hc.card_label(session.session_id, card_uid)} "
-                    f"kind={kind or '-'} reason={reason}")
+            log_req(f"    Card play reject: "
+                f"card={_hc.card_label(session.session_id, card_uid)} "
+                f"kind={kind or '-'} reason={reason}")
             return False
 
         if not card_uid or kind not in {
@@ -1644,8 +1645,8 @@ class CardPlayMixin(_HostBase):
         chain_game.push_green_light(
             pl_t, _hc.game_engine.EPriorityContext.ResolveTopOfChain)
         self._send_battle_events(session, chain_game, pl_t)
-        _hc.log_req(f"    RulesPort card play queued {row[3]} uid={card_uid} "
-                f"payment={payment} x={x_cost}")
+        log_req(f"    RulesPort card play queued {row[3]} uid={card_uid} "
+            f"payment={payment} x={x_cost}")
         return True
 
     def _affordable_troop_abilities(self, session, bstate):

@@ -4,6 +4,7 @@ Moved out of hconnect_server.HCPHandler._handle_service_request_legacy.
 """
 
 import gamemodes.tournament_server as tournament_server
+from db import log_req
 
 
 # ServiceTournaments — TryReconnection (25021)
@@ -22,8 +23,8 @@ def handle_tryreconnection_25021(handler, target, instance, data_type, reqid, co
     if not handler.authenticated:
         handler._pending_tournament_reconnect = reconnect_tid
         reconnect_ok = bool(reconnect_tid)
-        _hc.log_req(f">>> TryReconnection: deferred until auth "
-                f"tid={reconnect_tid}")
+        log_req(f">>> TryReconnection: deferred until auth "
+            f"tid={reconnect_tid}")
         resp_inner = _hc.encode_objfmt_response(
             ["Game.Shared.Network.Tournaments.TryReconnectionToDisconnectedTournamentResponseArgs"],
             [("Error", "enum1", (
@@ -62,8 +63,8 @@ def handle_tryreconnection_25021(handler, target, instance, data_type, reqid, co
         if join_ok:
             reconnect_signup = _hc.db_tournament_signup_by_player(
                 reconnect_tid, reconnect_uid, conn=_hc._db)
-            _hc.log_req(f">>> TryReconnection: re-entered Corinth tid={reconnect_tid} "
-                    f"player={reconnect_uid}")
+            log_req(f">>> TryReconnection: re-entered Corinth tid={reconnect_tid} "
+                f"player={reconnect_uid}")
     reconnect_live = bool(
         reconnect_signup and
         _hc.db_tournament_player_run_live(
@@ -98,11 +99,11 @@ def handle_tryreconnection_25021(handler, target, instance, data_type, reqid, co
                 reconnect_tid, reconnect_uid, conn=_hc._db)
         _hc._push_corinth_deck_construction(
             handler, reconnect_tid, reconnect_pool)
-        _hc.log_req(f">>> TryReconnection: resumed Corinth tid={reconnect_tid} "
-                f"player={reconnect_uid}")
+        log_req(f">>> TryReconnection: resumed Corinth tid={reconnect_tid} "
+            f"player={reconnect_uid}")
     else:
-        _hc.log_req(f">>> TryReconnection: no active tournament "
-                f"tid={reconnect_tid} player={reconnect_uid}")
+        log_req(f">>> TryReconnection: no active tournament "
+            f"tid={reconnect_tid} player={reconnect_uid}")
     resp_inner = _hc.encode_objfmt_response(
         ["Game.Shared.Network.Tournaments.TryReconnectionToDisconnectedTournamentResponseArgs"],
         [("Error", "enum1", (
@@ -125,14 +126,14 @@ def handle_tryreconnection_25021(handler, target, instance, data_type, reqid, co
         "conh": conh,
         "sid": handler.sid,
     }, dw_bytes)
-    _hc.log_req(f"    Sent Tournament reconnect response ({len(dw_bytes)}b)")
+    log_req(f"    Sent Tournament reconnect response ({len(dw_bytes)}b)")
 
 
 # ServiceTournaments — LadderRecord (70023)
 def handle_ladderrecord_70023(handler, target, instance, data_type, reqid, comp, session_id,
                               conh, inner_obj, inner_bytes, raw_data_wrapper_bytes):
     import hconnect_server as _hc
-    _hc.log_req(">>> Respond LadderRecord — empty ladder")
+    log_req(">>> Respond LadderRecord — empty ladder")
     resp_fields = [
         ("constructedIronStars", "int", 0), ("constructedStars", "int", 0),
         ("constructedMaxStars", "int", 0), ("constructedStreak", "int", 0),
@@ -149,13 +150,13 @@ def handle_ladderrecord_70023(handler, target, instance, data_type, reqid, comp,
     handler.scnt += 1
     handler.send({"issuer": f"0.0.0.0.ServiceTournaments.{_hc.SERVICE_MAIL_UID}.ServicePlayer.{handler.client_uid}.{reqid|1}",
                "target": target, "instance": instance, "reqid": reqid | 1, "c": comp, "conh": conh, "sid": handler.sid}, dw_bytes)
-    _hc.log_req(f"    Sent LadderRecord response ({len(dw_bytes)}b)")
+    log_req(f"    Sent LadderRecord response ({len(dw_bytes)}b)")
 
 
 def handle_request_70027(handler, target, instance, data_type, reqid, comp, session_id,
                          conh, inner_obj, inner_bytes, raw_data_wrapper_bytes):
     import hconnect_server as _hc
-    _hc.log_req(">>> Respond LadderTierRewardsList — empty")
+    log_req(">>> Respond LadderTierRewardsList — empty")
     resp_inner = _hc.encode_objfmt_response(
         ["Game.Shared.Tournaments.Messages.Tournament+LadderTierRewardsList+Response"],
         [("tier_rewards", "coll", ("System.Collections.Generic.Dictionary`2#System.UInt32!Game.Shared.Tournaments.TournamentRewardInfo", 0))])
@@ -164,13 +165,13 @@ def handle_request_70027(handler, target, instance, data_type, reqid, comp, sess
     handler.scnt += 1
     handler.send({"issuer": f"0.0.0.0.ServiceTournaments.{_hc.SERVICE_MAIL_UID}.ServicePlayer.{handler.client_uid}.{reqid|1}",
                "target": target, "instance": instance, "reqid": reqid | 1, "c": comp, "conh": conh, "sid": handler.sid}, dw_bytes)
-    _hc.log_req(f"    Sent LadderTierRewardsList response ({len(dw_bytes)}b)")
+    log_req(f"    Sent LadderTierRewardsList response ({len(dw_bytes)}b)")
 
 
 def handle_request_70028(handler, target, instance, data_type, reqid, comp, session_id,
                          conh, inner_obj, inner_bytes, raw_data_wrapper_bytes):
     import hconnect_server as _hc
-    _hc.log_req(">>> Respond LadderRankingList — empty")
+    log_req(">>> Respond LadderRankingList — empty")
     resp_inner = _hc.encode_objfmt_response(
         ["Game.Shared.Tournaments.Messages.Tournament+LadderRankingList+Response"],
         [("ConstructedLadderRanking", "coll", ("System.Collections.Generic.List`1#System.String", 0)),
@@ -180,13 +181,13 @@ def handle_request_70028(handler, target, instance, data_type, reqid, comp, sess
     handler.scnt += 1
     handler.send({"issuer": f"0.0.0.0.ServiceTournaments.{_hc.SERVICE_MAIL_UID}.ServicePlayer.{handler.client_uid}.{reqid|1}",
                "target": target, "instance": instance, "reqid": reqid | 1, "c": comp, "conh": conh, "sid": handler.sid}, dw_bytes)
-    _hc.log_req(f"    Sent LadderRankingList response ({len(dw_bytes)}b)")
+    log_req(f"    Sent LadderRankingList response ({len(dw_bytes)}b)")
 
 
 def handle_request_70015(handler, target, instance, data_type, reqid, comp, session_id,
                          conh, inner_obj, inner_bytes, raw_data_wrapper_bytes):
     import hconnect_server as _hc
-    _hc.log_req(">>> PooledMsg reqflush — acking")
+    log_req(">>> PooledMsg reqflush — acking")
     resp_inner = _hc.encode_objfmt_response(
         ["Game.Shared.PooledMessaging.PooledMessagingRequestsInterface+Response"], [])
     resp_body = _hc.compress_gzip(resp_inner) if comp else resp_inner
@@ -205,7 +206,7 @@ def handle_request_25019(handler, target, instance, data_type, reqid, comp, sess
         _hc._waiting_rooms[room_id] = {"id": room_id, "style": inner_obj.get("style", "se"),
             "format": fmt, "playerCount": int(inner_obj.get("playerCount", 2)),
             "players": {}, "status": "waiting"}
-    _hc.log_req(f">>> CreateWaitingRoom: id={room_id}")
+    log_req(f">>> CreateWaitingRoom: id={room_id}")
     resp_inner = _hc.encode_objfmt_response(
         ["Game.Shared.Network.Tournaments.CreateWaitingRoomResponseArgs"], [])
     resp_body = _hc.compress_gzip(resp_inner) if comp else resp_inner
@@ -213,7 +214,7 @@ def handle_request_25019(handler, target, instance, data_type, reqid, comp, sess
     handler.scnt += 1
     handler.send({"issuer": f"0.0.0.0.ServiceTournaments.{_hc.SERVICE_MAIL_UID}.ServicePlayer.{handler.client_uid}.{reqid|1}",
                "target": target, "instance": instance, "reqid": reqid | 1, "c": comp, "conh": conh, "sid": handler.sid}, dw_bytes)
-    _hc.log_req(f"    Sent CreateWaitingRoom response ({len(dw_bytes)}b)")
+    log_req(f"    Sent CreateWaitingRoom response ({len(dw_bytes)}b)")
 
 
 # ServiceTournaments — TestTournamentEntry (25027)
@@ -222,7 +223,7 @@ def handle_testtournamententry_25027(handler, target, instance, data_type, reqid
     import hconnect_server as _hc
     tournament_id = int(inner_obj.get("TournamentID", 0) or 0)
     is_wr = bool(inner_obj.get("IsWaitingRoom", False))
-    _hc.log_req(f">>> TestTournamentEntry: tid={tournament_id} wr={is_wr}")
+    log_req(f">>> TestTournamentEntry: tid={tournament_id} wr={is_wr}")
     room = _hc.db_tournament_by_id(tournament_id)
     # Corinth is a persistent async catalog entry.  It remains in
     # ``started`` status while individual runs are matched, but its
@@ -244,7 +245,7 @@ def handle_testtournamententry_25027(handler, target, instance, data_type, reqid
     handler.scnt += 1
     handler.send({"issuer": f"0.0.0.0.ServiceTournaments.{_hc.SERVICE_MAIL_UID}.ServicePlayer.{handler.client_uid}.{reqid|1}",
                "target": target, "instance": instance, "reqid": reqid | 1, "c": comp, "conh": conh, "sid": handler.sid}, dw_bytes)
-    _hc.log_req(f"    Sent TestTournamentEntry ({len(dw_bytes)}b)")
+    log_req(f"    Sent TestTournamentEntry ({len(dw_bytes)}b)")
 
 
 # ServiceTournaments — EnterTournament (25029)
@@ -252,7 +253,7 @@ def handle_entertournament_25029(handler, target, instance, data_type, reqid, co
                                  conh, inner_obj, inner_bytes, raw_data_wrapper_bytes):
     import hconnect_server as _hc
     tournament_id = int(inner_obj.get("TournamentID", 0) or 0)
-    _hc.log_req(f">>> EnterTournament: tid={tournament_id}")
+    log_req(f">>> EnterTournament: tid={tournament_id}")
     player_uid = int(handler.client_reck_id) if handler.client_reck_id else 0
     player_name = (handler.user_profile.get("name", "Unknown") if handler.user_profile else "Unknown")
     deck_id = _hc.uid_instance(inner_bytes, "DeckId")
@@ -266,7 +267,7 @@ def handle_entertournament_25029(handler, target, instance, data_type, reqid, co
     if not ok:
         signup = _hc.db_tournament_signup_by_player(tournament_id, player_uid)
         if signup:
-            _hc.log_req(f"    Player already signed up")
+            log_req(f"    Player already signed up")
             is_waiting_room = False
         else:
             dw_bytes = _hc._encode_enter_tournament_error(comp, session_id, tournament_id, "InvalidTouranmentError")
@@ -276,13 +277,13 @@ def handle_entertournament_25029(handler, target, instance, data_type, reqid, co
             return
     else:
         is_waiting_room = target_p > 1
-        _hc.log_req(f"    Player {player_name} joined room {tournament_id} ({count}/{target_p}) type={type_id}")
+        log_req(f"    Player {player_name} joined room {tournament_id} ({count}/{target_p}) type={type_id}")
     with _hc.player_handler_lock:
         _hc.player_handlers[player_uid] = handler
     if deck_id:
         _hc.player_decks[player_uid] = deck_id
-        _hc.log_req(f"    Deck selected: {deck_id}")
-    _hc.log_req(f"    EntryGroup: {entry_group}")
+        log_req(f"    Deck selected: {deck_id}")
+    log_req(f"    EntryGroup: {entry_group}")
     for stype_id in (2, 3):
         if type_id == stype_id:
             row = _hc.db_tournament_room_for_game(tournament_id, conn=_hc._db)
@@ -307,7 +308,7 @@ def handle_entertournament_25029(handler, target, instance, data_type, reqid, co
     handler.scnt += 1
     handler.send({"issuer": f"0.0.0.0.ServiceTournaments.{_hc.SERVICE_MAIL_UID}.ServicePlayer.{handler.client_uid}.{reqid|1}",
                "target": target, "instance": instance, "reqid": reqid | 1, "c": comp, "conh": conh, "sid": handler.sid}, dw_bytes)
-    _hc.log_req(f"    Sent EnterTournament response ({len(dw_bytes)}b)")
+    log_req(f"    Sent EnterTournament response ({len(dw_bytes)}b)")
     for s in _hc.db_tournament_signups_by_tournament(tournament_id):
         handler = _hc.player_handlers.get(s["player_uid"])
         if handler and handler is not handler and tournament_id:
@@ -338,7 +339,7 @@ def handle_entertournament_25029(handler, target, instance, data_type, reqid, co
                     "target": target, "instance": instance,
                     "reqid": 0, "c": 0, "conh": 0, "sid": handler.sid,
                 }, ti_dw)
-                _hc.log_req(f"    Pushed TournamentInfo (25058) for tid={tournament_id} from EnterTournament")
+                log_req(f"    Pushed TournamentInfo (25058) for tid={tournament_id} from EnterTournament")
             except Exception: pass
     corinth_entry = _hc._is_corinth_room(entry_room or {})
     if ((corinth_entry and count >= 1) or
@@ -357,10 +358,10 @@ def handle_entertournament_25029(handler, target, instance, data_type, reqid, co
                     tournament_id, player_uid, conn=_hc._db)
             _hc._push_corinth_deck_construction(
                 handler, tournament_id, pool)
-            _hc.log_req(f"    >>> Corinth entry: deck construction "
-                    f"started for player {player_uid}")
+            log_req(f"    >>> Corinth entry: deck construction "
+                f"started for player {player_uid}")
             return
-        _hc.log_req(f"    >>> Room {tournament_id} full — starting game")
+        log_req(f"    >>> Room {tournament_id} full — starting game")
         # Preserve the handlers found during this join.  The start
         # path sends several unsolicited events after the Enter
         # request; a shared-registry lookup can otherwise lose one
@@ -422,9 +423,9 @@ def handle_request_25039(handler, target, instance, data_type, reqid, comp, sess
                         tournament_id, active_match[0], conn=_hc._db)
                     _hc.db_delete_game_session(active_match[0], conn=_hc._db)
                     _hc._db.commit()
-                    _hc.log_req(
-                        f">>> GameEntrance: discarded stale Corinth "
-                        f"match session={active_match[0]} for new search")
+                    log_req(
+                    f">>> GameEntrance: discarded stale Corinth "
+                    f"match session={active_match[0]} for new search")
                     active_match = None
                 else:
                     # Wait for the opponent's explicit new-search
@@ -435,9 +436,9 @@ def handle_request_25039(handler, target, instance, data_type, reqid, comp, sess
                     _hc._db.commit()
                     ok = True
                     active_match = None
-                    _hc.log_req(
-                        f">>> GameEntrance: player {player_uid} "
-                        f"requested new search; awaiting opponent")
+                    log_req(
+                    f">>> GameEntrance: player {player_uid} "
+                    f"requested new search; awaiting opponent")
             else:
                 active_session = None
             if active_session:
@@ -481,8 +482,8 @@ def handle_request_25039(handler, target, instance, data_type, reqid, comp, sess
         if ok:
             _hc.db_apply_tournament_main_deck(
                 match[0], player_uid, main_ids, conn=_hc._db)
-    _hc.log_req(f">>> GameEntrance (dt=25039) tid={tournament_id} "
-            f"player={player_uid} searching={searching} ok={ok}")
+    log_req(f">>> GameEntrance (dt=25039) tid={tournament_id} "
+        f"player={player_uid} searching={searching} ok={ok}")
     resp_inner = _hc.encode_objfmt_response(
         ["Game.Shared.Network.Tournaments.GameEntranceResponseArgs",
          "System.Boolean"], [("success", "bool", bool(ok))])
@@ -541,9 +542,9 @@ def handle_request_25011(handler, target, instance, data_type, reqid, comp, sess
             _hc.db_tournament_signup_set_async_state(
                 tournament_id, player_uid,
                 deck_ready=True, searching=False, conn=_hc._db)
-    _hc.log_req(f">>> SaveTournamentDeck (dt=25011) tid={tournament_id} "
-            f"player={player_uid} main={len(main_cards)} "
-            f"side={len(side_cards)} valid={valid}")
+    log_req(f">>> SaveTournamentDeck (dt=25011) tid={tournament_id} "
+        f"player={player_uid} main={len(main_cards)} "
+        f"side={len(side_cards)} valid={valid}")
     resp_inner = _hc.encode_objfmt_response(
         ["Game.Shared.Network.Tournaments.SaveTournamentDeckResponseArgs",
          "System.Boolean"],
@@ -562,7 +563,7 @@ def handle_request_25011(handler, target, instance, data_type, reqid, comp, sess
 def handle_request_25005(handler, target, instance, data_type, reqid, comp, session_id,
                          conh, inner_obj, inner_bytes, raw_data_wrapper_bytes):
     import hconnect_server as _hc
-    _hc.log_req(">>> UnsubscribeDescriptionListener — ack")
+    log_req(">>> UnsubscribeDescriptionListener — ack")
     resp_inner = _hc.encode_objfmt_response(
         ["Game.Shared.Network.Tournaments.UnsubscribeDescriptionListenerResponseArgs"], [])
     resp_body = _hc.compress_gzip(resp_inner) if comp else resp_inner
@@ -570,14 +571,14 @@ def handle_request_25005(handler, target, instance, data_type, reqid, comp, sess
     handler.scnt += 1
     handler.send({"issuer": f"0.0.0.0.ServiceTournaments.{_hc.SERVICE_MAIL_UID}.ServicePlayer.{handler.client_uid}.{reqid|1}",
                "target": target, "instance": instance, "reqid": reqid | 1, "c": comp, "conh": conh, "sid": handler.sid}, dw_bytes)
-    _hc.log_req(f"    Sent UnsubscribeDescriptionListener response ({len(dw_bytes)}b)")
+    log_req(f"    Sent UnsubscribeDescriptionListener response ({len(dw_bytes)}b)")
 
 
 def handle_request_25007(handler, target, instance, data_type, reqid, comp, session_id,
                          conh, inner_obj, inner_bytes, raw_data_wrapper_bytes):
     import hconnect_server as _hc
     tournament_id = int(inner_obj.get("TournamentID", 0))
-    _hc.log_req(f">>> GetTournamentInfo: tid={tournament_id}")
+    log_req(f">>> GetTournamentInfo: tid={tournament_id}")
     resp_inner = _hc.encode_objfmt_response(
         ["Game.Client.Network.Tournaments.GetTournamentInfoResponse",
          "Game.Shared.Tournaments.TournamentInfo",
@@ -593,13 +594,13 @@ def handle_request_25007(handler, target, instance, data_type, reqid, comp, sess
     handler.scnt += 1
     handler.send({"issuer": f"0.0.0.0.ServiceTournaments.{_hc.SERVICE_MAIL_UID}.ServicePlayer.{handler.client_uid}.{reqid|1}",
                "target": target, "instance": instance, "reqid": reqid | 1, "c": comp, "conh": conh, "sid": handler.sid}, dw_bytes)
-    _hc.log_req(f"    Sent GetTournamentInfo response ({len(dw_bytes)}b)")
+    log_req(f"    Sent GetTournamentInfo response ({len(dw_bytes)}b)")
 
 
 def handle_request_25035(handler, target, instance, data_type, reqid, comp, session_id,
                          conh, inner_obj, inner_bytes, raw_data_wrapper_bytes):
     import hconnect_server as _hc
-    _hc.log_req(">>> LeaveWaitingRoom")
+    log_req(">>> LeaveWaitingRoom")
     player_uid = int(handler.client_reck_id) if handler.client_reck_id else 0
     _hc.tournament_server.leave_all(player_uid)
     resp_inner = _hc.encode_objfmt_response(["Game.Shared.Network.Tournaments.LeaveWaitingRoomResponseArgs"], [])
@@ -608,13 +609,13 @@ def handle_request_25035(handler, target, instance, data_type, reqid, comp, sess
     handler.scnt += 1
     handler.send({"issuer": f"0.0.0.0.ServiceTournaments.{_hc.SERVICE_MAIL_UID}.ServicePlayer.{handler.client_uid}.{reqid|1}",
                "target": target, "instance": instance, "reqid": reqid | 1, "c": comp, "conh": conh, "sid": handler.sid}, dw_bytes)
-    _hc.log_req(f"    Sent LeaveWaitingRoom response ({len(dw_bytes)}b)")
+    log_req(f"    Sent LeaveWaitingRoom response ({len(dw_bytes)}b)")
 
 
 def handle_request_25031(handler, target, instance, data_type, reqid, comp, session_id,
                          conh, inner_obj, inner_bytes, raw_data_wrapper_bytes):
     import hconnect_server as _hc
-    _hc.log_req(">>> LeaveTournament")
+    log_req(">>> LeaveTournament")
     player_uid = int(handler.client_reck_id) if handler.client_reck_id else 0
     tournament_id = int(inner_obj.get("TournamentID", 0) or 0)
     active_tournament_session = _hc.db_tournament_match_session(
@@ -623,14 +624,14 @@ def handle_request_25031(handler, target, instance, data_type, reqid, comp, sess
         tournament_id and _hc.record_tournament_forfeit(
             tournament_id, player_uid, handler))
     if forfeit_recorded:
-        _hc.log_req(f"    Recorded tournament forfeit: tid={tournament_id} "
-                f"loser={player_uid}")
+        log_req(f"    Recorded tournament forfeit: tid={tournament_id} "
+            f"loser={player_uid}")
         status = _hc.db_tournament_status(tournament_id, conn=_hc._db)
         if (status and str(status).lower() == "complete"
                 and active_tournament_session):
             _hc.db_delete_game_session(active_tournament_session[0])
-            _hc.log_req(f"    Tournament complete: cleaned PvP session "
-                    f"{active_tournament_session[0]}")
+            log_req(f"    Tournament complete: cleaned PvP session "
+                f"{active_tournament_session[0]}")
     # record_tournament_forfeit already applies the async run-limit
     # retirement and deckbuilder transition.  Applying a generic
     # withdrawal afterwards would turn the returned player back into
@@ -649,7 +650,7 @@ def handle_request_25031(handler, target, instance, data_type, reqid, comp, sess
     handler.scnt += 1
     handler.send({"issuer": f"0.0.0.0.ServiceTournaments.{_hc.SERVICE_MAIL_UID}.ServicePlayer.{handler.client_uid}.{reqid|1}",
                "target": target, "instance": instance, "reqid": reqid | 1, "c": comp, "conh": conh, "sid": handler.sid}, dw_bytes)
-    _hc.log_req(f"    Sent LeaveTournament response ({len(dw_bytes)}b)")    
+    log_req(f"    Sent LeaveTournament response ({len(dw_bytes)}b)")    
 
 
 LEGACY_HANDLERS = {

@@ -17,6 +17,7 @@ from typing import Any, Callable, Mapping, MutableMapping, cast
 import game_engine
 from domain.enums import ECardAttributes, ECardTypes, card_type_from_db
 from gamedata import DEFAULT_RECORD_STORE, ability_graph
+from db import log_req
 
 
 _COLLECTION_BY_LOCATION = {
@@ -947,5 +948,5 @@ def attach_pvp_runtime_facts(port_session, game_session, battle_state, *,
 def _block_reject(reason, attacker, blocker):
     """Log why a declared block set was refused (diagnostic)."""
     import hconnect_server as _hc
-    _hc.log_req(f"    PROBE block reject: {reason} attacker={attacker} blocker={blocker}")
+    log_req(f"    PROBE block reject: {reason} attacker={attacker} blocker={blocker}")
     return False

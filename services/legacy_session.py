@@ -6,6 +6,7 @@ Moved out of hconnect_server.HCPHandler._handle_service_request_legacy.
 import hashlib
 import json
 import os
+from db import log_req
 
 
 # ServiceGameSession ReplayFetch (160000)
@@ -20,13 +21,13 @@ def handle_servicegamesession_replayfetch_160000(handler, target, instance, data
     if isinstance(env_json, dict) and env_json.get("action") == "replayfetch":
         from services.replay import replay_fetch
         resp_envelope = replay_fetch(env_json)
-        _hc.log_req(
-            f">>> ReplayFetch session={env_json.get('Session', '')} "
-            f"offset={env_json.get('Offset', 0)} size={len(resp_envelope)}"
-        )
+        log_req(
+        f">>> ReplayFetch session={env_json.get('Session', '')} "
+        f"offset={env_json.get('Offset', 0)} size={len(resp_envelope)}"
+    )
     else:
         resp_envelope = b"\0\0\0\0\0"
-        _hc.log_req(">>> ReplayFetch invalid request")
+        log_req(">>> ReplayFetch invalid request")
     resp_inner = _hc.encode_objfmt_response(
         ["Game.Shared.GameReq.GameReq+Response", "System.Byte[]"],
         [("Envelope", "bytes", resp_envelope)],
@@ -43,7 +44,7 @@ def handle_servicegamesession_replayfetch_160000(handler, target, instance, data
         "issuer": issuer_str, "target": target, "instance": instance,
         "reqid": resp_reqid, "c": comp, "conh": conh, "sid": handler.sid,
     }, dw_bytes)
-    _hc.log_req(f"    Sent ReplayFetch response ({len(dw_bytes)}b)")
+    log_req(f"    Sent ReplayFetch response ({len(dw_bytes)}b)")
 
 
 # GameSession Service — PlayerTransaction (3029)
@@ -60,7 +61,7 @@ def handle_playertransaction_3029(handler, target, instance, data_type, reqid, c
     # Decode the raw transaction once at the application boundary;
     # execution below consumes typed flags without reparsing bytes.
     transaction = _hc.classify_player_transaction(inner_bytes)
-    _hc.log_req(f"    [DEBUG-TX] 3029 from reck={handler.client_reck_id} bytes={bytes(inner_bytes[:72])!r}")
+    log_req(f"    [DEBUG-TX] 3029 from reck={handler.client_reck_id} bytes={bytes(inner_bytes[:72])!r}")
     # Run labeled recovery even when nested ObjFmt parsing failed,
     # then reclassify with the real command flags so combat and
     # continuation-specific raw recovery rules are available.
@@ -194,9 +195,9 @@ def handle_playertransaction_3029(handler, target, instance, data_type, reqid, c
                 transaction_row_id=transaction_capture_id)
         except Exception as capture_error:
             # Diagnostics must never make a live transaction fail.
-            _hc.log_req(f"    Transaction capture failed: {capture_error}")
+            log_req(f"    Transaction capture failed: {capture_error}")
 
-    _hc.log_req(f">>> PlayerTransaction (dt=3029) txId={txn_id_str} quit={quit_series} cheat={is_cheat} pass={is_pass_priority}")
+    log_req(f">>> PlayerTransaction (dt=3029) txId={txn_id_str} quit={quit_series} cheat={is_cheat} pass={is_pass_priority}")
     
     # Handle mulligan keep — push AcceptedStartingHand + phase sequence
     handled = False
@@ -258,12 +259,12 @@ def handle_playertransaction_3029(handler, target, instance, data_type, reqid, c
                 # Gameplay belongs to the RulesPort host.  With no attached
                 # host there is no legacy engine to fall back to, so the
                 # request is refused and acknowledged.
-                _hc.log_req("    PvP RulesPort boundary: no attached host, "
-                            "refusing legacy fallback")
+                log_req("    PvP RulesPort boundary: no attached host, "
+                        "refusing legacy fallback")
                 handled = True
         except Exception as _pvp_error:
             import traceback
-            _hc.log_req(f"    PvP RulesPort adapter exception: {_pvp_error}")
+            log_req(f"    PvP RulesPort adapter exception: {_pvp_error}")
             traceback.print_exc()
             handled = True
         if (handled and not is_pass_priority and
@@ -325,9 +326,9 @@ def handle_playertransaction_3029(handler, target, instance, data_type, reqid, c
         # reinterpreted under a different phase/priority contract.  A
         # transaction class the client actually sends belongs in
         # classify_player_transaction, not in the legacy engine.
-        _hc.log_req("    RulesPort boundary: refusing legacy fallback"
-                + ("" if native_boundary_intent else
-                   " (unclassified transaction)"))
+        log_req("    RulesPort boundary: refusing legacy fallback"
+            + ("" if native_boundary_intent else
+               " (unclassified transaction)"))
         handler._push_transaction_ack(session)
         handled = True
 
@@ -342,8 +343,8 @@ def handle_playertransaction_3029(handler, target, instance, data_type, reqid, c
     if (session and handled and
             int(getattr(handler, "_game_sync_send_count", 0)) ==
             sync_packets_before):
-        _hc.log_req("    PlayerTransaction emitted no 3055; "
-                "sending empty sync acknowledgement")
+        log_req("    PlayerTransaction emitted no 3055; "
+            "sending empty sync acknowledgement")
         handler._push_transaction_ack(session)
 
     # PlayerTransaction is fire-and-forget in the battle client. Its
@@ -366,7 +367,7 @@ def handle_playertransaction_3029(handler, target, instance, data_type, reqid, c
                 handled, post_state_json=post_state_json,
                 post_rules_port_json=post_rules_port_json)
         except Exception as capture_error:
-            _hc.log_req(f"    Transaction completion capture failed: {capture_error}")
+            log_req(f"    Transaction completion capture failed: {capture_error}")
 
 
 LEGACY_HANDLERS = {

@@ -9,6 +9,7 @@ from typing import Any, cast
 
 import game_engine
 from rules_port.card_view import CardView
+from db import log_req
 
 
 if TYPE_CHECKING:
@@ -728,7 +729,7 @@ class CardStateMixin(_HostBase):
                 scid, owner, card_collection_for_location(row[2]), ct,
                 template_id=_tpl, cost=cost, attack=atk, defense=defense,
                 gems=gems, attributes=attributes, state=int(row[3] or 0))
-        _hc.log_req(f"    One-shot ability {ag[:8]} removed from {hex(int(card_uid))}")
+        log_req(f"    One-shot ability {ag[:8]} removed from {hex(int(card_uid))}")
         return True
 
 
@@ -761,7 +762,7 @@ class CardStateMixin(_HostBase):
         game.push_card_updated(scid, pl_t, _hc.game_engine.ECardCollections.Hand, ct,
                                attack=atk, defense=def_, cost=cost,
                                template_id=tpl_guid, gems=gem_type)
-        _hc.log_req(f"    Added card {card_uid} ({name}) from deck to hand")
+        log_req(f"    Added card {card_uid} ({name}) from deck to hand")
 
     def _player_draw_card(self, game, session, pl_t, owner_id=None):
         """Draw the top card of the human's deck into hand (pushes into `game`)."""
@@ -772,7 +773,7 @@ class CardStateMixin(_HostBase):
             from services.tournament_game import pvp_load_state, pvp_save_state
             bstate = pvp_load_state(session)
             if not bstate:
-                _hc.log_req("    PvP debug draw ignored: no PvP state")
+                log_req("    PvP debug draw ignored: no PvP state")
                 return False
         else:
             bstate = _be.load_state(session)
@@ -823,12 +824,12 @@ class CardStateMixin(_HostBase):
             session.session_id, owner_id, conn=_hc._db)
         if not row:
             if is_pvp:
-                _hc.log_req(f"    PvP debug draw: pid {owner_id} deck empty")
+                log_req(f"    PvP debug draw: pid {owner_id} deck empty")
                 return False
             # Deck-out: a player who must draw with an empty deck loses.
             self._finish_battle_gameend(
                 session, False, winners=[ai_t], losers=[pl_t])
-            _hc.log_req("    Game over: player deck empty on draw (AI wins)")
+            log_req("    Game over: player deck empty on draw (AI wins)")
             return True
         repl_zone = self._dispatch_native_trigger(
             game, session, draw_pl_t, ai_t, bstate,
@@ -839,7 +840,7 @@ class CardStateMixin(_HostBase):
                 pvp_save_state(session, bstate)
             else:
                 _be.save_state(session, bstate)
-            _hc.log_req(f"    Player draw replaced (would-draw/would-enter trigger)")
+            log_req(f"    Player draw replaced (would-draw/would-enter trigger)")
             return
         scid = _hc.game_engine.SessionCardId(_hc.game_engine.UID(row[1]))
         _hc.db_move_card_row_to_hand(session.session_id, row[0], conn=_hc._db)
@@ -884,7 +885,7 @@ class CardStateMixin(_HostBase):
             pvp_save_state(session, bstate)
         else:
             _be.save_state(session, bstate)
-        _hc.log_req(f"    Player drew card {row[1]} ({name})")
+        log_req(f"    Player drew card {row[1]} ({name})")
 
     def _rules_port_deck_out(self, game, session, owner_id, pl_t, ai_t,
                              battle_state):
@@ -904,11 +905,11 @@ class CardStateMixin(_HostBase):
         if owner_id:
             self._finish_battle_gameend(
                 session, False, winners=[ai_t], losers=[pl_t])
-            _hc.log_req("    Game over: player deck empty on native draw")
+            log_req("    Game over: player deck empty on native draw")
         else:
             self._finish_battle_gameend(
                 session, True, winners=[pl_t], losers=[ai_t])
-            _hc.log_req("    Game over: AI deck empty on native draw")
+            log_req("    Game over: AI deck empty on native draw")
         return True
 
     def _ai_play_resource(self, game, session, ai_t, battle_state):

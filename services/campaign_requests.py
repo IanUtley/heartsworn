@@ -4,6 +4,7 @@ Registered in ``services/__init__.py``; routed by ``data_type``.
 """
 
 import json
+from db import log_req
 
 
 # ServiceCampaign Siege (150000)
@@ -13,9 +14,9 @@ def handle_servicecampaign_siege_150000(handler, target, instance, data_type, re
     envelope = inner_obj.get("Envelope", b"{}")
     try:
         env_json = json.loads(envelope) if isinstance(envelope, (bytes, str)) else envelope
-        _hc.log_req(f">>> Campaign Siege (dt=150000) action={env_json.get('RequestType', '?')}")
+        log_req(f">>> Campaign Siege (dt=150000) action={env_json.get('RequestType', '?')}")
     except:
-        _hc.log_req(f">>> Campaign Siege (dt=150000) raw={envelope[:80]}")
+        log_req(f">>> Campaign Siege (dt=150000) raw={envelope[:80]}")
     resp_envelope = json.dumps({"SiegeStatus": 2, "Offset": 0, "Count": 0, "Results": []}).encode("utf-8")
     resp_inner = _hc.encode_objfmt_response(
         ["Game.Shared.Campaign.Siege.Messaging+Response",
@@ -36,7 +37,7 @@ def handle_servicecampaign_siege_150000(handler, target, instance, data_type, re
         "conh": conh,
         "sid": handler.sid,
     }, dw_bytes)
-    _hc.log_req(f"    Sent Campaign Siege response ({len(dw_bytes)}b)")
+    log_req(f"    Sent Campaign Siege response ({len(dw_bytes)}b)")
 
 
 # ServiceCampaign Main (110000) — campaign/adventure system
@@ -53,14 +54,14 @@ def handle_campaign_adventure_system_110000(handler, target, instance, data_type
 def handle_resolve_service_uids_140000(handler, target, instance, data_type, reqid, comp, session_id,
                                        conh, inner_obj, inner_bytes, raw_data_wrapper_bytes):
     import hconnect_server as _hc
-    _hc.log_req(f">>> Cluster pick (dt=140000) target={target}")
+    log_req(f">>> Cluster pick (dt=140000) target={target}")
     # UID format in C#: [FieldOffset(0)] public ulong m_UID64 = type | (instance << 8)
     if target == "ServiceCampaign":
         service_uid = _hc.UID_TYPE["ServiceCampaign"]  # 253
-        _hc.log_req(f"    Returning ServiceCampaign UID: {service_uid}")
+        log_req(f"    Returning ServiceCampaign UID: {service_uid}")
     else:
         service_uid = _hc.UID_TYPE["ServiceGameSession"]  # 246
-        _hc.log_req(f"    Returning ServiceGameSession UID: {service_uid}")
+        log_req(f"    Returning ServiceGameSession UID: {service_uid}")
     env_json = json.dumps({"Kind": "pickres", "ServiceID": {"m_UID64": service_uid}})
     resp_inner = _hc.encode_objfmt_response(
         ["Game.Shared.Cluster.ClusterComms+EnvelopeR", "System.Byte[]"],
@@ -72,7 +73,7 @@ def handle_resolve_service_uids_140000(handler, target, instance, data_type, req
     handler.scnt += 1
     handler.send({"issuer": issuer_str, "target": target, "instance": instance,
         "reqid": resp_reqid, "c": comp, "conh": conh, "sid": handler.sid}, dw_bytes)
-    _hc.log_req(f"    Sent Cluster pick response ({len(dw_bytes)}b)")
+    log_req(f"    Sent Cluster pick response ({len(dw_bytes)}b)")
 
 
 

@@ -3,6 +3,7 @@
 from typing import TYPE_CHECKING
 import json
 import random
+from db import log_req
 
 
 def discarding_player(bstate, ability_controller):
@@ -101,8 +102,8 @@ class CombatMixin(_HostBase):
         announcement_events = game.events[event_start:]
         del game.events[event_start:]
         game.events[0:0] = announcement_events
-        _hc.log_req("    Re-announced champion board cards (client in battle)",
-                level="DEBUG")
+        log_req("    Re-announced champion board cards (client in battle)",
+            level="DEBUG")
         return True
 
     def _send_battle_events(self, session, game, pl_t):
@@ -159,7 +160,7 @@ class CombatMixin(_HostBase):
                     "GreenLightSessionEventArgs")
             before = len(game.events)
             game.events = [ev for ev in game.events if type(ev).__name__ not in held]
-            _hc.log_req(f"    Deck-search picker open: held {before - len(game.events)} priority event(s)")
+            log_req(f"    Deck-search picker open: held {before - len(game.events)} priority event(s)")
         prompt_open = prompt_open or deck_search_open
         if prompt_open and not picker_packet:
             game.events = [ev for ev in game.events
@@ -188,8 +189,8 @@ class CombatMixin(_HostBase):
                     else _hc.game_engine.UID(int(getattr(active, "uid64", active))))
                 phase_ev.priority_player_id = chooser
                 picker_packet.insert(0, phase_ev)
-            _hc.log_req("    [DEBUG-PACKET] picker sent as its own packet: " + ", ".join(
-                type(e).__name__.replace("SessionEventArgs", "") for e in picker_packet))
+            log_req("    [DEBUG-PACKET] picker sent as its own packet: " + ", ".join(
+            type(e).__name__.replace("SessionEventArgs", "") for e in picker_packet))
         from rules_port.visibility import (project_visible_hands,
                                            project_visible_top_decks)
         current_state = getattr(self, "_current_bstate", {}) or {}
@@ -251,18 +252,18 @@ class CombatMixin(_HostBase):
                 if hasattr(event, "controller"):
                     event.controller = projected_owner
         except Exception as exc:
-            _hc.log_req(f"    Card owner projection skipped: {exc}")
+            log_req(f"    Card owner projection skipped: {exc}")
         batches = [list(game.events)]
         if picker_packet:
             batches.append(picker_packet)
         for batch in batches:
             game.events = batch
-            _hc.log_req("    [DEBUG-SEND] packet: " + ", ".join(
-                type(e).__name__.replace("SessionEventArgs", "") + (
-                    f"(phase={getattr(e, 'turn_phase', None)} "
-                    f"priority={getattr(e, 'priority_player_id', None)})"
-                    if type(e).__name__ == "TurnPhaseUpdatedSessionEventArgs" else "")
-                for e in batch))
+            log_req("    [DEBUG-SEND] packet: " + ", ".join(
+            type(e).__name__.replace("SessionEventArgs", "") + (
+                f"(phase={getattr(e, 'turn_phase', None)} "
+                f"priority={getattr(e, 'priority_player_id', None)})"
+                if type(e).__name__ == "TurnPhaseUpdatedSessionEventArgs" else "")
+            for e in batch))
             pkt = game.make_network_packet(pl_t)
             dw = _hc.encode_datawrapper(0, 3055, _hc.compress_gzip(_hc.encode_sync_event(pkt)), 1,
                                     "00000000-0000-0000-0000-000000000000")
@@ -362,8 +363,8 @@ class CombatMixin(_HostBase):
             self._push_warzone_card_updates(game, session, pl_t, ai_t)
         if send:
             self._send_battle_events(session, game, pl_t)
-        _hc.log_req(f"    Phase options (priority window): {len(playable)} playable "
-                f"quick actions, champ_ab={len(affordable_champ)}")
+        log_req(f"    Phase options (priority window): {len(playable)} playable "
+            f"quick actions, champ_ab={len(affordable_champ)}")
 
     def _push_practice_ability_chain_window(self, session, port, game):
         """Give the single Practice client the chain response window.
@@ -398,8 +399,8 @@ class CombatMixin(_HostBase):
             pl_t if _hc._same_uid(port.active_player_id, pl_t) else ai_t,
             pl_t)
         self._send_battle_events(session, chain_game, pl_t)
-        _hc.log_req("    RulesPort Practice ability priority window: "
-                f"phase={port.current_turn_phase} priority=player")
+        log_req("    RulesPort Practice ability priority window: "
+            f"phase={port.current_turn_phase} priority=player")
         return True
 
     def _push_attack_options(self, session, pl_t, ai_t):
@@ -443,7 +444,7 @@ class CombatMixin(_HostBase):
         if ready and defending_champion_immune(self, self.user_profile["id"]):
             # The champion is the only attack target and it can't be attacked; troops only block, so no attack is legal.
             ready = []
-            _hc.log_req("    Attack options withheld: opposing champion can't be attacked")
+            log_req("    Attack options withheld: opposing champion can't be attacked")
         from pickers import PickOption, present_options
         present_options(game, pl_t, [PickOption(card_uid=int(scid.uid.uid64), state="Attack")
                                      for scid in ready])
@@ -451,7 +452,7 @@ class CombatMixin(_HostBase):
         game.push_player_updated(ai_t, champ_id=getattr(self, "_ai_champ_scid", None))
         self._push_warzone_card_updates(game, session, pl_t, ai_t)
         self._send_battle_events(session, game, pl_t)
-        _hc.log_req(f"    Attack options: {len(ready)} ready troop(s)")
+        log_req(f"    Attack options: {len(ready)} ready troop(s)")
 
     def _auto_declare_force_attackers(self, session, pl_t, ai_t, bstate, game):
         """Server-authoritative "Must attack": every ready player warzone troop
@@ -552,8 +553,8 @@ class CombatMixin(_HostBase):
                 str(k): str(v) for k, v in attackers.items()}
             _be.save_state(session, bstate)
             game.push_combat_listing(pl_t, combats)
-            _hc.log_req(f"    Auto-declared {len(combats)} ForceAttack attacker(s): "
-                    f"{[hex(c.attacker.uid.uid64) for c in combats]}")
+            log_req(f"    Auto-declared {len(combats)} ForceAttack attacker(s): "
+                f"{[hex(c.attacker.uid.uid64) for c in combats]}")
         return combats
 
     def _push_blocker_options(self, session, pl_t, ai_t):
@@ -602,7 +603,7 @@ class CombatMixin(_HostBase):
         game.push_player_updated(ai_t, champ_id=getattr(self, "_ai_champ_scid", None))
         self._push_warzone_card_updates(game, session, pl_t, ai_t)
         self._send_battle_events(session, game, pl_t)
-        _hc.log_req(f"    Blockers options: {len(rows)} defender troop(s) for {len(attackers)} AI attacker(s)")
+        log_req(f"    Blockers options: {len(rows)} defender troop(s) for {len(attackers)} AI attacker(s)")
         return True
 
     def _player_can_block(self, session):
@@ -699,12 +700,12 @@ class CombatMixin(_HostBase):
         if ph <= 0:
             self._finish_battle_gameend(
                 session, False, winners=[ai_t], losers=[pl_t])
-            _hc.log_req(f"    Game over: player health {ph} <= 0 (AI wins)")
+            log_req(f"    Game over: player health {ph} <= 0 (AI wins)")
             return True
         if ah <= 0:
             self._finish_battle_gameend(
                 session, True, winners=[pl_t], losers=[ai_t])
-            _hc.log_req(f"    Game over: AI health {ah} <= 0 (player wins)")
+            log_req(f"    Game over: AI health {ah} <= 0 (player wins)")
             return True
         return False
 
@@ -936,20 +937,20 @@ class CombatMixin(_HostBase):
         card_row = _hc.db_card_sacrifice_info(
             session.session_id, int(card_uid), conn=_hc._db)
         if not card_row:
-            _hc.log_req(f"    Sacrifice rejected missing card {int(card_uid)}")
+            log_req(f"    Sacrifice rejected missing card {int(card_uid)}")
             return False
         actual_owner, location, card_type = card_row
         # A sacrifice cost names a troop or the source itself (an Artifact, e.g.
         # Hellshot Catapult); the cost's own candidates already limit the choice.
         if str(location or "").lower() != "warzone":
-            _hc.log_req(
-                f"    Sacrifice rejected invalid zone/type uid={int(card_uid)} "
-                f"owner={int(actual_owner or 0)} location={location!r} type={card_type!r}")
+            log_req(
+            f"    Sacrifice rejected invalid zone/type uid={int(card_uid)} "
+            f"owner={int(actual_owner or 0)} location={location!r} type={card_type!r}")
             return False
         if expected_owner_id is not None and int(actual_owner or 0) != int(expected_owner_id):
-            _hc.log_req(
-                f"    Sacrifice rejected wrong owner uid={int(card_uid)} "
-                f"expected={int(expected_owner_id)} actual={int(actual_owner or 0)}")
+            log_req(
+            f"    Sacrifice rejected wrong owner uid={int(card_uid)} "
+            f"expected={int(expected_owner_id)} actual={int(actual_owner or 0)}")
             return False
         int(actual_owner or 0)
         # Sacrifice is a native death transition: zone events, replacement
@@ -983,7 +984,7 @@ class CombatMixin(_HostBase):
         victim_id = 0 if owner == human_id else human_id
         voided = bstate.get("resolving_target_uid")
         if not voided:
-            _hc.log_req("    Same-cost discard: no voided troop recorded")
+            log_req("    Same-cost discard: no voided troop recorded")
             return
 
         def card_cost(uid):
@@ -1001,8 +1002,8 @@ class CombatMixin(_HostBase):
             gd, _owner_uid = self._discard_card_to_owner(session, pl_t, ai_t, uid)
             if gd is not None:
                 game.events.extend(gd.events)
-        _hc.log_req(f"    Same-cost discard: voided cost={cost}, "
-                    f"discarded {len(matching)} card(s) from owner {victim_id}")
+        log_req(f"    Same-cost discard: voided cost={cost}, "
+                f"discarded {len(matching)} card(s) from owner {victim_id}")
 
     def _push_discard_prompt(self, game, session, pl_t, ai_t, bstate,
                              ability_guid=None):
@@ -1040,7 +1041,7 @@ class CombatMixin(_HostBase):
                 if gd is not None:
                     game.events.extend(gd.events)
                 bstate["ai_discarded_uid"] = chosen
-                _hc.log_req(f"    AI discard resolved without player prompt: {chosen}")
+                log_req(f"    AI discard resolved without player prompt: {chosen}")
             else:
                 bstate["ai_discarded_uid"] = None
             return
@@ -1057,11 +1058,11 @@ class CombatMixin(_HostBase):
             # empty hand therefore resolves the Deathcry as a no-op; opening
             # class 23 with min/max=1 and zero targets leaves the client in a
             # picker it cannot answer and strands the native chain.
-            _hc.log_req("    Deathcry discard: no legal hand target")
+            log_req("    Deathcry discard: no legal hand target")
             return "discard: no legal target"
         prompt = self._discard_prompt_data(resolving_ability, bstate=bstate)
         if not prompt or not prompt[1]:
-            _hc.log_req("    Deathcry discard: missing metadata prompt target")
+            log_req("    Deathcry discard: missing metadata prompt target")
             return
         child_ability, target_template = prompt
         source_uid = bstate.get("resolving_source_uid")
@@ -1086,7 +1087,7 @@ class CombatMixin(_HostBase):
         bstate["pending_discard_target_template"] = target_template
         bstate["pending_discard_scid"] = None
         _be.save_state(session, bstate)
-        _hc.log_req("    Deathcry discard: class-23 prompt pushed (player discards)")
+        log_req("    Deathcry discard: class-23 prompt pushed (player discards)")
 
     def _resolve_champion_void_targets(self, game, session, pl_t, ai_t,
                                        bstate, ability_guid):
@@ -1141,8 +1142,8 @@ class CombatMixin(_HostBase):
         if voided_uids:
             bstate.setdefault("ability_lists", {})["VoidedCards"] = \
                 list(voided_uids)
-        _hc.log_req(f"    Champion void targets: {voided} voided "
-                f"(stats={stats})")
+        log_req(f"    Champion void targets: {voided} voided "
+            f"(stats={stats})")
 
     def _dispatch_blocker_events(self, game, session, bstate, runners):
         """Emit the authored block triggers for ``(attacker, blockers)`` pairs.

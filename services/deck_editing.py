@@ -9,13 +9,14 @@ from binascii import unhexlify
 import io
 import json
 import struct
+from db import log_req
 
 
 # CreateNewDeckFromTemplate (2091)
 def handle_createnewdeckfromtemplate_2091(handler, target, instance, data_type, reqid, comp, session_id,
                                           conh, inner_obj, inner_bytes, raw_data_wrapper_bytes):
     import hconnect_server as _hc
-    _hc.log_req(f">>> CreateNewDeckFromTemplate (dt=2091)")
+    log_req(f">>> CreateNewDeckFromTemplate (dt=2091)")
     resp_inner = _hc.encode_objfmt_response(
         ["Game.Client.Network.Profile.CreateNewDeckFromTemplateResponse",
          "System.Boolean",
@@ -41,14 +42,14 @@ def handle_createnewdeckfromtemplate_2091(handler, target, instance, data_type, 
         "issuer": issuer_str, "target": target, "instance": instance,
         "reqid": resp_reqid, "c": comp, "conh": conh, "sid": handler.sid,
     }, dw_bytes)
-    _hc.log_req(f"    Sent CreateNewDeckFromTemplate response ({len(dw_bytes)}b)")
+    log_req(f"    Sent CreateNewDeckFromTemplate response ({len(dw_bytes)}b)")
 
 
 # AddNewDeck (2089)
 def handle_addnewdeck_2089(handler, target, instance, data_type, reqid, comp, session_id,
                            conh, inner_obj, inner_bytes, raw_data_wrapper_bytes):
     import hconnect_server as _hc
-    _hc.log_req(f">>> AddNewDeck (dt=2089)")
+    log_req(f">>> AddNewDeck (dt=2089)")
     # Extract deck name from raw bytes (parser fails on ResourceId)
     deck_name = "FirstDeck"
     if isinstance(inner_obj, dict) and inner_obj.get("DeckName"):
@@ -65,7 +66,7 @@ def handle_addnewdeck_2089(handler, target, instance, data_type, reqid, comp, se
                     deck_name = namebytes.decode("utf-8", errors="replace")
                 except:
                     pass
-    _hc.log_req(f"    Deck name: {deck_name}")
+    log_req(f"    Deck name: {deck_name}")
 
     # Extract card IDs from raw bytes and save to DB first
     card_ids = []
@@ -144,7 +145,7 @@ def handle_addnewdeck_2089(handler, target, instance, data_type, reqid, comp, se
     if not handler.user_profile:
         # No authenticated user — error out rather than fabricate a
         # bogus deck ID that the client can't look up again.
-        _hc.log_req("    ERROR: No user_profile for AddNewDeck — rejecting")
+        log_req("    ERROR: No user_profile for AddNewDeck — rejecting")
         err_inner = _hc.encode_objfmt_response(
             ["Game.Client.Network.Profile.AddNewDeckResponse",
              "Game.Shared.Network.Profile.EAddNewDeckError", "System.String"],
@@ -160,7 +161,7 @@ def handle_addnewdeck_2089(handler, target, instance, data_type, reqid, comp, se
             "issuer": issuer_err, "target": target, "instance": instance,
             "reqid": err_reqid, "c": comp, "conh": conh, "sid": handler.sid,
         }, dw_err)
-        _hc.log_req(f"    Sent AddNewDeck error ({len(dw_err)}b)")
+        log_req(f"    Sent AddNewDeck error ({len(dw_err)}b)")
         return
     cards_json = json.dumps(card_ids)
     # Persist an explicit empty map too; otherwise removing a gem can
@@ -187,8 +188,8 @@ def handle_addnewdeck_2089(handler, target, instance, data_type, reqid, comp, se
             active_gems_json=ag_json, gem_abilities_json=ga_json,
             deck_sleeve_guid=deck_sleeve_guid,
             gameboard_guid=gameboard_guid, coin_guid=coin_guid)
-        _hc.log_req(f"    Updated campaign deck '{deck_name}' "
-                f"id={deck_db_id} with {len(card_ids)} cards")
+        log_req(f"    Updated campaign deck '{deck_name}' "
+            f"id={deck_db_id} with {len(card_ids)} cards")
     else:
         deck_db_id = _hc.db_save_deck(
             user_id, deck_name, cards_json,
@@ -197,8 +198,8 @@ def handle_addnewdeck_2089(handler, target, instance, data_type, reqid, comp, se
             active_gems_json=ag_json, gem_abilities_json=ga_json,
             deck_sleeve_guid=deck_sleeve_guid,
             gameboard_guid=gameboard_guid, coin_guid=coin_guid)
-        _hc.log_req(f"    Saved deck '{deck_name}' id={deck_db_id} "
-                f"with {len(card_ids)} cards")
+        log_req(f"    Saved deck '{deck_name}' id={deck_db_id} "
+            f"with {len(card_ids)} cards")
     deck_uid = deck_db_id
     # Link this deck as the champion's last used deck (pve_champion_id is
     # the champion UID = (db_id << 8) | 12).
@@ -206,7 +207,7 @@ def handle_addnewdeck_2089(handler, target, instance, data_type, reqid, comp, se
         champ_db_id = pve_champion_uid >> 8
         _hc.db_set_champion_last_deck(
             champ_db_id, deck_db_id, conn=_hc._db)
-        _hc.log_req(f"    Set champion {champ_db_id} last_deck_id={deck_db_id}")
+        log_req(f"    Set champion {champ_db_id} last_deck_id={deck_db_id}")
     deck_uid64 = (deck_uid << 8) | 17  # UID.Type.Deck=17
     # Build deck_bits manually with all 23 fields (skip ActiveGems)
     tn = ["Game.Client.Network.Profile.AddNewDeckResponse",
@@ -334,14 +335,14 @@ def handle_addnewdeck_2089(handler, target, instance, data_type, reqid, comp, se
         "issuer": issuer_str, "target": target, "instance": instance,
         "reqid": resp_reqid, "c": comp, "conh": conh, "sid": handler.sid,
     }, dw_bytes)
-    _hc.log_req(f"    Sent AddNewDeck response (deck={deck_uid}, {len(dw_bytes)}b)")
+    log_req(f"    Sent AddNewDeck response (deck={deck_uid}, {len(dw_bytes)}b)")
 
 
 # UpdateDeck (2095)
 def handle_updatedeck_2095(handler, target, instance, data_type, reqid, comp, session_id,
                            conh, inner_obj, inner_bytes, raw_data_wrapper_bytes):
     import hconnect_server as _hc
-    _hc.log_req(">>> UpdateDeck (dt=2095)")
+    log_req(">>> UpdateDeck (dt=2095)")
     deck_id = 0
     deck_name = None
     pve_champion_id = None
@@ -429,7 +430,7 @@ def handle_updatedeck_2095(handler, target, instance, data_type, reqid, comp, se
                             elif fname == b'GameboardId': gameboard_guid = val
                             elif fname == b'CoinId': coin_guid = val
                         except: pass
-    _hc.log_req(f"    Parsed: id={deck_id}, name={deck_name}, cards={len(card_ids) if card_ids else 0}, gems={len(active_gems)}, sleeve={deck_sleeve_guid}")
+    log_req(f"    Parsed: id={deck_id}, name={deck_name}, cards={len(card_ids) if card_ids else 0}, gems={len(active_gems)}, sleeve={deck_sleeve_guid}")
     from services.equipment import (parse_request_equipment_ids,
                                     sanitize_deck_equipment)
     # None: the request has no EquipmentIDs field, so keep the saved items.
@@ -461,23 +462,23 @@ def handle_updatedeck_2095(handler, target, instance, data_type, reqid, comp, se
             kept_equipment = sanitize_deck_equipment(
                 _hc._db, owner_id, equipment_ids)
             equipment_json = json.dumps(kept_equipment)
-            _hc.log_req(f"    Equipment: requested={len(equipment_ids)} "
-                        f"kept={kept_equipment}")
+            log_req(f"    Equipment: requested={len(equipment_ids)} "
+                    f"kept={kept_equipment}")
         success = _hc.db_update_deck(deck_id, owner_id,
             deck_name=deck_name, cards_json=cards_json,
             pve_champion_id=pve_champion_id, pvp_champion_guid=pvp_champion_guid,
             active_gems_json=ag_json, gem_abilities_json=ga_json,
             deck_sleeve_guid=deck_sleeve_guid, gameboard_guid=gameboard_guid, coin_guid=coin_guid,
             equipment_json=equipment_json)
-        _hc.log_req(f"    DB update: {'OK' if success else 'FAILED'} "
-                f"(owner={owner_id})")
+        log_req(f"    DB update: {'OK' if success else 'FAILED'} "
+            f"(owner={owner_id})")
         # Link this deck as the champion's last used deck (pve_champion_id
         # is the champion UID = (db_id << 8) | 12).
         if pve_champion_id:
             champ_db_id = pve_champion_id >> 8
             _hc.db_set_champion_last_deck(
                 champ_db_id, deck_id, conn=_hc._db)
-            _hc.log_req(f"    Set champion {champ_db_id} last_deck_id={deck_id}")
+            log_req(f"    Set champion {champ_db_id} last_deck_id={deck_id}")
 
     # Only report a real deck UID; on failure return invalid (updated=False
     # tells the client it didn't save).
@@ -495,14 +496,14 @@ def handle_updatedeck_2095(handler, target, instance, data_type, reqid, comp, se
     handler.scnt += 1
     handler.send({"issuer": issuer_str, "target": target, "instance": instance,
         "reqid": resp_reqid, "c": comp, "conh": conh, "sid": handler.sid}, dw_bytes)
-    _hc.log_req(f"    Sent UpdateDeck response (deck={deck_id}, {len(dw_bytes)}b)")
+    log_req(f"    Sent UpdateDeck response (deck={deck_id}, {len(dw_bytes)}b)")
 
 
 # GetPlayerCardIDList (2043)
 def handle_getplayercardidlist_2043(handler, target, instance, data_type, reqid, comp, session_id,
                                     conh, inner_obj, inner_bytes, raw_data_wrapper_bytes):
     import hconnect_server as _hc
-    _hc.log_req(f">>> GetPlayerCardIDList (dt=2043)")
+    log_req(f">>> GetPlayerCardIDList (dt=2043)")
     p = handler.user_profile
     db_cards = []
     if p:
@@ -583,7 +584,7 @@ def handle_getplayercardidlist_2043(handler, target, instance, data_type, reqid,
     handler.scnt += 1
     handler.send({"issuer": issuer_str, "target": target, "instance": instance,
         "reqid": resp_reqid, "c": comp, "conh": conh, "sid": handler.sid}, dw_bytes)
-    _hc.log_req(f"    Sent GetPlayerCardIDList response ({total_cards} cards, {len(dw_bytes)}b)")
+    log_req(f"    Sent GetPlayerCardIDList response ({total_cards} cards, {len(dw_bytes)}b)")
 
 
 # DeleteChampion (2035)
@@ -591,11 +592,11 @@ def handle_deletechampion_2035(handler, target, instance, data_type, reqid, comp
                                conh, inner_obj, inner_bytes, raw_data_wrapper_bytes):
     import hconnect_server as _hc
     champ_id = int(inner_obj.get("ChampionId", 0))
-    _hc.log_req(f">>> DeleteChampion: id={champ_id}")
+    log_req(f">>> DeleteChampion: id={champ_id}")
     if handler.user_profile and champ_id > 0:
         _hc.db_delete_champion(champ_id, handler.user_profile["id"], conn=_hc._db)
         _hc._db.commit()
-        _hc.log_req(f"    Marked champion {champ_id} as deleted")
+        log_req(f"    Marked champion {champ_id} as deleted")
     
     # Encode DeleteChampionResponse (ChampionBits + Error + ErrorMessage)
     tnames = ["Game.Client.Network.Profile.DeleteChampionResponse",
@@ -647,7 +648,7 @@ def handle_deletechampion_2035(handler, target, instance, data_type, reqid, comp
         "issuer": issuer_str, "target": target, "instance": instance,
         "reqid": resp_reqid, "c": comp, "conh": conh, "sid": handler.sid,
     }, dw_bytes)
-    _hc.log_req(f"    Sent DeleteChampionResponse ({len(dw_bytes)}b)")
+    log_req(f"    Sent DeleteChampionResponse ({len(dw_bytes)}b)")
 
 
 # AddChampion (2033)
@@ -680,7 +681,7 @@ def handle_addchampion_2033(handler, target, instance, data_type, reqid, comp, s
             g = inner_obj["Gender"]
             gender_val = int(g[1]) if isinstance(g, list) else int(g.split(":'")[1].split("'")[0]) if isinstance(g, str) else int(g.get("value__", 1))
     except: pass
-    _hc.log_req(f">>> AddChampion: name={champ_name} pet={pet_name!r} race={race_val} class={cls_val} gender={gender_val}")
+    log_req(f">>> AddChampion: name={champ_name} pet={pet_name!r} race={race_val} class={cls_val} gender={gender_val}")
 
     starting_talents = _hc._default_talents_for_champion(
         race_val, cls_val, gender_val)
@@ -729,10 +730,10 @@ def handle_addchampion_2033(handler, target, instance, data_type, reqid, comp, s
                         f"PvE {race_name} Starter", pve_template_guid,
                         0, "Free", conn=_hc._db)
                 _hc._db.commit()
-                _hc.log_req(f"    Granted {cards_granted} starter deck cards for {race_name} (first grant)")
+                log_req(f"    Granted {cards_granted} starter deck cards for {race_name} (first grant)")
                 handler.push_cards_to_client()
             else:
-                _hc.log_req(f"    Starter deck for {race_name} already granted — skipping")
+                log_req(f"    Starter deck for {race_name} already granted — skipping")
 
             # Every newly created champion needs its own starter deck,
             # even when this user already received the race's cards.
@@ -747,7 +748,7 @@ def handle_addchampion_2033(handler, target, instance, data_type, reqid, comp, s
                 pve_champion_id=champ_db_id)
             _hc.db_set_champion_last_deck(
                 champ_db_id, deck_db_id, conn=_hc._db)
-            _hc.log_req(f"    Auto-created deck id={deck_db_id} for champion {champ_db_id}")
+            log_req(f"    Auto-created deck id={deck_db_id} for champion {champ_db_id}")
     else:
         champ_db_id = 1
 
@@ -888,14 +889,14 @@ def handle_addchampion_2033(handler, target, instance, data_type, reqid, comp, s
         "issuer": issuer_str, "target": target, "instance": instance,
         "reqid": resp_reqid, "c": comp, "conh": conh, "sid": handler.sid,
     }, dw_bytes)
-    _hc.log_req(f"    Sent AddChampionResponse (id={champ_db_id}, name={champ_name}, {len(dw_bytes)}b)")
+    log_req(f"    Sent AddChampionResponse (id={champ_db_id}, name={champ_name}, {len(dw_bytes)}b)")
 
 
 # UpdateChampionDeckID (2187)
 def handle_updatechampiondeckid_2187(handler, target, instance, data_type, reqid, comp, session_id,
                                      conh, inner_obj, inner_bytes, raw_data_wrapper_bytes):
     import hconnect_server as _hc
-    _hc.log_req(">>> UpdateChampionDeckID (dt=2187)")
+    log_req(">>> UpdateChampionDeckID (dt=2187)")
     champ_uid = 0; deck_id = 0; auth_id = 0
     if isinstance(inner_obj, dict):
         champ_uid = int(inner_obj.get("ChampionID", 0))
@@ -924,14 +925,14 @@ def handle_updatechampiondeckid_2187(handler, target, instance, data_type, reqid
             handler.user_profile = restored_profile
         if handler.user_profile:
             handler._set_client_identity_from_profile()
-            _hc.log_req(f"    Restored profile for auth id {auth_id}: "
-                    f"user={handler.user_profile['id']}")
+            log_req(f"    Restored profile for auth id {auth_id}: "
+                f"user={handler.user_profile['id']}")
     champ_db_id = champ_uid >> 8 if champ_uid > 0xff else champ_uid
-    _hc.log_req(f"    ChampionID={champ_uid} (db={champ_db_id}) LastDeckID={deck_id}")
+    log_req(f"    ChampionID={champ_uid} (db={champ_db_id}) LastDeckID={deck_id}")
     if handler.user_profile and champ_db_id > 0:
         _hc.db_set_champion_last_deck(
             champ_db_id, deck_id, handler.user_profile["id"], conn=_hc._db)
-        _hc.log_req(f"    Updated champion {champ_db_id} last_deck_id={deck_id}")
+        log_req(f"    Updated champion {champ_db_id} last_deck_id={deck_id}")
     # Return success response with Error=Ok
     resp_inner = _hc.encode_objfmt_response(
         ["Game.Client.Network.Profile.UpdateChampionDeckIDResponse",
@@ -944,14 +945,14 @@ def handle_updatechampiondeckid_2187(handler, target, instance, data_type, reqid
     handler.scnt += 1
     handler.send({"issuer": issuer_str, "target": target, "instance": instance,
         "reqid": resp_reqid, "c": comp, "conh": conh, "sid": handler.sid}, dw_bytes)
-    _hc.log_req(f"    Sent UpdateChampionDeckID response ({len(dw_bytes)}b)")
+    log_req(f"    Sent UpdateChampionDeckID response ({len(dw_bytes)}b)")
 
 
 # UpdateChampionTalents (2037)
 def handle_updatechampiontalents_2037(handler, target, instance, data_type, reqid, comp, session_id,
                                       conh, inner_obj, inner_bytes, raw_data_wrapper_bytes):
     import hconnect_server as _hc
-    _hc.log_req(">>> UpdateChampionTalents (dt=2037)")
+    log_req(">>> UpdateChampionTalents (dt=2037)")
     # Parse ChampionId (ulong) + Talents (List<ResourceId> GUIDs) from the
     # request. The client always sends the champion's full talent list, so
     # we just persist it — no server-side defaults needed.
@@ -979,7 +980,7 @@ def handle_updatechampiontalents_2037(handler, target, instance, data_type, reqi
             champ_id, handler.user_profile["id"] if handler.user_profile else 0,
             json.dumps(talents), conn=_hc._db)
         _hc._db.commit()
-        _hc.log_req(f"    Saved talents for champion {champ_id}: {talents}")
+        log_req(f"    Saved talents for champion {champ_id}: {talents}")
         crow = _hc.db_champion_profile(champ_id, conn=_hc._db)
         if crow:
             champ_name = crow[0] or ""
@@ -990,7 +991,7 @@ def handle_updatechampiontalents_2037(handler, target, instance, data_type, reqi
             level_val = crow[4] or 1
             pet_name = crow[6] or ""
     else:
-        _hc.log_req(f"    Could not parse champion id / talents ({len(talents)} guids found)")
+        log_req(f"    Could not parse champion id / talents ({len(talents)} guids found)")
 
     # Build the response with a full ChampionBits (incl. ChampionTalents)
     # so the client's HandleTalentsUpdate can update the champion.
@@ -1102,7 +1103,7 @@ def handle_updatechampiontalents_2037(handler, target, instance, data_type, reqi
     handler.scnt += 1
     handler.send({"issuer": issuer_str, "target": target, "instance": instance,
         "reqid": resp_reqid, "c": comp, "conh": conh, "sid": handler.sid}, dw_bytes)
-    _hc.log_req(f"    Sent UpdateChampionTalents response ({len(dw_bytes)}b)")
+    log_req(f"    Sent UpdateChampionTalents response ({len(dw_bytes)}b)")
 
 
 # ServiceProfile — UpgradeExtendedArtOnCard (2185)
@@ -1145,7 +1146,7 @@ def _spend_extended_art_stardust(handler, user_id, card_rarity):
 def handle_upgradeextendedartoncard_2185(handler, target, instance, data_type, reqid, comp, session_id,
                                          conh, inner_obj, inner_bytes, raw_data_wrapper_bytes):
     import hconnect_server as _hc
-    _hc.log_req(">>> UpgradeExtendedArtOnCard (dt=2185)")
+    log_req(">>> UpgradeExtendedArtOnCard (dt=2185)")
     card_instance_id = int(inner_obj.get("CardInstanceId", 0))
     user_id = handler.user_profile["id"] if handler.user_profile else 0
     row = _hc.db_card_instance_art(
@@ -1153,10 +1154,10 @@ def handle_upgradeextendedartoncard_2185(handler, target, instance, data_type, r
     stardust_id = 0
     error = _EXTENDED_ART_OK
     if not row:
-        _hc.log_req(f"    Card instance {card_instance_id} not found for user {user_id}")
+        log_req(f"    Card instance {card_instance_id} not found for user {user_id}")
         error = _EXTENDED_ART_NOT_OWNED
     elif row[2]:
-        _hc.log_req(f"    Card instance {card_instance_id} already extended art")
+        log_req(f"    Card instance {card_instance_id} already extended art")
         error = _EXTENDED_ART_ALREADY
     else:
         card = _hc._db.execute(
@@ -1165,11 +1166,11 @@ def handle_upgradeextendedartoncard_2185(handler, target, instance, data_type, r
             handler, user_id, card[0] if card else None)
         if stardust_id is None:
             error = _EXTENDED_ART_INSUFFICIENT
-            _hc.log_req(f"    Not enough stardust for card instance {card_instance_id}")
+            log_req(f"    Not enough stardust for card instance {card_instance_id}")
         else:
             _hc.db_set_card_instance_extended_art(
                 user_id, card_instance_id, conn=_hc._db)
-            _hc.log_req(f"    Upgraded card instance {card_instance_id} to extended art")
+            log_req(f"    Upgraded card instance {card_instance_id} to extended art")
     _hc._db.commit()
     resp_inner = _hc.encode_objfmt_response(
         ["Game.Client.Network.Profile.UpgradeExtendedArtOnCardResponse",
@@ -1188,7 +1189,7 @@ def handle_upgradeextendedartoncard_2185(handler, target, instance, data_type, r
         "issuer": issuer_str, "target": target, "instance": instance,
         "reqid": resp_reqid, "c": comp, "conh": conh, "sid": handler.sid,
     }, dw_bytes)
-    _hc.log_req(f"    Sent UpgradeExtendedArtOnCard ({len(dw_bytes)}b, error={error})")
+    log_req(f"    Sent UpgradeExtendedArtOnCard ({len(dw_bytes)}b, error={error})")
 
 DECK_EDIT_HANDLERS = {
     2091: handle_createnewdeckfromtemplate_2091,

@@ -7,6 +7,7 @@ handler by ``data_type`` through :data:`CHEST_REQUEST_HANDLERS`.
 import json
 import random
 import re
+from db import log_req
 
 
 def handle_chest_spinning_2049(handler, target, instance, data_type, reqid, comp, session_id,
@@ -20,18 +21,18 @@ def handle_chest_spinning_2049(handler, target, instance, data_type, reqid, comp
         chest_uid = int(chest_id_raw)
     except (TypeError, ValueError):
         chest_uid = 0
-    _hc.log_req(f">>> SpinWheelOfFate: ChestID={chest_uid}")
+    log_req(f">>> SpinWheelOfFate: ChestID={chest_uid}")
 
     # A spin does not open the chest: it may award prizes, re-spins, or
     # upgrade the chest's rarity, and the player opens it afterwards.
     spin = (_hc._spin_client_chest(handler, chest_uid)
             if handler.user_profile else None)
     if spin is None:
-        _hc.log_req(f"    No profile")
+        log_req(f"    No profile")
         resp_inner = b""
     else:
         if spin["error"]:
-            _hc.log_req(f"    Spin refused: error={spin['error']}")
+            log_req(f"    Spin refused: error={spin['error']}")
         reward_card_bits = spin["cards"]
         # Push reward cards and inventory changes to client
         if reward_card_bits:
@@ -59,7 +60,7 @@ def handle_chest_spinning_2049(handler, target, instance, data_type, reqid, comp
         "issuer": issuer_str, "target": target, "instance": instance,
         "reqid": resp_reqid, "c": comp, "conh": conh, "sid": handler.sid,
     }, dw_bytes)
-    _hc.log_req(f"    Sent SpinWheelOfFate response ({len(dw_bytes)}b)")
+    log_req(f"    Sent SpinWheelOfFate response ({len(dw_bytes)}b)")
 
 
 def handle_opencardpack_2127(handler, target, instance, data_type, reqid, comp, session_id,
@@ -67,7 +68,7 @@ def handle_opencardpack_2127(handler, target, instance, data_type, reqid, comp, 
     import hconnect_server as _hc
     item_id = inner_obj.get("ItemId", "{}")
     open_amount = inner_obj.get("OpenAmount", 1)
-    _hc.log_req(f">>> OpenCardPack: id={item_id} amount={open_amount}")
+    log_req(f">>> OpenCardPack: id={item_id} amount={open_amount}")
     
     # Extract template guid from client raw bytes
     # ResourceId uses DataMember field "m_Guid" (not "guid")
@@ -91,7 +92,7 @@ def handle_opencardpack_2127(handler, target, instance, data_type, reqid, comp, 
                                 break
                         except:
                             pass
-    _hc.log_req(f">>> OpenCardPack: pack_guid={pack_guid} amount={open_amount}")
+    log_req(f">>> OpenCardPack: pack_guid={pack_guid} amount={open_amount}")
 
     # Map store item GUID to card set GUID — query pack_set_map table
     row = _hc.db_pack_set_info(pack_guid, conn=_hc._db)
@@ -101,7 +102,7 @@ def handle_opencardpack_2127(handler, target, instance, data_type, reqid, comp, 
         set_guid = pack_guid  # fallback: treat pack GUID as set GUID
         is_full_set = 0
         is_primal = 0
-    _hc.log_req(f"    pack_guid={pack_guid} → set_guid={set_guid} full={is_full_set} primal={is_primal}")
+    log_req(f"    pack_guid={pack_guid} → set_guid={set_guid} full={is_full_set} primal={is_primal}")
 
     # Validate player owns this pack
     pack_error = None
@@ -112,7 +113,7 @@ def handle_opencardpack_2127(handler, target, instance, data_type, reqid, comp, 
         if not existing or existing[1] < open_amount:
             pack_error = "NotEnoughInventory"
             pack_error_code = 5
-            _hc.log_req(f"    Pack not in inventory! (have={existing[1] if existing else 0}, want={open_amount})")
+            log_req(f"    Pack not in inventory! (have={existing[1] if existing else 0}, want={open_amount})")
     
     # Generate card instances for the pack
     card_templates = _hc._load_card_templates()
@@ -128,7 +129,7 @@ def handle_opencardpack_2127(handler, target, instance, data_type, reqid, comp, 
         except ValueError as exc:
             pack_error = "CardCreationFailed"
             pack_error_code = 3
-            _hc.log_req(f"    Starter deck contents unavailable: {exc}")
+            log_req(f"    Starter deck contents unavailable: {exc}")
     if not pack_error:
         if campaign_pack_config:
             # Adventure Zone campaign packs are not normal PvP
@@ -147,18 +148,18 @@ def handle_opencardpack_2127(handler, target, instance, data_type, reqid, comp, 
                 pack_inventory_rewards.extend(
                     (_hc.STARDUST_TEMPLATES[rarity.lower()], "stardust")
                     for rarity in reward.stardust_rarities)
-                _hc.log_req(
-                    f"    Campaign pack: {len(all_cards)} cards, "
-                f"{sum(kind == 'equipment' for _, kind in pack_inventory_rewards)} "
-                f"equipment, "
-                    f"{sum(kind == 'stardust' for _, kind in pack_inventory_rewards)} "
-                    f"stardust (replacement rate={_hc.STARDUST_REPLACEMENT_RATE:.0%})")
+                log_req(
+                f"    Campaign pack: {len(all_cards)} cards, "
+            f"{sum(kind == 'equipment' for _, kind in pack_inventory_rewards)} "
+            f"equipment, "
+                f"{sum(kind == 'stardust' for _, kind in pack_inventory_rewards)} "
+                f"stardust (replacement rate={_hc.STARDUST_REPLACEMENT_RATE:.0%})")
         elif starter_pack:
             for _ in range(open_amount):
                 all_cards.extend(starter_pack["cards"])
-            _hc.log_req(
-                f"    Starter deck {starter_pack['definition']['name']}: "
-                f"{len(starter_pack['cards'])} cards x {open_amount}")
+            log_req(
+            f"    Starter deck {starter_pack['definition']['name']}: "
+            f"{len(starter_pack['cards'])} cards x {open_amount}")
         elif is_full_set:
             # Grant every PVP card from the set (4x each)
             pool = card_templates.get(set_guid, [])
@@ -167,7 +168,7 @@ def handle_opencardpack_2127(handler, target, instance, data_type, reqid, comp, 
                 for c in pool:
                     for _ in range(4):  # 4x each card
                         all_cards.append((c[0], c[1], c[3], c[4], c[5]))
-            _hc.log_req(f"    Full set: {len(pool)} unique cards x4 = {len(all_cards)} total")
+            log_req(f"    Full set: {len(pool)} unique cards x4 = {len(all_cards)} total")
         else:
             for _ in range(open_amount):
                 all_cards.extend(_hc._generate_booster(card_templates, set_guid))
@@ -186,7 +187,7 @@ def handle_opencardpack_2127(handler, target, instance, data_type, reqid, comp, 
             handler.user_profile["id"], pack_guid, open_amount, conn=_hc._db)
         if consumed:
             pack_client_uid, new_qty = consumed
-            _hc.log_req(f"    Consumed {open_amount}x pack {pack_guid} from inventory (remaining={max(0, new_qty)})")
+            log_req(f"    Consumed {open_amount}x pack {pack_guid} from inventory (remaining={max(0, new_qty)})")
             # Push inventory update so client pack count decrements
             if pack_client_uid:
                 handler.push_inventory_to_client(qty=max(0, new_qty), template_guid=pack_guid, item_id=pack_client_uid)
@@ -208,7 +209,7 @@ def handle_opencardpack_2127(handler, target, instance, data_type, reqid, comp, 
             new_card_data.append((guid, name, cost, atk, def_, cid, 0))
             card_instance_ids[i] = cid  # Update for response encoding
         _hc._db.commit()
-        _hc.log_req(f"    Created {len(new_card_data)} card_instances IDs {new_card_data[0][5]}-{new_card_data[-1][5]}")
+        log_req(f"    Created {len(new_card_data)} card_instances IDs {new_card_data[0][5]}-{new_card_data[-1][5]}")
 
         # OpenCardPackResponse.NewCardInstances is the authoritative
         # collection update.  Do not also send these same instances
@@ -239,8 +240,8 @@ def handle_opencardpack_2127(handler, target, instance, data_type, reqid, comp, 
                     conn=_hc._db)
                 new_chests.append((chest_rarity, chest_db_id))
             _hc._db.commit()
-            _hc.log_req(f"    Generated {len(new_chests)} chests: "
-                        f"{[rarity for rarity, _ in new_chests]}")
+            log_req(f"    Generated {len(new_chests)} chests: "
+                    f"{[rarity for rarity, _ in new_chests]}")
     
     # Encode OpenCardPackResponse using builder
     from objfmt_builder import ObjFmtBuilder
@@ -291,7 +292,7 @@ def handle_opencardpack_2127(handler, target, instance, data_type, reqid, comp, 
         handler.push_inventory_to_client(
             qty=quantity, template_guid=template_guid,
             item_id=item_uid)
-    _hc.log_req(f"    Sent OpenCardPack response ({len(all_cards)} cards, {len(dw_bytes)}b)")
+    log_req(f"    Sent OpenCardPack response ({len(all_cards)} cards, {len(dw_bytes)}b)")
 
 
 def handle_reserved_for_chests_with_a_2129(handler, target, instance, data_type, reqid, comp, session_id,
@@ -313,7 +314,7 @@ def handle_reserved_for_chests_with_a_2129(handler, target, instance, data_type,
             continue
         if chest_uid > 0:
             requested_ids.append(chest_uid)
-    _hc.log_req(f">>> OpenChest: ids={requested_ids}")
+    log_req(f">>> OpenChest: ids={requested_ids}")
 
     error_val = 0
     error_message = ""
@@ -357,9 +358,9 @@ def handle_reserved_for_chests_with_a_2129(handler, target, instance, data_type,
         "issuer": issuer_str, "target": target, "instance": instance,
         "reqid": resp_reqid, "c": comp, "conh": conh, "sid": handler.sid,
     }, dw_bytes)
-    _hc.log_req(
-        f"    Sent OpenChest response ({len(card_template_ids)} cards, "
-        f"{len(dw_bytes)}b)")
+    log_req(
+    f"    Sent OpenChest response ({len(card_template_ids)} cards, "
+    f"{len(dw_bytes)}b)")
     # OpenChestResponse only drives the reward display.  Collection
     # cards, equipment/Stardust rewards and the consumed chest entry
     # arrive through the normal profile events, just as they do for the

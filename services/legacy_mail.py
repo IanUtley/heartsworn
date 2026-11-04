@@ -7,6 +7,7 @@ from binascii import hexlify
 import io
 import struct
 import time
+from db import log_req
 
 
 # GetUnreadMailCount (60007)
@@ -19,9 +20,9 @@ def handle_getunreadmailcount_60007(handler, target, instance, data_type, reqid,
     # First mail check after login = client is ready
     if handler._inventory_pending and handler.user_profile:
         handler._inventory_pending = False
-        _hc.log_req(">>> Client ready (mail check received)")
+        log_req(">>> Client ready (mail check received)")
     
-    _hc.log_req(f">>> Respond GetUnreadMailCount -> {count}")
+    log_req(f">>> Respond GetUnreadMailCount -> {count}")
     resp_inner = _hc.encode_get_unread_mail_count_response(count)
     resp_body = _hc.compress_gzip(resp_inner) if comp else resp_inner
     resp_reqid = reqid | 1
@@ -37,7 +38,7 @@ def handle_getunreadmailcount_60007(handler, target, instance, data_type, reqid,
         "conh": conh,
         "sid": handler.sid,
     }, dw_bytes)
-    _hc.log_req(f"    Sent GetUnreadMailCount response ({len(dw_bytes)}b)")
+    log_req(f"    Sent GetUnreadMailCount response ({len(dw_bytes)}b)")
 
 
 # Mail.Receive (60002) — get mail list
@@ -46,7 +47,7 @@ def handle_get_mail_list_60002(handler, target, instance, data_type, reqid, comp
     import hconnect_server as _hc
     from profile_db import db_get_mail_list
     db_emails = db_get_mail_list(handler.user_profile["id"]) if handler.user_profile else []
-    _hc.log_req(f">>> Respond Mail.Receive -> {len(db_emails)} emails")
+    log_req(f">>> Respond Mail.Receive -> {len(db_emails)} emails")
     now = time.strftime("%m/%d/%Y %H:%M:%S", time.gmtime())
     
     # Include envelope type + UID type
@@ -175,14 +176,14 @@ def handle_get_mail_list_60002(handler, target, instance, data_type, reqid, comp
         "issuer": issuer_str, "target": target, "instance": instance,
         "reqid": resp_reqid, "c": comp, "conh": conh, "sid": handler.sid,
     }, dw_bytes)
-    _hc.log_req(f"    Sent Mail.Receive response ({len(dw_bytes)}b)")
+    log_req(f"    Sent Mail.Receive response ({len(dw_bytes)}b)")
 
 
 # Mail.Delivered (60005) — sent mail
 def handle_sent_mail_60005(handler, target, instance, data_type, reqid, comp, session_id,
                            conh, inner_obj, inner_bytes, raw_data_wrapper_bytes):
     import hconnect_server as _hc
-    _hc.log_req(">>> Respond Mail.Delivered -> 0 (empty)")
+    log_req(">>> Respond Mail.Delivered -> 0 (empty)")
     now = time.strftime("%m/%d/%Y %H:%M:%S", time.gmtime())
     type_names = [
         "Game.Shared.Mail.Messages.Mail+Delivered+Response",
@@ -239,14 +240,14 @@ def handle_sent_mail_60005(handler, target, instance, data_type, reqid, comp, se
         "issuer": issuer_str, "target": target, "instance": instance,
         "reqid": resp_reqid, "c": comp, "conh": conh, "sid": handler.sid,
     }, dw_bytes)
-    _hc.log_req(f"    Sent Mail.Delivered response ({len(dw_bytes)}b)")
+    log_req(f"    Sent Mail.Delivered response ({len(dw_bytes)}b)")
 
 
 # Mail.MarkRead (60004)
 def handle_mail_markread_60004(handler, target, instance, data_type, reqid, comp, session_id,
                                conh, inner_obj, inner_bytes, raw_data_wrapper_bytes):
     import hconnect_server as _hc
-    _hc.log_req(">>> Respond Mail.MarkRead")
+    log_req(">>> Respond Mail.MarkRead")
     from profile_db import db_mark_all_mail_read
     if handler.user_profile:
         db_mark_all_mail_read(handler.user_profile["id"])
@@ -262,14 +263,14 @@ def handle_mail_markread_60004(handler, target, instance, data_type, reqid, comp
         "issuer": issuer_str, "target": target, "instance": instance,
         "reqid": resp_reqid, "c": comp, "conh": conh, "sid": handler.sid,
     }, dw_bytes)
-    _hc.log_req(f"    Sent Mail.MarkRead response ({len(dw_bytes)}b)")
+    log_req(f"    Sent Mail.MarkRead response ({len(dw_bytes)}b)")
 
 
 # Mail.MarkDelete (60006)
 def handle_mail_markdelete_60006(handler, target, instance, data_type, reqid, comp, session_id,
                                  conh, inner_obj, inner_bytes, raw_data_wrapper_bytes):
     import hconnect_server as _hc
-    _hc.log_req(">>> Respond Mail.MarkDelete")
+    log_req(">>> Respond Mail.MarkDelete")
     # Mark all user's emails as deleted in DB
     from profile_db import db_delete_all_mail
     if handler.user_profile:
@@ -286,14 +287,14 @@ def handle_mail_markdelete_60006(handler, target, instance, data_type, reqid, co
         "issuer": issuer_str, "target": target, "instance": instance,
         "reqid": resp_reqid, "c": comp, "conh": conh, "sid": handler.sid,
     }, dw_bytes)
-    _hc.log_req(f"    Sent Mail.MarkDelete response ({len(dw_bytes)}b)")
+    log_req(f"    Sent Mail.MarkDelete response ({len(dw_bytes)}b)")
 
 
 # Mail.Claim (60003) — claim attachments from a mail
 def handle_claim_attachments_from_a_mail_60003(handler, target, instance, data_type, reqid, comp, session_id,
                                                conh, inner_obj, inner_bytes, raw_data_wrapper_bytes):
     import hconnect_server as _hc
-    _hc.log_req(">>> Mail.Claim (dt=60003)")
+    log_req(">>> Mail.Claim (dt=60003)")
     p = handler.user_profile
     mail_id_obj = inner_obj.get("MailID", {})
     mail_id_64 = 0
@@ -313,12 +314,12 @@ def handle_claim_attachments_from_a_mail_60003(handler, target, instance, data_t
             if gold_granted or plat_granted:
                 p["gold"] += gold_granted
                 p["platinum"] += plat_granted
-                _hc.log_req(f"    Claimed mail #{eid}: gold+{gold_granted} plat+{plat_granted}")
+                log_req(f"    Claimed mail #{eid}: gold+{gold_granted} plat+{plat_granted}")
             if claim.get("cards"):
                 handler.push_cards_to_client()
-                _hc.log_req(f"    Claimed mail #{eid}: cards+{len(claim['cards'])}")
+                log_req(f"    Claimed mail #{eid}: cards+{len(claim['cards'])}")
         else:
-            _hc.log_req(f"    Mail #{eid} already claimed or not found")
+            log_req(f"    Mail #{eid} already claimed or not found")
     
     resp_inner = _hc.encode_objfmt_response(
         ["Game.Shared.Mail.Messages.Mail+Claim+Response",
@@ -341,7 +342,7 @@ def handle_claim_attachments_from_a_mail_60003(handler, target, instance, data_t
         "issuer": issuer_str, "target": target, "instance": instance,
         "reqid": resp_reqid, "c": comp, "conh": conh, "sid": handler.sid,
     }, dw_bytes, data_type, reqid, target, instance)
-    _hc.log_req(f"    Sent Mail.Claim response ({len(dw_bytes)}b)")
+    log_req(f"    Sent Mail.Claim response ({len(dw_bytes)}b)")
 
 
 # PingMailServer (9001)

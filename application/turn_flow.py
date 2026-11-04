@@ -7,6 +7,7 @@ from typing import cast
 import json
 import re
 import struct
+from db import log_req
 
 
 if TYPE_CHECKING:
@@ -79,7 +80,7 @@ class TurnFlowMixin(_HostBase):
         # safely returns None and the outer dispatcher can report that decode
         # gap without mutating state.
         if port is None:
-            _hc.log_req("    RulesPort skipped: no attached session host")
+            log_req("    RulesPort skipped: no attached session host")
             return False
         # The port is shared by both connections.  Pin the dispatch identity
         # for the whole locked transaction so every projection (resource,
@@ -134,7 +135,7 @@ class TurnFlowMixin(_HostBase):
                     self._sync_rules_port_setup_checkpoint(
                         session, setup_phase, setup_player)
             except Exception as exc:
-                _hc.log_req(f"    RulesPort setup checkpoint recovery failed: {exc}")
+                log_req(f"    RulesPort setup checkpoint recovery failed: {exc}")
         if setup_phase is not None:
             port.current_turn_phase = setup_phase
         # Clear orphaned continuation markers before any fresh transaction,
@@ -177,8 +178,8 @@ class TurnFlowMixin(_HostBase):
                                       is_set_ability_data=True,
                                       typed_payload=continuation_payload)
                     payload = continuation_payload
-                    _hc.log_req("    RulesPort discard continuation: forcing SetAbilityActivationData "
-                            f"instance={continuation_payload.get('ability_instance_id')}")
+                    log_req("    RulesPort discard continuation: forcing SetAbilityActivationData "
+                        f"instance={continuation_payload.get('ability_instance_id')}")
                 elif not getattr(port, "pending_activation", None):
                     # A completed AI discard continuation must not poison the
                     # next player's fresh activation with its resume offset
@@ -200,7 +201,7 @@ class TurnFlowMixin(_HostBase):
                 if _be_choice_wire.load_state(session).get("pending_choice"):
                     command = replace(command, is_ability_activate=False,
                                       is_set_ability_data=True)
-                    _hc.log_req("    RulesPort choice continuation: forcing SetAbilityActivationData")
+                    log_req("    RulesPort choice continuation: forcing SetAbilityActivationData")
             except Exception:
                 pass
         # Class-23 discard continuations are consumed by the legacy hand
@@ -302,7 +303,7 @@ class TurnFlowMixin(_HostBase):
             "is_set_stops", "is_set_auto_pass", "is_quit_game",
             "is_encounter_mod_dialog"))
         if payload is None and payload_required:
-            _hc.log_req("    RulesPort skipped: decoder supplied no typed payload")
+            log_req("    RulesPort skipped: decoder supplied no typed payload")
             # These transaction classes are inside the RulesPort migration
             # boundary.  Do not let a malformed/unsupported nested ObjFmt
             # envelope fall through to the legacy rules handler, where it
@@ -355,8 +356,8 @@ class TurnFlowMixin(_HostBase):
                 payload = dict(payload)
                 payload["ability_instance_id"] = int(continuation_instance)
                 command = replace(command, typed_payload=payload)
-                _hc.log_req("    RulesPort continuation instance recovered="
-                        f"{payload['ability_instance_id']}")
+                log_req("    RulesPort continuation instance recovered="
+                    f"{payload['ability_instance_id']}")
         # Some client builds serialize a manual/quick ability activation using
         # the (misspelled) ActivateTriggeredAbiliesTransaction envelope.  The
         # envelope name is not authoritative: metadata marks whether the
@@ -378,10 +379,10 @@ class TurnFlowMixin(_HostBase):
                                       is_ability_activate=True,
                                       is_activate_triggered_abilities=False,
                                       typed_payload=payload)
-                    _hc.log_req("    RulesPort reclassified non-triggered ability "
-                            f"{ability_guid} from triggered envelope")
+                    log_req("    RulesPort reclassified non-triggered ability "
+                        f"{ability_guid} from triggered envelope")
             except Exception as exc:
-                _hc.log_req(f"    RulesPort ability envelope check failed: {exc}")
+                log_req(f"    RulesPort ability envelope check failed: {exc}")
         setattr(session, "_rules_port_dispatch_command", command)
         session._rules_port_mutation_emitted = False
         # Mono can submit the same ability activation twice on a rapid
@@ -400,7 +401,7 @@ class TurnFlowMixin(_HostBase):
                         int(lp.get("source_card_id", -1)) == int((payload or {}).get("source_card_id", -2)) and
                         str(lp.get("ability_template_id", "")).lower() ==
                         str((payload or {}).get("ability_template_id", "")).lower()):
-                    _hc.log_req("    RulesPort ignored duplicate ability activation")
+                    log_req("    RulesPort ignored duplicate ability activation")
                     self._push_transaction_ack(session)
                     setattr(session, "_rules_port_dispatch_command", None)
                     return True
@@ -418,44 +419,44 @@ class TurnFlowMixin(_HostBase):
                 # The typed decoder could not build an intent (for example a
                 # play transaction whose nested payload never decoded).  The
                 # port has nothing to explain, so name the boundary directly.
-                _hc.log_req("    RulesPort reject: unclassified transaction"
-                        f" phase={port.current_turn_phase!r}"
-                        f" player={player_uid!r}")
-            _hc.log_req("    RulesPort boundary diagnostic:"
-                    f" intent_phase="
-                    f"{getattr(rejected, 'phase', None)!r}"
-                    f" native_phase={port.current_turn_phase!r}"
-                    f" player={player_uid!r}"
-                    f" coerced={intent_player!r}"
-                    f" in_session="
-                    f"{_hc._uid_in(intent_player, port.player_ids)}"
-                    f" terminated={port.terminated}"
-                    f" native_priority="
-                    f"{port.action_stack.priority_player_id!r}"
-                    f" active={port.active_player_id!r}")
+                log_req("    RulesPort reject: unclassified transaction"
+                    f" phase={port.current_turn_phase!r}"
+                    f" player={player_uid!r}")
+            log_req("    RulesPort boundary diagnostic:"
+                f" intent_phase="
+                f"{getattr(rejected, 'phase', None)!r}"
+                f" native_phase={port.current_turn_phase!r}"
+                f" player={player_uid!r}"
+                f" coerced={intent_player!r}"
+                f" in_session="
+                f"{_hc._uid_in(intent_player, port.player_ids)}"
+                f" terminated={port.terminated}"
+                f" native_priority="
+                f"{port.action_stack.priority_player_id!r}"
+                f" active={port.active_player_id!r}")
             if getattr(rejected, "kind", "") == "pass_priority":
                 try:
                     action = port.action_stack.peek()
-                    _hc.log_req(
-                        "    RulesPort priority diagnostic: "
-                        f"phase={port.current_turn_phase!r} "
-                        f"stack_priority={port.action_stack.priority_player_id!r} "
-                        f"action_priority={getattr(action, 'priority_player_id', None)!r} "
-                        f"queue={list(getattr(action, '_priority_queue', ()) or ())!r} "
-                        f"chain={list(getattr(port.chain, '_instance_ids', ()) or ())!r}")
+                    log_req(
+                    "    RulesPort priority diagnostic: "
+                    f"phase={port.current_turn_phase!r} "
+                    f"stack_priority={port.action_stack.priority_player_id!r} "
+                    f"action_priority={getattr(action, 'priority_player_id', None)!r} "
+                    f"queue={list(getattr(action, '_priority_queue', ()) or ())!r} "
+                    f"chain={list(getattr(port.chain, '_instance_ids', ()) or ())!r}")
                 except Exception as diag_exc:
-                    _hc.log_req(f"    RulesPort priority diagnostic failed: {diag_exc}")
+                    log_req(f"    RulesPort priority diagnostic failed: {diag_exc}")
             if (getattr(command, "is_ability_activate", False) and
                     projected_game is not None):
                 try:
                     source = (payload or {}).get("source_card_id")
                     guid = (payload or {}).get("ability_template_id")
                     card = facts.get_card(source) if facts is not None else None
-                    _hc.log_req(f"    RulesPort ability validation: source={source} guid={guid} "
-                            f"card={card} owner={getattr(card, 'owner_id', None)} "
-                            f"location={getattr(card, 'location', None)} abilities={getattr(card, 'abilities', None)}")
+                    log_req(f"    RulesPort ability validation: source={source} guid={guid} "
+                        f"card={card} owner={getattr(card, 'owner_id', None)} "
+                        f"location={getattr(card, 'location', None)} abilities={getattr(card, 'abilities', None)}")
                 except Exception as diag_exc:
-                    _hc.log_req(f"    RulesPort ability diagnostic failed: {diag_exc}")
+                    log_req(f"    RulesPort ability diagnostic failed: {diag_exc}")
             setattr(session, "_rules_port_dispatch_command", None)
             # A decoder-owned typed card/ability intent is already inside the
             # migration boundary.  Do not let its RulesPort validation or
@@ -516,10 +517,10 @@ class TurnFlowMixin(_HostBase):
             try:
                 port.persist()
             except Exception as exc:
-                _hc.log_req(f"    RulesPort post-tick persistence failed: {exc}")
-        _hc.log_req(
-            f"    RulesPort handled={handled} transaction={command.__class__.__name__}",
-            level="DEBUG")
+                log_req(f"    RulesPort post-tick persistence failed: {exc}")
+        log_req(
+        f"    RulesPort handled={handled} transaction={command.__class__.__name__}",
+        level="DEBUG")
         if handled:
             game = getattr(getattr(port, "event_sink", None), "game", None)
             emitted = bool(getattr(session, "_rules_port_mutation_emitted", False))
@@ -540,11 +541,11 @@ class TurnFlowMixin(_HostBase):
             except Exception:
                 pass
             if game is not None and game.events:
-                _hc.log_req(
-                    "    RulesPort post-tick event sink: "
-                    f"emitted={emitted} prompt_pending={prompt_pending} "
-                    f"classes="
-                    f"{[getattr(type(ev), 'CLASS_ID', 0) for ev in game.events]}")
+                log_req(
+                "    RulesPort post-tick event sink: "
+                f"emitted={emitted} prompt_pending={prompt_pending} "
+                f"classes="
+                f"{[getattr(type(ev), 'CLASS_ID', 0) for ev in game.events]}")
             if game is not None and not emitted and not prompt_pending:
                     self._send_battle_events(session, game, player_uid)
             # A manual champion activation leaves a chain item pending.  The
@@ -595,12 +596,12 @@ class TurnFlowMixin(_HostBase):
                                 _send_pvp_packet(
                                     target_h, session, window, target_uid,
                                     "rules-port-ability-priority")
-                            _hc.log_req(
-                                f"    PvP RulesPort ability priority window: "
-                                f"pid={priority_pid} phase={phase}")
+                            log_req(
+                            f"    PvP RulesPort ability priority window: "
+                            f"pid={priority_pid} phase={phase}")
                 except Exception as exc:
-                    _hc.log_req(
-                        f"    PvP RulesPort ability priority projection failed: {exc}")
+                    log_req(
+                    f"    PvP RulesPort ability priority projection failed: {exc}")
             # Practice/PvE has the same native chain semantics as tournament
             # PvP, but only one client projection.  The activation tick emits
             # the charge/card updates; replace the stale main-phase options
@@ -612,8 +613,8 @@ class TurnFlowMixin(_HostBase):
                 try:
                     self._push_practice_ability_chain_window(session, port, game)
                 except Exception as exc:
-                    _hc.log_req(
-                        f"    RulesPort Practice ability priority projection failed: {exc}")
+                    log_req(
+                    f"    RulesPort Practice ability priority projection failed: {exc}")
             # A completed manual ability returns to the same main-phase
             # priority window.  The legacy ability handler rebuilt the
             # PlayerOptionList at that boundary, but the RulesPort action
@@ -647,8 +648,8 @@ class TurnFlowMixin(_HostBase):
                             "pending_deck_search", "pending_discard_ability",
                             "pending_conversation", "resolution_paused")))
                     if settled:
-                        _hc.log_req("    RulesPort post-ability main-phase options "
-                                "refresh (settled)")
+                        log_req("    RulesPort post-ability main-phase options "
+                            "refresh (settled)")
                         if (session.session_name or "").startswith(
                                 "tourney-"):
                             from services.tournament_game import (
@@ -660,17 +661,17 @@ class TurnFlowMixin(_HostBase):
                             self._push_main_phase_options(
                                 session, game.player_uid, game.ai_uid)
                 except Exception as exc:
-                    _hc.log_req(f"    RulesPort option refresh failed: {exc}")
+                    log_req(f"    RulesPort option refresh failed: {exc}")
         else:
             from rules_port.wire import describe_transaction
             described = normalize_player_transaction(
                 command, player_uid, current_phase=port.current_turn_phase,
                 payload=payload)
-            _hc.log_req("    RulesPort handler reject: "
-                    f"{describe_transaction(described, port)} "
-                    f"phase={getattr(port, 'current_turn_phase', None)} "
-                    f"priority={getattr(getattr(port, 'action_stack', None), 'priority_player_id', None)} "
-                    f"action={type(getattr(getattr(port, 'action_stack', None), 'peek', lambda: None)()).__name__}")
+            log_req("    RulesPort handler reject: "
+                f"{describe_transaction(described, port)} "
+                f"phase={getattr(port, 'current_turn_phase', None)} "
+                f"priority={getattr(getattr(port, 'action_stack', None), 'priority_player_id', None)} "
+                f"action={type(getattr(getattr(port, 'action_stack', None), 'peek', lambda: None)()).__name__}")
             if getattr(command, "is_ability_activate", False):
                 self._refresh_options_after_rejected_ability(
                     session, port, projected_game, player_uid)
@@ -686,7 +687,7 @@ class TurnFlowMixin(_HostBase):
         """
         import hconnect_server as _hc
         for event in events:
-            _hc.log_req(f"    Committed application event: {event!r}")
+            log_req(f"    Committed application event: {event!r}")
 
     def _refresh_options_after_rejected_ability(
             self, session, port, projected_game, request_player):
@@ -734,12 +735,12 @@ class TurnFlowMixin(_HostBase):
             sent = self._push_main_phase_options(
                 session, player_uid, ai_uid)
             if sent:
-                _hc.log_req("    RulesPort rejected stale ability click; "
-                        "refreshed main-phase options")
+                log_req("    RulesPort rejected stale ability click; "
+                    "refreshed main-phase options")
             return bool(sent)
         except Exception as refresh_exc:
-            _hc.log_req("    RulesPort rejected ability option refresh failed: "
-                    f"{refresh_exc}")
+            log_req("    RulesPort rejected ability option refresh failed: "
+                f"{refresh_exc}")
             return False
 
     def _hand_card_playable(self, session, card_uid, ct, cost, thresh_json,
@@ -921,10 +922,10 @@ class TurnFlowMixin(_HostBase):
                                         resource_played, friendly_count, enemy_count):
                 playable.append(scid)
             else:
-                _hc.log_req(f"    Playability: skip "
-                        f"{_hc.card_label(session.session_id, card_uid)} "
-                        f"type {ct} "
-                        f"(cost {cost} > resources {resources} / thresholds / no troop target)")
+                log_req(f"    Playability: skip "
+                    f"{_hc.card_label(session.session_id, card_uid)} "
+                    f"type {ct} "
+                    f"(cost {cost} > resources {resources} / thresholds / no troop target)")
         game2 = game or self._fresh_game(session, pl_t, ai_t, bstate)
         game2.push_options(pl_t, playable)
         # Attach targeting TargetInstances so the client opens the target picker
@@ -971,7 +972,7 @@ class TurnFlowMixin(_HostBase):
         game2.push_green_light(pl_t, _hc.game_engine.EPriorityContext.Normal)
         sent = self._send_battle_events(session, game2, pl_t)
         if sent:
-            _hc.log_req(f"    Pushed main-phase options ({len(playable)} playable, champ_ab={len(abilities) if player_champ_cid and abilities else 0}, troop_ab={sum(len(v) for v in affordable.values())})")
+            log_req(f"    Pushed main-phase options ({len(playable)} playable, champ_ab={len(abilities) if player_champ_cid and abilities else 0}, troop_ab={sum(len(v) for v in affordable.values())})")
         return sent
 
     def _extract_transaction_targets(self, inner_bytes, exclude_uid):
@@ -1552,9 +1553,9 @@ class TurnFlowMixin(_HostBase):
                     attributes=(cdef.attributes if cdef else 0),
                     state=int(new_state))
             if changed:
-                _hc.log_req(f"    RulesPort ResetActiveCards: active="
-                        f"{int(active_owner_id or 0)} updated {len(changed)} "
-                        "warzone card(s)")
+                log_req(f"    RulesPort ResetActiveCards: active="
+                    f"{int(active_owner_id or 0)} updated {len(changed)} "
+                    "warzone card(s)")
             return len(changed)
 
         from rules_port.runtime_helpers import owner_uid
@@ -1604,8 +1605,8 @@ class TurnFlowMixin(_HostBase):
                 state=int(new_state))
         _hc._db.commit()
         if changed:
-            _hc.log_req(f"    ResetActiveCards: active={int(active_owner_id or 0)} "
-                    f"updated {changed} warzone card(s)")
+            log_req(f"    ResetActiveCards: active={int(active_owner_id or 0)} "
+                f"updated {changed} warzone card(s)")
         return changed
 
     def _push_champions_warm(self, session, pl_t, ai_t, bstate, game):
@@ -1702,7 +1703,7 @@ class TurnFlowMixin(_HostBase):
         # ``_announce_champion_board_cards``).
         setattr(session, "_client_in_battle",
                 getattr(session, "session_id", None))
-        _hc.trace_rules_port(_hc.log_req, "project-before", port, bstate)
+        _hc.trace_rules_port(log_req, "project-before", port, bstate)
         current = load_state(session, default=lambda: dict(bstate))
         # An authored prompt that already owns the client's UI state must not
         # be replaced by the ordinary phase/priority projection.  A trigger
@@ -1718,8 +1719,8 @@ class TurnFlowMixin(_HostBase):
             "pending_conversation", "pending_discard_ability")
             if current.get(key)]
         if pending_input:
-            _hc.log_req("    RulesPort projection held for pending client input: "
-                    + ",".join(pending_input))
+            log_req("    RulesPort projection held for pending client input: "
+                + ",".join(pending_input))
             return True
         phases = list(current.get("turn_phases") or ())
         phase = port.current_turn_phase
@@ -1742,7 +1743,7 @@ class TurnFlowMixin(_HostBase):
                 ai_idx = int(current.get("phase_idx", 0) or 0)
             self._run_ai_turn(session, pl_t, ai_t, bstate,
                               start_idx=ai_idx)
-            _hc.trace_rules_port(_hc.log_req, "project-after-ai", port, bstate)
+            _hc.trace_rules_port(log_req, "project-after-ai", port, bstate)
             return False
         if _hc._same_uid(priority, ai_t):
             # During a human attack the human remains the native active
@@ -1781,9 +1782,9 @@ class TurnFlowMixin(_HostBase):
                     blockers = [port.get_card(int(blocker_id))
                                 for blocker_id in blocker_ids]
                     if any(blocker is None for blocker in blockers):
-                        _hc.log_req(
-                            "    RulesPort AI defense could not hydrate "
-                            f"blockers for attacker={attacker_id!r}")
+                        log_req(
+                        "    RulesPort AI defense could not hydrate "
+                        f"blockers for attacker={attacker_id!r}")
                         return False
                     combat.declare_blockers(blockers)
 
@@ -1791,19 +1792,19 @@ class TurnFlowMixin(_HostBase):
                 port.persist()
                 self._send_battle_events(session, response_game, pl_t)
                 if not port.pass_player_priority(ai_t):
-                    _hc.log_req(
-                        "    RulesPort AI defense priority pass rejected: "
-                        f"priority={port.action_stack.priority_player_id!r}")
+                    log_req(
+                    "    RulesPort AI defense priority pass rejected: "
+                    f"priority={port.action_stack.priority_player_id!r}")
                     return False
                 port.drive_until_input(max_steps=64)
                 port.persist()
-                _hc.trace_rules_port(_hc.log_req, "project-after-ai-defense",
+                _hc.trace_rules_port(log_req, "project-after-ai-defense",
                                  port, current)
                 return self._project_rules_port_priority(
                     session, pl_t, ai_t, current)
-            _hc.log_req(
-                f"    RulesPort ignored stale AI priority: active="
-                f"{port.active_player_id!r} ai={ai_t!r} phase={phase!r}")
+            log_req(
+            f"    RulesPort ignored stale AI priority: active="
+            f"{port.active_player_id!r} ai={ai_t!r} phase={phase!r}")
             return False
         if not _hc._same_uid(priority, pl_t):
             return False
@@ -1836,7 +1837,7 @@ class TurnFlowMixin(_HostBase):
         if phase != _hc.game_engine.ETurnPhases.DeclareAttack:
             self._push_warzone_card_updates(game, session, pl_t, ai_t)
         self._send_battle_events(session, game, pl_t)
-        _hc.trace_rules_port(_hc.log_req, "project-human", port, bstate)
+        _hc.trace_rules_port(log_req, "project-human", port, bstate)
         if phase in (_hc.game_engine.ETurnPhases.FirstMainPhase,
                      _hc.game_engine.ETurnPhases.SecondMainPhase):
             self._push_main_phase_options(
@@ -1858,7 +1859,7 @@ class TurnFlowMixin(_HostBase):
         port = getattr(session, "_rules_port_session", None)
         if port is None:
             return False
-        _hc.trace_rules_port(_hc.log_req, "drive-before", port, bstate)
+        _hc.trace_rules_port(log_req, "drive-before", port, bstate)
         if (port.current_turn_phase == _hc.game_engine.ETurnPhases.StartTurn and
                 port.action_stack.count == 0 and
                 int(getattr(port, "total_turns_taken", 0) or 0) == 0):
@@ -1869,7 +1870,7 @@ class TurnFlowMixin(_HostBase):
         port.drive_until_input(max_steps=64)
         if getattr(port, "trigger_prompt_open", False):
             # The picker is out: the turn waits for the answer (no further phase update).
-            _hc.log_req("    Trigger choice open: turn held until it is answered")
+            log_req("    Trigger choice open: turn held until it is answered")
             return False
         # A resolver can queue server-owned chain responses (a troop's Deploy
         # trigger) while it finishes.  Give the AI the same follow-up passes
@@ -1884,7 +1885,7 @@ class TurnFlowMixin(_HostBase):
                         action.priority_player_id):
                     break
                 port.drive_until_input(max_steps=64)
-        _hc.trace_rules_port(_hc.log_req, "drive-after", port, bstate)
+        _hc.trace_rules_port(log_req, "drive-after", port, bstate)
         return self._project_rules_port_priority(
             session, pl_t, ai_t, bstate)
 

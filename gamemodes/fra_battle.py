@@ -1,6 +1,7 @@
 """FRA battle setup and reconnect snapshots for the arena and campaign encounters."""
 
 import json
+from db import log_req
 
 
 class FraBattleMixin:
@@ -174,13 +175,13 @@ class FraBattleMixin:
                 if wire_type.endswith("EncounterModDrawCards"):
                     bstate["fra_refill_hands_after_draw"] = True
                 else:
-                    _hc.log_req(f"    FRA encounter mod skipped: {wire_type}")
+                    log_req(f"    FRA encounter mod skipped: {wire_type}")
                 continue
 
             template_guid = str(modification.get("card_guid") or "").lower()
             if not template_guid or not _hc.db_template_exists(
                     template_guid, conn=_hc._db):
-                _hc.log_req(f"    FRA card mod skipped: invalid template {template_guid}")
+                log_req(f"    FRA card mod skipped: invalid template {template_guid}")
                 continue
             amount = max(0, int(modification.get("amount", 1) or 0))
             collection = str(modification.get("collection", "Deck") or "Deck")
@@ -193,11 +194,11 @@ class FraBattleMixin:
             }
             location = location_by_collection.get(collection_key)
             if location is None:
-                _hc.log_req(f"    FRA card mod skipped: unsupported collection {collection}")
+                log_req(f"    FRA card mod skipped: unsupported collection {collection}")
                 continue
             row = _hc.db_template_card_info(template_guid, conn=_hc._db)
             if not row:
-                _hc.log_req(f"    FRA card mod skipped: template row missing {template_guid}")
+                log_req(f"    FRA card mod skipped: template row missing {template_guid}")
                 continue
             setup_data = self._battle_setup_template_data(
                 template_guid, template_cache)
@@ -216,8 +217,8 @@ class FraBattleMixin:
             if (len(target_owners) > 1 and
                     _shared_all_player_grant(ability_guids)):
                 card_target_owners = (target_owners[0],)
-                _hc.log_req("    FRA shared all-player grant projected once: "
-                        f"card={template_guid[:8]} copies={len(target_owners)}")
+                log_req("    FRA shared all-player grant projected once: "
+                    f"card={template_guid[:8]} copies={len(target_owners)}")
             card_type_name = str(row[0] or "Unknown")
             card_type = _hc.game_engine.card_type_from_db(card_type_name)
 
@@ -408,8 +409,8 @@ class FraBattleMixin:
         ai_champion = (_hc.db_game_champion(
             session.session_id, 0, conn=_hc._db) or checkpoint_champion(0))
         if not player_champion or not ai_champion:
-            _hc.log_req("    FRA reconnect snapshot aborted: missing champion "
-                    "rows and checkpoint identities")
+            log_req("    FRA reconnect snapshot aborted: missing champion "
+                "rows and checkpoint identities")
             return False
         player_champ_uid, player_champ_guid = player_champion
         ai_champ_uid, ai_champ_guid = ai_champion
@@ -420,7 +421,7 @@ class FraBattleMixin:
             return False
         if (player_champ_uid <= 0 or ai_champ_uid <= 0 or
                 (player_champ_uid & 0xff) == 0 or (ai_champ_uid & 0xff) == 0):
-            _hc.log_req("    FRA reconnect snapshot aborted: invalid champion UID")
+            log_req("    FRA reconnect snapshot aborted: invalid champion UID")
             return False
 
         player_uid = _hc.game_engine.UID.make(244, player_pid)
@@ -462,7 +463,7 @@ class FraBattleMixin:
                 "instance": str(session.server_id),
                 "reqid": 0, "c": 0, "conh": 0, "sid": self.sid,
             }, body)
-            _hc.log_req(f"    FRA reconnect: sent {label}")
+            log_req(f"    FRA reconnect: sent {label}")
 
         # JoinDisconnectedGame adds only the reconnecting client locally. Add
         # the AI before GameStarted so Unity has both Player objects when it
@@ -701,8 +702,8 @@ class FraBattleMixin:
                 self._push_phase_options_empty(session, player_uid, ai_uid)
             elif not pending_input:
                 self._push_phase_options(session, player_uid, ai_uid, phase)
-        _hc.log_req(
-            f"    FRA reconnect snapshot restored for pid={player_pid} "
-            f"session={session.session_id} phase={phase} "
-            f"priority={int(priority_uid.uid64)}")
+        log_req(
+        f"    FRA reconnect snapshot restored for pid={player_pid} "
+        f"session={session.session_id} phase={phase} "
+        f"priority={int(priority_uid.uid64)}")
         return True

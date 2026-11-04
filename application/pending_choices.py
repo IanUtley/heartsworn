@@ -8,6 +8,7 @@ import json
 import random
 import re
 import struct
+from db import log_req
 
 
 if TYPE_CHECKING:
@@ -33,8 +34,8 @@ class PendingChoicesMixin(_HostBase):
                          champions=[])
         candidates = [int(c) for c in candidates]
         if not candidates:
-            _hc.log_req(f"    Shards of Fate: no Standard resource left in deck "
-                    f"(owner {owner_id})")
+            log_req(f"    Shards of Fate: no Standard resource left in deck "
+                f"(owner {owner_id})")
             return "shards of fate: no standard resource in deck"
         if owner_id != 0:
             # Do not expose the deck's current shard order in the picker.
@@ -80,8 +81,8 @@ class PendingChoicesMixin(_HostBase):
                         data={"gain_threshold_color": int(flag)})
             game.push_player_updated(
                 ai_t, champ_id=getattr(self, "_ai_champ_scid", None))
-        _hc.log_req(f"    Shards of Fate (AI): gained threshold flags "
-                f"{threshold_colors}")
+        log_req(f"    Shards of Fate (AI): gained threshold flags "
+            f"{threshold_colors}")
         return f"shards of fate: AI gained {threshold_colors} threshold flags"
 
     def _prompt_optional_trigger(self, game, pl_t, ai_t, session, bstate,
@@ -238,17 +239,17 @@ class PendingChoicesMixin(_HostBase):
                 present_pick(g2, self._trigger_pick_request(
                     chooser, inst_id, source_uid, ability_guid, entries))
                 _send_pvp_packet(h, session, g2, chooser, "trigger")
-            _hc.log_req(f"    PvP trigger prompt: {ability_guid[:8]} -> pid "
-                    f"{chooser_pid} targets={len(entries)}")
+            log_req(f"    PvP trigger prompt: {ability_guid[:8]} -> pid "
+                f"{chooser_pid} targets={len(entries)}")
             return
         _be.save_state(session, bstate)
         _port = getattr(session, "_rules_port_session", None)
         if _port is not None:
             _port.trigger_prompt_open = True
         # DEBUG (trigger picker): what the client's target picker is sent.
-        _hc.log_req("    [DEBUG-PICKER] trigger %s source=%s owner=%s chooser=%s "
-                    "entries=%s" % (ability_guid[:8], hex(source_uid), prompt_owner_id,
-                                    pl_t, [(index, tid, list(uids)) for index, tid, uids, _mn, _mx in entries]))
+        log_req("    [DEBUG-PICKER] trigger %s source=%s owner=%s chooser=%s "
+                "entries=%s" % (ability_guid[:8], hex(source_uid), prompt_owner_id,
+                                pl_t, [(index, tid, list(uids)) for index, tid, uids, _mn, _mx in entries]))
         # PlayerOptionList: trigger card + the ability as an option + the
         # legal candidates as a TargetInstance keyed by the target template.
         # The picker needs priority to commit (the client's
@@ -256,8 +257,8 @@ class PendingChoicesMixin(_HostBase):
         from pickers import present_pick
         present_pick(game, self._trigger_pick_request(
             pl_t, inst_id, source_uid, ability_guid, entries))
-        _hc.log_req(f"    Trigger target prompt: {ability_guid[:8]} source={hex(source_uid)} "
-                f"targets={len(entries)} inst={inst_id}")
+        log_req(f"    Trigger target prompt: {ability_guid[:8]} source={hex(source_uid)} "
+            f"targets={len(entries)} inst={inst_id}")
 
     @staticmethod
     def _trigger_pick_request(player_id, instance_id, source_uid, ability_guid, entries):
@@ -289,8 +290,8 @@ class PendingChoicesMixin(_HostBase):
         present_pick(game, self._trigger_pick_request(
             pl_t, pend["instance_id"], pend["source_uid"], pend["ability_guid"], entries))
         self._send_battle_events(session, game, pl_t)
-        _hc.log_req(f"    Trigger picker re-sent: {pend['ability_guid'][:8]} "
-                    f"entries={len(pend.get('target_entries') or [])}")
+        log_req(f"    Trigger picker re-sent: {pend['ability_guid'][:8]} "
+                f"entries={len(pend.get('target_entries') or [])}")
 
     def _queue_conversation_prompt(self, game, session, pl_t, ai_t, bstate,
                                    conversation_id):
@@ -367,8 +368,8 @@ class PendingChoicesMixin(_HostBase):
         if bstate.get("pvp"):
             event._private_player_uid = event_player
         game._push(event)
-        _hc.log_req(f"    Conversation queued: {str(conversation_id)[:8]} "
-                f"ability={ability_guid[:8]} owner={answer_owner_id}")
+        log_req(f"    Conversation queued: {str(conversation_id)[:8]} "
+            f"ability={ability_guid[:8]} owner={answer_owner_id}")
         return f"conversation: awaiting {str(conversation_id).lower()}"
 
     def _resume_interpreted_conversation(self, session, pl_t, ai_t,
@@ -380,8 +381,8 @@ class PendingChoicesMixin(_HostBase):
         from rules_port.context import EffectContext
         from rules_port.resolution import prompt_interpreted_reveal
         _be = self._checkpoint_engine(session)
-        _hc.log_req("    Conversation answered: resuming the interpreter "
-                    f"{continuation['ability_guid'][:8]}")
+        log_req("    Conversation answered: resuming the interpreter "
+                f"{continuation['ability_guid'][:8]}")
         pending_state.pop("pending_conversation", None)
         pending_state.pop("resolution_paused", None)
         g = self._fresh_game(session, pl_t, ai_t, pending_state)
@@ -434,20 +435,20 @@ class PendingChoicesMixin(_HostBase):
                     record_fra_challenge_conversation_answer)
                 if record_fra_challenge_conversation_answer(
                         self.user_profile["id"], conversation_id):
-                    _hc.log_req(
-                        "    FRA challenge answer accepted: "
-                        f"{conversation_id[:8]}")
+                    log_req(
+                    "    FRA challenge answer accepted: "
+                    f"{conversation_id[:8]}")
             self._push_transaction_ack(session)
             return True
         if (conversation_id and conversation_id != str(
                 pending.get("conversation_id", "")).lower()):
-            _hc.log_req(f"    Conversation answer rejected: got {conversation_id}, "
-                    f"expected {pending.get('conversation_id')}")
+            log_req(f"    Conversation answer rejected: got {conversation_id}, "
+                f"expected {pending.get('conversation_id')}")
             self._push_transaction_ack(session)
             return True
         owner_id = int(pending.get("owner_id", 0) or 0)
         if owner_id != int(self.user_profile["id"] if self.user_profile else 0):
-            _hc.log_req(f"    Conversation answer rejected for owner {owner_id}")
+            log_req(f"    Conversation answer rejected for owner {owner_id}")
             self._push_transaction_ack(session)
             return True
 
@@ -501,8 +502,8 @@ class PendingChoicesMixin(_HostBase):
                 pl_t, _hc.game_engine.EPriorityContext.ResolveTopOfChain)
             self._send_battle_events(session, game, pl_t)
         self._push_transaction_ack(session)
-        _hc.log_req(f"    Conversation resolved: "
-                f"{pending.get('conversation_id', '')[:8]}")
+        log_req(f"    Conversation resolved: "
+            f"{pending.get('conversation_id', '')[:8]}")
         return True
 
     def _prompt_deck_search(self, game, session, pl_t, ai_t, bstate,
@@ -633,8 +634,8 @@ class PendingChoicesMixin(_HostBase):
         bstate["pending_deck_search"] = pend
         _be.save_state(session, bstate)
         build_prompt(game, pl_t)
-        _hc.log_req(f"    Deck-search prompt: {ability_guid[:8]} source={hex(source_uid)} "
-                f"candidates={len(pend['candidates'])} inst={inst_id}")
+        log_req(f"    Deck-search prompt: {ability_guid[:8]} source={hex(source_uid)} "
+            f"candidates={len(pend['candidates'])} inst={inst_id}")
         return f"deck search: awaiting {len(pend['candidates'])} candidates"
 
     def _mark_interpreted_chain_item_done(self, bstate):
@@ -661,7 +662,7 @@ class PendingChoicesMixin(_HostBase):
             int(pend["source_uid"]), int(pend["owner_id"]),
             [int(uid) for uid in (pend.get("candidates") or [])],
             kind=kind, continuation=continuation if isinstance(continuation, dict) else None)
-        _hc.log_req("    Deck-search picker re-sent to the client")
+        log_req("    Deck-search picker re-sent to the client")
         self._send_battle_events(session, game, pl_t)
 
     def _prompt_choice_cards(self, game, session, pl_t, ai_t, bstate,
@@ -681,14 +682,14 @@ class PendingChoicesMixin(_HostBase):
         # advertise the ability being resolved (not a fixed copy ability).
         prompt_ability = choice_prompt_ability(pending)
         pending["prompt_ability_guid"] = prompt_ability
-        _hc.log_req("    PvP choice prompt DEBUG: "
-                f"kind={pending.get('kind')} "
-                f"source={pending.get('source_uid')} "
-                f"parent={pending.get('parent', {}).get('ability_guid')} "
-                f"parent_resume="
-                f"{pending.get('parent', {}).get('resume_effect_order')} "
-                f"child={pending.get('continuation', {}).get('ability_guid')}",
-                level="DEBUG")
+        log_req("    PvP choice prompt DEBUG: "
+            f"kind={pending.get('kind')} "
+            f"source={pending.get('source_uid')} "
+            f"parent={pending.get('parent', {}).get('ability_guid')} "
+            f"parent_resume="
+            f"{pending.get('parent', {}).get('resume_effect_order')} "
+            f"child={pending.get('continuation', {}).get('ability_guid')}",
+            level="DEBUG")
 
         def build_prompt(target_game, player_uid):
             from pickers import PickRequest, PickTarget, present_pick
@@ -794,12 +795,12 @@ class PendingChoicesMixin(_HostBase):
                                int(value) for value in
                                pending.get("choice_uids", [])}), None)
         if chosen_uid is None:
-            _hc.log_req("    Choice answer invalid: no legal choice card")
+            log_req("    Choice answer invalid: no legal choice card")
             self._push_transaction_ack(session)
             return True
         owner_id = int(pending.get("owner_id", self.user_profile["id"]))
         if owner_id != int(self.user_profile["id"]):
-            _hc.log_req(f"    Choice answer rejected for owner {owner_id}")
+            log_req(f"    Choice answer rejected for owner {owner_id}")
             self._push_transaction_ack(session)
             return True
         bstate.pop("pending_choice", None)
@@ -815,7 +816,7 @@ class PendingChoicesMixin(_HostBase):
             choice_context = EffectContext.from_rules_port(
                 g, session, _hc._db, self, pl_t, ai_t, bstate, "", ability=None)
             if not play_choice_card(choice_context, chosen_uid, owner_id):
-                _hc.log_req(f"    Choice answer rejected: {hex(int(chosen_uid))}")
+                log_req(f"    Choice answer rejected: {hex(int(chosen_uid))}")
                 bstate["pending_choice"] = pending
                 bstate["resolution_paused"] = True
                 _be.save_state(session, bstate)
@@ -823,7 +824,7 @@ class PendingChoicesMixin(_HostBase):
                 return True
             resolve_choice_card_abilities(
                 choice_context, chosen_uid, pending.get("source_uid"), owner_id)
-            _hc.log_req(f"    Choice selected: {hex(int(chosen_uid))}: resuming the interpreter")
+            log_req(f"    Choice selected: {hex(int(chosen_uid))}: resuming the interpreter")
             try:
                 ir_exec.resume_conversation(
                     pending["interpreter"],
@@ -921,8 +922,8 @@ class PendingChoicesMixin(_HostBase):
                         self._push_main_phase_options(session, pl_t, ai_t)
             if not projected:
                 self._push_transaction_ack(session)
-            _hc.log_req(f"    Choice selected: {hex(int(chosen_uid))} "
-                    f"for {child_guid[:8]} target")
+            log_req(f"    Choice selected: {hex(int(chosen_uid))} "
+                f"for {child_guid[:8]} target")
             return True
         from rules_port.context import EffectContext
         bstate["_rules_port_attached"] = True
@@ -934,7 +935,7 @@ class PendingChoicesMixin(_HostBase):
             g, session, _hc._db, self, pl_t, ai_t, bstate,
             "", ability=None)
         if not play_choice_card(choice_context, chosen_uid, owner_id):
-            _hc.log_req(f"    Choice answer rejected: {hex(int(chosen_uid))}")
+            log_req(f"    Choice answer rejected: {hex(int(chosen_uid))}")
             bstate["pending_choice"] = pending
             bstate["resolution_paused"] = True
             _be.save_state(session, bstate)
@@ -962,8 +963,8 @@ class PendingChoicesMixin(_HostBase):
                     _hc.game_engine.ETurnPhases.SecondMainPhase):
                 self._push_main_phase_options(session, pl_t, ai_t)
         self._push_transaction_ack(session)
-        _hc.log_req(f"    Choice selected: {hex(int(chosen_uid))} "
-                f"for {pending['ability_guid'][:8]}")
+        log_req(f"    Choice selected: {hex(int(chosen_uid))} "
+            f"for {pending['ability_guid'][:8]}")
         return True
 
     def _push_private_revealed_cards(self, session, bstate, owner_id, rows,
@@ -1130,15 +1131,15 @@ class PendingChoicesMixin(_HostBase):
             if h is not None:
                 _send_pvp_packet(h, session, private, chooser,
                                  "revealed-choice")
-            _hc.log_req(f"    PvP revealed-choice prompt: {ability_guid[:8]} "
-                    f"-> pid {chooser_pid} candidates={len(candidates or [])}")
+            log_req(f"    PvP revealed-choice prompt: {ability_guid[:8]} "
+                f"-> pid {chooser_pid} candidates={len(candidates or [])}")
             return "revealed choice: awaiting player"
 
         bstate["pending_deck_search"] = pend
         _be.save_state(session, bstate)
         build_prompt(game, pl_t)
-        _hc.log_req(f"    Revealed-choice prompt: {ability_guid[:8]} "
-                f"source={hex(source_uid)} candidates={len(candidates or [])}")
+        log_req(f"    Revealed-choice prompt: {ability_guid[:8]} "
+            f"source={hex(source_uid)} candidates={len(candidates or [])}")
         return "revealed choice: awaiting player"
 
     def _resolve_pending_trigger_target(self, session, pl_t, ai_t, inner_bytes,
@@ -1294,8 +1295,8 @@ class PendingChoicesMixin(_HostBase):
                     pl_t, _hc.game_engine.EPriorityContext.ResolveTopOfChain)
                 self._send_battle_events(session, g, pl_t)
             self._push_transaction_ack(session)
-            _hc.log_req(f"    RulesPort trigger target chosen: {ag[:8]} "
-                    f"target={hex(chosen_uid) if chosen_uid else 'none'}")
+            log_req(f"    RulesPort trigger target chosen: {ag[:8]} "
+                f"target={hex(chosen_uid) if chosen_uid else 'none'}")
             return True
         from rules_port.resolution import trigger_event_fields
         _be.stack_push(bstate, {
@@ -1313,8 +1314,8 @@ class PendingChoicesMixin(_HostBase):
         g.push_green_light(pl_t, _hc.game_engine.EPriorityContext.ResolveTopOfChain)
         self._send_battle_events(session, g, pl_t)
         self._push_transaction_ack(session)
-        _hc.log_req(f"    Trigger target chosen: {ag[:8]} "
-                f"target={hex(chosen_uid) if chosen_uid else 'none'}")
+        log_req(f"    Trigger target chosen: {ag[:8]} "
+            f"target={hex(chosen_uid) if chosen_uid else 'none'}")
         return True
 
     def _resolve_rules_port_trigger_continuation(self, session, transaction):
@@ -1422,8 +1423,8 @@ class PendingChoicesMixin(_HostBase):
                             _hc.game_engine.ETurnPhases.FirstMainPhase,
                             _hc.game_engine.ETurnPhases.SecondMainPhase)):
                     self._push_main_phase_options(session, pl_t, ai_t)
-                _hc.log_req(f"    Optional trigger declined: "
-                        f"{pending.get('ability_guid', '')[:8]}")
+                log_req(f"    Optional trigger declined: "
+                    f"{pending.get('ability_guid', '')[:8]}")
                 session._rules_port_mutation_emitted = True
                 return True
             pending.pop("optional", None)
@@ -1570,11 +1571,11 @@ class PendingChoicesMixin(_HostBase):
                 valid_targets = owned_hand_cards(wire_uids)
             submitted_uids = selected_uids or list(wire_uids)
             if len(submitted_uids) != 1 or len(valid_targets) != 1:
-                _hc.log_req(
-                    "    RulesPort discard continuation rejected: "
-                    f"target_index={target_index} selected={selected_uids} "
-                    f"wire_cards={list(wire_uids)} "
-                    f"valid_hand_cards={[uid for uid, _row in valid_targets]}")
+                log_req(
+                "    RulesPort discard continuation rejected: "
+                f"target_index={target_index} selected={selected_uids} "
+                f"wire_cards={list(wire_uids)} "
+                f"valid_hand_cards={[uid for uid, _row in valid_targets]}")
                 return False
             chosen_uid, _row = valid_targets[0]
 
@@ -1616,7 +1617,7 @@ class PendingChoicesMixin(_HostBase):
                 finished_chain = self._resume_completed_rules_port_chain(
                     session, state, completed_chain)
             session._rules_port_mutation_emitted = True
-            _hc.log_req(f"    RulesPort discard continuation: {chosen_uid} -> {result}")
+            log_req(f"    RulesPort discard continuation: {chosen_uid} -> {result}")
             # The Deathcry that opened this picker fired during the AI's turn
             # (Bloatcap's "each opposing champion chooses and discards a
             # card"), which paused its phase loop so the picker survived.
@@ -1627,7 +1628,7 @@ class PendingChoicesMixin(_HostBase):
                 self._push_transaction_ack(session)
                 state.pop("ai_turn_phase_idx", None)
                 _be.save_state(session, state)
-                _hc.log_req(f"    Discard answered — resuming AI turn at idx {ai_idx}")
+                log_req(f"    Discard answered — resuming AI turn at idx {ai_idx}")
                 if getattr(session, "_rules_port_session", None) is not None:
                     # The continuation resolved the chain item directly, so
                     # its ResolveTopOfChainAction is still the native stack
@@ -1678,9 +1679,9 @@ class PendingChoicesMixin(_HostBase):
             state["pending_discard_scid"] = valid_legacy_uids[0]
             _be.save_state(session, state)
         else:
-            _hc.log_req(
-                "    RulesPort legacy discard continuation rejected: "
-                f"selected={legacy_uids} valid_hand_cards={valid_legacy_uids}")
+            log_req(
+            "    RulesPort legacy discard continuation rejected: "
+            f"selected={legacy_uids} valid_hand_cards={valid_legacy_uids}")
             return False
         handled = self._handle_set_ability_data_transaction(
             session, type("_Continuation", (), {"inner_bytes": b""})())
@@ -1765,7 +1766,7 @@ class PendingChoicesMixin(_HostBase):
                 assert chosen_uid is not None  # the guard above admits only a picked or chosen card
                 answer = int(chosen_uid)
                 taken = {int(chosen_uid)}
-            _hc.log_req(f"    Deck-search choice {answer}: resuming the interpreter")
+            log_req(f"    Deck-search choice {answer}: resuming the interpreter")
             g = self._fresh_game(session, pl_t, ai_t, bstate)
             self._hide_candidates_to_deck(
                 g, session, pl_t, ai_t,
@@ -1811,8 +1812,8 @@ class PendingChoicesMixin(_HostBase):
                 g, session, pl_t, ai_t,
                 [cu for cu in pend["candidates"] if int(cu) != int(chosen_uid)])
             self._send_battle_events(session, g, pl_t)
-            _hc.log_req(f"    Deck-search chosen: {hex(chosen_uid)} -> hand "
-                    f"(owner {pend['owner_id']})")
+            log_req(f"    Deck-search chosen: {hex(chosen_uid)} -> hand "
+                f"(owner {pend['owner_id']})")
             # Resume the turn that paused for this prompt (the deathcry fired
             # during combat).  The AI turn resumes where it stopped; a player
             # combat pause advances off AssignDamage; otherwise just re-grant
@@ -1821,7 +1822,7 @@ class PendingChoicesMixin(_HostBase):
             if ai_idx is not None:
                 bstate.pop("ai_turn_phase_idx", None)
                 _be.save_state(session, bstate)
-                _hc.log_req(f"    Deck-search answered — resuming AI turn at idx {ai_idx}")
+                log_req(f"    Deck-search answered — resuming AI turn at idx {ai_idx}")
                 self._run_ai_turn(session, pl_t, ai_t, bstate, start_idx=ai_idx)
             elif _be.current_phase(bstate) in (
                     _hc.game_engine.ETurnPhases.AssignDamage,
@@ -1835,9 +1836,9 @@ class PendingChoicesMixin(_HostBase):
                 self._send_battle_events(session, g2, pl_t)
                 self._push_main_phase_options(session, pl_t, ai_t)
         else:
-            _hc.log_req(f"    Deck-search answer invalid: "
-                    f"chosen={hex(chosen_uid) if chosen_uid else 'none'} "
-                    f"candidates={pend['candidates']}")
+            log_req(f"    Deck-search answer invalid: "
+                f"chosen={hex(chosen_uid) if chosen_uid else 'none'} "
+                f"candidates={pend['candidates']}")
         _be.save_state(session, bstate)
         self._push_transaction_ack(session)
         return True
@@ -1858,9 +1859,9 @@ class PendingChoicesMixin(_HostBase):
         bstate.pop("resolution_paused", None)
         candidates = [int(uid) for uid in (pend.get("candidates") or [])]
         if picks is None and (not chosen_uid or int(chosen_uid) not in candidates):
-            _hc.log_req(f"    Matching-target answer invalid: "
-                    f"chosen={hex(int(chosen_uid)) if chosen_uid else 'none'} "
-                    f"candidates={candidates}")
+            log_req(f"    Matching-target answer invalid: "
+                f"chosen={hex(int(chosen_uid)) if chosen_uid else 'none'} "
+                f"candidates={candidates}")
             _be.save_state(session, bstate)
             self._push_transaction_ack(session)
             return True
@@ -1880,7 +1881,7 @@ class PendingChoicesMixin(_HostBase):
             from rules_port.context import EffectContext
             from rules_port.resolution import prompt_interpreted_reveal
             answer = list(picks) if picks else int(chosen_uid)
-            _hc.log_req(f"    Matching-target choice {answer}: resuming the interpreter")
+            log_req(f"    Matching-target choice {answer}: resuming the interpreter")
             bstate.pop("pending_deck_search", None)
             try:
                 ir_exec.resume_ability(
@@ -1939,7 +1940,7 @@ class PendingChoicesMixin(_HostBase):
             # Native sessions take the pick's continuation from the RulesPort scheduler: project its window.  That
             # resumes the AI turn when the AI has priority (an AI-first game held its StartTurn window behind this
             # game-start pick) and otherwise presents the human's window.
-            _hc.log_req("    Deck pick resolved on the native chain: projecting priority")
+            log_req("    Deck pick resolved on the native chain: projecting priority")
             self._send_battle_events(session, g, pl_t)
             self._advance_rules_port_to_priority(session, pl_t, ai_t, bstate)
         else:
@@ -1961,8 +1962,8 @@ class PendingChoicesMixin(_HostBase):
                     pl_t, _hc.game_engine.EPriorityContext.ResolveTopOfChain)
             self._send_battle_events(session, g, pl_t)
         self._push_transaction_ack(session)
-        _hc.log_req(f"    Matching deck target chosen: {hex(int(chosen_uid))}; "
-                f"created matching cards and resumed priority")
+        log_req(f"    Matching deck target chosen: {hex(int(chosen_uid))}; "
+            f"created matching cards and resumed priority")
         return True
 
     def _resolve_pending_revealed_choice(self, session, pl_t, ai_t, bstate,
@@ -1985,7 +1986,7 @@ class PendingChoicesMixin(_HostBase):
                 from rules_port.context import EffectContext
                 from rules_port.resolution import prompt_interpreted_reveal
                 answer = list(picks) if picks else int(chosen_uid)
-                _hc.log_req(f"    Revealed choice {answer}: resuming the interpreter")
+                log_req(f"    Revealed choice {answer}: resuming the interpreter")
                 self._hide_candidates_to_deck(g, session, pl_t, ai_t, revealed)
                 bstate.pop("pending_deck_search", None)
                 bstate.pop("resolution_paused", None)
@@ -2078,8 +2079,8 @@ class PendingChoicesMixin(_HostBase):
                         scid, owner, _hc.game_engine.ECardCollections.Deck, ct,
                         template_id=row[0], cost=cost, attack=atk,
                         defense=defense, state=0, nulling=True)
-                _hc.log_req(f"    Revealed choice: {hex(chosen)} -> deck top "
-                        f"(owner {pend['owner_id']})")
+                log_req(f"    Revealed choice: {hex(chosen)} -> deck top "
+                    f"(owner {pend['owner_id']})")
             else:
                 from rules_port.context import EffectContext
                 from rules_port.deck_effects import move_deck_card_to_hand
@@ -2087,8 +2088,8 @@ class PendingChoicesMixin(_HostBase):
                     EffectContext.from_rules_port(
                         g, session, _hc._db, self, pl_t, ai_t, bstate, ""),
                     int(chosen_uid), pend["owner_id"])
-                _hc.log_req(f"    Revealed choice: {hex(int(chosen_uid))} -> hand "
-                        f"(owner {pend['owner_id']})")
+                log_req(f"    Revealed choice: {hex(int(chosen_uid))} -> hand "
+                    f"(owner {pend['owner_id']})")
             remaining = [cu for cu in revealed if cu != int(chosen_uid)]
             if remaining:
                 from pvp_db import db_randomly_insert_deck_cards
@@ -2118,11 +2119,11 @@ class PendingChoicesMixin(_HostBase):
                 session.session_id, int(pend["owner_id"]), revealed)
             self._hide_candidates_to_deck(g, session, pl_t, ai_t, revealed)
             self._send_battle_events(session, g, pl_t)
-            _hc.log_req("    Revealed choice declined; returned cards to deck")
+            log_req("    Revealed choice declined; returned cards to deck")
         else:
-            _hc.log_req(f"    Revealed choice invalid: "
-                    f"chosen={hex(int(chosen_uid)) if chosen_uid else 'none'} "
-                    f"candidates={candidates}")
+            log_req(f"    Revealed choice invalid: "
+                f"chosen={hex(int(chosen_uid)) if chosen_uid else 'none'} "
+                f"candidates={candidates}")
         _be.save_state(session, bstate)
         g2 = self._fresh_game(session, pl_t, ai_t, bstate)
         g2.push_green_light(pl_t, _hc.game_engine.EPriorityContext.Normal)
@@ -2183,12 +2184,12 @@ class PendingChoicesMixin(_HostBase):
             self._hide_candidates_to_deck(g, session, pl_t, ai_t,
                                           pend["candidates"])
             self._send_battle_events(session, g, pl_t)
-            _hc.log_req(f"    Shards of Fate: gained threshold flags "
-                    f"{threshold_colors} "
-                    f"(chosen {hex(int(chosen_uid))})")
+            log_req(f"    Shards of Fate: gained threshold flags "
+                f"{threshold_colors} "
+                f"(chosen {hex(int(chosen_uid))})")
         else:
-            _hc.log_req(f"    Shards of Fate: invalid pick "
-                    f"chosen={hex(chosen_uid) if chosen_uid else 'none'}")
+            log_req(f"    Shards of Fate: invalid pick "
+                f"chosen={hex(chosen_uid) if chosen_uid else 'none'}")
         _be.save_state(session, bstate)
         # Re-grant the player priority + fresh main-phase options (the resource
         # play consumed the window; the pick resumes the turn).

@@ -1,3 +1,4 @@
+from db import log_req
 """Store requests (item listing, redeem codes) still served by the legacy fallback.
 
 Moved out of hconnect_server.HCPHandler._handle_service_request_legacy.
@@ -9,7 +10,7 @@ Moved out of hconnect_server.HCPHandler._handle_service_request_legacy.
 def handle_getstoreitems_6009(handler, target, instance, data_type, reqid, comp, session_id,
                               conh, inner_obj, inner_bytes, raw_data_wrapper_bytes):
     import hconnect_server as _hc
-    _hc.log_req(">>> Respond GetStoreItems -> 1 booster pack")
+    log_req(">>> Respond GetStoreItems -> 1 booster pack")
     resp_inner = _hc.encode_get_store_items_response()
     resp_body = _hc.compress_gzip(resp_inner) if comp else resp_inner
     resp_reqid = reqid | 1
@@ -25,7 +26,7 @@ def handle_getstoreitems_6009(handler, target, instance, data_type, reqid, comp,
         "conh": conh,
         "sid": handler.sid,
     }, dw_bytes)
-    _hc.log_req(f"    Sent GetStoreItems response ({len(dw_bytes)}b)")
+    log_req(f"    Sent GetStoreItems response ({len(dw_bytes)}b)")
 
 
 # ServiceEscrow — RedeemCode (6013)
@@ -33,12 +34,12 @@ def handle_redeemcode_6013(handler, target, instance, data_type, reqid, comp, se
                            conh, inner_obj, inner_bytes, raw_data_wrapper_bytes):
     import hconnect_server as _hc
     redeem_code = inner_obj.get("RedeemCode", "")
-    _hc.log_req(f">>> RedeemCode: code='{redeem_code}'")
+    log_req(f">>> RedeemCode: code='{redeem_code}'")
     
     p = handler.user_profile
     result = _hc.db_redeem_code(redeem_code, p["id"])
     if not result["redeemed"]:
-        _hc.log_req(f"    RedeemCode invalid: {redeem_code}")
+        log_req(f"    RedeemCode invalid: {redeem_code}")
         resp_inner = _hc.encode_objfmt_response(
             ["Game.Client.Network.Escrow.RedeemCodeResponse",
              "System.Collections.Generic.List`1#Game.Shared.ResourceId",
@@ -65,7 +66,7 @@ def handle_redeemcode_6013(handler, target, instance, data_type, reqid, comp, se
             "issuer": issuer_str, "target": target, "instance": instance,
             "reqid": resp_reqid, "c": comp, "conh": conh, "sid": handler.sid,
         }, dw_bytes)
-        _hc.log_req(f"    Sent RedeemCode (invalid) response ({len(dw_bytes)}b)")
+        log_req(f"    Sent RedeemCode (invalid) response ({len(dw_bytes)}b)")
     else:
         gold_delta = result["gold"]
         plat_delta = result["platinum"]
@@ -91,7 +92,7 @@ def handle_redeemcode_6013(handler, target, instance, data_type, reqid, comp, se
             f"You have successfully redeemed the code '{redeem_code}' and received {reward_desc}.\n\nThank you for playing Hex: Shards of Fate!",
             "SYSTEM")
     
-        _hc.log_req(f"    RedeemCode success: gold+{gold_delta} plat+{plat_delta}")
+        log_req(f"    RedeemCode success: gold+{gold_delta} plat+{plat_delta}")
         if card_grants:
             handler.push_cards_to_client()
     
@@ -121,7 +122,7 @@ def handle_redeemcode_6013(handler, target, instance, data_type, reqid, comp, se
             "issuer": issuer_str, "target": target, "instance": instance,
             "reqid": resp_reqid, "c": comp, "conh": conh, "sid": handler.sid,
         }, dw_bytes, data_type, reqid, target, instance)
-        _hc.log_req(f"    Sent RedeemCode (ok) response ({len(dw_bytes)}b)")
+        log_req(f"    Sent RedeemCode (ok) response ({len(dw_bytes)}b)")
 
 
 # OpenCardPack (2127)

@@ -3,6 +3,7 @@
 import random
 import threading
 from collections import namedtuple
+from db import log_req
 
 
 # The fixed client addresses every treasure chest by the InventoryItem UID the
@@ -209,9 +210,9 @@ def _spin_client_chest(handler, chest_uid, rng=None):
             inventory_updates=_grant_pack_inventory_rewards(
                 handler, result.inventory_rewards))
         _hc._db.commit()
-    _hc.log_req(f"    Spun chest {chest_uid} ({chest.chest_type}, cost {cost}): "
-                f"{result.outcome} symbols={result.symbols} colors={result.colors} "
-                f"gold={result.gold} -> {result.rarity} status={result.spin_status}")
+    log_req(f"    Spun chest {chest_uid} ({chest.chest_type}, cost {cost}): "
+            f"{result.outcome} symbols={result.symbols} colors={result.colors} "
+            f"gold={result.gold} -> {result.rarity} status={result.spin_status}")
     return summary
 
 
@@ -299,7 +300,7 @@ def _open_client_chests(handler, chest_uids):
             remaining = _hc.db_consume_inventory_row(
                 chest.inventory_row_id, 1, conn=_hc._db)
         summary["opened"].append((chest.template_guid, chest_uid, remaining))
-        _hc.log_req(f"    Opened chest {chest_uid} "
-                f"({chest.template_guid or chest.set_guid}): {len(cards)} cards, "
-                f"{len(inventory_rewards)} items, remaining={remaining}")
+        log_req(f"    Opened chest {chest_uid} "
+            f"({chest.template_guid or chest.set_guid}): {len(cards)} cards, "
+            f"{len(inventory_rewards)} items, remaining={remaining}")
     return summary

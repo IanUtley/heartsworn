@@ -4,6 +4,7 @@ Registered in ``services/__init__.py``; routed by ``data_type``.
 """
 
 import json
+from db import log_req
 
 
 # ServiceProfile (80000)
@@ -11,14 +12,14 @@ def handle_serviceprofile_80000(handler, target, instance, data_type, reqid, com
                                 conh, inner_obj, inner_bytes, raw_data_wrapper_bytes):
     import hconnect_server as _hc
     envelope = inner_obj.get("Envelope", b"{}")
-    _hc.log_req(f">>> ServiceProfile (dt=80000) env={len(envelope)}b")
+    log_req(f">>> ServiceProfile (dt=80000) env={len(envelope)}b")
     try:
         env_json = json.loads(envelope.decode("utf-8"))
-        _hc.log_req(f"    Envelope action: {env_json.get('action', '?')}")
+        log_req(f"    Envelope action: {env_json.get('action', '?')}")
         for k, v in env_json.items():
-            _hc.log_req(f"      {k}={str(v)[:80]}")
+            log_req(f"      {k}={str(v)[:80]}")
     except:
-        _hc.log_req(f"    Envelope raw: {_hc.hexdump(envelope)}")
+        log_req(f"    Envelope raw: {_hc.hexdump(envelope)}")
     try:
         env_json = json.loads(envelope.decode("utf-8"))
     except (TypeError, ValueError, UnicodeDecodeError):
@@ -35,11 +36,11 @@ def handle_serviceprofile_80000(handler, target, instance, data_type, reqid, com
         resp_envelope = json.dumps(
             replay_list(env_json), separators=(",", ":")
         ).encode("utf-8")
-        _hc.log_req("    Replay list returned from game_replays")
+        log_req("    Replay list returned from game_replays")
     elif template_envelope is not None:
         resp_envelope = template_envelope
-        _hc.log_req(f"    Deck template {env_json.get('action')} handled "
-                    f"({len(resp_envelope)}b)")
+        log_req(f"    Deck template {env_json.get('action')} handled "
+                f"({len(resp_envelope)}b)")
     else:
         resp_envelope = b"{}"
     resp_inner = _hc.encode_profile_response(resp_envelope)
@@ -57,7 +58,7 @@ def handle_serviceprofile_80000(handler, target, instance, data_type, reqid, com
         "conh": conh,
         "sid": handler.sid,
     }, dw_bytes)
-    _hc.log_req(f"    Sent ServiceProfile response ({len(dw_bytes)}b)")
+    log_req(f"    Sent ServiceProfile response ({len(dw_bytes)}b)")
 
 
 

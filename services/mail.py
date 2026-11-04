@@ -546,7 +546,7 @@ def handle_delete(handler, target, instance, reqid, comp, session_id,
 def _ping_mail_server(handler, target, instance, data_type, reqid, comp, session_id,
                       conh, inner_obj, inner_bytes, raw_data_wrapper_bytes):
     import hconnect_server as _hc
-    _hc.log_req(">>> Respond PingMailServer (dt=9001)")
+    log_req(">>> Respond PingMailServer (dt=9001)")
     timestamp = time.strftime("%m/%d/%Y %H:%M:%S", time.gmtime())
     resp_inner = _hc.encode_ping_mail_server_response(timestamp)
     resp_body = _hc.compress_gzip(resp_inner) if comp else resp_inner
@@ -563,7 +563,7 @@ def _ping_mail_server(handler, target, instance, data_type, reqid, comp, session
         "conh": conh,
         "sid": handler.sid,
     }, dw_bytes)
-    _hc.log_req(f"    Sent PingMailServer response ({len(dw_bytes)}b)")
+    log_req(f"    Sent PingMailServer response ({len(dw_bytes)}b)")
 
 
 def handle_ping_mail_server(handler, target, instance, reqid, comp, session_id, conh,

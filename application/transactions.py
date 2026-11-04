@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING
 from typing import Any
 import re
 import struct
+from db import log_req
 
 
 if TYPE_CHECKING:
@@ -64,10 +65,10 @@ class TransactionsMixin(_HostBase):
                             "instance": str(session.server_id),
                             "reqid": 0, "c": 0, "conh": 0, "sid": self.sid,
                         }, dw_ps)
-                        _hc.log_req(f"    RequestPrioritySync (PvP): Mulligan greenlight to actor {my_pid}")
+                        log_req(f"    RequestPrioritySync (PvP): Mulligan greenlight to actor {my_pid}")
                     else:
                         self._push_transaction_ack(session)
-                        _hc.log_req(f"    RequestPrioritySync (PvP): Mulligan — {my_pid} not the actor, acked")
+                        log_req(f"    RequestPrioritySync (PvP): Mulligan — {my_pid} not the actor, acked")
                 elif phase == _hc.game_engine.ETurnPhases.PickGoesFirst:
                     winner_pid = pvp_state.get(
                         "goes_first_pid", pvp_state["turn_pid"])
@@ -91,10 +92,10 @@ class TransactionsMixin(_HostBase):
                             "instance": str(session.server_id),
                             "reqid": 0, "c": 0, "conh": 0, "sid": self.sid,
                         }, dw_ps)
-                        _hc.log_req(f"    RequestPrioritySync (PvP): PickGoesFirst greenlight to winner {my_pid}")
+                        log_req(f"    RequestPrioritySync (PvP): PickGoesFirst greenlight to winner {my_pid}")
                     else:
                         self._push_transaction_ack(session)
-                        _hc.log_req(f"    RequestPrioritySync (PvP): PickGoesFirst — {my_pid} is not the winner, acked")
+                        log_req(f"    RequestPrioritySync (PvP): PickGoesFirst — {my_pid} is not the winner, acked")
                 else:
                     game_ps.push_turn_phase(phase, turn_uid, my_uid)
                     game_ps.push_green_light(
@@ -112,7 +113,7 @@ class TransactionsMixin(_HostBase):
                         "instance": str(session.server_id),
                         "reqid": 0, "c": 0, "conh": 0, "sid": self.sid,
                     }, dw_ps)
-                    _hc.log_req(f"    RequestPrioritySync (PvP): re-sent GreenLight for phase {phase}")
+                    log_req(f"    RequestPrioritySync (PvP): re-sent GreenLight for phase {phase}")
             return True
 
         _be = self._checkpoint_engine(session)
@@ -126,7 +127,7 @@ class TransactionsMixin(_HostBase):
             bstate, phase = None, None
         if bstate and bstate.get("pending_trigger") and not bstate.get("pvp"):
             self._resend_pending_trigger(session, bstate, pl_t, ai_t)
-            _hc.log_req("    RequestPrioritySync: picker still pending, re-sent")
+            log_req("    RequestPrioritySync: picker still pending, re-sent")
             return True
         if bstate and phase is not None and bstate.get("turn_player") == _be.PLAYER:
             game = self._fresh_game(session, pl_t, ai_t, bstate)
@@ -143,7 +144,7 @@ class TransactionsMixin(_HostBase):
                 self._push_main_phase_options(session, pl_t, ai_t)
             else:
                 self._push_phase_options_empty(session, pl_t, ai_t)
-            _hc.log_req(f"    RequestPrioritySync: re-sent GreenLight for phase {phase}")
+            log_req(f"    RequestPrioritySync: re-sent GreenLight for phase {phase}")
         elif (bstate and phase is not None
               and bstate.get("turn_player") == _be.AI
               and bstate.get("ai_turn_phase_idx") is not None):
@@ -176,11 +177,11 @@ class TransactionsMixin(_HostBase):
                 self._push_blocker_options(session, pl_t, ai_t)
             else:
                 self._push_phase_options_empty(session, pl_t, ai_t)
-            _hc.log_req(f"    RequestPrioritySync: re-sent AI-stop GreenLight "
-                    f"for phase {phase}")
+            log_req(f"    RequestPrioritySync: re-sent AI-stop GreenLight "
+                f"for phase {phase}")
         else:
             self._push_transaction_ack(session)
-            _hc.log_req("    RequestPrioritySync: no active battle, acked")
+            log_req("    RequestPrioritySync: no active battle, acked")
         return True
 
     def _handle_choose_pick_transaction(self, session, transaction):
@@ -212,17 +213,17 @@ class TransactionsMixin(_HostBase):
                 # then nothing happened").  Ignore any non-winner pick
                 # and resolve on the winner's first choose.
                 if my_pid != winner_pid:
-                    _hc.log_req(f"    PvP choose: {my_pid} (non-winner) "
-                            f"pick ignored — waiting on winner "
-                            f"{winner_pid}")
+                    log_req(f"    PvP choose: {my_pid} (non-winner) "
+                        f"pick ignored — waiting on winner "
+                        f"{winner_pid}")
                     self._push_transaction_ack(session)
                     return True
                 if state.get("pick_resolved"):
                     # Already resolved — this is a stale/re-sent choose
                     # from the winner; just ack to avoid double-drawing.
-                    _hc.log_req(f"    PvP choose: already resolved "
-                            f"(draws_first {state['draws_first_pid']}) "
-                            f"— stale pick from {my_pid}")
+                    log_req(f"    PvP choose: already resolved "
+                        f"(draws_first {state['draws_first_pid']}) "
+                        f"— stale pick from {my_pid}")
                     self._push_transaction_ack(session)
                     return True
                 # The winner picks Play -> winner plays first and the
@@ -263,8 +264,8 @@ class TransactionsMixin(_HostBase):
                     for apid in pids:
                         _hc.db_game_draw_cards(session.session_id, apid,
                                            opening_hand_size)
-                    _hc.log_req(f"    PvP choose: drew hands for both "
-                            f"({opening_hand_size})")
+                    log_req(f"    PvP choose: drew hands for both "
+                        f"({opening_hand_size})")
 
                 # Push hand + Mulligan to each player.
                 hands = {
@@ -332,11 +333,11 @@ class TransactionsMixin(_HostBase):
                     h.send({"issuer": f"0.0.0.0.ServiceGameSession.246.{session.session_id}.{h.scnt}",
                             "target": "ServiceGameSession", "instance": str(session.server_id),
                             "reqid": 0, "c": 0, "conh": 0, "sid": h.sid}, dw)
-                    _hc.log_req(f"    PvP choose: hand to pid {apid}")
+                    log_req(f"    PvP choose: hand to pid {apid}")
             else:
                 _push_to_both_players(session, self, lambda g, pt:
                     [g.push_turn_phase(_hc.game_engine.ETurnPhases.Mulligan, pt, pt),
-                     g.push_green_light(pt, _hc.game_engine.EPriorityContext.Normal)], _hc.log_req)
+                     g.push_green_light(pt, _hc.game_engine.EPriorityContext.Normal)], log_req)
             return True
         else:
             # The coin-flip winner chose Play or Draw. FRA can resolve this
@@ -346,14 +347,14 @@ class TransactionsMixin(_HostBase):
             coin_winner_is_player = getattr(
                 self, "_pve_coin_winner_is_player", True)
             if not coin_winner_is_player and not ai_choice:
-                _hc.log_req("    PvE choose: ignored player pick; AI won coin toss")
+                log_req("    PvE choose: ignored player pick; AI won coin toss")
                 self._push_transaction_ack(session)
                 return True
             chose_draw = b"ChooseDrawTransaction" in inner_bytes
             if (coin_winner_is_player and
                     getattr(self, "_pve_forced_draw_first", False)):
                 if not chose_draw:
-                    _hc.log_req("    PvE choose: Weight rejected Play; forcing Draw")
+                    log_req("    PvE choose: Weight rejected Play; forcing Draw")
                 chose_draw = True
                 self._pve_forced_draw_first = False
             # A draw-first player draws on turn 1. The play/draw choice is
@@ -453,7 +454,7 @@ class TransactionsMixin(_HostBase):
                     "target": "ServiceGameSession", "instance": gs_inst,
                     "reqid": 0, "c": 0, "conh": 0, "sid": self.sid,
                 }, dw)
-                _hc.log_req(f"    Pushed Mulligan phase ({len(dw)}b)")
+                log_req(f"    Pushed Mulligan phase ({len(dw)}b)")
             return True
 
     def _handle_mulligan_keep_transaction(self, session, transaction):
@@ -485,8 +486,8 @@ class TransactionsMixin(_HostBase):
                     # extra AcceptedStartingHand/priority packet can
                     # pop the visible Mulligan dialog on the opponent.
                     if my_pid in kept:
-                        _hc.log_req(f"    PvP: duplicate keep from "
-                                f"{my_pid}; ignored")
+                        log_req(f"    PvP: duplicate keep from "
+                            f"{my_pid}; ignored")
                     else:
                         kept.append(my_pid)
                         state["kept"] = kept
@@ -520,7 +521,7 @@ class TransactionsMixin(_HostBase):
                                 "instance": str(session.server_id),
                                 "reqid": 0, "c": 0, "conh": 0, "sid": _keep_h.sid,
                             }, dw)
-                        _hc.log_req(f"    PvP: player {my_pid} kept hand (pushed to both)")
+                        log_req(f"    PvP: player {my_pid} kept hand (pushed to both)")
                         from services.tournament_game import pvp_mulligan_next
                         pvp_mulligan_next(session, state, my_pid)
             return True
@@ -693,9 +694,9 @@ class TransactionsMixin(_HostBase):
                 if native_port.begin_first_turn(first_turn_uid):
                     # Entering StartTurn already dispatched TurnStartedEvent.
                     first_turn_started_natively = True
-                    _hc.log_req(
-                        "    RulesPort began first turn: "
-                        f"active={native_port.active_player_id!r}")
+                    log_req(
+                    "    RulesPort began first turn: "
+                    f"active={native_port.active_player_id!r}")
             # Fortune readings are opponent-owned encounter effects. Resolve
             # the selected card through the normal metadata/BOM path so its
             # target templates choose the player's champion for
@@ -713,9 +714,9 @@ class TransactionsMixin(_HostBase):
                     fortune_log = resolve_port_ability(
                         self, game, session, _hc._db, pl_t, ai_t, bstate,
                         fortune_ability, fortune_source, 0, target_map={})
-                    _hc.log_req(f"    Fortune {fortune_guid}: {fortune_log}")
+                    log_req(f"    Fortune {fortune_guid}: {fortune_log}")
                 except Exception as exc:
-                    _hc.log_req(f"    Fortune {fortune_guid} error: {exc}")
+                    log_req(f"    Fortune {fortune_guid} error: {exc}")
                 finally:
                     for key in ("player_mod_target", "player_spell_target",
                                 "resolving_target_uid", "resolving_effect_guid"):
@@ -787,7 +788,7 @@ class TransactionsMixin(_HostBase):
                 self._dispatch_native_trigger(
                     game, session, pl_t, ai_t, bstate, "TurnStartedEvent",
                     int(first_champ.uid.uid64), first_owner)
-                _hc.log_req(f"    First turn: TurnStartedEvent dispatched for owner {first_owner}")
+                log_req(f"    First turn: TurnStartedEvent dispatched for owner {first_owner}")
             if (_be.stack_empty(bstate) and
                     not bstate.get("pending_choice") and
                     not bstate.get("pending_deck_search") and
@@ -814,7 +815,7 @@ class TransactionsMixin(_HostBase):
                     "target": "ServiceGameSession", "instance": gs_inst, "reqid": 0, "c": 0, "conh": 0, "sid": self.sid,
                 }, dw)
                 self._event_q.append((self.scnt, dw, {}))
-                _hc.log_req(f"    Pushed StartGame phase after keep ({len(dw)}b)")
+                log_req(f"    Pushed StartGame phase after keep ({len(dw)}b)")
             # Auto-pass non-stop phases (StartTurn -> Ready -> Prep -> Draw)
             # until the next stop phase (FirstMainPhase).  PvP sessions
             # advance via route_pvp_pass instead — calling the AI-turn
@@ -877,7 +878,7 @@ class TransactionsMixin(_HostBase):
                     session, pl_t, ai_t, int(card_uid))
                 if gd_owner:
                     gd.events.extend(gd_owner.events)
-                _hc.log_req(f"    Discarded card {card_uid}")
+                log_req(f"    Discarded card {card_uid}")
             except Exception:
                 continue
         _hc._db.commit()
@@ -910,7 +911,7 @@ class TransactionsMixin(_HostBase):
             g2.push_player_updated(pl_t, champ_id=getattr(self, "_player_champ_scid", None))
             g2.push_player_updated(ai_t, champ_id=getattr(self, "_ai_champ_scid", None))
             self._send_battle_events(session, g2, pl_t)
-            _hc.log_req(f"    Still over hand limit ({hand_count} cards) — re-granted priority to discard more")
+            log_req(f"    Still over hand limit ({hand_count} cards) — re-granted priority to discard more")
         else:
             _be.advance_phase(bstate)
             _be.save_state(session, bstate)
@@ -943,7 +944,7 @@ class TransactionsMixin(_HostBase):
             hand_rows = db_rules_port_hand_rows(session.session_id, my_pid)
             redraw_count = len(hand_rows)
             draw_count = max(0, redraw_count - 1)
-            _hc.log_req(f"    PvP mulligan redraw: {redraw_count} -> {draw_count} cards")
+            log_req(f"    PvP mulligan redraw: {redraw_count} -> {draw_count} cards")
             # Save old card_uids so we can push them back to deck.
             old_scids = [_hc.game_engine.UID(row[1]) for row in hand_rows]
             _old_rows, new_rows = db_rules_port_redraw_hand(
@@ -987,7 +988,7 @@ class TransactionsMixin(_HostBase):
                 h.send({"issuer": f"0.0.0.0.ServiceGameSession.246.{session.session_id}.{h.scnt}",
                         "target": "ServiceGameSession", "instance": str(session.server_id),
                         "reqid": 0, "c": 0, "conh": 0, "sid": h.sid}, dw)
-                _hc.log_req(f"    PvP mulligan: pushed redrawn hand to pid {pid}")
+                log_req(f"    PvP mulligan: pushed redrawn hand to pid {pid}")
             if draw_count == 0:
                 # C# auto-accepts a zero-card hand and passes priority.
                 return self._handle_mulligan_keep_transaction(
@@ -1063,7 +1064,7 @@ class TransactionsMixin(_HostBase):
                     "target": "ServiceGameSession", "instance": gs_inst, "reqid": 0, "c": 0, "conh": 0, "sid": self.sid,
                 }, dw)
                 self._event_q.append((self.scnt, dw, {}))
-                _hc.log_req(f"    Mulligan redraw: {redraw_count} back, {draw_count} drawn")
+                log_req(f"    Mulligan redraw: {redraw_count} back, {draw_count} drawn")
             if draw_count == 0:
                 # AuthoritativeSessionBase.Mulligan accepts the hand and
                 # passes priority immediately when the reduced size is zero.
@@ -1079,7 +1080,7 @@ class TransactionsMixin(_HostBase):
         """Execute a client DebugCheatTransaction and acknowledge it."""
         import hconnect_server as _hc
         from debug_cheats import handle_debug_cheat
-        _hc.log_req("    Debug cheat — dispatching server-side action")
+        log_req("    Debug cheat — dispatching server-side action")
         handled = handle_debug_cheat(self, session, transaction.inner_bytes)
         if handled:
             self._push_transaction_ack(session)
@@ -1091,8 +1092,8 @@ class TransactionsMixin(_HostBase):
             # Tournament dialogs resolve through the RulesPort encounter-mod
             # resolver; with no attached host there is no legacy path.
             import hconnect_server as _hc
-            _hc.log_req("    PvP RulesPort boundary: no attached host, "
-                        "refusing legacy fallback")
+            log_req("    PvP RulesPort boundary: no attached host, "
+                    "refusing legacy fallback")
             self._push_transaction_ack(session)
             return True
         return self._resolve_pending_conversation(session, transaction)
@@ -1146,8 +1147,8 @@ class TransactionsMixin(_HostBase):
             g.push_green_light(pl_t, _hc.game_engine.EPriorityContext.ResolveTopOfChain)
             self._send_battle_events(session, g, pl_t)
             self._push_transaction_ack(session)
-            _hc.log_req(f"    Trigger target chosen: {ag[:8]} "
-                    f"target={hex(chosen_uid) if chosen_uid else 'none'}")
+            log_req(f"    Trigger target chosen: {ag[:8]} "
+                f"target={hex(chosen_uid) if chosen_uid else 'none'}")
         if bstate.get("pending_deck_search"):
             # The player answered a "search your deck" class-39 prompt
             # (e.g. Darkspire Priestess's Deathcry) — move the chosen
@@ -1187,9 +1188,9 @@ class TransactionsMixin(_HostBase):
                 gd.push_green_light(pl_t, _hc.game_engine.EPriorityContext.Normal)
                 self._send_battle_events(session, gd, pl_t)
                 self._push_main_phase_options(session, pl_t, ai_t)
-                _hc.log_req(f"    Discard (class-23 follow-up): {discard_card_uid} owner={owner_uid} ({tpl_d})")
+                log_req(f"    Discard (class-23 follow-up): {discard_card_uid} owner={owner_uid} ({tpl_d})")
             else:
-                _hc.log_req(f"    Discard (class-23 follow-up): no hand card uid={discard_card_uid}")
+                log_req(f"    Discard (class-23 follow-up): no hand card uid={discard_card_uid}")
             bstate.pop("pending_discard_ability", None)
             bstate.pop("pending_discard_ability_instance_id", None)
             bstate.pop("pending_discard_target_template", None)
@@ -1332,8 +1333,8 @@ class TransactionsMixin(_HostBase):
         block_summary = ", ".join(
             hex(int(k)) + "->" + (hex(int(v[0])) if v else "none")
             for k, v in blockers_map.items())
-        _hc.log_req(f"    CommitDefense: {len(attackers)} attacker(s), "
-                f"blocks={block_summary}")
+        log_req(f"    CommitDefense: {len(attackers)} attacker(s), "
+            f"blocks={block_summary}")
         if authoritative_port is not None:
             # The native defense transaction already staged the blockers and
             # consumed the defender's DeclareDefense priority before this
@@ -1341,9 +1342,9 @@ class TransactionsMixin(_HostBase):
             # action into DeclareDefensePriorityWindow; re-entering the AI
             # turn loop here re-published DeclareDefense and left the client
             # submitting a second (often empty) defense transaction.
-            _hc.log_req(f"    PROBE commit before save: port={authoritative_port.current_turn_phase} "
-                        f"phase_idx={bstate.get('phase_idx')} stack={len(bstate.get('stack') or [])} "
-                        f"turn_phases={len(bstate.get('turn_phases') or [])}")
+            log_req(f"    PROBE commit before save: port={authoritative_port.current_turn_phase} "
+                    f"phase_idx={bstate.get('phase_idx')} stack={len(bstate.get('stack') or [])} "
+                    f"turn_phases={len(bstate.get('turn_phases') or [])}")
             save_checkpoint(session, bstate)
             # The commit consumes the defender's DeclareDefense window.  A
             # blocked trigger queued by this commit must not hold the port in
@@ -1354,8 +1355,8 @@ class TransactionsMixin(_HostBase):
                     authoritative_port.action_stack.priority_player_id is not None):
                 authoritative_port.pass_player_priority(
                     authoritative_port.action_stack.priority_player_id)
-                _hc.log_req("    PROBE commit passed defender window: "
-                            f"port={authoritative_port.current_turn_phase}")
+                log_req("    PROBE commit passed defender window: "
+                        f"port={authoritative_port.current_turn_phase}")
             self._advance_to_priority(session, pl_t, ai_t, bstate)
             # Tell the client the phase the port reached: the events built
             # before the advance still name DeclareDefense.
@@ -1366,8 +1367,8 @@ class TransactionsMixin(_HostBase):
                 authoritative_port.active_player_id,
                 priority_uid if priority_uid is not None else pl_t)
             self._send_battle_events(session, phase_game, pl_t)
-            _hc.log_req(f"    PROBE commit after advance: port={authoritative_port.current_turn_phase} "
-                        f"phase_idx={bstate.get('phase_idx')} stack={len(bstate.get('stack') or [])}")
+            log_req(f"    PROBE commit after advance: port={authoritative_port.current_turn_phase} "
+                    f"phase_idx={bstate.get('phase_idx')} stack={len(bstate.get('stack') or [])}")
             return True
         start_idx = bstate.get("ai_turn_phase_idx", 0)
         bstate.pop("ai_turn_phase_idx", None)
@@ -1431,8 +1432,8 @@ class TransactionsMixin(_HostBase):
         bstate["player_attackers"] = {
             str(u): str(ai_champ_uid64) for u in merged}
         save_checkpoint(session, bstate)
-        _hc.log_req(f"    CommitTroopsToAttack: {len(attackers)} new attacker(s) -> "
-                f"{[hex(u) for u in attackers]} (merged, total {len(merged)})")
+        log_req(f"    CommitTroopsToAttack: {len(attackers)} new attacker(s) -> "
+            f"{[hex(u) for u in attackers]} (merged, total {len(merged)})")
         # Push the combat events: one AttackDeclared (class 27) per
         # attacker + a CombatListing (62) with a CombatSession (63) per
         # attacker (no blockers yet — the AI will pass DeclareDefense).
@@ -1549,7 +1550,7 @@ class TransactionsMixin(_HostBase):
                 _same_player_uid(port.active_player_id, ai_t)):
             # The AI attacks this turn, so the damage is already resolved and the damage order is not ours to give.
             # Re-resolving on a stale order from the client would deal the damage twice.
-            _hc.log_req("    AssignDamageOrder ignored: the AI is the attacking player")
+            log_req("    AssignDamageOrder ignored: the AI is the attacking player")
             self._push_transaction_ack(session)
             return True
         if cur_phase == _hc.game_engine.ETurnPhases.AssignDamage:
@@ -1588,7 +1589,7 @@ class TransactionsMixin(_HostBase):
                     bstate["player_damage_order"] = {str(k): [str(b) for b in v]
                                                      for k, v in order_map.items()}
                     save_checkpoint(session, bstate)
-            _hc.log_req(f"    AssignDamageOrder (AssignDamage step): resolving {n_att} attackers")
+            log_req(f"    AssignDamageOrder (AssignDamage step): resolving {n_att} attackers")
             if native_combat:
                 bstate = self._resolve_combat_damage(
                     session, pl_t, ai_t, bstate)
@@ -1620,7 +1621,7 @@ class TransactionsMixin(_HostBase):
             save_checkpoint(session, bstate)
             # If the AI's champion is dead, end the game (player wins).
             if bstate.get("ai_health", 10) <= 0:
-                _hc.log_req(f"    AI defeated! ai_health={bstate['ai_health']}")
+                log_req(f"    AI defeated! ai_health={bstate['ai_health']}")
                 self._finish_battle_gameend(
                     session, True, winners=[pl_t], losers=[ai_t])
                 self._push_transaction_ack(session)
@@ -1628,8 +1629,8 @@ class TransactionsMixin(_HostBase):
         elif cur_phase == _hc.game_engine.ETurnPhases.AssignFirstStrikeDamage:
             # Swiftstrike step: FirstStrike/DualStrike combatants deal
             # damage now; casualties are removed before the normal step.
-            _hc.log_req("    AssignDamageOrder (Swiftstrike step): "
-                    "resolving first-strike damage")
+            log_req("    AssignDamageOrder (Swiftstrike step): "
+                "resolving first-strike damage")
             if native_combat:
                 bstate = self._resolve_combat_damage(
                     session, pl_t, ai_t, bstate, first_strike=True)
@@ -1652,7 +1653,7 @@ class TransactionsMixin(_HostBase):
                     session, pl_t, ai_t, bstate, first_strike=True)
             save_checkpoint(session, bstate)
         else:
-            _hc.log_req(f"    AssignDamageOrder ({cur_phase}): no damage yet, advancing")
+            log_req(f"    AssignDamageOrder ({cur_phase}): no damage yet, advancing")
         if bstate.get("pending_deck_search"):
             # A combat-death deck-search prompt is awaiting the player's
             # answer — do NOT advance to the next phase yet (the phase
@@ -1660,7 +1661,7 @@ class TransactionsMixin(_HostBase):
             # SetAbilityActivationData answer advances the turn.
             save_checkpoint(session, bstate)
             self._push_transaction_ack(session)
-            _hc.log_req("    AssignDamage: paused for deck-search answer")
+            log_req("    AssignDamage: paused for deck-search answer")
             return True
         # Advance to the next phase (SecondMain after AssignDamage).  Native
         # RulesPort already performed that transition above; applying the
@@ -1702,7 +1703,7 @@ class TransactionsMixin(_HostBase):
                     self._push_transaction_ack(session)
                     handled = True
             except Exception as exc:
-                _hc.log_req(f"    PvP SetAutoPass exception: {exc}")
+                log_req(f"    PvP SetAutoPass exception: {exc}")
         if handled:
             pass
         else:
@@ -1711,7 +1712,7 @@ class TransactionsMixin(_HostBase):
             bstate["player_autopass"] = st
             _be.save_state(session, bstate)
             self._push_transaction_ack(session)
-            _hc.log_req(f"    SetAutoPass: state={st} (player auto-passes to end of turn)")
+            log_req(f"    SetAutoPass: state={st} (player auto-passes to end of turn)")
             self._advance_to_priority(session, pl_t, ai_t, bstate)
         return True
 
@@ -1732,17 +1733,17 @@ class TransactionsMixin(_HostBase):
                         pstate.pop("autopass_state", None)
                         pvp_save_state(session, pstate)
                     self._push_transaction_ack(session)
-                    _hc.log_req("    PvP CancelAutoPass: auto-pass cleared")
+                    log_req("    PvP CancelAutoPass: auto-pass cleared")
                     handled = True
             except Exception as exc:
-                _hc.log_req(f"    PvP CancelAutoPass exception: {exc}")
+                log_req(f"    PvP CancelAutoPass exception: {exc}")
         if not handled:
             bstate = _be.load_state(session)
             self._current_bstate = bstate
             bstate.pop("player_autopass", None)
             _be.save_state(session, bstate)
             self._push_transaction_ack(session)
-            _hc.log_req("    CancelAutoPass: auto-pass cleared")
+            log_req("    CancelAutoPass: auto-pass cleared")
         return True
 
     def _handle_set_turn_phases_transaction(self, session, transaction):
@@ -1774,7 +1775,7 @@ class TransactionsMixin(_HostBase):
                         start_idx = resume
                         bstate.pop("ai_turn_phase_idx", None)
                         _bse.save_state(session, bstate)
-                        _hc.log_req(f"    Stops updated — phase {paused_phase} no longer a stop; resuming AI turn")
+                        log_req(f"    Stops updated — phase {paused_phase} no longer a stop; resuming AI turn")
                         pl_t = _hc.game_engine.UID.make(244, int(self.client_reck_id))
                         ai_t = _hc.game_engine.UID.make(_hc.game_engine.SERVICE_AI_UID_TYPE, 1000)
                         self._run_ai_turn(session, pl_t, ai_t, bstate, start_idx=start_idx)
@@ -1799,7 +1800,7 @@ class TransactionsMixin(_HostBase):
                 self._pending_player_stops = (self_stops, opp_stops)
         except (ValueError, TypeError):
             self._pending_player_stops = (self_stops, opp_stops)
-        _hc.log_req(f"    Captured phase stops: self={self_stops} opp={opp_stops}")
+        log_req(f"    Captured phase stops: self={self_stops} opp={opp_stops}")
         # No 3055 events are pushed for SetTurnPhases — send an empty
         # sync packet so the client's one-at-a-time transaction pipeline
         # (m_HasPreviousTransactionBeenRespondedByServer) is unblocked;
@@ -1832,17 +1833,17 @@ class TransactionsMixin(_HostBase):
                 _rpv = route_pvp_pass(self, session)
             except Exception as _e:
                 import traceback
-                _hc.log_req(f"    PvP pass exception: {_e}")
+                log_req(f"    PvP pass exception: {_e}")
                 traceback.print_exc()
                 _rpv = True
             if not _rpv:
-                _hc.log_req("    Pass during setup phase — no-op (battle not started)")
+                log_req("    Pass during setup phase — no-op (battle not started)")
             self._push_transaction_ack(session)
         else:
             bstate = _be.load_state(session)
             self._current_bstate = bstate
-            _hc.log_req(f"    Pass priority: turn={bstate.get('turn_player')} priority=player "
-                    f"phase={_be.current_phase(bstate)} (client={pass_turn_phase})")
+            log_req(f"    Pass priority: turn={bstate.get('turn_player')} priority=player "
+                f"phase={_be.current_phase(bstate)} (client={pass_turn_phase})")
 
             # The client also auto-passes non-stop phases, which race with
             # the server's own auto-advance. Ignore a stale pass whose
@@ -1871,12 +1872,12 @@ class TransactionsMixin(_HostBase):
                     bstate["turn_phases"] = list(held_phases)
                     bstate["phase_idx"] = held_idx
                     _be.save_state(session, bstate)
-                    _hc.log_req(f"    Reconciled stale AI phase_idx to held stop "
-                            f"phase {pass_turn_phase}")
+                    log_req(f"    Reconciled stale AI phase_idx to held stop "
+                        f"phase {pass_turn_phase}")
             if (pass_turn_phase is not None
                     and pass_turn_phase != _be.current_phase(bstate)
                     and not pending_ai_chain):
-                _hc.log_req(f"    Ignored stale pass (client phase {pass_turn_phase} != {_be.current_phase(bstate)})")
+                log_req(f"    Ignored stale pass (client phase {pass_turn_phase} != {_be.current_phase(bstate)})")
                 self._push_transaction_ack(session)
             elif (_be.stack_empty(bstate) and
                   bstate.get("turn_player") == _be.AI):
@@ -1885,7 +1886,7 @@ class TransactionsMixin(_HostBase):
                 start_idx = bstate.get("ai_turn_phase_idx", 0)
                 bstate.pop("ai_turn_phase_idx", None)
                 _be.save_state(session, bstate)
-                _hc.log_req(f"    Human passed during AI turn — resuming AI at idx {start_idx}")
+                log_req(f"    Human passed during AI turn — resuming AI at idx {start_idx}")
                 self._run_ai_turn(session, pl_t, ai_t, bstate, start_idx=start_idx)
             elif _be.current_phase(bstate) in (_hc.game_engine.ETurnPhases.EndTurn,
                                                _hc.game_engine.ETurnPhases.Discard):
@@ -1924,10 +1925,10 @@ class TransactionsMixin(_HostBase):
                 _be.save_state(session, bstate)
                 if next_player == _be.PLAYER:
                     self._advance_to_priority(session, pl_t, ai_t, bstate)
-                    _hc.log_req("    Bonus turn kept player in control")
+                    log_req("    Bonus turn kept player in control")
                 else:
                     self._run_ai_turn(session, pl_t, ai_t, bstate)
-                    _hc.log_req("    Turn passed to AI; AI turn played out")
+                    log_req("    Turn passed to AI; AI turn played out")
             else:
                 # A non-empty chain: passing resolves the top of the chain
                 # instead of advancing the phase (troops/spells/abilities/
@@ -1944,7 +1945,7 @@ class TransactionsMixin(_HostBase):
                         item = _be.stack_pop(bstate)
                         _be.stack_reset_passes(bstate)
                         if item is None:
-                            _hc.log_req("    RulesPort rejected empty chain item after both passes")
+                            log_req("    RulesPort rejected empty chain item after both passes")
                             self._push_transaction_ack(session)
                             return True
                         # A FRESH game seeded from battle state so any
@@ -2011,8 +2012,8 @@ class TransactionsMixin(_HostBase):
                                 gs.push_green_light(pl_t, self._priority_context_for(
                                     cur_phase, bstate))
                             self._send_battle_events(session, gs, pl_t)
-                        _hc.log_req(f"    Resolved chain item {item.get('kind')} "
-                                f"({item.get('ability_guid', '')[:8] or hex(item.get('source_uid') or 0)})")
+                        log_req(f"    Resolved chain item {item.get('kind')} "
+                            f"({item.get('ability_guid', '')[:8] or hex(item.get('source_uid') or 0)})")
                     else:
                         self._push_transaction_ack(session)
                 else:
@@ -2031,8 +2032,8 @@ class TransactionsMixin(_HostBase):
                         bstate["player_has_ready_troop"] = self._player_can_attack_troops(session)
                         bstate["turn_phases"] = _be.build_turn_phases(bstate)
                         _be.save_state(session, bstate)
-                        _hc.log_req(f"    FirstMain pass: combat={bstate['player_has_ready_troop']} "
-                                f"phases={len(bstate['turn_phases'])}")
+                        log_req(f"    FirstMain pass: combat={bstate['player_has_ready_troop']} "
+                            f"phases={len(bstate['turn_phases'])}")
                     # If the pass ends the AssignDamage step, resolve the
                     # combat damage (unblocked attackers hit the champion)
                     # before moving on. AssignDamageOrderTransaction is the
@@ -2046,7 +2047,7 @@ class TransactionsMixin(_HostBase):
                             session, pl_t, ai_t, bstate, first_strike=fs)
                         _be.save_state(session, bstate)
                         if bstate.get("ai_health", 10) <= 0:
-                            _hc.log_req(f"    AI defeated via pass at AssignDamage! ai_health={bstate['ai_health']}")
+                            log_req(f"    AI defeated via pass at AssignDamage! ai_health={bstate['ai_health']}")
                             self._finish_battle_gameend(
                                 session, True, winners=[pl_t], losers=[ai_t])
                             self._push_transaction_ack(session)
@@ -2055,7 +2056,7 @@ class TransactionsMixin(_HostBase):
                             # Pause for the deck-search answer; the
                             # follow-up advances the phase.
                             self._push_transaction_ack(session)
-                            _hc.log_req("    Pass at AssignDamage: paused for deck-search answer")
+                            log_req("    Pass at AssignDamage: paused for deck-search answer")
                             return True
                     _be.advance_phase(bstate)
                     _be.save_state(session, bstate)
