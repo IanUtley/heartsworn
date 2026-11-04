@@ -29,6 +29,7 @@ from services.chests import _grant_pack_inventory_rewards
 from services.chests import _roll_pack_chest_rarities
 from profile_db import db_create_treasure_chest
 from services.chests import _open_client_chests
+from services.card_pools import full_set_pool, generate_booster, generate_starter_deck, load_card_templates
 
 
 def handle_chest_spinning_2049(handler, target, instance, data_type, reqid, comp, session_id,
@@ -137,7 +138,7 @@ def handle_opencardpack_2127(handler, target, instance, data_type, reqid, comp, 
             log_req(f"    Pack not in inventory! (have={existing[1] if existing else 0}, want={open_amount})")
     
     # Generate card instances for the pack
-    card_templates = _hc._load_card_templates()
+    card_templates = load_card_templates()
     all_cards = []
     pack_inventory_rewards = []
     pack_inventory_updates = []
@@ -145,7 +146,7 @@ def handle_opencardpack_2127(handler, target, instance, data_type, reqid, comp, 
     starter_pack = None
     if not pack_error:
         try:
-            starter_pack = _hc._generate_starter_deck(
+            starter_pack = generate_starter_deck(
                 card_templates, pack_guid)
         except ValueError as exc:
             pack_error = "CardCreationFailed"
@@ -184,7 +185,7 @@ def handle_opencardpack_2127(handler, target, instance, data_type, reqid, comp, 
         elif is_full_set:
             # Grant every PVP card from the set (4x each)
             pool = card_templates.get(set_guid, [])
-            pool = _hc._full_set_pool(pool)
+            pool = full_set_pool(pool)
             for _ in range(open_amount):
                 for c in pool:
                     for _ in range(4):  # 4x each card
@@ -192,7 +193,7 @@ def handle_opencardpack_2127(handler, target, instance, data_type, reqid, comp, 
             log_req(f"    Full set: {len(pool)} unique cards x4 = {len(all_cards)} total")
         else:
             for _ in range(open_amount):
-                all_cards.extend(_hc._generate_booster(card_templates, set_guid))
+                all_cards.extend(generate_booster(card_templates, set_guid))
     
     # Track instance IDs for response encoding (fallback: 5000+)
     card_instance_ids = [5000 + i for i in range(len(all_cards))]

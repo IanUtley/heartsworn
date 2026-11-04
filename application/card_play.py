@@ -911,7 +911,7 @@ class CardPlayMixin(_HostBase):
                     instance_id = int(card_details[1])
                 except (TypeError, ValueError):
                     pass
-        has_persisted_gem = persisted_gem is not _hc._NO_PERSISTED_GEM
+        has_persisted_gem = persisted_gem is not _NO_PERSISTED_GEM
         try:
             gem_type = int(persisted_gem or 0) if has_persisted_gem else 0
         except (TypeError, ValueError):

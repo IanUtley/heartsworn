@@ -28,6 +28,7 @@ from encoder import (compress_gzip, encode_datawrapper,
                      encode_get_challengers_response,
                      encode_objfmt_response)
 import db
+from services.card_pools import load_card_templates
 
 
 _ZERO_GUID = "00000000-0000-0000-0000-000000000000"
@@ -454,7 +455,7 @@ def _grant_arena_chests(handler, user_id, chest_count):
     from gamedata import DEFAULT_RECORD_STORE
     from az1_pack import generate_arena_chest
     from services.chests import _grant_pack_inventory_rewards, _grant_reward_cards
-    card_templates = _hc._load_card_templates()
+    card_templates = load_card_templates()
     cards = []
     equipment = []
     for _ in range(chest_count):

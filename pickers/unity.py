@@ -72,8 +72,7 @@ def _build_option(game, ge, option: PickOption):
 def present_options(game, player_id, options) -> None:
     """Push one PlayerOptionList carrying ``options`` (possibly none). No request and no GreenLight: the caller owns the
     rest of the window."""
-    import hconnect_server as _hc
-    ge = _hc.game_engine
+    import game_engine as ge
     ev = game._make_event(ge.PlayerOptionListSessionEventArgs)
     ev.player_id = player_id
     for option in options:
@@ -82,8 +81,7 @@ def present_options(game, player_id, options) -> None:
 
 
 def present_pick(game, request: PickRequest) -> None:
-    import hconnect_server as _hc
-    ge = _hc.game_engine
+    import game_engine as ge
     _present_reveal(game, request, ge)
     ev = game._make_event(ge.PlayerOptionListSessionEventArgs)
     ev.player_id = request.player_id

@@ -19,6 +19,7 @@ from profile_db import db_chest_probabilities
 from profile_db import db_next_card_instance_id
 from profile_db import db_create_card_instance
 from profile_db import db_open_chest
+from services.card_pools import generate_booster, generate_crayburn_chest, load_card_templates
 
 
 # The fixed client addresses every treasure chest by the InventoryItem UID the
@@ -99,14 +100,14 @@ def _generate_chest_rewards(chest, card_templates, rng=None):
             (STARDUST_TEMPLATES[rarity.lower()], "stardust")
             for rarity in reward.stardust_rarities)
         return list(reward.cards), inventory_rewards
-    cards = _hc._generate_crayburn_chest(card_templates, chest.template_guid)
+    cards = generate_crayburn_chest(card_templates, chest.template_guid)
     if cards is None:
         from services.chest_loot import roll_chest_loot
         loot_cards, inventory_rewards = roll_chest_loot(
             db._db, card_templates, chest.set_guid, chest.chest_type, rng)
         if loot_cards or inventory_rewards:
             return loot_cards, inventory_rewards
-        cards = _hc._generate_booster(card_templates, chest.set_guid)
+        cards = generate_booster(card_templates, chest.set_guid)
         keep_count = _CHEST_KEEP_COUNTS.get(chest.chest_type, 3)
         if len(cards) > keep_count:
             cards = rng.sample(cards, keep_count)
@@ -212,7 +213,7 @@ def _spin_client_chest(handler, chest_uid, rng=None):
             summary["error"] = wof.NOT_ENOUGH_GOLD
             return summary
 
-        result = wof.roll_spin(db._db, _hc._load_card_templates(),
+        result = wof.roll_spin(db._db, load_card_templates(),
                                chest.set_guid, chest.chest_type, rng or random)
         db_adjust_user_currency(user_id, gold_delta=result.gold - cost,
                                 conn=db._db)
@@ -292,7 +293,7 @@ def _open_client_chests(handler, chest_uids):
     if not handler.user_profile:
         return None
     user_id = handler.user_profile["id"]
-    card_templates = _hc._load_card_templates()
+    card_templates = load_card_templates()
     summary = {"cards": [], "card_template_ids": [], "inventory_template_ids": [],
                "inventory_updates": [], "opened": [], "invalid": []}
     for chest_uid in chest_uids:
