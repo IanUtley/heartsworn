@@ -1,8 +1,13 @@
 """ServiceLoadBalancer session requests, served through the services registry."""
 
 import campaign
+import db
 import game_engine
 import game_session
+from gamemodes.tournament_engine import (_tournament_session_flags, player_decks,
+                                         tournament_id_from_session_name)
+from pve_db import db_get_arena_state
+from tournament_db import db_tournament_room_for_game
 from application.commands import (JoinSessionCommand, SetSessionStateCommand,
                                   StartEncounterCommand, StartSessionCommand)
 from domain.uids import UID_TYPE, make_uid
@@ -12,7 +17,7 @@ from encoder import compress_gzip, encode_datawrapper, encode_objfmt_response
 from domain.constants import SERVICE_AI_UID_TYPE
 from gamemodes.fra_arena import _fra_arena_session_state_data, _fra_arena_setup_values
 from gamemodes.tournament_engine import player_handlers
-from services.reconnect import _record_reconnect_decline
+from services.reconnect import _record_reconnect_decline, _reconnect_declined_for_pid
 from services.tournament_game import (PVP_EVENTS_READY, PVP_READY,
                                       handle_ready_for_game_events,
                                       handle_ready_for_game_setup,
@@ -498,3 +503,179 @@ def handle_quit_on_reconnect(handler, target, instance, reqid, comp, session_id,
             log_req(f">>> QuitOnReconnectionGame failed: {exc}")
     else:
         log_req(">>> QuitOnReconnectionGame: no session")
+
+
+def handle_try_reconnection(handler, target, instance, reqid, comp, session_id,
+                            conh, inner_obj, inner_bytes, *, SERVICE_MAIL_UID,
+                            log_req, data_type, **_kw):
+    reconnect_pid = int(handler.client_reck_id or 0)
+    reconnect_session = game_session.find_session_by_player(reconnect_pid)
+    reconnect_state = {}
+    # The fixed client sends this same request once from the landing
+    # page and again when UIArenaCampaignViewModel opens. Keep FRA
+    # offers out of the landing-page prompt; the arena-screen probe is
+    # the second distinct request on this authenticated connection.
+    probe_ids = getattr(handler, "_try_reconnection_probe_ids", None)
+    if probe_ids is None:
+        probe_ids = handler._try_reconnection_probe_ids = set()
+    try:
+        probe_id = int(reqid)
+    except (TypeError, ValueError):
+        probe_id = len(probe_ids)
+    if probe_id not in probe_ids:
+        probe_ids.add(probe_id)
+    fra_arena_screen_probe = len(probe_ids) > 1
+    fra_setup = (_fra_arena_setup_values(
+    getattr(reconnect_session, "encounter_data", None))
+        if reconnect_session else None)
+    saved_battle_state = (getattr(reconnect_session, "turn_order", None)
+                          if reconnect_session else None)
+    is_fra_checkpoint = False
+    is_tournament_reconnect = bool(
+        reconnect_session and
+        str(getattr(reconnect_session, "session_name", "") or "")
+        .startswith("tourney-"))
+    reconnect_declined = False
+    from services.tournament_game import campaign_session_reconnectable
+    is_campaign_reconnect = bool(
+        reconnect_session and
+        campaign_session_reconnectable(reconnect_session, reconnect_pid))
+    if (reconnect_session and
+            getattr(reconnect_session, "state", "") != "ended" and
+            (fra_setup or is_tournament_reconnect or is_campaign_reconnect)):
+        try:
+            from services.tournament_game import (
+                fra_session_reconnectable, pvp_load_state,
+                pvp_session_lock,
+            )
+            with pvp_session_lock(reconnect_session):
+                if is_campaign_reconnect:
+                    from rules_port.persistence import load_state as load_rules_state
+                    reconnect_state = load_rules_state(reconnect_session) or {}
+                elif fra_setup:
+                    is_fra_checkpoint = fra_session_reconnectable(
+                        reconnect_session, reconnect_pid)
+                    saved_battle_state = getattr(
+                        reconnect_session, "turn_order", None)
+                    if is_fra_checkpoint:
+                        from rules_port.persistence import load_state
+                        reconnect_state = load_state(reconnect_session) or {}
+                elif is_tournament_reconnect:
+                    reconnect_state = pvp_load_state(reconnect_session) or {}
+                reconnect_declined = _reconnect_declined_for_pid(
+                reconnect_state, reconnect_pid)
+        except Exception as exc:
+            log_req(f"    Reconnect checkpoint lookup failed: {exc}")
+            reconnect_state = {}
+    is_fra_reconnect = bool(
+        is_fra_checkpoint and fra_arena_screen_probe and
+        isinstance(saved_battle_state, dict))
+    if is_fra_checkpoint and not fra_arena_screen_probe:
+        log_req("    FRA reconnect offer deferred until the arena screen")
+    can_reconnect = bool(
+        reconnect_session
+        and getattr(reconnect_session, "state", "") != "ended"
+        and (is_fra_reconnect or is_campaign_reconnect or
+             (is_tournament_reconnect and reconnect_state.get("pvp"))))
+    if can_reconnect and not reconnect_declined:
+        session_uid = int(reconnect_session.session_id)
+        tournament_id = 0
+        if is_fra_reconnect:
+            reconnect_flags = int(fra_setup["flags"])
+            reconnect_encounter_data = \
+                _fra_arena_session_state_data(fra_setup)[1]
+        elif is_campaign_reconnect:
+            reconnect_encounter_data = _campaign_encounter_struct(reconnect_session)
+        else:
+            try:
+                tournament_id = tournament_id_from_session_name(
+                reconnect_session.session_name)
+            except (IndexError, ValueError):
+                tournament_id = 0
+            tournament_room = db_tournament_room_for_game(
+            tournament_id, conn=db._db)
+            reconnect_flags = _tournament_session_flags({
+            "format": tournament_room.get("format", 0)
+            if tournament_room else 0
+        })
+            reconnect_encounter_data = (
+                "Game.Shared.SessionStateEncounterData", [
+                    ("SceneTemplateId", "struct", (
+                        "Game.Shared.ResourceId", [
+                            ("m_Guid", "guid",
+                             "00000000-0000-0000-0000-000000000000")])),
+                    ("SessionFlags", "enum1", (
+                        "Game.Shared.ESessionFlags", reconnect_flags)),
+                    ("TournamentID", "ulong", tournament_id),
+                ])
+        deck_db_id = int(player_decks.get(reconnect_pid, 0) or 0)
+        if is_fra_reconnect:
+            try:
+                arena_state = db_get_arena_state(
+                int((handler.user_profile or {}).get("id") or 0),
+                initialize=False, conn=db._db)
+                deck_db_id = handler._resolve_fra_deck_id(
+                    arena_state.get("deck_id", 0))
+            except Exception as exc:
+                log_req(f"    FRA reconnect deck lookup failed: {exc}")
+        deck_uid = make_uid(244, deck_db_id) if deck_db_id else 0
+        resp_inner = encode_objfmt_response(
+        ["Game.Client.Network.LoadBalancer.TryReconnectionToDisconnectedGameResponse",
+         "Game.Shared.SessionState", "Game.Shared.UID",
+         "Game.Shared.SessionStateEncounterData",
+         "Game.Shared.ResourceId", "System.Guid",
+         "Game.Shared.ESessionFlags", "System.UInt64",
+         "System.Int32", "System.String", "System.Boolean",
+         "Game.Shared.Network.LoadBalancer.ETryReconnectionToDisconnectedGameError",
+         "System.String"],
+        [("SessionState", "struct", ("Game.Shared.SessionState", [
+            ("SessionId", "uid", session_uid),
+            ("SessionName", "string", _client_session_name(reconnect_session)),
+            ("MinimumPlayerCount", "int", 2),
+            ("MaximumPlayerCount", "int", 2),
+            # The client dereferences EncounterData before it
+            # enters Battle and UIBattle later reads the flags.
+            # An empty `class` field decodes as null on the fixed
+            # client, so encode the saved tournament/FRA identity;
+            # the reconnect snapshot restores the actual board.
+            ("EncounterData", "struct", reconnect_encounter_data),
+            ("JoinInsteadOfReconnect", "bool", False),
+        ])),
+         ("DeckID", "uid", deck_uid),
+         ("Error", "enum1", (
+             "Game.Shared.Network.LoadBalancer.ETryReconnectionToDisconnectedGameError", 0)),
+         ("ErrorMessage", "string", "")])
+        log_req(f">>> Respond TryReconnectionToDisconnectedGame -> "
+            f"{reconnect_session.session_name} "
+            f"({'FRA' if is_fra_reconnect else 'campaign' if is_campaign_reconnect else 'tournament'})")
+    else:
+        if can_reconnect and reconnect_declined:
+            log_req(
+            f">>> Respond TryReconnectionToDisconnectedGame -> "
+            f"pid {reconnect_pid} previously declined this session")
+        else:
+            log_req(">>> Respond TryReconnectionToDisconnectedGame -> no game")
+        resp_inner = encode_objfmt_response(
+        ["Game.Client.Network.LoadBalancer.TryReconnectionToDisconnectedGameResponse",
+         "Game.Shared.UID",
+         "Game.Shared.Network.LoadBalancer.ETryReconnectionToDisconnectedGameError",
+         "System.String"],
+        [("DeckID", "uid", 0),
+         ("Error", "enum1", (
+             "Game.Shared.Network.LoadBalancer.ETryReconnectionToDisconnectedGameError", 0)),
+         ("ErrorMessage", "string", "")])
+    resp_body = compress_gzip(resp_inner) if comp else resp_inner
+    resp_reqid = reqid | 1
+    dw_bytes = encode_datawrapper(resp_reqid, data_type, resp_body, comp, session_id)
+    issuer_str = f"0.0.0.0.ServiceLoadBalancer.{SERVICE_MAIL_UID}.ServicePlayer.{handler.client_uid}.{resp_reqid}"
+    handler.scnt += 1
+    handler.send({
+        "issuer": issuer_str,
+        "target": target,
+        "instance": instance,
+        "reqid": resp_reqid,
+        "c": comp,
+        "conh": conh,
+        "sid": handler.sid,
+    }, dw_bytes)
+    log_req(f"    Sent TryReconnection response ({len(dw_bytes)}b)")

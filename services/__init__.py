@@ -52,6 +52,7 @@ _SERVICE_TABLE = {
     22027: ("services.loadbalancer", "handle_ready_for_game_setup_request", {"data_type": 22027}),
     22029: ("services.loadbalancer", "handle_ready_for_game_events_request", {"data_type": 22029}),
     22011: ("services.loadbalancer", "handle_quit_on_reconnect", {"data_type": 22011}),
+    22013: ("services.loadbalancer", "handle_try_reconnection", {"data_type": 22013}),
 
     # Matchmaking and direct challenges
     4001: ("services.matchmaking", "handle_ping_matchmaking", {}),

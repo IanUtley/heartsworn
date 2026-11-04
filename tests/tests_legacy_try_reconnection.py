@@ -18,7 +18,7 @@ from tests.test_db import fresh_database  # noqa: E402
 fresh_database()
 
 import hconnect_server as hc  # noqa: E402
-from services import legacy_loadbalancer as lb  # noqa: E402
+from services import dispatch as service_dispatch  # noqa: E402
 from services.reconnect import _record_reconnect_decline  # noqa: E402
 
 PLAYER_ID = 67890
@@ -60,6 +60,9 @@ class _StubHandler:
 def _packet(session, rules_state, reqid=9000, fra=False, tournament_pvp=None, handler=None):
     handler = handler or _StubHandler()
     lock = mock.MagicMock()
+    import importlib
+    module_name, fn_name, extra = service_dispatch(22013)
+    fn = getattr(importlib.import_module(module_name), fn_name)
     with mock.patch.object(hc.game_session, "find_session_by_player", return_value=session), \
          mock.patch("services.tournament_game.campaign_session_reconnectable",
                     return_value=session is not None and not fra and tournament_pvp is None), \
@@ -67,9 +70,9 @@ def _packet(session, rules_state, reqid=9000, fra=False, tournament_pvp=None, ha
          mock.patch("services.tournament_game.pvp_load_state", return_value=tournament_pvp or {}), \
          mock.patch("services.tournament_game.pvp_session_lock", return_value=lock), \
          mock.patch("rules_port.persistence.load_state", return_value=rules_state):
-        lb.handle_tryreconnectiontodisconnectedgame_22013(
-            handler, "target", 3, 22013, reqid, False, "session-x", "conh-1",
-            {}, b"", b"")
+        fn(handler, "target", 3, reqid, False, "session-x", "conh-1",
+           inner_obj={}, inner_bytes=b"", SERVICE_MAIL_UID=252,
+           SERVICE_PROFILE_UID=0, log_req=lambda *_a, **_k: True, **extra)
     headers, body = handler.sent[-1]  # the last response on this connection
     return headers["issuer"], hashlib.sha256(body).hexdigest()
 
