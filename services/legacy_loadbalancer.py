@@ -2245,24 +2245,8 @@ def handle_readytostartgame_22031(handler, target, instance, data_type, reqid, c
         handler._handle_choose_pick_transaction(session, ai_pick)
 
 
-# Tournament PvP — JoinDisconnectedGame (22023)
-def handle_joindisconnectedgame_22023(handler, target, instance, data_type, reqid, comp, session_id,
-                                      conh, inner_obj, inner_bytes, raw_data_wrapper_bytes):
-    import hconnect_server as _hc
-    from services.tournament_game import handle_join_disconnected_game
-    handle_join_disconnected_game(handler, target, instance, reqid, comp,
-                                  session_id, conh, inner_obj, inner_bytes,
-                                  log_req=log_req)
 
 
-# Tournament PvP — ReadyToContinueGame (22025)
-def handle_readytocontinuegame_22025(handler, target, instance, data_type, reqid, comp, session_id,
-                                     conh, inner_obj, inner_bytes, raw_data_wrapper_bytes):
-    import hconnect_server as _hc
-    from services.tournament_game import handle_ready_to_continue_game
-    handle_ready_to_continue_game(handler, target, instance, reqid, comp,
-                                  session_id, conh, inner_obj, inner_bytes,
-                                  log_req=log_req)
 
 
 LEGACY_HANDLERS = {
@@ -2275,6 +2259,4 @@ LEGACY_HANDLERS = {
     22029: handle_readyforgameevents_22029,
     22027: handle_readyforgamesetup_22027,
     22031: handle_readytostartgame_22031,
-    22023: handle_joindisconnectedgame_22023,
-    22025: handle_readytocontinuegame_22025,
 }
