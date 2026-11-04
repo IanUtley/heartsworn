@@ -347,6 +347,10 @@ game_engine.event_logger = _record_session_events
 from application.objfmt_wire import parse_datawrapper
 # === ObjFmt encoder ===
 
+from domain.uids import (
+    SERVICE_GAME_SESSION_UID, SERVICE_MAIL_UID, SERVICE_MATCHMAKING_UID,
+    SERVICE_PLAYER_UID, SERVICE_PROFILE_UID, UID_TYPE,
+)
 from encoder import (
     client_session_guid, compress_gzip, decompress_gzip,
     encode_challenger_list, encode_datawrapper,
@@ -365,22 +369,6 @@ from services.card_pools import (
     full_set_pool as _full_set_pool,
     roll_primal_upgrade as _roll_primal_upgrade,
 )
-UID_TYPE = {
-    "ServicePlayer": SERVICE_PLAYER_UID_TYPE,
-    "ServiceAI": SERVICE_AI_UID_TYPE,
-    "ServiceMail": 252,
-    "ServiceProfile": 245,
-    "ServiceGameSession": SERVICE_GAME_SESSION_UID_TYPE,
-    "ServiceMatchmaking": 247,
-    "ServiceEscrow": 249,
-    "ServiceCampaign": 253,
-}
-
-SERVICE_MAIL_UID = make_uid(UID_TYPE["ServiceMail"], 0)
-SERVICE_PROFILE_UID = make_uid(UID_TYPE["ServiceProfile"], 0)
-SERVICE_GAME_SESSION_UID = make_uid(UID_TYPE["ServiceGameSession"], 0)
-SERVICE_MATCHMAKING_UID = make_uid(UID_TYPE["ServiceMatchmaking"], 0)
-SERVICE_PLAYER_UID = make_uid(UID_TYPE["ServicePlayer"], 67890)
 
 # Connected client registry: {user_id: [(HCPHandler, last_active_time), ...]}
 _active_clients = {}

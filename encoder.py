@@ -8,6 +8,7 @@ import uuid
 from binascii import hexlify
 
 from domain.enums import EGemTypesNew
+from domain.uids import make_uid
 
 
 _ZERO_GUID = "00000000-0000-0000-0000-000000000000"
@@ -40,10 +41,6 @@ def decompress_gzip(data):
 # =============================================================================
 #  UID utilities
 # =============================================================================
-
-def make_uid(type_byte, instance_id):
-    return (type_byte & 0xFF) | ((instance_id & 0x00FFFFFFFFFFFFFF) << 8)
-
 
 def client_session_guid(handler):
     """Return the handler's cached RequestHandlerSessionId or the zero GUID."""

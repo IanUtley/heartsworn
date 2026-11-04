@@ -35,28 +35,12 @@ import os
 
 import db as connection_db
 import pvp_db as db_layer
-
-# UID type codes (must match hconnect_server.py)
-UID_TYPE = {
-    "ServicePlayer": 244,
-    "ServiceAI": 248,
-    "ServiceMail": 252,
-    "ServiceProfile": 245,
-    "ServiceGameSession": 246,
-    "ServiceMatchmaking": 247,
-    "ServiceEscrow": 249,
-    "ServiceCampaign": 253,
-}
+from domain.uids import UID_TYPE, make_uid
 
 _DB_PATH = os.environ.get(
     "HEX_DB_PATH",
     os.path.join(os.path.dirname(__file__), "hconnect.db"),
 )
-
-
-def make_uid(uid_type, inst):
-    """Create a UID ulong from type and instance."""
-    return (inst << 8) | uid_type
 
 
 class GameSession:
