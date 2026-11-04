@@ -17,6 +17,10 @@ from domain.uids import SERVICE_GAME_SESSION_UID
 from pvp_db import db_card_owner_id
 from pvp_db import db_card_zone_details
 from pvp_db import db_card_sacrifice_info
+from pvp_db import db_move_card_to_location
+from pvp_db import db_warzone_troops_basic
+from pvp_db import db_card_basic
+from pvp_db import db_hand_card_uids
 
 
 def discarding_player(bstate, ability_controller):
@@ -435,7 +439,7 @@ class CombatMixin(_HostBase):
         self._current_bstate = bstate
         game = self._fresh_game(session, pl_t, ai_t, bstate)
         self._auto_declare_force_attackers(session, pl_t, ai_t, bstate, game)
-        rows = _hc.db_warzone_troops_basic(session.session_id, self.user_profile["id"])
+        rows = db_warzone_troops_basic(session.session_id, self.user_profile["id"])
         from rules_port.static_rules import effective_attributes
         from rules_port.combat_rules import can_attack_card
         ready = []
@@ -482,8 +486,8 @@ class CombatMixin(_HostBase):
         from pvp_db import db_card_state_value as db_card_state_raw
         from rules_port.static_rules import effective_attributes
         from rules_port.combat_rules import can_attack_card
-        rows = _hc.db_warzone_troops_basic(session.session_id,
-                                       self.user_profile["id"])
+        rows = db_warzone_troops_basic(session.session_id,
+                                   self.user_profile["id"])
         ai_champ_uid = getattr(self, "_ai_champ_scid", None)
         ai_champ_uid64 = ai_champ_uid.uid.to_uint64() if ai_champ_uid else 0
         attackers = {int(k): int(v)
@@ -939,7 +943,7 @@ class CombatMixin(_HostBase):
         sacrifice isn't combat damage). The troop still DIES, so its Deathcry
         triggers (mirrors the client; e.g. Spiritbound Spy -> Phantom)."""
         import hconnect_server as _hc
-        row = _hc.db_card_basic(session.session_id, card_uid)
+        row = db_card_basic(session.session_id, card_uid)
         if not row:
             return False
         tpl_guid, owner_id = row
@@ -1008,8 +1012,8 @@ class CombatMixin(_HostBase):
             return int(self._card_full_data(game, scid, row[0], None)[3] or 0)
 
         cost = card_cost(voided)
-        matching = [int(uid) for (uid,) in _hc.db_hand_card_uids(
-            session.session_id, victim_id, conn=db._db)
+        matching = [int(uid) for (uid,) in db_hand_card_uids(
+        session.session_id, victim_id, conn=db._db)
             if card_cost(uid) == cost]
         for uid in matching:
             gd, _owner_uid = self._discard_card_to_owner(session, pl_t, ai_t, uid)
@@ -1062,10 +1066,10 @@ class CombatMixin(_HostBase):
         # PVE ability): class-23 opens BattleStateConfigureAbility and the
         # selected hand card is returned in SetAbilityActivationData.
         hand = [game_engine.SessionCardId(game_engine.UID(int(uid))) for (uid,) in
-                _hc.db_hand_card_uids(
-                    session.session_id,
-                    self.user_profile["id"] if self.user_profile else 0,
-                    conn=db._db)]
+                db_hand_card_uids(
+                session.session_id,
+                self.user_profile["id"] if self.user_profile else 0,
+                conn=db._db)]
         if not hand:
             # The authored discard target allows a best-effort minimum.  An
             # empty hand therefore resolves the Deathcry as a no-op; opening
@@ -1136,8 +1140,8 @@ class CombatMixin(_HostBase):
             # troops' attack/defense, then adds the fixed +3.
             stats["atk"] += int(row[3] or 0)
             stats["def"] += int(row[4] or 0)
-            _hc.db_move_card_to_location(
-                session.session_id, int(uid), "void", position=0, conn=db._db)
+            db_move_card_to_location(
+            session.session_id, int(uid), "void", position=0, conn=db._db)
             db._db.commit()
             scid = game_engine.SessionCardId(game_engine.UID(int(uid)))
             tpl_guid = row[2]

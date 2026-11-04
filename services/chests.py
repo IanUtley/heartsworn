@@ -7,6 +7,11 @@ from db import log_req
 import db
 from db import STARDUST_TEMPLATES
 from profile_db import db_inventory_item
+from az1_pack import CAMPAIGN_PACK_CONFIGS
+from az1_pack import generate_campaign_pack
+from profile_db import db_add_card
+from profile_db import db_add_stardust
+from profile_db import db_consume_inventory_row
 
 
 # The fixed client addresses every treasure chest by the InventoryItem UID the
@@ -75,12 +80,12 @@ def _generate_chest_rewards(chest, card_templates, rng=None):
     """
     import hconnect_server as _hc
     rng = rng or random
-    pack_config = _hc.CAMPAIGN_PACK_CONFIGS.get((chest.template_guid or "").lower())
+    pack_config = CAMPAIGN_PACK_CONFIGS.get((chest.template_guid or "").lower())
     if pack_config:
         from gamedata import DEFAULT_RECORD_STORE
-        reward = _hc.generate_campaign_pack(
-            card_templates, DEFAULT_RECORD_STORE, rng,
-            pack_config=pack_config)
+        reward = generate_campaign_pack(
+        card_templates, DEFAULT_RECORD_STORE, rng,
+        pack_config=pack_config)
         inventory_rewards = [(guid, "equipment")
                              for guid in reward.equipment_guids]
         inventory_rewards.extend(
@@ -121,7 +126,7 @@ def _grant_pack_inventory_rewards(handler, inventory_rewards):
         if template_guid in STARDUST_TEMPLATES.values():
             rarity = next(key for key, value in STARDUST_TEMPLATES.items()
                           if value == template_guid)
-            _hc.db_add_stardust(user_id, rarity, 1, conn=db._db)
+            db_add_stardust(user_id, rarity, 1, conn=db._db)
         updates[template_guid] = (client_uid, int(row[1] or 0) + 1 if row else 1)
     return [(guid, client_uid, quantity)
             for guid, (client_uid, quantity) in updates.items()]
@@ -157,7 +162,7 @@ def _grant_reward_cards(user_id, cards):
     next_id = _hc.db_next_card_instance_id(user_id, conn=db._db)
     for offset, (guid, name, cost, atk, def_) in enumerate(cards):
         instance_id = next_id + offset
-        _hc.db_add_card(user_id, guid, conn=db._db)
+        db_add_card(user_id, guid, conn=db._db)
         _hc.db_create_card_instance(user_id, instance_id, guid, conn=db._db)
         granted.append((guid, name, cost, atk, def_, instance_id, 0))
     return granted
@@ -300,8 +305,8 @@ def _open_client_chests(handler, chest_uids):
             _hc.db_open_chest(chest.db_id, conn=db._db)
             remaining = 0
         else:
-            remaining = _hc.db_consume_inventory_row(
-                chest.inventory_row_id, 1, conn=db._db)
+            remaining = db_consume_inventory_row(
+            chest.inventory_row_id, 1, conn=db._db)
         summary["opened"].append((chest.template_guid, chest_uid, remaining))
         log_req(f"    Opened chest {chest_uid} "
             f"({chest.template_guid or chest.set_guid}): {len(cards)} cards, "

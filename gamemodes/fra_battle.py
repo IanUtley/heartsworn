@@ -10,6 +10,12 @@ from encoder import encode_objfmt_response
 from encoder import encode_sync_event
 from domain.uids import SERVICE_GAME_SESSION_UID
 from encoder import client_session_guid
+from pvp_db import db_game_cards_at_location
+from pvp_db import db_template_exists
+from pvp_db import db_template_card_info
+from profile_db import db_find_deck_owner
+from pvp_db import db_game_champion
+from pvp_db import db_template_name
 
 
 class FraBattleMixin:
@@ -187,8 +193,8 @@ class FraBattleMixin:
                 continue
 
             template_guid = str(modification.get("card_guid") or "").lower()
-            if not template_guid or not _hc.db_template_exists(
-                    template_guid, conn=db._db):
+            if not template_guid or not db_template_exists(
+                template_guid, conn=db._db):
                 log_req(f"    FRA card mod skipped: invalid template {template_guid}")
                 continue
             amount = max(0, int(modification.get("amount", 1) or 0))
@@ -204,7 +210,7 @@ class FraBattleMixin:
             if location is None:
                 log_req(f"    FRA card mod skipped: unsupported collection {collection}")
                 continue
-            row = _hc.db_template_card_info(template_guid, conn=db._db)
+            row = db_template_card_info(template_guid, conn=db._db)
             if not row:
                 log_req(f"    FRA card mod skipped: template row missing {template_guid}")
                 continue
@@ -356,7 +362,7 @@ class FraBattleMixin:
         import hconnect_server as _hc
         uid = self.user_profile["id"] if self.user_profile else None
         if uid and arena_deck_id:
-            if _hc.db_find_deck_owner(arena_deck_id, conn=db._db) == uid:
+            if db_find_deck_owner(arena_deck_id, conn=db._db) == uid:
                 return arena_deck_id
         if uid:
             row = _hc.db_latest_deck_id_for_user(uid, conn=db._db)
@@ -411,11 +417,11 @@ class FraBattleMixin:
         # FRA champions are synthetic SessionCardIds and intentionally have
         # no game_cards rows. Prefer a row if another session provides one,
         # then restore the saved UID/template pair from the battle checkpoint.
-        player_champion = (_hc.db_game_champion(
-            session.session_id, owner_id, conn=db._db) or
+        player_champion = (db_game_champion(
+        session.session_id, owner_id, conn=db._db) or
             checkpoint_champion(owner_id))
-        ai_champion = (_hc.db_game_champion(
-            session.session_id, 0, conn=db._db) or checkpoint_champion(0))
+        ai_champion = (db_game_champion(
+        session.session_id, 0, conn=db._db) or checkpoint_champion(0))
         if not player_champion or not ai_champion:
             log_req("    FRA reconnect snapshot aborted: missing champion "
                 "rows and checkpoint identities")
@@ -439,9 +445,9 @@ class FraBattleMixin:
         ai_champ_scid = game_engine.SessionCardId(
             game_engine.UID(ai_champ_uid))
         player_name = str(profile.get("name") or "Player")
-        player_champ_name = _hc.db_template_name(
-            player_champ_guid, conn=db._db) or player_name
-        ai_name = _hc.db_template_name(ai_champ_guid, conn=db._db) or "AI Opponent"
+        player_champ_name = db_template_name(
+        player_champ_guid, conn=db._db) or player_name
+        ai_name = db_template_name(ai_champ_guid, conn=db._db) or "AI Opponent"
         player_sleeve = state.get("player_deck_sleeve_id") or ""
         ai_sleeve = state.get("ai_deck_sleeve_id") or ""
         self._player_champ_scid = player_champ_scid
@@ -541,8 +547,8 @@ class FraBattleMixin:
         for owner, owner_uid, sleeve in (
                 (owner_id, player_uid, player_sleeve),
                 (0, ai_uid, ai_sleeve)):
-            deck_rows = _hc.db_game_cards_at_location(
-                session.session_id, "deck", user_id=owner, conn=db._db)
+            deck_rows = db_game_cards_at_location(
+            session.session_id, "deck", user_id=owner, conn=db._db)
             deck_ids = []
             for card_uid, template_guid, _owner, card_type, card_state, _ags, _attrs in deck_rows:
                 scid = game_engine.SessionCardId(
@@ -557,8 +563,8 @@ class FraBattleMixin:
             game.push_deck_created_with_cards(owner_uid, deck_ids, sleeve)
 
         for owner, owner_uid in ((owner_id, player_uid), (0, ai_uid)):
-            hand_rows = _hc.db_game_cards_at_location(
-                session.session_id, "hand", user_id=owner, conn=db._db)
+            hand_rows = db_game_cards_at_location(
+            session.session_id, "hand", user_id=owner, conn=db._db)
             for card_uid, template_guid, _owner, card_type, card_state, _ags, _attrs in hand_rows:
                 scid = game_engine.SessionCardId(
                     game_engine.UID(int(card_uid)))
@@ -580,8 +586,8 @@ class FraBattleMixin:
                 ("PlayedResources", game_engine.ECardCollections.PlayedResources),
                 ("underground", game_engine.ECardCollections.Underground)):
             for card_uid, template_guid, owner, card_type, card_state, _ags, _attrs in \
-                    _hc.db_game_cards_at_location(
-                        session.session_id, zone, conn=db._db):
+                    db_game_cards_at_location(
+                    session.session_id, zone, conn=db._db):
                 scid = game_engine.SessionCardId(
                     game_engine.UID(int(card_uid)))
                 self._card_full_data(game, scid, template_guid)

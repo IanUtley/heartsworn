@@ -19,6 +19,13 @@ from db import STARDUST_TEMPLATES
 from profile_db import db_set_champion_last_deck
 from profile_db import db_inventory_item
 from profile_db import db_insert_card_instance
+from profile_db import db_find_deck_owner
+from profile_db import db_next_card_instance_for_user
+from profile_db import db_add_stardust
+from profile_db import db_consume_inventory_row
+from profile_db import db_update_deck
+from profile_db import db_save_deck
+from profile_db import db_card_instance_art
 
 
 # CreateNewDeckFromTemplate (2091)
@@ -190,23 +197,23 @@ def handle_addnewdeck_2089(handler, target, instance, data_type, reqid, comp, se
             user_id, pve_champion_uid, conn=db._db)
     if existing_campaign:
         deck_db_id = existing_campaign[0]
-        _hc.db_update_deck(
-            deck_db_id, user_id, deck_name=deck_name,
-            cards_json=cards_json, pve_champion_id=pve_champion_uid,
-            pvp_champion_guid=pvp_champ_guid,
-            active_gems_json=ag_json, gem_abilities_json=ga_json,
-            deck_sleeve_guid=deck_sleeve_guid,
-            gameboard_guid=gameboard_guid, coin_guid=coin_guid)
+        db_update_deck(
+        deck_db_id, user_id, deck_name=deck_name,
+        cards_json=cards_json, pve_champion_id=pve_champion_uid,
+        pvp_champion_guid=pvp_champ_guid,
+        active_gems_json=ag_json, gem_abilities_json=ga_json,
+        deck_sleeve_guid=deck_sleeve_guid,
+        gameboard_guid=gameboard_guid, coin_guid=coin_guid)
         log_req(f"    Updated campaign deck '{deck_name}' "
             f"id={deck_db_id} with {len(card_ids)} cards")
     else:
-        deck_db_id = _hc.db_save_deck(
-            user_id, deck_name, cards_json,
-            pve_champion_id=pve_champion_uid,
-            pvp_champion_guid=pvp_champ_guid,
-            active_gems_json=ag_json, gem_abilities_json=ga_json,
-            deck_sleeve_guid=deck_sleeve_guid,
-            gameboard_guid=gameboard_guid, coin_guid=coin_guid)
+        deck_db_id = db_save_deck(
+        user_id, deck_name, cards_json,
+        pve_champion_id=pve_champion_uid,
+        pvp_champion_guid=pvp_champ_guid,
+        active_gems_json=ag_json, gem_abilities_json=ga_json,
+        deck_sleeve_guid=deck_sleeve_guid,
+        gameboard_guid=gameboard_guid, coin_guid=coin_guid)
         log_req(f"    Saved deck '{deck_name}' id={deck_db_id} "
             f"with {len(card_ids)} cards")
     deck_uid = deck_db_id
@@ -287,8 +294,8 @@ def handle_addnewdeck_2089(handler, target, instance, data_type, reqid, comp, se
         tguid = "00000000-0000-0000-0000-000000000000"
         is_extended = False
         if handler.user_profile:
-            instance_art = _hc.db_card_instance_art(
-                user_id, cid, conn=db._db)
+            instance_art = db_card_instance_art(
+            user_id, cid, conn=db._db)
             if instance_art:
                 tguid = instance_art[1]
                 is_extended = bool(instance_art[2])
@@ -458,7 +465,7 @@ def handle_updatedeck_2095(handler, target, instance, data_type, reqid, comp, se
             # the save silently).  Attribute the deck by its DB owner:
             # the client only ever edits its own decks, and the deck id
             # is the handle the client must already hold.
-            owner_id = _hc.db_find_deck_owner(deck_id, conn=db._db)
+            owner_id = db_find_deck_owner(deck_id, conn=db._db)
     if owner_id:
         cards_json = json.dumps(card_ids) if card_ids is not None else None
         # Keep the denormalized cache in lockstep with ActiveGems,
@@ -473,12 +480,12 @@ def handle_updatedeck_2095(handler, target, instance, data_type, reqid, comp, se
             equipment_json = json.dumps(kept_equipment)
             log_req(f"    Equipment: requested={len(equipment_ids)} "
                     f"kept={kept_equipment}")
-        success = _hc.db_update_deck(deck_id, owner_id,
-            deck_name=deck_name, cards_json=cards_json,
-            pve_champion_id=pve_champion_id, pvp_champion_guid=pvp_champion_guid,
-            active_gems_json=ag_json, gem_abilities_json=ga_json,
-            deck_sleeve_guid=deck_sleeve_guid, gameboard_guid=gameboard_guid, coin_guid=coin_guid,
-            equipment_json=equipment_json)
+        success = db_update_deck(deck_id, owner_id,
+        deck_name=deck_name, cards_json=cards_json,
+        pve_champion_id=pve_champion_id, pvp_champion_guid=pvp_champion_guid,
+        active_gems_json=ag_json, gem_abilities_json=ga_json,
+        deck_sleeve_guid=deck_sleeve_guid, gameboard_guid=gameboard_guid, coin_guid=coin_guid,
+        equipment_json=equipment_json)
         log_req(f"    DB update: {'OK' if success else 'FAILED'} "
             f"(owner={owner_id})")
         # Link this deck as the champion's last used deck (pve_champion_id
@@ -724,8 +731,8 @@ def handle_addchampion_2033(handler, target, instance, data_type, reqid, comp, s
                 # at the first unused ID: the current maximum is already
                 # taken, and INSERT OR IGNORE would silently drop that
                 # card while its collection copy was still counted.
-                cid = _hc.db_next_card_instance_for_user(
-                    handler.user_profile["id"], conn=db._db)
+                cid = db_next_card_instance_for_user(
+                handler.user_profile["id"], conn=db._db)
                 for card_guid, count in deck["cards"]:
                     for _ in range(count):
                         db_insert_card_instance(
@@ -750,11 +757,11 @@ def handle_addchampion_2033(handler, target, instance, data_type, reqid, comp, s
             for card_guid, count in deck["cards"]:
                 cards_list.extend([card_guid] * count)
             cards_json = json.dumps(cards_list)
-            deck_db_id = _hc.db_save_deck(
-                handler.user_profile["id"],
-                f"{champ_name}'s {race_name} Deck",
-                cards_json,
-                pve_champion_id=champ_db_id)
+            deck_db_id = db_save_deck(
+            handler.user_profile["id"],
+            f"{champ_name}'s {race_name} Deck",
+            cards_json,
+            pve_champion_id=champ_db_id)
             db_set_champion_last_deck(
             champ_db_id, deck_db_id, conn=db._db)
             log_req(f"    Auto-created deck id={deck_db_id} for champion {champ_db_id}")
@@ -1145,8 +1152,8 @@ def _spend_extended_art_stardust(handler, user_id, card_rarity):
     if not row or int(row[1] or 0) < 1:
         return None
     client_uid = int(row[2] or 0)
-    remaining = _hc.db_consume_inventory_row(row[0], 1, conn=db._db)
-    _hc.db_add_stardust(user_id, key, -1, conn=db._db)
+    remaining = db_consume_inventory_row(row[0], 1, conn=db._db)
+    db_add_stardust(user_id, key, -1, conn=db._db)
     handler.push_inventory_to_client(
         qty=remaining, template_guid=template_guid, item_id=client_uid)
     return client_uid
@@ -1158,8 +1165,8 @@ def handle_upgradeextendedartoncard_2185(handler, target, instance, data_type, r
     log_req(">>> UpgradeExtendedArtOnCard (dt=2185)")
     card_instance_id = int(inner_obj.get("CardInstanceId", 0))
     user_id = handler.user_profile["id"] if handler.user_profile else 0
-    row = _hc.db_card_instance_art(
-        user_id, card_instance_id, conn=db._db)
+    row = db_card_instance_art(
+    user_id, card_instance_id, conn=db._db)
     stardust_id = 0
     error = _EXTENDED_ART_OK
     if not row:

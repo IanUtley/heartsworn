@@ -16,6 +16,8 @@ from db import card_label
 from debug_runtime import trace_rules_port
 from pvp_db import db_card_instance_dynamic_projections
 from pvp_db import db_template_by_guid
+from pvp_db import db_card_basic
+from pvp_db import db_warzone_display_rows
 
 
 if TYPE_CHECKING:
@@ -1197,7 +1199,7 @@ class TurnFlowMixin(_HostBase):
         chain_sources = {int(i.get("source_uid") or 0)
                          for i in ((bstate or {}).get("stack") or [])
                          if i.get("source_uid")}
-        rows = _hc.db_warzone_display_rows(session.session_id, conn=db._db)
+        rows = db_warzone_display_rows(session.session_id, conn=db._db)
         projections = db_card_instance_dynamic_projections(
         session.session_id, [row[0] for row in rows], conn=db._db)
         for card_uid, tpl_guid, user_id, cstate, _card_type in rows:
@@ -1247,7 +1249,7 @@ class TurnFlowMixin(_HostBase):
                 continue
             if cost == sent.get(card_uid, int(base_cost or 0)):
                 continue
-            basic = _hc.db_card_basic(session.session_id, card_uid)
+            basic = db_card_basic(session.session_id, card_uid)
             if not basic or not basic[0]:
                 continue
             tpl_guid = basic[0]
@@ -1584,7 +1586,7 @@ class TurnFlowMixin(_HostBase):
             game_engine.ECardStates.VoidsIfDestroyed |
             game_engine.ECardStates.CameOutThisTurn |
             game_engine.ECardStates.StartedATurnOnYourSide)
-        rows = _hc.db_warzone_display_rows(session.session_id, conn=db._db)
+        rows = db_warzone_display_rows(session.session_id, conn=db._db)
         changed = 0
         for card_uid, tpl_guid, owner_id, old_state, _card_type in rows:
             old_state = int(old_state or 0)

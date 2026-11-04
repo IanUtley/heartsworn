@@ -17,6 +17,10 @@ from application.card_play import _NO_PERSISTED_GEM
 from pvp_db import db_template_by_guid
 from application.records_projection import _records_card_projection
 from pvp_db import db_card_template_thresholds
+from pvp_db import db_move_card_to_location
+from pvp_db import EMPTY_SOCKET_GEMS
+from pvp_db import db_set_card_abilities
+from pvp_db import db_target_template_filter
 
 
 if TYPE_CHECKING:
@@ -276,12 +280,12 @@ class CardStateMixin(_HostBase):
             cast(Any, self), game, scid, gem_instance_id, persisted_gem=persisted_gem)
         display_gems = int(gem_type or 0)
         if (display_gems > 0x3FF and
-                not (display_gems & _hc.EMPTY_SOCKET_GEMS)):
+                not (display_gems & EMPTY_SOCKET_GEMS)):
             # Older deck saves lost the packed-format flag but retained the
             # socket payload. Restore the marker in the client projection so
             # its socket renderer decodes every slot instead of treating the
             # combined value as one legacy gem enum.
-            display_gems |= _hc.EMPTY_SOCKET_GEMS
+            display_gems |= EMPTY_SOCKET_GEMS
         if gem_type:
             gem_guids = db_gem_ability_guids(gem_type, conn=db._db)
             for gem_guid in gem_guids:
@@ -305,9 +309,9 @@ class CardStateMixin(_HostBase):
                         if str(gem_guid).lower() not in merged:
                             merged.append(str(gem_guid).lower())
                 if merged != current:
-                    _hc.db_set_card_abilities(
-                        game.session_id.uid64, scid.uid.uid64,
-                        json.dumps(merged), conn=db._db)
+                    db_set_card_abilities(
+                    game.session_id.uid64, scid.uid.uid64,
+                    json.dumps(merged), conn=db._db)
                     # _card_full_data() is also called immediately before the
                     # battle state is persisted.  That save uses the separate
                     # game_session connection, so leave the shared connection
@@ -370,8 +374,8 @@ class CardStateMixin(_HostBase):
                 scene_card = scene_view.as_shape("scene_card")
                 qualifies = False
                 for target_id in target_ids:
-                    filter_json = _hc.db_target_template_filter(
-                        target_id, conn=db._db)
+                    filter_json = db_target_template_filter(
+                    target_id, conn=db._db)
                     try:
                         filter_data = json.loads(filter_json or "{}")
                     except (TypeError, ValueError):
@@ -385,9 +389,9 @@ class CardStateMixin(_HostBase):
                     abilities.append(game_engine.ResourceId.from_str(scene_ag))
                     scene_added.append(scene_ag)
             if scene_added:
-                _hc.db_set_card_abilities(
-                    game.session_id.uid64, scid.uid.uid64,
-                    json.dumps(ability_guids), conn=db._db)
+                db_set_card_abilities(
+                game.session_id.uid64, scid.uid.uid64,
+                json.dumps(ability_guids), conn=db._db)
                 db._db.commit()
         # Effective attributes = static template attributes + any attributes
         # granted by the card's CURRENT passives. Attributes render as icons on
@@ -759,8 +763,8 @@ class CardStateMixin(_HostBase):
         """Move a specific card from the deck to the player's hand (pushes into
         `game`). Used by !addcard."""
         import hconnect_server as _hc
-        _hc.db_move_card_to_location(
-            session.session_id, int(card_uid), "hand", position=100, conn=db._db)
+        db_move_card_to_location(
+        session.session_id, int(card_uid), "hand", position=100, conn=db._db)
         db._db.commit()
         scid = game_engine.SessionCardId(game_engine.UID(int(card_uid)))
         tpl_guid, ct, name, cost, atk, def_, gem_type = self._card_full_data(

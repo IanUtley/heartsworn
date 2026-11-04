@@ -16,6 +16,10 @@ from domain.uids import SERVICE_PROFILE_UID
 from db import STARDUST_TEMPLATES
 from profile_db import db_inventory_item
 from profile_db import db_insert_card_instance
+from az1_pack import CAMPAIGN_PACK_CONFIGS
+from az1_pack import generate_campaign_pack
+from profile_db import db_add_card
+from profile_db import db_next_card_instance_for_user
 
 
 def handle_chest_spinning_2049(handler, target, instance, data_type, reqid, comp, session_id,
@@ -128,7 +132,7 @@ def handle_opencardpack_2127(handler, target, instance, data_type, reqid, comp, 
     all_cards = []
     pack_inventory_rewards = []
     pack_inventory_updates = []
-    campaign_pack_config = _hc.CAMPAIGN_PACK_CONFIGS.get(pack_guid.lower())
+    campaign_pack_config = CAMPAIGN_PACK_CONFIGS.get(pack_guid.lower())
     starter_pack = None
     if not pack_error:
         try:
@@ -146,9 +150,9 @@ def handle_opencardpack_2127(handler, target, instance, data_type, reqid, comp, 
             # range.  They award no Stardust (allow_stardust is off).
             from gamedata import DEFAULT_RECORD_STORE
             for _ in range(open_amount):
-                reward = _hc.generate_campaign_pack(
-                    card_templates, DEFAULT_RECORD_STORE, random,
-                    pack_config=campaign_pack_config)
+                reward = generate_campaign_pack(
+                card_templates, DEFAULT_RECORD_STORE, random,
+                pack_config=campaign_pack_config)
                 all_cards.extend(reward.cards)
                 pack_inventory_rewards.extend(
                     (guid, "equipment")
@@ -188,7 +192,7 @@ def handle_opencardpack_2127(handler, target, instance, data_type, reqid, comp, 
     # Persist generated cards to user's collection
     if handler.user_profile and not pack_error:
         for guid, _, _, _, _ in all_cards:
-            _hc.db_add_card(handler.user_profile["id"], guid)
+            db_add_card(handler.user_profile["id"], guid)
     
         # Remove the booster pack from inventory
         consumed = _hc.db_consume_inventory(
@@ -207,8 +211,8 @@ def handle_opencardpack_2127(handler, target, instance, data_type, reqid, comp, 
         # INSERT OR IGNORE in ``db_insert_card_instance`` then kept
         # whatever card happened to occupy that ID.  That made the
         # first card in an opened pack appear as an unrelated card.
-        next_id = _hc.db_next_card_instance_for_user(
-            handler.user_profile["id"], conn=db._db)
+        next_id = db_next_card_instance_for_user(
+        handler.user_profile["id"], conn=db._db)
         new_card_data = []
         for i, (guid, name, cost, atk, def_) in enumerate(all_cards):
             cid = next_id + i

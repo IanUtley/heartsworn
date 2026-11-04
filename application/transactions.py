@@ -14,6 +14,10 @@ from encoder import encode_sync_event
 from domain.uids import SERVICE_GAME_SESSION_UID
 from encoder import client_session_guid
 from pvp_db import db_card_instance_dynamic_projections
+from gamemodes.tournament_engine import player_handlers
+from pve_db import db_get_arena_state
+from pvp_db import db_game_get_hand
+from pvp_db import db_game_draw_cards
 
 
 if TYPE_CHECKING:
@@ -271,14 +275,14 @@ class TransactionsMixin(_HostBase):
                         (getattr(session, "encounter_data", {}) or {}).get(
                             "starting_hand_size", 7) or 7)
                     for apid in pids:
-                        _hc.db_game_draw_cards(session.session_id, apid,
-                                           opening_hand_size)
+                        db_game_draw_cards(session.session_id, apid,
+                                       opening_hand_size)
                     log_req(f"    PvP choose: drew hands for both "
                         f"({opening_hand_size})")
 
                 # Push hand + Mulligan to each player.
                 hands = {
-                    int(apid): _hc.db_game_get_hand(session.session_id, apid)
+                    int(apid): db_game_get_hand(session.session_id, apid)
                     for apid in pids
                 }
                 hand_uids = [int(card_uid)
@@ -287,7 +291,7 @@ class TransactionsMixin(_HostBase):
                 hand_projections = db_card_instance_dynamic_projections(
                 session.session_id, hand_uids, conn=db._db)
                 for apid in pids:
-                    h = _hc.player_handlers.get(apid)
+                    h = player_handlers.get(apid)
                     if not h: continue
                     aopp = pids[0] if pids[1] == apid else pids[1]
                     pl = game_engine.UID.make(244, apid)
@@ -397,18 +401,18 @@ class TransactionsMixin(_HostBase):
             # in the persisted session metadata so it survives the separate
             # transaction that carries the redraw request.  PvP retains its
             # existing one-fewer-card mulligan rule.
-            if not _hc.db_game_get_hand(session.session_id,
-                                    self.user_profile["id"]):
+            if not db_game_get_hand(session.session_id,
+                                self.user_profile["id"]):
                 # A champion with "can't draw cards" opens with no hand.
                 if not self._champion_cannot_draw(session, player=True):
-                    _hc.db_game_draw_cards(session.session_id,
-                                       self.user_profile["id"],
-                                       self._starting_hand_size(session))
+                    db_game_draw_cards(session.session_id,
+                                   self.user_profile["id"],
+                                   self._starting_hand_size(session))
                 if not self._champion_cannot_draw(session, player=False):
-                    _hc.db_game_draw_cards(session.session_id, 0, 7)
-            player_hand = _hc.db_game_get_hand(session.session_id,
-                                           self.user_profile["id"])
-            ai_hand = _hc.db_game_get_hand(session.session_id, 0)
+                    db_game_draw_cards(session.session_id, 0, 7)
+            player_hand = db_game_get_hand(session.session_id,
+                                       self.user_profile["id"])
+            ai_hand = db_game_get_hand(session.session_id, 0)
             opening_hand_projections = db_card_instance_dynamic_projections(
             session.session_id,
             [int(card_uid) for hand in (player_hand, ai_hand)
@@ -509,7 +513,7 @@ class TransactionsMixin(_HostBase):
                         other_pid = pids[0] if pids[1] == my_pid else pids[1]
                         other_uid = game_engine.UID.make(244, other_pid)
                         for _keep_pid in pids:
-                            _keep_h = _hc.player_handlers.get(_keep_pid)
+                            _keep_h = player_handlers.get(_keep_pid)
                             if not _keep_h:
                                 continue
                             g = game_engine.Game(int(session.session_id), pl_t, other_uid)
@@ -971,7 +975,7 @@ class TransactionsMixin(_HostBase):
             # Push the updated hand to both clients. A priority handoff is
             # sent only after the player keeps or is auto-accepted at zero.
             for pid in pids:
-                h = _hc.player_handlers.get(pid)
+                h = player_handlers.get(pid)
                 if not h: continue
                 is_me = (pid == my_pid)
                 p_uid = game_engine.UID.make(244, pid)
@@ -1010,7 +1014,7 @@ class TransactionsMixin(_HostBase):
             game2 = game_engine.Game(session.session_id, pl_t, ai_t)
 
             # Fetch deck's active_gems ONCE (not per card)
-            arena_lookup = _hc.db_get_arena_state(self.user_profile["id"])
+            arena_lookup = db_get_arena_state(self.user_profile["id"])
             deck_lookup_id = self._resolve_fra_deck_id(
                 arena_lookup["deck_id"]) or 0
             from pvp_db import db_deck_active_gems

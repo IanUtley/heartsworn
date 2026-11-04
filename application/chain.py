@@ -13,6 +13,9 @@ from domain.uids import SERVICE_GAME_SESSION_UID
 from pvp_db import db_card_owner_id
 from pvp_db import db_card_with_template
 from pvp_db import db_card_owner_zone_state
+from pvp_db import db_card_set_warzone_arrival
+from pvp_db import db_set_card_resolved_at
+from pvp_db import db_card_location
 
 if TYPE_CHECKING:
     from application._host_surface import HostSurface as _HostBase
@@ -316,10 +319,10 @@ class ChainMixin(_HostBase):
     def chain_mark_warzone_entry(self, session, source_uid):
         """Permanent bookkeeping for a troop/artifact reaching the warzone."""
         import hconnect_server as _hc
-        _hc.db_card_set_warzone_arrival(session.session_id, source_uid)
-        _hc.db_set_card_resolved_at(
-            session.session_id, source_uid,
-            self._next_resolve_counter(session))
+        db_card_set_warzone_arrival(session.session_id, source_uid)
+        db_set_card_resolved_at(
+        session.session_id, source_uid,
+        self._next_resolve_counter(session))
 
     def chain_push_empty(self, port, state, item, pending):
         if pending or state.get("stack"):
@@ -394,7 +397,7 @@ class ChainMixin(_HostBase):
         if kind == "troop":
             uid = int(item.get("source_uid") or 0)
             if uid:
-                loc = _hc.db_card_location(session.session_id, uid, conn=db._db)
+                loc = db_card_location(session.session_id, uid, conn=db._db)
                 if loc != "CastSpells":
                     log_req(f"    Troop {uid} already left the chain "
                         f"(loc={loc}) — skipped")
@@ -414,8 +417,8 @@ class ChainMixin(_HostBase):
                     _be.save_state(session, bstate)
                     return game
                 scid = game_engine.SessionCardId(game_engine.UID(uid))
-                _hc.db_card_set_warzone_arrival(session.session_id, uid)
-                _hc.db_set_card_resolved_at(session.session_id, uid, self._next_resolve_counter(session))
+                db_card_set_warzone_arrival(session.session_id, uid)
+                db_set_card_resolved_at(session.session_id, uid, self._next_resolve_counter(session))
                 crow2 = db_card_with_template(session.session_id, uid)
                 if crow2:
                     owner_id = db_card_owner_id(
@@ -517,7 +520,7 @@ class ChainMixin(_HostBase):
                 # have moved it into the deck (Eternal Youth / Chronic Madness
                 # "Put this into your deck") — only a spell still in CastSpells
                 # goes to the graveyard.
-                loc = _hc.db_card_location(session.session_id, uid, conn=db._db) or "discard"
+                loc = db_card_location(session.session_id, uid, conn=db._db) or "discard"
                 if loc != "deck":
                     # Default: the spent spell goes to the graveyard. A spell
                     # that moved itself into the deck (Eternal Youth's

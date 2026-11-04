@@ -18,6 +18,10 @@ from tournament_db import db_tournament_signup_set_async_state
 from gamemodes.tournament_engine import CORINTH_SHARD_GUIDS
 from gamemodes.tournament_engine import player_handler_lock
 from tournament_db import db_tournament_match_session
+from gamemodes.tournament_engine import player_handlers
+from gamemodes.tournament_engine import push_tournament_room_data
+from pvp_db import db_game_session_pids
+from gamemodes.tournament_engine import player_decks
 
 
 # ServiceTournaments — TryReconnection (25021)
@@ -101,7 +105,7 @@ def handle_tryreconnection_25021(handler, target, instance, data_type, reqid, co
             deck_ready=False, searching=False, conn=db._db)
             db._db.commit()
         with player_handler_lock:
-            _hc.player_handlers[reconnect_uid] = handler
+            player_handlers[reconnect_uid] = handler
         reconnect_pool = db_tournament_pool(
         reconnect_tid, reconnect_uid, conn=db._db)
         if len(reconnect_pool) != len(CORINTH_SHARD_GUIDS) * 4:
@@ -292,9 +296,9 @@ def handle_entertournament_25029(handler, target, instance, data_type, reqid, co
         is_waiting_room = target_p > 1
         log_req(f"    Player {player_name} joined room {tournament_id} ({count}/{target_p}) type={type_id}")
     with player_handler_lock:
-        _hc.player_handlers[player_uid] = handler
+        player_handlers[player_uid] = handler
     if deck_id:
-        _hc.player_decks[player_uid] = deck_id
+        player_decks[player_uid] = deck_id
         log_req(f"    Deck selected: {deck_id}")
     log_req(f"    EntryGroup: {entry_group}")
     for stype_id in (2, 3):
@@ -323,12 +327,12 @@ def handle_entertournament_25029(handler, target, instance, data_type, reqid, co
                "target": target, "instance": instance, "reqid": reqid | 1, "c": comp, "conh": conh, "sid": handler.sid}, dw_bytes)
     log_req(f"    Sent EnterTournament response ({len(dw_bytes)}b)")
     for s in _hc.db_tournament_signups_by_tournament(tournament_id):
-        handler = _hc.player_handlers.get(s["player_uid"])
+        handler = player_handlers.get(s["player_uid"])
         if handler and handler is not handler and tournament_id:
             try:
-                _hc.push_tournament_room_data(handler, f"tourn:waitingroom-{tournament_id}_full", "")
-                _hc.push_tournament_room_data(handler, f"tourn:tournament-{tournament_id}_full", "")
-                _hc.push_tournament_room_data(handler, "tourn:lobby_full", "")
+                push_tournament_room_data(handler, f"tourn:waitingroom-{tournament_id}_full", "")
+                push_tournament_room_data(handler, f"tourn:tournament-{tournament_id}_full", "")
+                push_tournament_room_data(handler, "tourn:lobby_full", "")
                 # Also push TournamentInfo (25058) to populate m_TournamentInfos
                 ti_inner = encode_objfmt_response(
                 ["Game.Shared.Network.Tournaments.TournamentInfoEventArgs",
@@ -384,7 +388,7 @@ def handle_entertournament_25029(handler, target, instance, data_type, reqid, co
             for signup in _hc.db_tournament_signups_by_tournament(tournament_id):
                 signup_pid = int(signup["player_uid"])
                 room_handlers.setdefault(
-                    signup_pid, _hc.player_handlers.get(signup_pid))
+                    signup_pid, player_handlers.get(signup_pid))
         _hc.start_waiting_room_game(
             tournament_id, handler_overrides=room_handlers)
 
@@ -419,8 +423,8 @@ def handle_request_25039(handler, target, instance, data_type, reqid, comp, sess
             tournament_id, player_uid, conn=db._db)
             if active_match:
                 other_pid = next(
-                    (int(pid) for pid in _hc.db_game_session_pids(
-                        int(active_match[0])) if int(pid) != player_uid),
+                    (int(pid) for pid in db_game_session_pids(
+                    int(active_match[0])) if int(pid) != player_uid),
                     0)
                 other_signup = db_tournament_signup_by_player(
                 tournament_id, other_pid, conn=db._db)

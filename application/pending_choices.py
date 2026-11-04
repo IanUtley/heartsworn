@@ -14,6 +14,7 @@ import db
 from pvp_db import db_card_owner_id
 from pvp_db import db_card_zone_details
 from pvp_db import db_ability_effect_rows
+from pvp_db import db_game_session_pids
 
 
 if TYPE_CHECKING:
@@ -993,7 +994,7 @@ class PendingChoicesMixin(_HostBase):
         from services.tournament_game import _send_pvp_packet
         from gamemodes.tournament_engine import player_handlers
         chooser_pid = int(owner_id)
-        pids = _hc.db_game_session_pids(session.session_id)
+        pids = db_game_session_pids(session.session_id)
         if chooser_pid not in pids:
             return False
         opponent_pid = next((p for p in pids if int(p) != chooser_pid), 0)

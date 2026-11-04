@@ -19,6 +19,8 @@ from pvp_db import db_card_sacrifice_info
 from pvp_db import db_card_owner_zone_state
 from pvp_db import db_gem_ability_guids
 from pvp_db import db_card_uids_in_zone
+from pvp_db import db_move_card_to_location
+from pve_db import db_get_arena_state
 
 
 if TYPE_CHECKING:
@@ -800,13 +802,13 @@ class CardPlayMixin(_HostBase):
                 if destination == "discard":
                     db_discard_card(session.session_id, uid, connection=db._db)
                 elif destination == "hand":
-                    _hc.db_move_card_to_location(
-                        session.session_id, uid, "hand", position=100, conn=db._db)
+                    db_move_card_to_location(
+                    session.session_id, uid, "hand", position=100, conn=db._db)
                     db._db.commit()
                 else:
-                    _hc.db_move_card_to_location(
-                        session.session_id, uid, destination,
-                        reset_state=True, conn=db._db)
+                    db_move_card_to_location(
+                    session.session_id, uid, destination,
+                    reset_state=True, conn=db._db)
                     db._db.commit()
                     if destination == "void":
                         voided_uids.append(uid)
@@ -924,8 +926,8 @@ class CardPlayMixin(_HostBase):
                 # from inside card encoding: that adds a write/commit to a
                 # client-facing turn transition and can hit SQLite's writer
                 # lock while the game state is being advanced.
-                arena = _hc.db_get_arena_state(
-                    self.user_profile["id"], initialize=False)
+                arena = db_get_arena_state(
+                self.user_profile["id"], initialize=False)
                 deck_id = self._resolve_fra_deck_id(arena["deck_id"]) or 0
                 active_gems_json = db_deck_active_gems(deck_id, conn=db._db)
                 if active_gems_json:

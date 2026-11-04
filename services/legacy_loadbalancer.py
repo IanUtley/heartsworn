@@ -29,6 +29,15 @@ from profile_db import db_insert_card_instance
 from gamemodes.fra_arena import _fra_arena_session_state_data
 from domain.constants import SERVICE_AI_UID_TYPE
 from pvp_db import db_template_ability_guids
+from gamemodes.tournament_engine import player_handlers
+from pve_db import db_get_arena_state
+from pvp_db import db_target_template_filter
+from pvp_db import db_template_exists
+from pvp_db import db_template_card_info
+from services.reconnect import _record_reconnect_decline
+from gamemodes.tournament_engine import player_decks
+from pvp_db import db_insert_game_cards
+from pvp_db import db_ability_metadata
 
 
 # ServiceLoadBalancer — QuitOnReconnectionGame (22011)
@@ -56,15 +65,15 @@ def handle_quitonreconnectiongame_22011(handler, target, instance, data_type, re
                 with pvp_session_lock(reconnect_session):
                     reconnect_state = pvp_load_state(reconnect_session) or {}
                     if reconnect_state.get("pvp"):
-                        _hc._record_reconnect_decline(
-                            reconnect_state, reconnect_pid)
+                        _record_reconnect_decline(
+                        reconnect_state, reconnect_pid)
                         pvp_save_state(reconnect_session, reconnect_state)
                         session_kind = "PvP"
                     elif fra_setup:
                         from rules_port.persistence import load_state, save_state
                         reconnect_state = load_state(reconnect_session) or {}
-                        _hc._record_reconnect_decline(
-                            reconnect_state, reconnect_pid)
+                        _record_reconnect_decline(
+                        reconnect_state, reconnect_pid)
                         save_state(reconnect_session, reconnect_state)
                         session_kind = "FRA"
                     else:
@@ -188,12 +197,12 @@ def handle_tryreconnectiontodisconnectedgame_22013(handler, target, instance, da
                         "Game.Shared.ESessionFlags", reconnect_flags)),
                     ("TournamentID", "ulong", tournament_id),
                 ])
-        deck_db_id = int(_hc.player_decks.get(reconnect_pid, 0) or 0)
+        deck_db_id = int(player_decks.get(reconnect_pid, 0) or 0)
         if is_fra_reconnect:
             try:
-                arena_state = _hc.db_get_arena_state(
-                    int((handler.user_profile or {}).get("id") or 0),
-                    initialize=False, conn=db._db)
+                arena_state = db_get_arena_state(
+                int((handler.user_profile or {}).get("id") or 0),
+                initialize=False, conn=db._db)
                 deck_db_id = handler._resolve_fra_deck_id(
                     arena_state.get("deck_id", 0))
             except Exception as exc:
@@ -698,7 +707,7 @@ def handle_readyforgamesetup_22027(handler, target, instance, data_type, reqid, 
         except Exception as _e:
             log_req(f"    PvP wire PlayerId parse failed: {_e}")
         from services.tournament_game import handle_ready_for_game_setup
-        new_resp, game_started = handle_ready_for_game_setup(handler, session, _hc._pvp_ready, _hc.player_handlers)
+        new_resp, game_started = handle_ready_for_game_setup(handler, session, _hc._pvp_ready, player_handlers)
         if new_resp is not None:
             resp_inner = new_resp
     resp_body = compress_gzip(resp_inner) if comp else resp_inner
@@ -1136,7 +1145,7 @@ def handle_readytostartgame_22031(handler, target, instance, data_type, reqid, c
         # Get player champion from the selected deck. Practice uses
         # this same deck as the AI's mirror; FRA uses it only as the
         # player's deck and obtains an authored challenger below.
-        arena = _hc.db_get_arena_state(handler.user_profile["id"])
+        arena = db_get_arena_state(handler.user_profile["id"])
         deck_db_id = handler._resolve_fra_deck_id(arena["deck_id"])
         player_champ_guid = _hc.db_get_player_champion_guid(deck_db_id) or "1d462ffb-0744-4996-804c-ba61b2c5c2f1"
         if _hc.db_champion_template_data_exists(player_champ_guid, conn=db._db):
@@ -1504,7 +1513,7 @@ def handle_readytostartgame_22031(handler, target, instance, data_type, reqid, c
             })
             player_deck_cards.append(cid)
     if player_insert_rows:
-        _hc.db_insert_game_cards(player_insert_rows, conn=db._db)
+        db_insert_game_cards(player_insert_rows, conn=db._db)
     db._db.commit()
     # Derive client definitions from the same prepared metadata used
     # for insertion; only socketed-gem ability merges need a later
@@ -1640,7 +1649,7 @@ def handle_readytostartgame_22031(handler, target, instance, data_type, reqid, c
         fallback_deck = _hc._STARTER_DECKS.get("Human") or {}
         for card_guid, quantity in fallback_deck.get("cards", []):
             for _ in range(max(0, int(quantity or 0))):
-                if _hc.db_template_exists(card_guid, conn=db._db):
+                if db_template_exists(card_guid, conn=db._db):
                     ai_card_specs.append((card_guid, 0, []))
     if ai_deck_guid or ai_card_specs:
         gem_types_by_name = {
@@ -1735,7 +1744,7 @@ def handle_readytostartgame_22031(handler, target, instance, data_type, reqid, c
                 except (TypeError, ValueError):
                     ability_guids = []
                 for ability_guid in ability_guids:
-                    meta = _hc.db_ability_metadata(ability_guid, conn=db._db)
+                    meta = db_ability_metadata(ability_guid, conn=db._db)
                     effect_exists = _hc.db_ability_has_effect(
                         ability_guid, conn=db._db)
                     if (meta and effect_exists and not meta[0] and
@@ -1757,8 +1766,8 @@ def handle_readytostartgame_22031(handler, target, instance, data_type, reqid, c
                             else str(raw_param or "").strip())
                         if not granted_guid:
                             continue
-                        trigger_row = _hc.db_ability_metadata(
-                            granted_guid, conn=db._db)
+                        trigger_row = db_ability_metadata(
+                        granted_guid, conn=db._db)
                         if (trigger_row and
                                 "GameStartedEvent" in (trigger_row[1] or "")):
                             return True
@@ -1807,8 +1816,8 @@ def handle_readytostartgame_22031(handler, target, instance, data_type, reqid, c
                                 except (TypeError, ValueError):
                                     _gtids = []
                                 for _gtid in _gtids:
-                                    _filter_json = _hc.db_target_template_filter(
-                                        _gtid, conn=db._db)
+                                    _filter_json = db_target_template_filter(
+                                    _gtid, conn=db._db)
                                     if (_filter_json or "{}").strip() not in ("", "{}"):
                                         if _granted not in handler._scene_targeted_ability_guids:
                                             handler._scene_targeted_ability_guids.append(_granted)
@@ -1871,8 +1880,8 @@ def handle_readytostartgame_22031(handler, target, instance, data_type, reqid, c
                     ai_deck_cards.append(cid)
                 cg_key = str(cg).lower()
                 if cg_key not in ai_template_rows:
-                    ai_template_rows[cg_key] = _hc.db_template_card_info(
-                        cg, conn=db._db)
+                    ai_template_rows[cg_key] = db_template_card_info(
+                    cg, conn=db._db)
                 r = ai_template_rows[cg_key]
                 if r:
                     ct2 = game_engine.card_type_from_db(r[0])
@@ -1905,7 +1914,7 @@ def handle_readytostartgame_22031(handler, target, instance, data_type, reqid, c
                      effective_attrs, "{}", gem_type or 0))
                 ai_materialized.append((cid, cg, _is_scene_mod, col))
             if ai_insert_rows:
-                _hc.db_insert_game_cards(ai_insert_rows, conn=db._db)
+                db_insert_game_cards(ai_insert_rows, conn=db._db)
             db._db.commit()
             for cid, cg, _is_scene_mod, col in ai_materialized:
                 if not _is_scene_mod:

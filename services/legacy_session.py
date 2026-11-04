@@ -15,6 +15,10 @@ from application.practice_flow import _same_uid
 from domain.uids import UID_TYPE
 from domain.uids import SERVICE_GAME_SESSION_UID
 from domain.uids import make_uid
+from application.player_transactions import classify_player_transaction
+from replay_db import set_session_transaction_trace_ids
+from replay_db import db_session_state_snapshot
+from replay_db import db_rules_port_state_snapshot
 
 
 # ServiceGameSession ReplayFetch (160000)
@@ -68,7 +72,7 @@ def handle_playertransaction_3029(handler, target, instance, data_type, reqid, c
 
     # Decode the raw transaction once at the application boundary;
     # execution below consumes typed flags without reparsing bytes.
-    transaction = _hc.classify_player_transaction(inner_bytes)
+    transaction = classify_player_transaction(inner_bytes)
     log_req(f"    [DEBUG-TX] 3029 from reck={handler.client_reck_id} bytes={bytes(inner_bytes[:72])!r}")
     # Run labeled recovery even when nested ObjFmt parsing failed,
     # then reclassify with the real command flags so combat and
@@ -78,14 +82,14 @@ def handle_playertransaction_3029(handler, target, instance, data_type, reqid, c
         inner_obj if isinstance(inner_obj, dict)
         else {"__raw__": inner_bytes})
     if decoded_payload:
-        transaction = _hc.classify_player_transaction(
-            inner_bytes, typed_payload=decoded_payload)
+        transaction = classify_player_transaction(
+        inner_bytes, typed_payload=decoded_payload)
     txn_info = transaction.fields
     txn_id_str = txn_info.get("m_TransactionId", "?")
     txn_id_int = transaction.transaction_id
-    _hc.set_session_transaction_trace_ids(
-        transaction_id=txn_id_int,
-        session_id=getattr(session, "session_id", None))
+    set_session_transaction_trace_ids(
+    transaction_id=txn_id_int,
+    session_id=getattr(session, "session_id", None))
     quit_series = txn_info.get("m_QuitEntireSeries", "?")
 
     # PassPriorityTransaction.m_TurnPhase — the phase the client thinks it
@@ -184,9 +188,9 @@ def handle_playertransaction_3029(handler, target, instance, data_type, reqid, c
             "is_encounter_mod_dialog": is_encounter_mod_dialog,
         }
         try:
-            pre_state_json = _hc.db_session_state_snapshot(
-                session.session_id)
-            pre_rules_port_json = _hc.db_rules_port_state_snapshot(session)
+            pre_state_json = db_session_state_snapshot(
+            session.session_id)
+            pre_rules_port_json = db_rules_port_state_snapshot(session)
             transaction_capture_id = _hc.db_record_session_transaction(
                 session.session_id, player_uid, reqid, data_type, comp,
                 txn_id_int,
@@ -199,8 +203,8 @@ def handle_playertransaction_3029(handler, target, instance, data_type, reqid, c
                 decoded_intent=decoded_payload or {},
                 pre_state_json=pre_state_json,
                 pre_rules_port_json=pre_rules_port_json)
-            _hc.set_session_transaction_trace_ids(
-                transaction_row_id=transaction_capture_id)
+            set_session_transaction_trace_ids(
+            transaction_row_id=transaction_capture_id)
         except Exception as capture_error:
             # Diagnostics must never make a live transaction fail.
             log_req(f"    Transaction capture failed: {capture_error}")
@@ -365,9 +369,9 @@ def handle_playertransaction_3029(handler, target, instance, data_type, reqid, c
 
     if transaction_capture_id is not None:
         try:
-            post_state_json = _hc.db_session_state_snapshot(
-                session.session_id)
-            post_rules_port_json = _hc.db_rules_port_state_snapshot(session)
+            post_state_json = db_session_state_snapshot(
+            session.session_id)
+            post_rules_port_json = db_rules_port_state_snapshot(session)
             _hc.db_complete_session_transaction(
                 transaction_capture_id,
                 hashlib.sha256(post_state_json.encode("utf-8")).hexdigest()
