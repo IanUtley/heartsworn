@@ -14,6 +14,7 @@ from application.commands import (ClaimMailCommand, DeleteMailCommand,
 from encoder import encode_objfmt_response, compress_gzip, encode_datawrapper
 from objfmt_builder import ObjFmtBuilder
 from domain.uids import SERVICE_MAIL_UID
+from encoder import encode_ping_mail_server_response
 
 
 def _send_response(handler, data_type, resp_inner, comp, session_id,
@@ -549,7 +550,7 @@ def _ping_mail_server(handler, target, instance, data_type, reqid, comp, session
     import hconnect_server as _hc
     log_req(">>> Respond PingMailServer (dt=9001)")
     timestamp = time.strftime("%m/%d/%Y %H:%M:%S", time.gmtime())
-    resp_inner = _hc.encode_ping_mail_server_response(timestamp)
+    resp_inner = encode_ping_mail_server_response(timestamp)
     resp_body = compress_gzip(resp_inner) if comp else resp_inner
     resp_reqid = reqid | 1
     dw_bytes = encode_datawrapper(resp_reqid, data_type, resp_body, comp, session_id)

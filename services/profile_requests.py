@@ -9,6 +9,8 @@ import db
 from encoder import encode_datawrapper
 from encoder import compress_gzip
 from domain.uids import SERVICE_PROFILE_UID
+from db import hexdump
+from encoder import encode_profile_response
 
 
 # ServiceProfile (80000)
@@ -23,7 +25,7 @@ def handle_serviceprofile_80000(handler, target, instance, data_type, reqid, com
         for k, v in env_json.items():
             log_req(f"      {k}={str(v)[:80]}")
     except:
-        log_req(f"    Envelope raw: {_hc.hexdump(envelope)}")
+        log_req(f"    Envelope raw: {hexdump(envelope)}")
     try:
         env_json = json.loads(envelope.decode("utf-8"))
     except (TypeError, ValueError, UnicodeDecodeError):
@@ -47,7 +49,7 @@ def handle_serviceprofile_80000(handler, target, instance, data_type, reqid, com
                 f"({len(resp_envelope)}b)")
     else:
         resp_envelope = b"{}"
-    resp_inner = _hc.encode_profile_response(resp_envelope)
+    resp_inner = encode_profile_response(resp_envelope)
     resp_body = compress_gzip(resp_inner) if comp else resp_inner
     resp_reqid = reqid | 1
     dw_bytes = encode_datawrapper(resp_reqid, data_type, resp_body, comp, session_id)

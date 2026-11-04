@@ -21,6 +21,7 @@ from replay_db import db_session_state_snapshot
 from replay_db import db_rules_port_state_snapshot
 from application.player_transactions import typed_payload_from_decoded
 from replay_db import db_record_session_transaction
+from replay_db import db_complete_session_transaction
 
 
 # ServiceGameSession ReplayFetch (160000)
@@ -374,12 +375,12 @@ def handle_playertransaction_3029(handler, target, instance, data_type, reqid, c
             post_state_json = db_session_state_snapshot(
             session.session_id)
             post_rules_port_json = db_rules_port_state_snapshot(session)
-            _hc.db_complete_session_transaction(
-                transaction_capture_id,
-                hashlib.sha256(post_state_json.encode("utf-8")).hexdigest()
-                if post_state_json else "",
-                handled, post_state_json=post_state_json,
-                post_rules_port_json=post_rules_port_json)
+            db_complete_session_transaction(
+            transaction_capture_id,
+            hashlib.sha256(post_state_json.encode("utf-8")).hexdigest()
+            if post_state_json else "",
+            handled, post_state_json=post_state_json,
+            post_rules_port_json=post_rules_port_json)
         except Exception as capture_error:
             log_req(f"    Transaction completion capture failed: {capture_error}")
 
