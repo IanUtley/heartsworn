@@ -2,8 +2,10 @@
 
 import campaign
 import game_engine
-from application.commands import StartEncounterCommand, StartSessionCommand
+from application.commands import JoinSessionCommand, StartEncounterCommand, StartSessionCommand
 from domain.uids import UID_TYPE, make_uid
+from binascii import unhexlify
+import struct
 from encoder import compress_gzip, encode_datawrapper, encode_objfmt_response
 from gamemodes.fra_arena import _fra_arena_session_state_data, _fra_arena_setup_values
 
@@ -235,3 +237,97 @@ def handle_find_session(handler, target, instance, reqid, comp, session_id,
         "sid": handler.sid,
     }, dw_bytes)
     log_req(f"    Sent FindSession response ({len(dw_bytes)}b)")
+
+
+def handle_join_session(handler, target, instance, reqid, comp, session_id,
+                        conh, inner_obj, inner_bytes, *, SERVICE_MAIL_UID,
+                        log_req, data_type):
+    """Join the named session and answer with its JoinSession packet."""
+    log_req(">>> JoinSession (dt=22021)")
+    player_uid = make_uid(UID_TYPE["ServicePlayer"], int(handler.client_reck_id))
+    # JoinSession carries the client's phase-stop preferences.  Keep
+    # them for the first battle checkpoint; previously only a later
+    # SetTurnPhasesTransaction populated the RulesPort state, so the
+    # initial practice turn silently fell back to server defaults
+    # (including an opponent SecondMain stop).
+    join_self_stops = handler._extract_enum_list(
+        inner_bytes, "m_SelfTurnPhases", "m_OpponentTurnPhases")
+    join_opp_stops = handler._extract_enum_list(
+        inner_bytes, "m_OpponentTurnPhases", None)
+    # A few older client serializers omit the member-name prefix;
+    # retain compatibility without weakening the normal wire parse.
+    if join_self_stops is None:
+        join_self_stops = handler._extract_enum_list(
+            inner_bytes, "SelfTurnPhases", "OpponentTurnPhases")
+    if join_opp_stops is None:
+        join_opp_stops = handler._extract_enum_list(
+            inner_bytes, "OpponentTurnPhases", None)
+    if join_self_stops is not None or join_opp_stops is not None:
+        handler._pending_player_stops = (
+            join_self_stops, join_opp_stops)
+        if handler.user_profile and join_self_stops is not None:
+            handler._save_player_stops(
+                handler.user_profile["id"], join_self_stops,
+                join_opp_stops if join_opp_stops is not None else [])
+    # Extract SessionId UID from raw inner bytes
+    session_id_val = 0
+    if isinstance(inner_bytes, bytes) and b"SessionId" in inner_bytes:
+        pos = inner_bytes.find(b"SessionId")
+        if pos >= 0:
+            rest = inner_bytes[pos:]
+            try:
+                # Skip to m_UID64, then 4 fields to hex value
+                idx = rest.find(b"m_UID64")
+                if idx >= 0:
+                    rest2 = rest[idx + 7:]  # skip "m_UID64"
+                    parts = rest2.split(b";", 5)
+                    # parts: [sub_idx, sub_type, nprops, hex_value, ...]
+                    if len(parts) >= 5:
+                        hex_val = parts[4].decode("ascii")
+                        session_id_val = struct.unpack("<Q", unhexlify(hex_val))[0]
+            except:
+                pass
+    session = (handler._application.execute(JoinSessionCommand(
+    session_id=session_id_val,
+    player_uid=player_uid,
+)).value if session_id_val else None)
+    if session:
+        resp_inner = encode_objfmt_response(
+        ["Game.Shared.Network.LoadBalancer.JoinSessionResponseArgs",
+         "Game.Shared.UID", "System.Boolean", "Game.Shared.SessionState",
+         "System.Collections.Generic.List`1#Game.Shared.PlayerState",
+         "Game.Shared.UID", "System.String",
+         "System.Int32", "System.Int32",
+         "Game.Shared.SessionStateEncounterData", "System.Boolean"],
+        [("RoutingPlayerId", "uid", player_uid),
+         ("Success", "bool", True),
+         ("SessionState", "struct", ("Game.Shared.SessionState", [
+             ("SessionId", "uid", session.session_id),
+             ("SessionName", "string", session.session_name),
+             ("MinimumPlayerCount", "int", 2),
+             ("MaximumPlayerCount", "int", 2),
+             ("EncounterData", "class", "Game.Shared.SessionStateEncounterData"),
+             ("JoinInsteadOfReconnect", "bool", False),
+         ])),
+         ("SessionPlayers", "coll", ("System.Collections.Generic.List`1#Game.Shared.PlayerState",
+             0, []))]
+    )
+        log_req(f"    JoinSession success, {len(session.players)} players")
+    else:
+        resp_inner = encode_objfmt_response(
+        ["Game.Shared.Network.LoadBalancer.JoinSessionResponseArgs",
+         "Game.Shared.UID", "System.Boolean"],
+        [("RoutingPlayerId", "uid", player_uid),
+         ("Success", "bool", False)]
+    )
+        log_req(f"    JoinSession failed: session not found")
+    resp_body = compress_gzip(resp_inner) if comp else resp_inner
+    resp_reqid = reqid | 1
+    dw_bytes = encode_datawrapper(resp_reqid, data_type, resp_body, comp, session_id)
+    issuer_str = f"0.0.0.0.ServiceLoadBalancer.{SERVICE_MAIL_UID}.ServicePlayer.{handler.client_uid}.{resp_reqid}"
+    handler.scnt += 1
+    handler.send({
+        "issuer": issuer_str, "target": target, "instance": instance,
+        "reqid": resp_reqid, "c": comp, "conh": conh, "sid": handler.sid,
+    }, dw_bytes)
+    log_req(f"    Sent JoinSession response ({len(dw_bytes)}b)")
