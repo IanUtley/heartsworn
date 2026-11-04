@@ -18,6 +18,7 @@ Request types:
 """
 
 from domain.enums import EGemTypesNew
+from application.champion_defaults import _RACE_DECK_MAP
 import base64
 import json
 import time
@@ -3039,10 +3040,6 @@ def _launch_encounter(handler, db, camp_id, champ_id, encounter_guid,
                                  target, instance, conh, uid)
 
 
-_RACE_DECK_MAP = {
-    1: "Human", 2: "Elf", 3: "Coyotle", 4: "Orc",
-    5: "Dwarf", 6: "ShinHare", 7: "Vennen", 8: "Necrotic",
-}
 
 # Discover the random-reading pool from the authored AZ1 effect set.
 _AZ1_FORTUNE_SET_GUID = "ccde3b6a-3425-4403-b366-dba0e2358fae"

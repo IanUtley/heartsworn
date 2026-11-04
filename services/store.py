@@ -22,11 +22,7 @@ if os.path.exists(_path):
     with open(_path) as f:
         _STORE_DECK_CARDS = json.load(f)
 
-_STARTER_DECKS = {}
-_path2 = os.path.join(_ROOT, "generated", "starter_decks.json")
-if os.path.exists(_path2):
-    with open(_path2) as f:
-        _STARTER_DECKS = json.load(f)
+from services.deck_editing import _STARTER_DECKS
 
 
 def send_purchase_response(handler, target, instance, reqid, comp,
