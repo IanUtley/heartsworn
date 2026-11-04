@@ -21,6 +21,12 @@ from pvp_db import db_move_card_to_location
 from pvp_db import db_warzone_troops_basic
 from pvp_db import db_card_basic
 from pvp_db import db_hand_card_uids
+from pvp_db import db_card_set_attacking_state
+from pvp_db import db_warzone_defender_rows
+from pvp_db import db_warzone_blocker_uids
+from pvp_db import db_ordered_zone_rows
+from pvp_db import db_ability_raw_json
+from pvp_db import db_card_combat_identity
 
 
 def discarding_player(bstate, ability_controller):
@@ -533,7 +539,7 @@ class CombatMixin(_HostBase):
                           game_engine.ECardStates.HasAttacked)
             if not (attrs & game_engine.ECardAttributes.Steadfast):
                 state_bits |= game_engine.ECardStates.Tapped
-            _hc.db_card_set_attacking_state(session.session_id, u, state_bits)
+            db_card_set_attacking_state(session.session_id, u, state_bits)
             card_details = db_card_zone_details(
             session.session_id, u, conn=db._db)
             tpl_guid = card_details[0] if card_details else None
@@ -598,9 +604,9 @@ class CombatMixin(_HostBase):
         # includes conditional static rules such as Electroid's Dwarf/Robot
         # control threshold, which is not a persisted keyword bit.
         from rules_port.combat_rules import can_block
-        rows = _hc.db_warzone_defender_rows(
-            session.session_id, self.user_profile["id"],
-            game_engine.ECardStates.Tapped, conn=db._db)
+        rows = db_warzone_defender_rows(
+        session.session_id, self.user_profile["id"],
+        game_engine.ECardStates.Tapped, conn=db._db)
         game = self._fresh_game(session, pl_t, ai_t, bstate)
         from pickers import BLOCK_DECLARATION_TEMPLATE as BLOCKING_TEMPLATE
         from pickers import PickOption, PickTarget, present_options
@@ -642,9 +648,9 @@ class CombatMixin(_HostBase):
             # declarations are persisted; the DeclareDefense path itself has
             # the attacker list and applies the full pairwise legality test.
             attackers = None
-        rows = _hc.db_warzone_blocker_uids(
-            session.session_id, self.user_profile["id"],
-            _ge.ECardStates.Tapped, conn=db._db)
+        rows = db_warzone_blocker_uids(
+        session.session_id, self.user_profile["id"],
+        _ge.ECardStates.Tapped, conn=db._db)
         from rules_port.combat_rules import can_block
         from rules_port.static_rules import effective_attributes
         if attackers is None:
@@ -1049,8 +1055,8 @@ class CombatMixin(_HostBase):
         human_owner = self.user_profile.get("id") if isinstance(
             self.user_profile, dict) else None
         if discarder is not None and int(discarder or 0) != int(human_owner or -1):
-            rows = [(row[1],) for row in _hc.db_ordered_zone_rows(
-                session.session_id, int(discarder), "hand", conn=db._db)]
+            rows = [(row[1],) for row in db_ordered_zone_rows(
+            session.session_id, int(discarder), "hand", conn=db._db)]
             if rows:
                 chosen = int(random.choice(rows)[0])
                 gd, _owner_uid = self._discard_card_to_owner(
@@ -1117,7 +1123,7 @@ class CombatMixin(_HostBase):
         uids = bstate.get("champion_void_uids") or []
         if not uids:
             return
-        raw_json = _hc.db_ability_raw_json(ability_guid, conn=db._db)
+        raw_json = db_ability_raw_json(ability_guid, conn=db._db)
         if not raw_json:
             return
         try:
@@ -1131,8 +1137,8 @@ class CombatMixin(_HostBase):
         voided_uids = []
         stats = {"atk": 0, "def": 0}
         for uid in uids:
-            row = _hc.db_card_combat_identity(
-                session.session_id, int(uid), conn=db._db)
+            row = db_card_combat_identity(
+            session.session_id, int(uid), conn=db._db)
             if not row or row[1] != "warzone":
                 continue
             # Bun'jitsu: "+[ATK] equal to the VOIDED TROOPS' [ATK] plus 3" —

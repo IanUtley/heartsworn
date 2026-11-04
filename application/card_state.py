@@ -21,6 +21,24 @@ from pvp_db import db_move_card_to_location
 from pvp_db import EMPTY_SOCKET_GEMS
 from pvp_db import db_set_card_abilities
 from pvp_db import db_target_template_filter
+from pvp_db import db_champion_template_health
+from profile_db import db_card_instance_display
+from pvp_db import db_card_instance_dynamic_projection
+from pvp_db import db_is_champion_template
+from pvp_db import db_card_template_lethal
+from pvp_db import db_template_subtype
+from pvp_db import db_session_turn_order
+from pvp_db import db_card_ability_list
+from pvp_db import db_get_card_abilities
+from pvp_db import db_card_sync_abilities
+from pvp_db import db_card_uses
+from pvp_db import db_bump_card_use
+from pvp_db import db_ability_activation_metadata
+from pvp_db import db_card_mutation_snapshot
+from pvp_db import db_template_attributes
+from pvp_db import db_set_card_abilities_and_attributes
+from pvp_db import db_deck_top_card_details
+from pvp_db import db_move_card_row_to_hand
 
 
 if TYPE_CHECKING:
@@ -41,7 +59,7 @@ class CardStateMixin(_HostBase):
         import hconnect_server as _hc
         if not guid:
             return 20
-        return _hc.db_champion_template_health(guid)
+        return db_champion_template_health(guid)
 
     def _template_by_guid(self, template_guid):
         """Fetch card template data for a template GUID.
@@ -70,8 +88,8 @@ class CardStateMixin(_HostBase):
             user_id = self.user_profile.get("id")
         if user_id is None:
             return None, None, None, 0, 0, 0
-        row = _hc.db_card_instance_display(
-            user_id, card_ref, conn=db._db)
+        row = db_card_instance_display(
+        user_id, card_ref, conn=db._db)
         if row:
             return row[0], row[1], row[2], row[3] or 0, row[4] or 0, row[5] or 0
         return None, None, None, 0, 0, 0
@@ -101,8 +119,8 @@ class CardStateMixin(_HostBase):
         irow = None
         if scid is not None:
             joined = (instance_projection if instance_projection is not None
-                      else _hc.db_card_instance_dynamic_projection(
-                          game.session_id.uid64, scid.uid.uid64, conn=db._db))
+                      else db_card_instance_dynamic_projection(
+                      game.session_id.uid64, scid.uid.uid64, conn=db._db))
             irow = joined
         t = None
         records_template = None
@@ -128,7 +146,7 @@ class CardStateMixin(_HostBase):
             # Champion templates — PvP champs in champion_templates_extended,
             # PvE champs (and some PvP) in champion_templates.  Try both.
             from pvp_db import db_champion_ability_guids
-            if _hc.db_is_champion_template(template_guid):
+            if db_is_champion_template(template_guid):
                 tpl_guid, ct_name, name, cost, atk, def_ = (
                     template_guid, "Champion", "Champion", 0, 0, 20)
                 ct = game_engine.ECardTypes.Champion
@@ -216,7 +234,7 @@ class CardStateMixin(_HostBase):
                 srow = (None, json.dumps(list(records_template[7])),
                         records_template[8])
             else:
-                lethal = bool(_hc.db_card_template_lethal(tpl_guid))
+                lethal = bool(db_card_template_lethal(tpl_guid))
                 srow = db_card_template_thresholds(tpl_guid)
             if srow:
                 if srow[0]:
@@ -243,7 +261,7 @@ class CardStateMixin(_HostBase):
             if records_template:
                 subtype = records_template[9] or ""
             else:
-                subtype = _hc.db_template_subtype(tpl_guid, conn=db._db) or ""
+                subtype = db_template_subtype(tpl_guid, conn=db._db) or ""
         except Exception:
             subtype = ""
         if subtype_override is not None:
@@ -421,8 +439,8 @@ class CardStateMixin(_HostBase):
                 bstate = getattr(self, "_current_bstate", None)
                 if bstate is None:
                     try:
-                        raw_state = _hc.db_session_turn_order(
-                            game.session_id.uid64, conn=db._db)
+                        raw_state = db_session_turn_order(
+                        game.session_id.uid64, conn=db._db)
                         data = json.loads(raw_state) if raw_state else {}
                         bstate = data if isinstance(data, dict) else {}
                     except Exception:
@@ -586,7 +604,7 @@ class CardStateMixin(_HostBase):
     def _card_ability_list(self, session, card_uid):
         """Current ability GUID list for a card instance (from card_abilities)."""
         import hconnect_server as _hc
-        return _hc.db_card_ability_list(session.session_id, card_uid)
+        return db_card_ability_list(session.session_id, card_uid)
 
     def _sync_instance_card_data(self, session, card_uid, template_guid,
                                  commit=True):
@@ -600,16 +618,16 @@ class CardStateMixin(_HostBase):
         import hconnect_server as _hc
         if not template_guid:
             return
-        ab_json, attrs = _hc.db_get_card_abilities(template_guid)
+        ab_json, attrs = db_get_card_abilities(template_guid)
         ab_json = ab_json or "[]"
         attrs = int(attrs or 0)
         try:
             [g.lower() for g in json.loads(ab_json)]
         except Exception:
             pass
-        _hc.db_card_sync_abilities(
-            session.session_id, card_uid, ab_json, attrs, template_guid,
-            commit=commit)
+        db_card_sync_abilities(
+        session.session_id, card_uid, ab_json, attrs, template_guid,
+        commit=commit)
         return attrs
 
     def _battle_setup_template_data(self, template_guid, cache):
@@ -650,12 +668,12 @@ class CardStateMixin(_HostBase):
     def _card_uses(self, session, card_uid):
         """Return the per-ability usage dict for a card instance."""
         import hconnect_server as _hc
-        return _hc.db_card_uses(session.session_id, card_uid)
+        return db_card_uses(session.session_id, card_uid)
 
     def _bump_card_use(self, session, card_uid, ability_guid):
         """Increment a card instance's usage of an ability (UsesPerGame/Turn)."""
         import hconnect_server as _hc
-        return _hc.db_bump_card_use(session.session_id, card_uid, ability_guid)
+        return db_bump_card_use(session.session_id, card_uid, ability_guid)
 
     def _champion_ability_uses(self, bstate):
         """Per-ability activation counts for the champion's synthetic powers."""
@@ -708,12 +726,12 @@ class CardStateMixin(_HostBase):
         complete CardUpdated so both the server and client agree.
         """
         import hconnect_server as _hc
-        meta = _hc.db_ability_activation_metadata(
-            ability_guid, conn=db._db)
+        meta = db_ability_activation_metadata(
+        ability_guid, conn=db._db)
         if not meta or int(meta[1] or 0) != 1:
             return False
-        row = _hc.db_card_mutation_snapshot(
-            session.session_id, int(card_uid), conn=db._db)
+        row = db_card_mutation_snapshot(
+        session.session_id, int(card_uid), conn=db._db)
         if not row:
             return False
         abilities = self._card_ability_list(session, card_uid)
@@ -721,11 +739,11 @@ class CardStateMixin(_HostBase):
         if ag not in abilities:
             return False
         abilities.remove(ag)
-        base_attrs = int(_hc.db_template_attributes(row[0], conn=db._db) or 0)
+        base_attrs = int(db_template_attributes(row[0], conn=db._db) or 0)
         attributes = base_attrs
-        _hc.db_set_card_abilities_and_attributes(
-            session.session_id, int(card_uid), json.dumps(abilities),
-            attributes, conn=db._db)
+        db_set_card_abilities_and_attributes(
+        session.session_id, int(card_uid), json.dumps(abilities),
+        attributes, conn=db._db)
         db._db.commit()
         if game is not None:
             scid = game_engine.SessionCardId(game_engine.UID(int(card_uid)))
@@ -831,8 +849,8 @@ class CardStateMixin(_HostBase):
         repl_draw = self._dispatch_native_trigger(
             game, session, draw_pl_t, ai_t, bstate,
             "CardWouldBeDrawnEvent", None, owner_id)
-        row = _hc.db_deck_top_card_details(
-            session.session_id, owner_id, conn=db._db)
+        row = db_deck_top_card_details(
+        session.session_id, owner_id, conn=db._db)
         if not row:
             if is_pvp:
                 log_req(f"    PvP debug draw: pid {owner_id} deck empty")
@@ -854,7 +872,7 @@ class CardStateMixin(_HostBase):
             log_req(f"    Player draw replaced (would-draw/would-enter trigger)")
             return
         scid = game_engine.SessionCardId(game_engine.UID(row[1]))
-        _hc.db_move_card_row_to_hand(session.session_id, row[0], conn=db._db)
+        db_move_card_row_to_hand(session.session_id, row[0], conn=db._db)
         db._db.commit()
         tpl_guid, ct, name, cost, atk, def_, gem_type = self._card_full_data(game, scid, row[3], row[2])
         game.push_card_drawn(scid, draw_pl_t, 1)

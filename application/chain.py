@@ -16,6 +16,7 @@ from pvp_db import db_card_owner_zone_state
 from pvp_db import db_card_set_warzone_arrival
 from pvp_db import db_set_card_resolved_at
 from pvp_db import db_card_location
+from pvp_db import db_card_discard_spell
 
 if TYPE_CHECKING:
     from application._host_surface import HostSurface as _HostBase
@@ -526,7 +527,7 @@ class ChainMixin(_HostBase):
                     # that moved itself into the deck (Eternal Youth's
                     # Escalation "PutThisIntoYourDeck") was already pushed by
                     # the leaf — skip the discard.
-                    _hc.db_card_discard_spell(session.session_id, uid)
+                    db_card_discard_spell(session.session_id, uid)
                     # The spell entered the crypt — "when a card enters an
                     # opposing crypt" triggers (Incantation of Fear) fire here.
                     self._dispatch_native_trigger(

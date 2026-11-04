@@ -21,6 +21,12 @@ from pvp_db import db_gem_ability_guids
 from pvp_db import db_card_uids_in_zone
 from pvp_db import db_move_card_to_location
 from pve_db import db_get_arena_state
+from pvp_db import db_warzone_troop_count
+from pvp_db import db_card_zone_projection
+from pvp_db import db_update_card_state
+from pvp_db import db_card_gem_type
+from pvp_db import db_ability_option_cards
+from pvp_db import db_game_cards_at_location_scalar
 
 
 if TYPE_CHECKING:
@@ -150,7 +156,7 @@ class CardPlayMixin(_HostBase):
 
     def _warzone_troop_count(self, session, user_id):
         import hconnect_server as _hc
-        return _hc.db_warzone_troop_count(session.session_id, user_id)
+        return db_warzone_troop_count(session.session_id, user_id)
 
     def _card_play_plan(self, template_guid, card_uid=0, owner_id=None,
                         session=None):
@@ -698,8 +704,8 @@ class CardPlayMixin(_HostBase):
                 data=data)
 
         def push_zone(uid, owner_id, location):
-            row = _hc.db_card_zone_projection(
-                session.session_id, int(uid), conn=db._db)
+            row = db_card_zone_projection(
+            session.session_id, int(uid), conn=db._db)
             if not row:
                 return
             scid = game_engine.SessionCardId(game_engine.UID(int(uid)))
@@ -774,9 +780,9 @@ class CardPlayMixin(_HostBase):
                     record_cost_card(kind, uid)
                     continue
                 if kind == "exhaust":
-                    _hc.db_update_card_state(
-                        session.session_id, uid,
-                        set_bits=game_engine.ECardStates.Tapped, conn=db._db)
+                    db_update_card_state(
+                    session.session_id, uid,
+                    set_bits=game_engine.ECardStates.Tapped, conn=db._db)
                     db._db.commit()
                     push_zone(uid, owner_id, row[1])
                     continue
@@ -947,8 +953,8 @@ class CardPlayMixin(_HostBase):
         if (not gem_type and scid is not None and
                 (not has_persisted_gem or not owner_is_player)):
             try:
-                persisted_gem = _hc.db_card_gem_type(
-                    game.session_id.uid64, scid.uid.uid64, conn=db._db)
+                persisted_gem = db_card_gem_type(
+                game.session_id.uid64, scid.uid.uid64, conn=db._db)
                 gem_type = int(persisted_gem or 0)
             except Exception:
                 # Older focused fixtures may not carry the optional gem
@@ -1688,8 +1694,8 @@ class CardPlayMixin(_HostBase):
             return {}
         phase = _be.current_phase(bstate)
         resources = bstate.get("player_resources", 0)
-        rows = _hc.db_ability_option_cards(
-            session.session_id, self.user_profile["id"], conn=db._db)
+        rows = db_ability_option_cards(
+        session.session_id, self.user_profile["id"], conn=db._db)
         result = {}
         from rules_port.triggers import trigger_collection_allows
         for card_uid, tpl_guid, card_state, attrs, _card_type, card_location in rows:
@@ -2195,7 +2201,7 @@ class CardPlayMixin(_HostBase):
         import hconnect_server as _hc
         if not ability_ids:
             return {}
-        hand_uids = _hc.db_game_cards_at_location_scalar(session.session_id, "hand", self.user_profile["id"])
+        hand_uids = db_game_cards_at_location_scalar(session.session_id, "hand", self.user_profile["id"])
         hand = [game_engine.SessionCardId(game_engine.UID(r)) for r in hand_uids]
         if not hand:
             return {}
