@@ -16,7 +16,7 @@ from tests.test_db import fresh_database  # noqa: E402
 
 fresh_database()
 
-from services import legacy_loadbalancer as lb  # noqa: E402
+from services import dispatch as service_dispatch  # noqa: E402
 
 PLAYER_ID = 67890
 RESUME_SESSION = SimpleNamespace(
@@ -46,11 +46,15 @@ class _StubHandler:
 
 
 def _packet(resume):
+    """Drive the request through the services registry, as the hub does."""
+    import importlib
+    module_name, fn_name, extra = service_dispatch(22019)
+    fn = getattr(importlib.import_module(module_name), fn_name)
     handler = _StubHandler()
-    with mock.patch.object(lb, "_campaign_resume_session", return_value=resume):
-        lb.handle_findsession_22019(
-            handler, "target", 3, 22019, 9000, False, "session-x", "conh-1",
-            {}, b"", b"")
+    with mock.patch(f"{module_name}._campaign_resume_session", return_value=resume):
+        fn(handler, "target", 3, 9000, False, "session-x", "conh-1",
+           inner_obj={}, inner_bytes=b"", SERVICE_MAIL_UID=252,
+           SERVICE_PROFILE_UID=0, log_req=lambda *_a, **_k: True, **extra)
     assert len(handler.sent) == 1, handler.sent
     headers, body = handler.sent[0]
     return headers["issuer"], hashlib.sha256(body).hexdigest()

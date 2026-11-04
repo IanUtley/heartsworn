@@ -140,3 +140,98 @@ def handle_start_encounter(handler, target, instance, reqid, comp, session_id,
         "sid": handler.sid,
     }, dw_bytes)
     log_req(f"    Sent StartEncounter session={session_name} sid={session_id} ({len(dw_bytes)}b)")
+
+
+def _client_session_name(session):
+    """The session name the client reads. Its reconnect dialog only recognises a campaign
+    session as ``C:<campaign id>`` (``Utils.ParseCampaignSessionInfo``); any other name leaves
+    the dialog with no effect. The server keeps its own ``camp_<id>`` name for lookups."""
+    name = str(session.session_name or "")
+    if name.startswith("camp_"):
+        return f"C:{name.split('_', 1)[1]}"
+    return name
+
+
+
+def _campaign_encounter_struct(session):
+    """The campaign battle's encounter identity, as the client reads it: the scene, the flags and the
+    tournament id, from the encounter data stored when the battle began."""
+    stored = session.encounter_data or {}
+    scene = str((stored.get("SceneTemplateId") or {}).get("m_Guid")
+                or "00000000-0000-0000-0000-000000000000")
+    flags = stored.get("SessionFlags") or 0
+    flags = int(flags.get("value__", 0) if isinstance(flags, dict) else flags)
+    return ("Game.Shared.SessionStateEncounterData", [
+        ("SceneTemplateId", "struct", (
+            "Game.Shared.ResourceId", [("m_Guid", "guid", scene)])),
+        ("SessionFlags", "enum1", ("Game.Shared.ESessionFlags", flags)),
+        ("TournamentID", "ulong", 0),
+    ])
+
+
+
+def _campaign_resume_session(player_pid):
+    """The player's live campaign battle, if one can be rejoined and they have not declined it."""
+    import game_session as gs
+    from services.tournament_game import campaign_session_reconnectable
+    from rules_port.persistence import load_state as load_rules_state
+    from services.reconnect import _reconnect_declined_for_pid
+    session = gs.find_session_by_player(player_pid)
+    if not campaign_session_reconnectable(session, player_pid):
+        return None
+    if _reconnect_declined_for_pid(load_rules_state(session) or {}, player_pid):
+        return None
+    return session
+
+
+
+def handle_find_session(handler, target, instance, reqid, comp, session_id,
+                      conh, inner_obj, inner_bytes, *, SERVICE_MAIL_UID,
+                      log_req, data_type):
+    """Answer FindSession with the player's resumable campaign battle, or none."""
+    player_uid = make_uid(UID_TYPE["ServicePlayer"], int(handler.client_reck_id))
+    resume = _campaign_resume_session(int(handler.client_reck_id))
+    if resume is not None:
+        # A live campaign battle: the client joins it, rather than starting a new encounter.
+        log_req(f">>> Respond FindSession -> campaign {resume.session_name} (resume)")
+        resp_inner = encode_objfmt_response(
+        ["Game.Shared.Network.LoadBalancer.FindSessionResponseArgs",
+         "Game.Shared.UID", "System.Boolean", "Game.Shared.SessionState",
+         "Game.Shared.SessionStateEncounterData", "Game.Shared.ResourceId",
+         "System.Guid", "Game.Shared.ESessionFlags", "System.UInt64",
+         "System.Int32", "System.String", "System.Boolean"],
+        [("RoutingPlayerId", "uid", player_uid),
+         ("Success", "bool", True),
+         ("SessionState", "struct", ("Game.Shared.SessionState", [
+             ("SessionId", "uid", resume.session_id),
+             ("SessionName", "string", _client_session_name(resume)),
+             ("MinimumPlayerCount", "int", 2),
+             ("MaximumPlayerCount", "int", 2),
+             ("EncounterData", "struct", _campaign_encounter_struct(resume)),
+             ("JoinInsteadOfReconnect", "bool", False),
+         ]))]
+    )
+    else:
+        log_req(">>> Respond FindSession -> no session")
+        resp_inner = encode_objfmt_response(
+        ["Game.Shared.Network.LoadBalancer.FindSessionResponseArgs",
+         "Game.Shared.UID", "System.Boolean", "Game.Shared.SessionState"],
+        [("RoutingPlayerId", "uid", player_uid),
+         ("Success", "bool", False),
+         ("SessionState", "class", "Game.Shared.SessionState")]
+    )
+    resp_body = compress_gzip(resp_inner) if comp else resp_inner
+    resp_reqid = reqid | 1
+    dw_bytes = encode_datawrapper(resp_reqid, data_type, resp_body, comp, session_id)
+    issuer_str = f"0.0.0.0.ServiceLoadBalancer.{SERVICE_MAIL_UID}.ServicePlayer.{handler.client_uid}.{resp_reqid}"
+    handler.scnt += 1
+    handler.send({
+        "issuer": issuer_str,
+        "target": target,
+        "instance": instance,
+        "reqid": resp_reqid,
+        "c": comp,
+        "conh": conh,
+        "sid": handler.sid,
+    }, dw_bytes)
+    log_req(f"    Sent FindSession response ({len(dw_bytes)}b)")

@@ -47,6 +47,7 @@ _SERVICE_TABLE = {
     # ServiceLoadBalancer session requests
     22015: ("services.loadbalancer", "handle_start_session", {"data_type": 22015}),
     22017: ("services.loadbalancer", "handle_start_encounter", {"data_type": 22017}),
+    22019: ("services.loadbalancer", "handle_find_session", {"data_type": 22019}),
 
     # Matchmaking and direct challenges
     4001: ("services.matchmaking", "handle_ping_matchmaking", {}),
