@@ -75,6 +75,7 @@ import game_engine
 from domain.constants import AI_UID_TYPE, PLAYER_UID_TYPE
 from domain.events import PlayerWishesToDrawFirstSessionEventArgs
 from gamedata.play_plan import AbilityInstance as MetadataAbilityInstance
+import db as dbmod
 
 
 class RecordingAction(GameAction):
@@ -2953,7 +2954,7 @@ def test_rules_port_chain_dispatch_skips_legacy_trigger_hook():
     assert hcp_result == "native"
     assert calls == []
     assert native_dispatch.call_count == 2
-    assert native_dispatch.call_args_list[0].kwargs["db"] is host._db
+    assert native_dispatch.call_args_list[0].kwargs["db"] is dbmod._db
     assert native_dispatch.call_args_list[0].kwargs["target_card_id"] == 902
     assert native_dispatch.call_args_list[1].kwargs["handler"] is hcp_host
 

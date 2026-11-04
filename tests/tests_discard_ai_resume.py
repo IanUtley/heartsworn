@@ -108,8 +108,8 @@ def test_ai_turn_resumes_from_native_phase_window_after_discard():
     transaction = types.SimpleNamespace(payload={
         "activation_data": {"target_map": {0: (hand_card,)}}})
 
-    old_db, old_hcs_db = dbmod._db, hcs._db
-    dbmod._db = hcs._db = db
+    old_db, old_hcs_db = dbmod._db, dbmod._db
+    dbmod._db = dbmod._db = db
     try:
         with mock.patch.object(resolution_mod, "resolve_port_ability",
                                lambda *args, **kwargs: "ok"), \
@@ -119,7 +119,7 @@ def test_ai_turn_resumes_from_native_phase_window_after_discard():
             assert handler._resolve_rules_port_discard_continuation(
                 session, transaction)
     finally:
-        dbmod._db, hcs._db = old_db, old_hcs_db
+        dbmod._db, dbmod._db = old_db, old_hcs_db
 
     assert port.chain.is_empty
     assert resumed == [(True, True)], resumed

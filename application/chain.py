@@ -4,6 +4,7 @@
 from typing import TYPE_CHECKING
 from db import log_req
 import game_engine
+import db
 
 if TYPE_CHECKING:
     from application._host_surface import HostSurface as _HostBase
@@ -27,7 +28,7 @@ class ChainMixin(_HostBase):
             return False
         import hconnect_server as _hc
         row = _hc.db_card_with_template(
-            session.session_id, int(card_uid), conn=_hc._db)
+            session.session_id, int(card_uid), conn=db._db)
         return bool(row) and "choice" in str(row[1] or "").lower()
 
     def _completed_rules_port_chain(self, session, bstate):
@@ -271,7 +272,7 @@ class ChainMixin(_HostBase):
         import hconnect_server as _hc
         from rules_port.resolution import resume_ability_continuation_parents
         return resume_ability_continuation_parents(
-            self, game, session, _hc._db, player_uid, ai_uid, state,
+            self, game, session, db._db, player_uid, ai_uid, state,
             continuation)
 
     def chain_card_data(self, game, scid, template_guid):
@@ -293,7 +294,7 @@ class ChainMixin(_HostBase):
         self._current_bstate = state
         try:
             return bool(state_based_deaths(EffectContext.from_rules_port(
-                game, session, _hc._db, self, player_uid, ai_uid, state,
+                game, session, db._db, self, player_uid, ai_uid, state,
                 "state_based_death", ability=None)))
         finally:
             if previous is None:
@@ -385,7 +386,7 @@ class ChainMixin(_HostBase):
         if kind == "troop":
             uid = int(item.get("source_uid") or 0)
             if uid:
-                loc = _hc.db_card_location(session.session_id, uid, conn=_hc._db)
+                loc = _hc.db_card_location(session.session_id, uid, conn=db._db)
                 if loc != "CastSpells":
                     log_req(f"    Troop {uid} already left the chain "
                         f"(loc={loc}) — skipped")
@@ -397,9 +398,9 @@ class ChainMixin(_HostBase):
                 from rules_port.resolution import \
                     resolve_port_played_permanent
                 owner_id = int(_hc.db_card_owner_id(
-                    session.session_id, uid, conn=_hc._db) or 0)
+                    session.session_id, uid, conn=db._db) or 0)
                 resolve_port_played_permanent(
-                    game, session, _hc._db, self, pl_t, ai_t, bstate, item,
+                    game, session, db._db, self, pl_t, ai_t, bstate, item,
                     owner_id)
                 if bstate.get("resolution_paused"):
                     _be.save_state(session, bstate)
@@ -410,7 +411,7 @@ class ChainMixin(_HostBase):
                 crow2 = _hc.db_card_with_template(session.session_id, uid)
                 if crow2:
                     owner_id = _hc.db_card_owner_id(
-                        session.session_id, uid, conn=_hc._db) or 0
+                        session.session_id, uid, conn=db._db) or 0
                     owner_sid = pl_t if (owner_id or 0) != 0 else ai_t
                     # Populate the CardDef (cost/atk/def/thresholds/abilities)
                     # so the re-pushed CardUpdated renders the full card — without
@@ -439,7 +440,7 @@ class ChainMixin(_HostBase):
                             owner_id)
         elif kind == "trigger":
             from rules_port.resolution import resolve_port_trigger
-            resolve_port_trigger(self, game, session, _hc._db, pl_t, ai_t,
+            resolve_port_trigger(self, game, session, db._db, pl_t, ai_t,
                                  bstate, item)
         elif kind == "spell":
             uid = int(item.get("source_uid") or 0)
@@ -448,7 +449,7 @@ class ChainMixin(_HostBase):
             # waited for the stack — skip its BOM so a countered spell never
             # also draws/buffs/damages (the client's interrupted card fizzles).
             loc_details = _hc.db_card_owner_zone_state(
-                session.session_id, uid, conn=_hc._db)
+                session.session_id, uid, conn=db._db)
             loc = loc_details[1] if loc_details else "discard"
             if loc != "CastSpells":
                 log_req(f"    Spell {uid} already left the chain "
@@ -473,7 +474,7 @@ class ChainMixin(_HostBase):
             bstate["x_cost"] = int(item.get("x_cost") or 0)
             from rules_port.resolution import resolve_port_played_spell
             resolve_port_played_spell(
-                game, session, _hc._db, self, pl_t, ai_t, bstate,
+                game, session, db._db, self, pl_t, ai_t, bstate,
                 item.get("ability_guids", []),
                 activations=item.get("activations"),
                 played_from_hand=bool(item.get("played_from_hand")),
@@ -508,7 +509,7 @@ class ChainMixin(_HostBase):
                 # have moved it into the deck (Eternal Youth / Chronic Madness
                 # "Put this into your deck") — only a spell still in CastSpells
                 # goes to the graveyard.
-                loc = _hc.db_card_location(session.session_id, uid, conn=_hc._db) or "discard"
+                loc = _hc.db_card_location(session.session_id, uid, conn=db._db) or "discard"
                 if loc != "deck":
                     # Default: the spent spell goes to the graveyard. A spell
                     # that moved itself into the deck (Eternal Youth's
@@ -541,7 +542,7 @@ class ChainMixin(_HostBase):
                 from rules_port.context import EffectContext
                 from rules_port.tunneling import resolve_surface
                 result = resolve_surface(EffectContext.from_rules_port(
-                    game, session, _hc._db, self, pl_t, ai_t, bstate, str(ag),
+                    game, session, db._db, self, pl_t, ai_t, bstate, str(ag),
                     ability=None), item.get("source_uid"))
                 log_req(f"    Tunneling Surface {item.get('source_uid')}: "
                     f"{result}")
@@ -570,7 +571,7 @@ class ChainMixin(_HostBase):
                     bstate["resolving_owner_id"] = 0
                 else:
                     source_owner = _hc.db_card_owner_id(
-                        session.session_id, int(src_uid or 0), conn=_hc._db)
+                        session.session_id, int(src_uid or 0), conn=db._db)
                     bstate["resolving_owner_id"] = (
                         int(source_owner) if source_owner is not None else
                         (self.user_profile["id"] if self.user_profile else 0))
@@ -608,7 +609,7 @@ class ChainMixin(_HostBase):
                     except Exception:
                         target_map = {0: target_uid}
                 ability_log = resolve_port_ability(
-                    self, game, session, _hc._db, pl_t, ai_t, bstate, ag,
+                    self, game, session, db._db, pl_t, ai_t, bstate, ag,
                     source_uid=bstate.get("resolving_source_uid"),
                     owner_id=bstate.get("resolving_owner_id", 0),
                     target_map=target_map)
@@ -665,7 +666,7 @@ class ChainMixin(_HostBase):
             from rules_port.context import EffectContext
             from rules_port.death_effects import state_based_deaths
             state_based_deaths(EffectContext.from_rules_port(
-                game, session, _hc._db, self, pl_t, ai_t, bstate,
+                game, session, db._db, self, pl_t, ai_t, bstate,
                 "state_based_death", ability=None))
             if _be.stack_empty(bstate):
                 surface_owner = (self.user_profile["id"]
@@ -674,7 +675,7 @@ class ChainMixin(_HostBase):
                 from rules_port.context import EffectContext
                 from rules_port.tunneling import queue_surfaces
                 queue_surfaces(EffectContext.from_rules_port(
-                    game, session, _hc._db, self, pl_t, ai_t, bstate,
+                    game, session, db._db, self, pl_t, ai_t, bstate,
                     "", ability=None), surface_owner)
         # Champion state check: a spell/trigger that brought a champion to 0
         # health ends the game right here.

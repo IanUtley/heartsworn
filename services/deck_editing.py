@@ -10,6 +10,7 @@ import io
 import json
 import struct
 from db import log_req
+import db
 
 
 # CreateNewDeckFromTemplate (2091)
@@ -178,7 +179,7 @@ def handle_addnewdeck_2089(handler, target, instance, data_type, reqid, comp, se
     existing_campaign = None
     if pve_champion_uid:
         existing_campaign = _hc.db_campaign_deck_for_champion(
-            user_id, pve_champion_uid, conn=_hc._db)
+            user_id, pve_champion_uid, conn=db._db)
     if existing_campaign:
         deck_db_id = existing_campaign[0]
         _hc.db_update_deck(
@@ -206,7 +207,7 @@ def handle_addnewdeck_2089(handler, target, instance, data_type, reqid, comp, se
     if pve_champion_uid:
         champ_db_id = pve_champion_uid >> 8
         _hc.db_set_champion_last_deck(
-            champ_db_id, deck_db_id, conn=_hc._db)
+            champ_db_id, deck_db_id, conn=db._db)
         log_req(f"    Set champion {champ_db_id} last_deck_id={deck_db_id}")
     deck_uid64 = (deck_uid << 8) | 17  # UID.Type.Deck=17
     # Build deck_bits manually with all 23 fields (skip ActiveGems)
@@ -279,7 +280,7 @@ def handle_addnewdeck_2089(handler, target, instance, data_type, reqid, comp, se
         is_extended = False
         if handler.user_profile:
             instance_art = _hc.db_card_instance_art(
-                user_id, cid, conn=_hc._db)
+                user_id, cid, conn=db._db)
             if instance_art:
                 tguid = instance_art[1]
                 is_extended = bool(instance_art[2])
@@ -449,7 +450,7 @@ def handle_updatedeck_2095(handler, target, instance, data_type, reqid, comp, se
             # the save silently).  Attribute the deck by its DB owner:
             # the client only ever edits its own decks, and the deck id
             # is the handle the client must already hold.
-            owner_id = _hc.db_find_deck_owner(deck_id, conn=_hc._db)
+            owner_id = _hc.db_find_deck_owner(deck_id, conn=db._db)
     if owner_id:
         cards_json = json.dumps(card_ids) if card_ids is not None else None
         # Keep the denormalized cache in lockstep with ActiveGems,
@@ -460,7 +461,7 @@ def handle_updatedeck_2095(handler, target, instance, data_type, reqid, comp, se
         equipment_json = None
         if equipment_ids is not None:
             kept_equipment = sanitize_deck_equipment(
-                _hc._db, owner_id, equipment_ids)
+                db._db, owner_id, equipment_ids)
             equipment_json = json.dumps(kept_equipment)
             log_req(f"    Equipment: requested={len(equipment_ids)} "
                     f"kept={kept_equipment}")
@@ -477,7 +478,7 @@ def handle_updatedeck_2095(handler, target, instance, data_type, reqid, comp, se
         if pve_champion_id:
             champ_db_id = pve_champion_id >> 8
             _hc.db_set_champion_last_deck(
-                champ_db_id, deck_id, conn=_hc._db)
+                champ_db_id, deck_id, conn=db._db)
             log_req(f"    Set champion {champ_db_id} last_deck_id={deck_id}")
 
     # Only report a real deck UID; on failure return invalid (updated=False
@@ -507,7 +508,7 @@ def handle_getplayercardidlist_2043(handler, target, instance, data_type, reqid,
     p = handler.user_profile
     db_cards = []
     if p:
-        db_cards = list(_hc.db_profile_card_instances(p["id"], conn=_hc._db))
+        db_cards = list(_hc.db_profile_card_instances(p["id"], conn=db._db))
     ctype_names = [
         "Game.Client.Network.Profile.GetPlayerCardIDListResponse",
         "System.Collections.Generic.List`1#Game.Shared.Domain.card_instance_bits",
@@ -594,8 +595,8 @@ def handle_deletechampion_2035(handler, target, instance, data_type, reqid, comp
     champ_id = int(inner_obj.get("ChampionId", 0))
     log_req(f">>> DeleteChampion: id={champ_id}")
     if handler.user_profile and champ_id > 0:
-        _hc.db_delete_champion(champ_id, handler.user_profile["id"], conn=_hc._db)
-        _hc._db.commit()
+        _hc.db_delete_champion(champ_id, handler.user_profile["id"], conn=db._db)
+        db._db.commit()
         log_req(f"    Marked champion {champ_id} as deleted")
     
     # Encode DeleteChampionResponse (ChampionBits + Error + ErrorMessage)
@@ -689,8 +690,8 @@ def handle_addchampion_2033(handler, target, instance, data_type, reqid, comp, s
     if handler.user_profile:
         champ_db_id = _hc.db_insert_champion(
             handler.user_profile["id"], champ_name, race_val, cls_val,
-            gender_val, pet_name, json.dumps(starting_talents), conn=_hc._db)
-        _hc._db.commit()
+            gender_val, pet_name, json.dumps(starting_talents), conn=db._db)
+        db._db.commit()
 
         # Grant starter deck cards for this race (once only per race)
         race_name = _hc._RACE_DECK_MAP.get(race_val)
@@ -702,34 +703,34 @@ def handle_addchampion_2033(handler, target, instance, data_type, reqid, comp, s
             if pve_template_guid:
                 if _hc.db_purchase_exists(
                         handler.user_profile["id"], pve_template_guid,
-                        conn=_hc._db):
+                        conn=db._db):
                     already_granted = True
             if not already_granted:
                 cards_granted = 0
                 for card_guid, count in deck["cards"]:
                     _hc.db_add_collection(
                         handler.user_profile["id"], card_guid, count,
-                        conn=_hc._db)
+                        conn=db._db)
                     cards_granted += count
                 # Create card_instances for each individual card. Start
                 # at the first unused ID: the current maximum is already
                 # taken, and INSERT OR IGNORE would silently drop that
                 # card while its collection copy was still counted.
                 cid = _hc.db_next_card_instance_for_user(
-                    handler.user_profile["id"], conn=_hc._db)
+                    handler.user_profile["id"], conn=db._db)
                 for card_guid, count in deck["cards"]:
                     for _ in range(count):
                         _hc.db_insert_card_instance(
                             handler.user_profile["id"], cid, card_guid,
-                            conn=_hc._db)
+                            conn=db._db)
                         cid += 1
                 # Record as a free grant in store_purchases
                 if pve_template_guid:
                     _hc.db_record_purchase(
                         handler.user_profile["id"],
                         f"PvE {race_name} Starter", pve_template_guid,
-                        0, "Free", conn=_hc._db)
-                _hc._db.commit()
+                        0, "Free", conn=db._db)
+                db._db.commit()
                 log_req(f"    Granted {cards_granted} starter deck cards for {race_name} (first grant)")
                 handler.push_cards_to_client()
             else:
@@ -747,7 +748,7 @@ def handle_addchampion_2033(handler, target, instance, data_type, reqid, comp, s
                 cards_json,
                 pve_champion_id=champ_db_id)
             _hc.db_set_champion_last_deck(
-                champ_db_id, deck_db_id, conn=_hc._db)
+                champ_db_id, deck_db_id, conn=db._db)
             log_req(f"    Auto-created deck id={deck_db_id} for champion {champ_db_id}")
     else:
         champ_db_id = 1
@@ -755,7 +756,7 @@ def handle_addchampion_2033(handler, target, instance, data_type, reqid, comp, s
 
     # Read back the champion's actual last_deck_id (set by the auto-created
     # starter deck above, or 0 if the deck was already granted previously).
-    ldid_row = _hc.db_champion_last_deck(champ_db_id, conn=_hc._db)
+    ldid_row = _hc.db_champion_last_deck(champ_db_id, conn=db._db)
     resp_last_deck_id = ldid_row[0] if ldid_row else 0
     resp_pet_name = ldid_row[1] if ldid_row else pet_name
 
@@ -931,7 +932,7 @@ def handle_updatechampiondeckid_2187(handler, target, instance, data_type, reqid
     log_req(f"    ChampionID={champ_uid} (db={champ_db_id}) LastDeckID={deck_id}")
     if handler.user_profile and champ_db_id > 0:
         _hc.db_set_champion_last_deck(
-            champ_db_id, deck_id, handler.user_profile["id"], conn=_hc._db)
+            champ_db_id, deck_id, handler.user_profile["id"], conn=db._db)
         log_req(f"    Updated champion {champ_db_id} last_deck_id={deck_id}")
     # Return success response with Error=Ok
     resp_inner = _hc.encode_objfmt_response(
@@ -978,10 +979,10 @@ def handle_updatechampiontalents_2037(handler, target, instance, data_type, reqi
     if champ_id is not None:
         _hc.db_update_champion_talents(
             champ_id, handler.user_profile["id"] if handler.user_profile else 0,
-            json.dumps(talents), conn=_hc._db)
-        _hc._db.commit()
+            json.dumps(talents), conn=db._db)
+        db._db.commit()
         log_req(f"    Saved talents for champion {champ_id}: {talents}")
-        crow = _hc.db_champion_profile(champ_id, conn=_hc._db)
+        crow = _hc.db_champion_profile(champ_id, conn=db._db)
         if crow:
             champ_name = crow[0] or ""
             race_val = crow[1] or 1
@@ -1132,12 +1133,12 @@ def _spend_extended_art_stardust(handler, user_id, card_rarity):
     if key is None:
         return None
     template_guid = _hc.STARDUST_TEMPLATES[key]
-    row = _hc.db_inventory_item(user_id, template_guid, conn=_hc._db)
+    row = _hc.db_inventory_item(user_id, template_guid, conn=db._db)
     if not row or int(row[1] or 0) < 1:
         return None
     client_uid = int(row[2] or 0)
-    remaining = _hc.db_consume_inventory_row(row[0], 1, conn=_hc._db)
-    _hc.db_add_stardust(user_id, key, -1, conn=_hc._db)
+    remaining = _hc.db_consume_inventory_row(row[0], 1, conn=db._db)
+    _hc.db_add_stardust(user_id, key, -1, conn=db._db)
     handler.push_inventory_to_client(
         qty=remaining, template_guid=template_guid, item_id=client_uid)
     return client_uid
@@ -1150,7 +1151,7 @@ def handle_upgradeextendedartoncard_2185(handler, target, instance, data_type, r
     card_instance_id = int(inner_obj.get("CardInstanceId", 0))
     user_id = handler.user_profile["id"] if handler.user_profile else 0
     row = _hc.db_card_instance_art(
-        user_id, card_instance_id, conn=_hc._db)
+        user_id, card_instance_id, conn=db._db)
     stardust_id = 0
     error = _EXTENDED_ART_OK
     if not row:
@@ -1160,7 +1161,7 @@ def handle_upgradeextendedartoncard_2185(handler, target, instance, data_type, r
         log_req(f"    Card instance {card_instance_id} already extended art")
         error = _EXTENDED_ART_ALREADY
     else:
-        card = _hc._db.execute(
+        card = db._db.execute(
             "SELECT rarity FROM card_templates WHERE guid=?", (row[1],)).fetchone()
         stardust_id = _spend_extended_art_stardust(
             handler, user_id, card[0] if card else None)
@@ -1169,9 +1170,9 @@ def handle_upgradeextendedartoncard_2185(handler, target, instance, data_type, r
             log_req(f"    Not enough stardust for card instance {card_instance_id}")
         else:
             _hc.db_set_card_instance_extended_art(
-                user_id, card_instance_id, conn=_hc._db)
+                user_id, card_instance_id, conn=db._db)
             log_req(f"    Upgraded card instance {card_instance_id} to extended art")
-    _hc._db.commit()
+    db._db.commit()
     resp_inner = _hc.encode_objfmt_response(
         ["Game.Client.Network.Profile.UpgradeExtendedArtOnCardResponse",
          "System.UInt64", "System.UInt64", "enum1", _EXTENDED_ART_ERR_TYPE,

@@ -2,12 +2,13 @@
 
 import json
 import sqlite3
+import db
 
 
 def _talent_ability_guid(talent_guid: str) -> str | None:
     """Resolve a champion talent GUID to its actual ability GUID via DB."""
     import hconnect_server as _hc
-    return _hc.db_talent_data_ability_guid(talent_guid, conn=_hc._db)
+    return _hc.db_talent_data_ability_guid(talent_guid, conn=db._db)
 
 
 # ERace enum value -> deck name key
@@ -36,7 +37,7 @@ def _default_talents_for_champion(race_val, class_val, gender_val):
         return []
     try:
         row = _hc.db_default_talents(
-            race_name, class_name, gender_name, conn=_hc._db)
+            race_name, class_name, gender_name, conn=db._db)
     except sqlite3.Error:
         return []
     if not row:

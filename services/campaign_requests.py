@@ -5,6 +5,7 @@ Registered in ``services/__init__.py``; routed by ``data_type``.
 
 import json
 from db import log_req
+import db
 
 
 # ServiceCampaign Siege (150000)
@@ -44,7 +45,7 @@ def handle_servicecampaign_siege_150000(handler, target, instance, data_type, re
 def handle_campaign_adventure_system_110000(handler, target, instance, data_type, reqid, comp, session_id,
                                             conh, inner_obj, inner_bytes, raw_data_wrapper_bytes):
     import hconnect_server as _hc
-    _hc.campaign.handle_campaign_request(handler, _hc._db, inner_obj, comp,
+    _hc.campaign.handle_campaign_request(handler, db._db, inner_obj, comp,
                                        session_id, reqid,
                                        target, instance, conh,
                                        _hc.SERVICE_MAIL_UID)

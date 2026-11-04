@@ -5,6 +5,7 @@ Moved out of hconnect_server.HCPHandler._handle_service_request_legacy.
 
 import gamemodes.tournament_server as tournament_server
 from db import log_req
+import db
 
 
 # ServiceTournaments — TryReconnection (25021)
@@ -42,10 +43,10 @@ def handle_tryreconnection_25021(handler, target, instance, data_type, reqid, co
                    "sid": handler.sid}, dw_bytes)
         return
     reconnect_room = _hc.db_tournament_room_for_game(
-        reconnect_tid, conn=_hc._db) if reconnect_tid else None
+        reconnect_tid, conn=db._db) if reconnect_tid else None
     reconnect_uid = int(handler.client_reck_id) if handler.client_reck_id else 0
     reconnect_signup = (_hc.db_tournament_signup_by_player(
-        reconnect_tid, reconnect_uid, conn=_hc._db)
+        reconnect_tid, reconnect_uid, conn=db._db)
         if reconnect_tid and reconnect_uid else None)
     # A persistent Corinth event can outlive an account identity
     # migration (for example, the old Name#discriminator identity to
@@ -62,13 +63,13 @@ def handle_tryreconnection_25021(handler, target, instance, data_type, reqid, co
             entry_group=0)
         if join_ok:
             reconnect_signup = _hc.db_tournament_signup_by_player(
-                reconnect_tid, reconnect_uid, conn=_hc._db)
+                reconnect_tid, reconnect_uid, conn=db._db)
             log_req(f">>> TryReconnection: re-entered Corinth tid={reconnect_tid} "
                 f"player={reconnect_uid}")
     reconnect_live = bool(
         reconnect_signup and
         _hc.db_tournament_player_run_live(
-            reconnect_tid, reconnect_uid, conn=_hc._db))
+            reconnect_tid, reconnect_uid, conn=db._db))
     reconnect_ok = bool(
         reconnect_room and reconnect_signup and
         str(reconnect_room.get("status", "")).lower() != "closed" and
@@ -82,21 +83,21 @@ def handle_tryreconnection_25021(handler, target, instance, data_type, reqid, co
         # that player's old run is no longer live.
         if reconnect_signup.get("status") != "active":
             _hc.db_tournament_signup_set_status(
-                reconnect_tid, reconnect_uid, "active", conn=_hc._db)
+                reconnect_tid, reconnect_uid, "active", conn=db._db)
             _hc.db_tournament_signup_set_async_state(
                 reconnect_tid, reconnect_uid,
-                deck_ready=False, searching=False, conn=_hc._db)
-            _hc._db.commit()
+                deck_ready=False, searching=False, conn=db._db)
+            db._db.commit()
         with _hc.player_handler_lock:
             _hc.player_handlers[reconnect_uid] = handler
         reconnect_pool = _hc.db_tournament_pool(
-            reconnect_tid, reconnect_uid, conn=_hc._db)
+            reconnect_tid, reconnect_uid, conn=db._db)
         if len(reconnect_pool) != len(_hc.CORINTH_SHARD_GUIDS) * 4:
             _hc.db_seed_tournament_pool(
                 reconnect_tid, reconnect_uid,
-                _hc.CORINTH_SHARD_GUIDS * 4, conn=_hc._db)
+                _hc.CORINTH_SHARD_GUIDS * 4, conn=db._db)
             reconnect_pool = _hc.db_tournament_pool(
-                reconnect_tid, reconnect_uid, conn=_hc._db)
+                reconnect_tid, reconnect_uid, conn=db._db)
         _hc._push_corinth_deck_construction(
             handler, reconnect_tid, reconnect_pool)
         log_req(f">>> TryReconnection: resumed Corinth tid={reconnect_tid} "
@@ -259,7 +260,7 @@ def handle_entertournament_25029(handler, target, instance, data_type, reqid, co
     deck_id = _hc.uid_instance(inner_bytes, "DeckId")
     entry_group = int(inner_obj.get("EntryGroup", 0) or 0)
     entry_room = _hc.db_tournament_room_for_game(
-        tournament_id, conn=_hc._db)
+        tournament_id, conn=db._db)
     if not _hc._is_corinth_room(entry_room or {}):
         _hc.tournament_server.leave_all(player_uid)
     ok, count, target_p, type_id = _hc.tournament_server.join_tournament(
@@ -286,7 +287,7 @@ def handle_entertournament_25029(handler, target, instance, data_type, reqid, co
     log_req(f"    EntryGroup: {entry_group}")
     for stype_id in (2, 3):
         if type_id == stype_id:
-            row = _hc.db_tournament_room_for_game(tournament_id, conn=_hc._db)
+            row = _hc.db_tournament_room_for_game(tournament_id, conn=db._db)
             if row:
                 set_id = row.get("set_id") or "set01"
                 if stype_id == 2:
@@ -349,13 +350,13 @@ def handle_entertournament_25029(handler, target, instance, data_type, reqid, co
             # starts deck construction, while a later matchmaking
             # pass creates the two-player battle session.
             pool = _hc.db_tournament_pool(
-                tournament_id, player_uid, conn=_hc._db)
+                tournament_id, player_uid, conn=db._db)
             if len(pool) != len(_hc.CORINTH_SHARD_GUIDS) * 4:
                 _hc.db_seed_tournament_pool(
                     tournament_id, player_uid,
-                    _hc.CORINTH_SHARD_GUIDS * 4, conn=_hc._db)
+                    _hc.CORINTH_SHARD_GUIDS * 4, conn=db._db)
                 pool = _hc.db_tournament_pool(
-                    tournament_id, player_uid, conn=_hc._db)
+                    tournament_id, player_uid, conn=db._db)
             _hc._push_corinth_deck_construction(
                 handler, tournament_id, pool)
             log_req(f"    >>> Corinth entry: deck construction "
@@ -385,8 +386,8 @@ def handle_request_25039(handler, target, instance, data_type, reqid, comp, sess
     player_uid = int(handler.client_reck_id) if handler.client_reck_id else 0
     tournament_id = int(inner_obj.get("TournamentID", 0) or 0)
     searching = bool(inner_obj.get("searching", False))
-    room = _hc.db_tournament_room_for_game(tournament_id, conn=_hc._db)
-    pool = _hc.db_tournament_pool(tournament_id, player_uid, conn=_hc._db)
+    room = _hc.db_tournament_room_for_game(tournament_id, conn=db._db)
+    pool = _hc.db_tournament_pool(tournament_id, player_uid, conn=db._db)
     main_ids = [card_uid for card_uid, _guid, location in pool
                 if int(location) == 0]
     corinth_entry = _hc._is_corinth_room(room or {})
@@ -403,14 +404,14 @@ def handle_request_25039(handler, target, instance, data_type, reqid, comp, sess
             # correctly exclude them) and do not leave searching=1
             # falsely displayed in the lobby.
             active_match = _hc.db_tournament_match_session(
-                tournament_id, player_uid, conn=_hc._db)
+                tournament_id, player_uid, conn=db._db)
             if active_match:
                 other_pid = next(
                     (int(pid) for pid in _hc.db_game_session_pids(
                         int(active_match[0])) if int(pid) != player_uid),
                     0)
                 other_signup = _hc.db_tournament_signup_by_player(
-                    tournament_id, other_pid, conn=_hc._db)
+                    tournament_id, other_pid, conn=db._db)
                 other_searching = bool(
                     other_signup and other_signup.get("status") == "active"
                     and int(other_signup.get("searching", 0) or 0))
@@ -420,9 +421,9 @@ def handle_request_25039(handler, target, instance, data_type, reqid, comp, sess
                     # unfinished assignment and its game state; it is
                     # not a win or loss in the async event.
                     _hc.db_tournament_discard_match(
-                        tournament_id, active_match[0], conn=_hc._db)
-                    _hc.db_delete_game_session(active_match[0], conn=_hc._db)
-                    _hc._db.commit()
+                        tournament_id, active_match[0], conn=db._db)
+                    _hc.db_delete_game_session(active_match[0], conn=db._db)
+                    db._db.commit()
                     log_req(
                     f">>> GameEntrance: discarded stale Corinth "
                     f"match session={active_match[0]} for new search")
@@ -432,8 +433,8 @@ def handle_request_25039(handler, target, instance, data_type, reqid, comp, sess
                     # request; do not silently reconnect this client.
                     _hc.db_tournament_signup_set_async_state(
                         tournament_id, player_uid,
-                        deck_ready=True, searching=True, conn=_hc._db)
-                    _hc._db.commit()
+                        deck_ready=True, searching=True, conn=db._db)
+                    db._db.commit()
                     ok = True
                     active_match = None
                     log_req(
@@ -453,35 +454,35 @@ def handle_request_25039(handler, target, instance, data_type, reqid, comp, sess
                     # an explicit Play Game/Find Player action is a
                     # new search request and must re-enter that queue.
                     signup = _hc.db_tournament_signup_by_player(
-                        tournament_id, player_uid, conn=_hc._db)
+                        tournament_id, player_uid, conn=db._db)
                     if signup and signup.get("status") != "active":
                         _hc.db_tournament_signup_set_status(
-                            tournament_id, player_uid, "active", conn=_hc._db)
+                            tournament_id, player_uid, "active", conn=db._db)
                     _hc.db_tournament_signup_set_async_state(
                         tournament_id, player_uid,
                         deck_ready=True, searching=True,
-                        conn=_hc._db)
-                    _hc._db.commit()
+                        conn=db._db)
+                    db._db.commit()
                     _hc.try_start_corinth_match(
                         tournament_id, handler_override=handler)
         else:
             # Cancelling the search leaves the saved deck/pool
             # intact but removes this entrant from the match queue.
             _hc.db_tournament_signup_set_async_state(
-                tournament_id, player_uid, searching=False, conn=_hc._db)
-            _hc._db.commit()
+                tournament_id, player_uid, searching=False, conn=db._db)
+            db._db.commit()
         # Searching is a valid asynchronous state even when no
         # opponent is available yet; the match transition is pushed
         # later when the second ready player arrives.
     elif searching:
         ok = ok and len(main_ids) == 20
         match = (_hc.db_tournament_match_session(
-            tournament_id, player_uid, conn=_hc._db)
+            tournament_id, player_uid, conn=db._db)
                   if ok else None)
         ok = ok and bool(match)
         if ok:
             _hc.db_apply_tournament_main_deck(
-                match[0], player_uid, main_ids, conn=_hc._db)
+                match[0], player_uid, main_ids, conn=db._db)
     log_req(f">>> GameEntrance (dt=25039) tid={tournament_id} "
         f"player={player_uid} searching={searching} ok={ok}")
     resp_inner = _hc.encode_objfmt_response(
@@ -519,8 +520,8 @@ def handle_request_25011(handler, target, instance, data_type, reqid, comp, sess
         deck = inner_obj
     main_cards = _hc._tournament_deck_card_ids(deck, "CardsInDeck")
     side_cards = _hc._tournament_deck_card_ids(deck, "CardsInSideboard")
-    room = _hc.db_tournament_room_for_game(tournament_id, conn=_hc._db)
-    pool = _hc.db_tournament_pool(tournament_id, player_uid, conn=_hc._db)
+    room = _hc.db_tournament_room_for_game(tournament_id, conn=db._db)
+    pool = _hc.db_tournament_pool(tournament_id, player_uid, conn=db._db)
     pool_by_id = {card_uid: template for card_uid, template, _loc in pool}
     submitted = main_cards + side_cards
     submitted_ids = [card_uid for card_uid, _guid in submitted]
@@ -537,11 +538,11 @@ def handle_request_25011(handler, target, instance, data_type, reqid, comp, sess
             tournament_id, player_uid,
             [(card_uid, guid, 0) for card_uid, guid in main_cards] +
             [(card_uid, guid, 1) for card_uid, guid in side_cards],
-            conn=_hc._db)
+            conn=db._db)
         if _hc._is_corinth_room(room or {}):
             _hc.db_tournament_signup_set_async_state(
                 tournament_id, player_uid,
-                deck_ready=True, searching=False, conn=_hc._db)
+                deck_ready=True, searching=False, conn=db._db)
     log_req(f">>> SaveTournamentDeck (dt=25011) tid={tournament_id} "
         f"player={player_uid} main={len(main_cards)} "
         f"side={len(side_cards)} valid={valid}")
@@ -619,14 +620,14 @@ def handle_request_25031(handler, target, instance, data_type, reqid, comp, sess
     player_uid = int(handler.client_reck_id) if handler.client_reck_id else 0
     tournament_id = int(inner_obj.get("TournamentID", 0) or 0)
     active_tournament_session = _hc.db_tournament_match_session(
-        tournament_id, player_uid, conn=_hc._db) if tournament_id else None
+        tournament_id, player_uid, conn=db._db) if tournament_id else None
     forfeit_recorded = bool(
         tournament_id and _hc.record_tournament_forfeit(
             tournament_id, player_uid, handler))
     if forfeit_recorded:
         log_req(f"    Recorded tournament forfeit: tid={tournament_id} "
             f"loser={player_uid}")
-        status = _hc.db_tournament_status(tournament_id, conn=_hc._db)
+        status = _hc.db_tournament_status(tournament_id, conn=db._db)
         if (status and str(status).lower() == "complete"
                 and active_tournament_session):
             _hc.db_delete_game_session(active_tournament_session[0])
@@ -638,7 +639,7 @@ def handle_request_25031(handler, target, instance, data_type, reqid, comp, sess
     # a withdrawn signup and leave the client in the lobby.
     if tournament_id and not forfeit_recorded:
         _hc.db_tournament_retire_player_run(
-            tournament_id, player_uid, conn=_hc._db)
+            tournament_id, player_uid, conn=db._db)
     _hc.tournament_server.leave_all(player_uid)
     resp_inner = _hc.encode_objfmt_response(
         ["Game.Shared.Network.Tournaments.LeaveTournamentResponseArgs",

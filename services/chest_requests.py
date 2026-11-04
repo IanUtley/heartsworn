@@ -8,6 +8,7 @@ import json
 import random
 import re
 from db import log_req
+import db
 
 
 def handle_chest_spinning_2049(handler, target, instance, data_type, reqid, comp, session_id,
@@ -95,7 +96,7 @@ def handle_opencardpack_2127(handler, target, instance, data_type, reqid, comp, 
     log_req(f">>> OpenCardPack: pack_guid={pack_guid} amount={open_amount}")
 
     # Map store item GUID to card set GUID — query pack_set_map table
-    row = _hc.db_pack_set_info(pack_guid, conn=_hc._db)
+    row = _hc.db_pack_set_info(pack_guid, conn=db._db)
     if row:
         set_guid, is_full_set, is_primal = row
     else:
@@ -109,7 +110,7 @@ def handle_opencardpack_2127(handler, target, instance, data_type, reqid, comp, 
     pack_error_code = 0
     if handler.user_profile:
         existing = _hc.db_inventory_item(
-            handler.user_profile["id"], pack_guid, conn=_hc._db)
+            handler.user_profile["id"], pack_guid, conn=db._db)
         if not existing or existing[1] < open_amount:
             pack_error = "NotEnoughInventory"
             pack_error_code = 5
@@ -184,7 +185,7 @@ def handle_opencardpack_2127(handler, target, instance, data_type, reqid, comp, 
     
         # Remove the booster pack from inventory
         consumed = _hc.db_consume_inventory(
-            handler.user_profile["id"], pack_guid, open_amount, conn=_hc._db)
+            handler.user_profile["id"], pack_guid, open_amount, conn=db._db)
         if consumed:
             pack_client_uid, new_qty = consumed
             log_req(f"    Consumed {open_amount}x pack {pack_guid} from inventory (remaining={max(0, new_qty)})")
@@ -200,15 +201,15 @@ def handle_opencardpack_2127(handler, target, instance, data_type, reqid, comp, 
         # whatever card happened to occupy that ID.  That made the
         # first card in an opened pack appear as an unrelated card.
         next_id = _hc.db_next_card_instance_for_user(
-            handler.user_profile["id"], conn=_hc._db)
+            handler.user_profile["id"], conn=db._db)
         new_card_data = []
         for i, (guid, name, cost, atk, def_) in enumerate(all_cards):
             cid = next_id + i
             _hc.db_insert_card_instance(
-                handler.user_profile["id"], cid, guid, conn=_hc._db)
+                handler.user_profile["id"], cid, guid, conn=db._db)
             new_card_data.append((guid, name, cost, atk, def_, cid, 0))
             card_instance_ids[i] = cid  # Update for response encoding
-        _hc._db.commit()
+        db._db.commit()
         log_req(f"    Created {len(new_card_data)} card_instances IDs {new_card_data[0][5]}-{new_card_data[-1][5]}")
 
         # OpenCardPackResponse.NewCardInstances is the authoritative
@@ -226,7 +227,7 @@ def handle_opencardpack_2127(handler, target, instance, data_type, reqid, comp, 
         if pack_inventory_rewards:
             pack_inventory_updates = _hc._grant_pack_inventory_rewards(
                 handler, pack_inventory_rewards)
-            _hc._db.commit()
+            db._db.commit()
 
         # Every booster pack contains one treasure chest
         # (BoosterPack_Content_Combined), and a Primal Pack a Legendary
@@ -237,9 +238,9 @@ def handle_opencardpack_2127(handler, target, instance, data_type, reqid, comp, 
                     open_amount, is_primal):
                 chest_db_id = _hc.db_create_treasure_chest(
                     handler.user_profile["id"], set_guid, chest_rarity,
-                    conn=_hc._db)
+                    conn=db._db)
                 new_chests.append((chest_rarity, chest_db_id))
-            _hc._db.commit()
+            db._db.commit()
             log_req(f"    Generated {len(new_chests)} chests: "
                     f"{[rarity for rarity, _ in new_chests]}")
     

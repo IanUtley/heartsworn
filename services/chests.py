@@ -4,6 +4,7 @@ import random
 import threading
 from collections import namedtuple
 from db import log_req
+import db
 
 
 # The fixed client addresses every treasure chest by the InventoryItem UID the
@@ -42,7 +43,7 @@ def _resolve_client_chest(user_id, chest_uid):
     # can collide with another inventory instance, so prefer an owned chest
     # row when resolving a legacy duplicated UID rather than whichever
     # unrelated row happens to sort first.
-    row = _hc._db.execute(
+    row = db._db.execute(
         "SELECT i.id, i.template_guid, i.quantity, i.client_item_uid, "
         "c.set_guid, c.chest_type FROM player_inventory i "
         "JOIN chest_templates c ON lower(c.guid)=lower(i.template_guid) "
@@ -53,7 +54,7 @@ def _resolve_client_chest(user_id, chest_uid):
                            row[5] or "Promo", None, row[0])
     if chest_uid >= CLIENT_CHEST_UID_BASE:
         row = _hc.db_get_chest_by_id(
-            chest_uid - CLIENT_CHEST_UID_BASE, user_id, conn=_hc._db)
+            chest_uid - CLIENT_CHEST_UID_BASE, user_id, conn=db._db)
         if row:
             return ClientChest(chest_uid, row[4] or "", row[1] or "",
                                row[2] or "Common", row[0], None)
@@ -88,7 +89,7 @@ def _generate_chest_rewards(chest, card_templates, rng=None):
     if cards is None:
         from services.chest_loot import roll_chest_loot
         loot_cards, inventory_rewards = roll_chest_loot(
-            _hc._db, card_templates, chest.set_guid, chest.chest_type, rng)
+            db._db, card_templates, chest.set_guid, chest.chest_type, rng)
         if loot_cards or inventory_rewards:
             return loot_cards, inventory_rewards
         cards = _hc._generate_booster(card_templates, chest.set_guid)
@@ -106,19 +107,19 @@ def _grant_pack_inventory_rewards(handler, inventory_rewards):
     """
     import hconnect_server as _hc
     user_id = handler.user_profile["id"]
-    next_uid = _hc.db_next_inventory_client_uid(user_id, conn=_hc._db)
+    next_uid = _hc.db_next_inventory_client_uid(user_id, conn=db._db)
     updates = {}
     for template_guid, _kind in inventory_rewards:
-        row = _hc.db_inventory_item(user_id, template_guid, conn=_hc._db)
+        row = _hc.db_inventory_item(user_id, template_guid, conn=db._db)
         candidate_uid = next_uid if not row or not row[2] else 0
         client_uid = _hc.db_upsert_inventory_item(
-            user_id, template_guid, 1, client_item_uid=candidate_uid, conn=_hc._db)
+            user_id, template_guid, 1, client_item_uid=candidate_uid, conn=db._db)
         if candidate_uid:
             next_uid += 1
         if template_guid in _hc.STARDUST_TEMPLATES.values():
             rarity = next(key for key, value in _hc.STARDUST_TEMPLATES.items()
                           if value == template_guid)
-            _hc.db_add_stardust(user_id, rarity, 1, conn=_hc._db)
+            _hc.db_add_stardust(user_id, rarity, 1, conn=db._db)
         updates[template_guid] = (client_uid, int(row[1] or 0) + 1 if row else 1)
     return [(guid, client_uid, quantity)
             for guid, (client_uid, quantity) in updates.items()]
@@ -135,7 +136,7 @@ def _roll_pack_chest_rarities(pack_count, is_primal=False, rng=None):
     import hconnect_server as _hc
     if is_primal:
         return ["Legendary"] * pack_count
-    probs = _hc.db_chest_probabilities(conn=_hc._db)
+    probs = _hc.db_chest_probabilities(conn=db._db)
     if not probs:
         return []
     rng = rng or random
@@ -151,11 +152,11 @@ def _grant_reward_cards(user_id, cards):
     """
     import hconnect_server as _hc
     granted = []
-    next_id = _hc.db_next_card_instance_id(user_id, conn=_hc._db)
+    next_id = _hc.db_next_card_instance_id(user_id, conn=db._db)
     for offset, (guid, name, cost, atk, def_) in enumerate(cards):
         instance_id = next_id + offset
-        _hc.db_add_card(user_id, guid, conn=_hc._db)
-        _hc.db_create_card_instance(user_id, instance_id, guid, conn=_hc._db)
+        _hc.db_add_card(user_id, guid, conn=db._db)
+        _hc.db_create_card_instance(user_id, instance_id, guid, conn=db._db)
         granted.append((guid, name, cost, atk, def_, instance_id, 0))
     return granted
 
@@ -186,22 +187,22 @@ def _spin_client_chest(handler, chest_uid, rng=None):
             summary["error"] = (wof.NOT_PLAYERS_CHEST if chest is None
                                 else wof.NO_SPIN_LEFT)
             return summary
-        spun, spin_status = wof.chest_spin_state(_hc._db, chest.db_id)
+        spun, spin_status = wof.chest_spin_state(db._db, chest.db_id)
         summary.update(rarity=chest.chest_type, spin_status=spin_status,
                        set_guid=chest.set_guid)
         if not wof.can_spin(spun, spin_status):
             summary["error"] = wof.NO_SPIN_LEFT
             return summary
         cost = wof.spin_cost(chest.chest_type, spin_status)
-        if db_get_user_currency(user_id, "gold", conn=_hc._db) < cost:
+        if db_get_user_currency(user_id, "gold", conn=db._db) < cost:
             summary["error"] = wof.NOT_ENOUGH_GOLD
             return summary
 
-        result = wof.roll_spin(_hc._db, _hc._load_card_templates(),
+        result = wof.roll_spin(db._db, _hc._load_card_templates(),
                                chest.set_guid, chest.chest_type, rng or random)
         db_adjust_user_currency(user_id, gold_delta=result.gold - cost,
-                                conn=_hc._db)
-        wof.save_spin(_hc._db, chest.db_id, result)
+                                conn=db._db)
+        wof.save_spin(db._db, chest.db_id, result)
         summary.update(
             rarity=result.rarity, spin_status=result.spin_status,
             gold=result.gold, colors=result.colors, symbols=result.symbols,
@@ -209,7 +210,7 @@ def _spin_client_chest(handler, chest_uid, rng=None):
             cards=_grant_reward_cards(user_id, result.cards),
             inventory_updates=_grant_pack_inventory_rewards(
                 handler, result.inventory_rewards))
-        _hc._db.commit()
+        db._db.commit()
     log_req(f"    Spun chest {chest_uid} ({chest.chest_type}, cost {cost}): "
             f"{result.outcome} symbols={result.symbols} colors={result.colors} "
             f"gold={result.gold} -> {result.rarity} status={result.spin_status}")
@@ -294,11 +295,11 @@ def _open_client_chests(handler, chest_uids):
             summary["inventory_template_ids"].append(guid)
             summary["inventory_updates"].append((guid, item_uid, quantity))
         if chest.db_id is not None:
-            _hc.db_open_chest(chest.db_id, conn=_hc._db)
+            _hc.db_open_chest(chest.db_id, conn=db._db)
             remaining = 0
         else:
             remaining = _hc.db_consume_inventory_row(
-                chest.inventory_row_id, 1, conn=_hc._db)
+                chest.inventory_row_id, 1, conn=db._db)
         summary["opened"].append((chest.template_guid, chest_uid, remaining))
         log_req(f"    Opened chest {chest_uid} "
             f"({chest.template_guid or chest.set_guid}): {len(cards)} cards, "

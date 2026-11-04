@@ -10,6 +10,7 @@ import re
 import struct
 from db import log_req
 import game_engine
+import db
 
 
 if TYPE_CHECKING:
@@ -30,7 +31,7 @@ class PendingChoicesMixin(_HostBase):
         import hconnect_server as _hc
         from rules_port import lifecycle as _be
         from rules_port.targeting import legal_targets as _lt
-        candidates = _lt(_hc._db, session.session_id, owner_id, shard_tpl,
+        candidates = _lt(db._db, session.session_id, owner_id, shard_tpl,
                          int(played_card_uid or 0), both_players=False,
                          champions=[])
         candidates = [int(c) for c in candidates]
@@ -50,7 +51,7 @@ class PendingChoicesMixin(_HostBase):
         from rules_port.resources import (
             apply_resource_change, card_template_threshold_flags)
         provided = card_template_threshold_flags(
-            _hc._db, session.session_id, int(chosen))
+            db._db, session.session_id, int(chosen))
         threshold_colors = sorted({
             int(flag) for flag in game_engine.SHARD_TO_FLAG.values()
             if provided & int(flag)})
@@ -74,7 +75,7 @@ class PendingChoicesMixin(_HostBase):
                 champion = getattr(self, "_ai_champ_scid", None)
                 if champion is not None:
                     dispatch_native_trigger(
-                        db=_hc._db, handler=self, game=game, session=session,
+                        db=db._db, handler=self, game=game, session=session,
                         player_uid=pl_t, ai_uid=ai_t, battle_state=bstate,
                         event_type="GainThresholdEvent",
                         source_card_id=int(champion.uid.uid64),
@@ -127,7 +128,7 @@ class PendingChoicesMixin(_HostBase):
             prompt_owner_id = bstate.get("resolving_owner_id")
         if prompt_owner_id is None:
             prompt_owner_id = _hc.db_card_owner_id(
-                session.session_id, source_uid, conn=_hc._db)
+                session.session_id, source_uid, conn=db._db)
         if prompt_owner_id is None:
             prompt_owner_id = 0
         prompt_owner_id = int(prompt_owner_id)
@@ -144,7 +145,7 @@ class PendingChoicesMixin(_HostBase):
             try:
                 all_target_ids = json.loads(
                     _hc.db_ability_target_template_ids(
-                        ability_guid, conn=_hc._db) or "[]")
+                        ability_guid, conn=db._db) or "[]")
             except (TypeError, ValueError, json.JSONDecodeError):
                 all_target_ids = []
         if candidates and all(isinstance(c, (list, tuple, set))
@@ -161,7 +162,7 @@ class PendingChoicesMixin(_HostBase):
                  if str(known).lower() == str(tid).lower()), position)
             from rules_port.targeting import authored_target_candidates
             authored = authored_target_candidates(
-                _hc._db, session.session_id, prompt_owner_id,
+                db._db, session.session_id, prompt_owner_id,
                 all_target_ids, index, source_uid=source_uid, battle_state=bstate)
             if position < len(candidate_sets) and candidate_sets[position]:
                 uids = [int(u) for u in candidate_sets[position]]
@@ -171,7 +172,7 @@ class PendingChoicesMixin(_HostBase):
                 try:
                     from rules_port.targeting import legal_targets
                     uids = [int(u) for u in legal_targets(
-                        _hc._db, session.session_id, prompt_owner_id, tid,
+                        db._db, session.session_id, prompt_owner_id, tid,
                         source_uid, both_players=True,
                         champions=self._champion_targets(),
                         battle_state=bstate)]
@@ -391,9 +392,9 @@ class PendingChoicesMixin(_HostBase):
             ir_exec.resume_conversation(
                 continuation,
                 context=EffectContext.from_rules_port(
-                    g, session, _hc._db, self, pl_t, ai_t, pending_state, ""))
+                    g, session, db._db, self, pl_t, ai_t, pending_state, ""))
         except ir_exec.NeedsChoice as pause:
-            prompt_interpreted_reveal(self, g, session, _hc._db, pl_t, ai_t,
+            prompt_interpreted_reveal(self, g, session, db._db, pl_t, ai_t,
                                       pending_state, pause)
             _be.save_state(session, pending_state)
             self._send_battle_events(session, g, pl_t)
@@ -469,7 +470,7 @@ class PendingChoicesMixin(_HostBase):
         ability_owner_id = int(owner_id if stored_owner is None
                                else stored_owner)
         resolve_port_ability(
-            self, game, session, _hc._db, pl_t, ai_t, pending_state,
+            self, game, session, db._db, pl_t, ai_t, pending_state,
             pending.get("ability_guid", ""), pending.get("source_uid"),
             ability_owner_id, target_map={int(k): v for k, v in
                                   (pending.get("target_map") or {}).items()},
@@ -580,7 +581,7 @@ class PendingChoicesMixin(_HostBase):
             for cu in pend["candidates"]:
                 c_scid = game_engine.SessionCardId(game_engine.UID(int(cu)))
                 c_row = _hc.db_card_zone_details(
-                    session.session_id, int(cu), conn=_hc._db)
+                    session.session_id, int(cu), conn=db._db)
                 if not c_row:
                     continue
                 c_tpl = c_row[0]
@@ -815,7 +816,7 @@ class PendingChoicesMixin(_HostBase):
             from rules_port.resolution import prompt_interpreted_reveal
             bstate["_rules_port_attached"] = True
             choice_context = EffectContext.from_rules_port(
-                g, session, _hc._db, self, pl_t, ai_t, bstate, "", ability=None)
+                g, session, db._db, self, pl_t, ai_t, bstate, "", ability=None)
             if not play_choice_card(choice_context, chosen_uid, owner_id):
                 log_req(f"    Choice answer rejected: {hex(int(chosen_uid))}")
                 bstate["pending_choice"] = pending
@@ -829,9 +830,9 @@ class PendingChoicesMixin(_HostBase):
             try:
                 ir_exec.resume_conversation(
                     pending["interpreter"],
-                    context=EffectContext.from_rules_port(g, session, _hc._db, self, pl_t, ai_t, bstate, ""))
+                    context=EffectContext.from_rules_port(g, session, db._db, self, pl_t, ai_t, bstate, ""))
             except ir_exec.NeedsChoice as pause:
-                prompt_interpreted_reveal(self, g, session, _hc._db, pl_t, ai_t, bstate, pause)
+                prompt_interpreted_reveal(self, g, session, db._db, pl_t, ai_t, bstate, pause)
             except ir_exec.NeedsConversation:
                 pass  # the next pause is saved; the client's answer resumes the interpreter
             else:
@@ -861,7 +862,7 @@ class PendingChoicesMixin(_HostBase):
             child_targets[int(continuation.get("target_index", 0))] = \
                 int(chosen_uid)
             resolve_port_ability(
-                self, g, session, _hc._db, pl_t, ai_t, bstate,
+                self, g, session, db._db, pl_t, ai_t, bstate,
                 child_guid, child_source, child_owner,
                 target_map=child_targets,
                 variables=continuation.get("variables") or {},
@@ -871,7 +872,7 @@ class PendingChoicesMixin(_HostBase):
             parent_guid = str(parent.get("ability_guid") or "").lower()
             if parent_guid and not bstate.get("resolution_paused"):
                 resolve_port_ability(
-                    self, g, session, _hc._db, pl_t, ai_t, bstate,
+                    self, g, session, db._db, pl_t, ai_t, bstate,
                     parent_guid, parent.get("source_uid"),
                     int(parent.get("owner_id", owner_id) or owner_id),
                     target_map=_hc._numeric_target_map(parent.get("target_map")),
@@ -933,7 +934,7 @@ class PendingChoicesMixin(_HostBase):
         bstate.get("phase")
         bstate["phase"] = game_engine.ETurnPhases.StartTurn
         choice_context = EffectContext.from_rules_port(
-            g, session, _hc._db, self, pl_t, ai_t, bstate,
+            g, session, db._db, self, pl_t, ai_t, bstate,
             "", ability=None)
         if not play_choice_card(choice_context, chosen_uid, owner_id):
             log_req(f"    Choice answer rejected: {hex(int(chosen_uid))}")
@@ -946,7 +947,7 @@ class PendingChoicesMixin(_HostBase):
             choice_context, chosen_uid, pending.get("source_uid"), owner_id)
         target_map = _hc._numeric_target_map(pending.get("target_map"))
         resolve_port_ability(
-            self, g, session, _hc._db, pl_t, ai_t, bstate,
+            self, g, session, db._db, pl_t, ai_t, bstate,
             pending["ability_guid"], pending.get("source_uid"), owner_id,
             target_map=target_map, variables=pending.get("variables") or {},
             resume_from_order=int(pending.get("resume_effect_order", 0)))
@@ -1068,7 +1069,7 @@ class PendingChoicesMixin(_HostBase):
         # particular, Starsphere moves the selected card to the top of the
         # deck; Oakhenge-style effects move their selected card to hand.
         move_row = next((row[2] for row in _hc.db_ability_effect_rows(
-            ability_guid, conn=_hc._db)
+            ability_guid, conn=db._db)
                          if row[1] == "MoveCardToZoneEffectTemplate"), None)
         try:
             move_spec = json.loads(move_row or "{}") if move_row else {}
@@ -1084,14 +1085,14 @@ class PendingChoicesMixin(_HostBase):
         target_index = int((continuation or {}).get("target_index") or 0)
         try:
             target_id = json.loads(_hc.db_ability_target_template_ids(
-                ability_guid, conn=_hc._db) or "[]")[target_index]
+                ability_guid, conn=db._db) or "[]")[target_index]
         except (TypeError, ValueError, IndexError, json.JSONDecodeError):
             target_id = "00000000-0000-0000-0000-000000000000"
 
         def build_prompt(g, player_uid):
             from pickers import PickRequest, PickTarget, present_pick
             rows = _hc.db_card_positions(
-                session.session_id, pend["revealed_cards"], conn=_hc._db)
+                session.session_id, pend["revealed_cards"], conn=db._db)
             # The reveal is sent unless a controller-private PvP reveal already went out in its own packet.
             # The picker reuses the reveal the game already holds for these cards, if there is one.
             reveal = (None if (bstate or {}).get("private_reveal_sent")
@@ -1595,7 +1596,7 @@ class PendingChoicesMixin(_HostBase):
             ai_t = game_engine.UID.make(game_engine.SERVICE_AI_UID_TYPE, 1000)
             game = self._fresh_game(session, pl_t, ai_t, state)
             result = resolve_port_ability(
-                self, game, session, _hc._db, pl_t, ai_t, state, guid,
+                self, game, session, db._db, pl_t, ai_t, state, guid,
                 parent.get("source_uid"), int(parent.get("owner_id", 0) or 0),
                 target_map=target_map,
                 variables=parent.get("variables") or {},
@@ -1605,7 +1606,7 @@ class PendingChoicesMixin(_HostBase):
             from rules_port.resolution import \
                 resume_ability_continuation_parents
             resume_ability_continuation_parents(
-                self, game, session, _hc._db, pl_t, ai_t, state,
+                self, game, session, db._db, pl_t, ai_t, state,
                 native_continuation)
             _be.save_state(session, state)
             completed_chain = self._completed_rules_port_chain(session, state)
@@ -1778,9 +1779,9 @@ class PendingChoicesMixin(_HostBase):
                 ir_exec.resume_ability(
                     native_continuation["interpreter"], answer,
                     context=EffectContext.from_rules_port(
-                        g, session, _hc._db, self, pl_t, ai_t, bstate, ""))
+                        g, session, db._db, self, pl_t, ai_t, bstate, ""))
             except ir_exec.NeedsChoice as pause:
-                prompt_interpreted_reveal(self, g, session, _hc._db, pl_t, ai_t, bstate, pause)
+                prompt_interpreted_reveal(self, g, session, db._db, pl_t, ai_t, bstate, pause)
                 _be.save_state(session, bstate)
                 self._send_battle_events(session, g, pl_t)
                 self._push_transaction_ack(session)
@@ -1803,7 +1804,7 @@ class PendingChoicesMixin(_HostBase):
             from rules_port.context import EffectContext
             from rules_port.deck_effects import move_deck_card_to_hand
             native_context = EffectContext.from_rules_port(
-                g, session, _hc._db, self, pl_t, ai_t, bstate,
+                g, session, db._db, self, pl_t, ai_t, bstate,
                 str(pend.get("ability_guid") or "").lower())
             move_deck_card_to_hand(
                 native_context, chosen_uid, pend["owner_id"])
@@ -1887,9 +1888,9 @@ class PendingChoicesMixin(_HostBase):
             try:
                 ir_exec.resume_ability(
                     interpreted, answer,
-                    context=EffectContext.from_rules_port(g, session, _hc._db, self, pl_t, ai_t, bstate, ""))
+                    context=EffectContext.from_rules_port(g, session, db._db, self, pl_t, ai_t, bstate, ""))
             except ir_exec.NeedsChoice as pause:
-                prompt_interpreted_reveal(self, g, session, _hc._db, pl_t, ai_t, bstate, pause)
+                prompt_interpreted_reveal(self, g, session, db._db, pl_t, ai_t, bstate, pause)
                 _be.save_state(session, bstate)
                 self._send_battle_events(session, g, pl_t)
                 self._push_transaction_ack(session)
@@ -1913,7 +1914,7 @@ class PendingChoicesMixin(_HostBase):
         child_targets[int(continuation.get("target_index", 0))] = \
             int(chosen_uid)
         resolve_port_ability(
-            self, g, session, _hc._db, pl_t, ai_t, bstate,
+            self, g, session, db._db, pl_t, ai_t, bstate,
             child_guid, child_source, child_owner,
             target_map=child_targets,
             variables=continuation.get("variables") or {},
@@ -1923,7 +1924,7 @@ class PendingChoicesMixin(_HostBase):
                 "ability_instance_id", continuation.get("instance_id", 1))
                 or 1))
         resume_ability_continuation_parents(
-            self, g, session, _hc._db, pl_t, ai_t, bstate, continuation)
+            self, g, session, db._db, pl_t, ai_t, bstate, continuation)
         _be.save_state(session, bstate)
         pending_input = (bstate.get("pending_choice") or
                          bstate.get("pending_trigger") or
@@ -1995,9 +1996,9 @@ class PendingChoicesMixin(_HostBase):
                     ir_exec.resume_ability(
                         native_continuation["interpreter"], answer,
                         context=EffectContext.from_rules_port(
-                            g, session, _hc._db, self, pl_t, ai_t, bstate, ""))
+                            g, session, db._db, self, pl_t, ai_t, bstate, ""))
                 except ir_exec.NeedsChoice as pause:
-                    prompt_interpreted_reveal(self, g, session, _hc._db, pl_t, ai_t, bstate, pause)
+                    prompt_interpreted_reveal(self, g, session, db._db, pl_t, ai_t, bstate, pause)
                     _be.save_state(session, bstate)
                     self._send_battle_events(session, g, pl_t)
                     self._push_transaction_ack(session)
@@ -2028,7 +2029,7 @@ class PendingChoicesMixin(_HostBase):
                 bstate.pop("pending_deck_search", None)
                 bstate.pop("resolution_paused", None)
                 resolve_port_ability(
-                    self, g, session, _hc._db, pl_t, ai_t, bstate,
+                    self, g, session, db._db, pl_t, ai_t, bstate,
                     str(native_continuation.get("ability_guid") or "").lower(),
                     int(native_continuation.get("source_uid") or 0),
                     int(native_continuation.get("owner_id", pend.get("owner_id", 0)) or 0),
@@ -2039,7 +2040,7 @@ class PendingChoicesMixin(_HostBase):
                     instance_id=int(native_continuation.get(
                         "ability_instance_id", pend.get("instance_id", 1))))
                 resume_ability_continuation_parents(
-                    self, g, session, _hc._db, pl_t, ai_t, bstate,
+                    self, g, session, db._db, pl_t, ai_t, bstate,
                     native_continuation)
                 _be.save_state(session, bstate)
                 self._send_battle_events(session, g, pl_t)
@@ -2067,10 +2068,10 @@ class PendingChoicesMixin(_HostBase):
                 # even when the revealed card was already at position zero.
                 _hc.db_move_card_to_deck_top(
                     session.session_id, chosen, state_after_zone_exit(0),
-                    conn=_hc._db)
-                _hc._db.commit()
+                    conn=db._db)
+                db._db.commit()
                 row = _hc.db_card_zone_details(
-                    session.session_id, chosen, conn=_hc._db)
+                    session.session_id, chosen, conn=db._db)
                 if row:
                     scid = game_engine.SessionCardId(game_engine.UID(chosen))
                     owner = pl_t if (row[2] or 0) != 0 else ai_t
@@ -2087,7 +2088,7 @@ class PendingChoicesMixin(_HostBase):
                 from rules_port.deck_effects import move_deck_card_to_hand
                 move_deck_card_to_hand(
                     EffectContext.from_rules_port(
-                        g, session, _hc._db, self, pl_t, ai_t, bstate, ""),
+                        g, session, db._db, self, pl_t, ai_t, bstate, ""),
                     int(chosen_uid), pend["owner_id"])
                 log_req(f"    Revealed choice: {hex(int(chosen_uid))} -> hand "
                     f"(owner {pend['owner_id']})")
@@ -2144,7 +2145,7 @@ class PendingChoicesMixin(_HostBase):
             g = self._fresh_game(session, pl_t, ai_t, bstate)
             from rules_port.resources import card_template_threshold_flags
             provided = card_template_threshold_flags(
-                _hc._db, session.session_id, int(chosen_uid))
+                db._db, session.session_id, int(chosen_uid))
             threshold_colors = sorted({
                 int(flag) for flag in game_engine.SHARD_TO_FLAG.values()
                 if provided & int(flag)})
@@ -2169,7 +2170,7 @@ class PendingChoicesMixin(_HostBase):
                     champion = getattr(self, "_player_champ_scid", None)
                     if champion is not None:
                         dispatch_native_trigger(
-                            db=_hc._db, handler=self, game=g, session=session,
+                            db=db._db, handler=self, game=g, session=session,
                             player_uid=pl_t, ai_uid=ai_t,
                             battle_state=bstate,
                             event_type="GainThresholdEvent",
@@ -2211,7 +2212,7 @@ class PendingChoicesMixin(_HostBase):
         for cu in uids:
             c_scid = game_engine.SessionCardId(game_engine.UID(int(cu)))
             c_row = _hc.db_card_zone_details(
-                session.session_id, int(cu), conn=_hc._db)
+                session.session_id, int(cu), conn=db._db)
             if not c_row:
                 continue
             if str(c_row[3] or "").lower() == "discard":
@@ -2230,7 +2231,7 @@ class PendingChoicesMixin(_HostBase):
                 continue
             _hc.db_move_card_to_deck(
                 session.session_id, int(cu), state_after_zone_exit(0),
-                conn=_hc._db)
+                conn=db._db)
             owner = pl_t if (c_row[2] or 0) != 0 else ai_t
             _tpl2, ct2, _n2, _c2, _a2, _d2, _g2 = self._card_full_data(
                 game, c_scid, c_row[0], c_row[1])

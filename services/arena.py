@@ -27,6 +27,7 @@ from db import log_req as _log_req
 from encoder import (compress_gzip, encode_datawrapper,
                      encode_get_challengers_response,
                      encode_objfmt_response)
+import db
 
 
 _ZERO_GUID = "00000000-0000-0000-0000-000000000000"
@@ -462,7 +463,7 @@ def _grant_arena_chests(handler, user_id, chest_count):
         equipment.append((reward.equipment_guid, "equipment"))
     _grant_reward_cards(user_id, cards)
     updates = _grant_pack_inventory_rewards(handler, equipment)
-    _hc._db.commit()
+    db._db.commit()
     for guid, client_uid, quantity in updates:
         handler.push_inventory_to_client(
             qty=quantity, template_guid=guid, item_id=client_uid)

@@ -10,6 +10,7 @@ from datetime import datetime
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 
 from tests.test_db import fresh_database
+import db as dbmod
 
 # Bind this process's test database before any runtime import
 # opens ``db``; the live ``hconnect.db`` is never opened.
@@ -298,9 +299,9 @@ def test_ai_owned_reattach_builds_combat_phase_facts():
     from rules_port import lifecycle
 
     db, path = _database_copy()
-    old_hcs_db = hcs._db
+    old_hcs_db = dbmod._db
     old_ai_db = ai._db
-    hcs._db = db
+    dbmod._db = db
     ai._db = db
     try:
         class _Game:
@@ -362,7 +363,7 @@ def test_ai_owned_reattach_builds_combat_phase_facts():
         assert port.has_legal_attackers is True
         assert port.active_player_skips_attack is False
     finally:
-        hcs._db = old_hcs_db
+        dbmod._db = old_hcs_db
         ai._db = old_ai_db
         db.close()
         pass  # in-memory database: nothing to remove

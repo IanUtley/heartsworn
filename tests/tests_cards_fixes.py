@@ -570,7 +570,7 @@ def test_crazed_squirrel_titan_ai_battles_a_legal_opposing_troop(db):
     # Lethal damage is applied by the chain's state-based step; use the real
     # production method so the troop that took lethal damage actually dies.
     import hconnect_server as _hcs
-    _hcs._db = db  # the state-based step reads the server's database
+    dbmod._db = db  # the state-based step reads the server's database
     handler.chain_state_based = (
         lambda session, state, game_, p, a:
         _hcs.HCPHandler.chain_state_based(handler, session, state, game_, p, a))
@@ -632,9 +632,9 @@ def test_oakhenge_reveal_opens_one_selectable_picker(db):
     db.commit()
 
     old_db = dbmod._db
-    old_hcs_db = hcs._db
+    old_hcs_db = dbmod._db
     dbmod._db = db
-    hcs._db = db
+    dbmod._db = db
     try:
         from rules_port import lifecycle
 
@@ -714,7 +714,7 @@ def test_oakhenge_reveal_opens_one_selectable_picker(db):
             session, pl_t, ai_t, bstate, pend, 364)
     finally:
         dbmod._db = old_db
-        hcs._db = old_hcs_db
+        dbmod._db = old_hcs_db
 
     assert not prompts[1:], f"the picker was raised twice: {prompts}"
     rows = db.execute(
@@ -762,9 +762,9 @@ def test_oakhenge_single_revealed_troop_moves_without_a_picker(db):
     db.commit()
 
     old_db = dbmod._db
-    old_hcs_db = hcs._db
+    old_hcs_db = dbmod._db
     dbmod._db = db
-    hcs._db = db
+    dbmod._db = db
     try:
         from rules_port import lifecycle
 
@@ -789,7 +789,7 @@ def test_oakhenge_single_revealed_troop_moves_without_a_picker(db):
             game, session, db, handler, pl_t, ai_t, bstate, [OAK_AG])
     finally:
         dbmod._db = old_db
-        hcs._db = old_hcs_db
+        dbmod._db = old_hcs_db
 
     reveals = [event for event in game.events if isinstance(
         event, game_engine.CardsRevealedSessionEventArgs)]
@@ -843,9 +843,9 @@ def test_dream_eagle_one_of_them_offers_only_the_looked_at_cards(db):
     db.commit()
 
     old_db = dbmod._db
-    old_hcs_db = hcs._db
+    old_hcs_db = dbmod._db
     dbmod._db = db
-    hcs._db = db
+    dbmod._db = db
     try:
         handler = HandlerStub(db)
         handler._checkpoint_engine = lambda session: lifecycle
@@ -865,7 +865,7 @@ def test_dream_eagle_one_of_them_offers_only_the_looked_at_cards(db):
             [SECONDARY], None, owner_id=5)
     finally:
         dbmod._db = old_db
-        hcs._db = old_hcs_db
+        dbmod._db = old_hcs_db
 
     entries = bstate["pending_trigger"]["target_entries"]
     assert len(entries) == 1, entries
@@ -1114,9 +1114,9 @@ def test_revealed_cards_put_back_into_deck_are_hidden_again(db):
     db.commit()
 
     old_db = dbmod._db
-    old_hcs_db = hcs._db
+    old_hcs_db = dbmod._db
     dbmod._db = db
-    hcs._db = db
+    dbmod._db = db
     try:
         from rules_port import lifecycle
 
@@ -1150,7 +1150,7 @@ def test_revealed_cards_put_back_into_deck_are_hidden_again(db):
             dgm._null_hidden_card_representation = original
     finally:
         dbmod._db = old_db
-        hcs._db = old_hcs_db
+        dbmod._db = old_hcs_db
 
     for uid in (372, 374, 375, 376):
         assert uid in nulled, (uid, nulled)
@@ -1277,9 +1277,9 @@ def test_discard_continuation_reprojects_native_chain_window(db):
         "activation_data": {"target_map": {0: (hand_card,)}}})
 
     old_db = dbmod._db
-    old_hcs_db = hcs._db
+    old_hcs_db = dbmod._db
     dbmod._db = db
-    hcs._db = db
+    dbmod._db = db
     try:
         calls = []
         with mock.patch.object(resolution_mod, "resolve_port_ability",
@@ -1313,7 +1313,7 @@ def test_discard_continuation_reprojects_native_chain_window(db):
             assert acks == [1], acks
     finally:
         dbmod._db = old_db
-        hcs._db = old_hcs_db
+        dbmod._db = old_hcs_db
 
 
 def test_crown_of_the_primals_buffs_target_troop(db):
@@ -1624,9 +1624,9 @@ def test_shards_of_fate_detection_and_ai_threshold(db):
     _copy_card(db, "00e13fdf-b2c3-4fe7-a064-ce4481b24e8d")  # Shards of Fate
     _copy_card(db, "133705cb-cdb1-42fe-b6c5-45f24c43b7cb")  # Blood Shard
     old_db = dbmod._db
-    old_hcs_db = hcs._db
+    old_hcs_db = dbmod._db
     dbmod._db = db
-    hcs._db = db
+    dbmod._db = db
     try:
         h = object.__new__(hcs.HCPHandler)
         ag, tpl = h._shards_of_fate_template(
@@ -1659,7 +1659,7 @@ def test_shards_of_fate_detection_and_ai_threshold(db):
         assert bstate.get("ai_total_resources", 0) == 0, bstate
     finally:
         dbmod._db = old_db
-        hcs._db = old_hcs_db
+        dbmod._db = old_hcs_db
 
 
 def test_shard_of_cunning_ai_plays_choice_and_gains_threshold(db):
@@ -1887,9 +1887,9 @@ def test_resource_grant_columns_from_gamedata(db):
     _copy_card(db, "00e13fdf-b2c3-4fe7-a064-ce4481b24e8d")  # Shards of Fate
     _copy_card(db, "8554b2c8-cf48-467d-bf55-ab45e306ce43")  # Sapphire Shard
     old_db = dbmod._db
-    old_hcs_db = hcs._db
+    old_hcs_db = dbmod._db
     dbmod._db = db
-    hcs._db = db
+    dbmod._db = db
     try:
         from db import db_ensure_resource_grants
         db_ensure_resource_grants(db)
@@ -1905,7 +1905,7 @@ def test_resource_grant_columns_from_gamedata(db):
         assert row2 == (1, 1), row2  # basic shard: current + max
     finally:
         dbmod._db = old_db
-        hcs._db = old_hcs_db
+        dbmod._db = old_hcs_db
 
 
 def test_granted_resource_ability_adds_fruitful_forsight_resources(db):

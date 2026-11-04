@@ -22,6 +22,7 @@ fresh_database()   # bind this process's database before ``db`` is imported
 import game_engine
 
 from tests.tests_combat import make_db, add_card, HandlerStub, SessionStub, TPL_GLADIATOR
+import db as dbmod
 
 
 def _ag(seed):
@@ -693,8 +694,8 @@ def test_hand_discard_child_with_no_legal_card_completes_without_prompt(db):
               "_rules_port_attached": True,
               "_rules_port_native_effect": True, "stack": []}
 
-    old_hcs_db = hcs._db
-    hcs._db = db
+    old_hcs_db = dbmod._db
+    dbmod._db = db
     try:
         context = EffectContext.from_rules_port(
             game, session, db, handler, pl_t, ai_t, bstate, "", ability=None)
@@ -704,7 +705,7 @@ def test_hand_discard_child_with_no_legal_card_completes_without_prompt(db):
             handler, game, session, db, pl_t, ai_t, bstate,
             bstate["stack"].pop())
     finally:
-        hcs._db = old_hcs_db
+        dbmod._db = old_hcs_db
 
     assert result == "COMPLETED", result
     assert not bstate.get("resolution_paused"), bstate

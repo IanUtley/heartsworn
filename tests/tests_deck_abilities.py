@@ -277,7 +277,7 @@ def test_prairie_scout_activation_gating(db):
     from hconnect_server import HCPHandler
 
     # The affordable-ability query reads hconnect_server's connection.
-    hmod._db = db
+    dbmod._db = db
 
     class PrairieHandler:
         user_profile = {"id": 5}
@@ -371,8 +371,8 @@ def test_hand_tunnel_activation_gating(db):
         return value
 
     handler = ReeseHandler(db)
-    old_db = hcs._db
-    hcs._db = db
+    old_db = dbmod._db
+    dbmod._db = db
     try:
         available = HCPHandler._affordable_troop_abilities(
             handler, SessionStub(), state(2, 1))
@@ -398,7 +398,7 @@ def test_hand_tunnel_activation_gating(db):
         assert not HCPHandler._affordable_troop_abilities(
             handler, SessionStub(), state(2, 0))
     finally:
-        hcs._db = old_db
+        dbmod._db = old_db
 
 
 def test_pregame_health_counts_only_heals(db):
@@ -423,7 +423,7 @@ def test_escalation_preview_value(db):
     import hconnect_server as hmod
     from hconnect_server import HCPHandler
     dbmod._db = db
-    hmod._db = db
+    dbmod._db = db
     add_card(db, 101, 5, "eternal_youth", "hand")
 
     class EH:
@@ -523,8 +523,8 @@ def test_cardupdated_carries_counters_and_related(db):
     import hconnect_server as hmod
     from hconnect_server import HCPHandler
     dbmod._db = db
-    hmod._db = db
-    hmod._db = db
+    dbmod._db = db
+    dbmod._db = db
     add_card(db, 101, 5, "incantation", "warzone")
     add_card(db, 102, 5, "exile", "warzone")
     db.execute(
@@ -590,7 +590,7 @@ def test_burn_champion_playable(db):
     import hconnect_server as hmod
     from hconnect_server import HCPHandler
     dbmod._db = db
-    hmod._db = db
+    dbmod._db = db
 
     class Stub:
         user_profile = {"id": 5}
@@ -624,7 +624,7 @@ def test_auto_target_no_picker(db):
     import hconnect_server as hmod
     from hconnect_server import HCPHandler
     dbmod._db = db
-    hmod._db = db
+    dbmod._db = db
 
     class Stub:
         user_profile = {"id": 5}
@@ -655,7 +655,7 @@ def test_gem_survives_repush(db):
     import hconnect_server as hmod
     from hconnect_server import HCPHandler
     dbmod._db = db
-    hmod._db = db
+    dbmod._db = db
     # card_template_id carries the FRA instance id; gems is the socketed gem
     # persisted on the card row.
     db.execute(
@@ -702,7 +702,7 @@ def test_consumed_one_shot_stays_off_card_updated(db):
     import hconnect_server as hmod
     from hconnect_server import HCPHandler
     dbmod._db = db
-    hmod._db = db
+    dbmod._db = db
     add_card(db, 101, 0, "wretched_wrangler", "warzone")
     db.execute(
         "UPDATE game_cards SET card_abilities='[]' WHERE session_id=1 "
@@ -808,7 +808,7 @@ def test_poca_ability_no_picker(db):
     import hconnect_server as hmod
     from hconnect_server import HCPHandler
     dbmod._db = db
-    hmod._db = db
+    dbmod._db = db
 
     class Stub:
         user_profile = {"id": 5}

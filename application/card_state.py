@@ -10,6 +10,7 @@ from typing import Any, cast
 import game_engine
 from rules_port.card_view import CardView
 from db import log_req
+import db
 
 
 if TYPE_CHECKING:
@@ -60,7 +61,7 @@ class CardStateMixin(_HostBase):
         if user_id is None:
             return None, None, None, 0, 0, 0
         row = _hc.db_card_instance_display(
-            user_id, card_ref, conn=_hc._db)
+            user_id, card_ref, conn=db._db)
         if row:
             return row[0], row[1], row[2], row[3] or 0, row[4] or 0, row[5] or 0
         return None, None, None, 0, 0, 0
@@ -91,7 +92,7 @@ class CardStateMixin(_HostBase):
         if scid is not None:
             joined = (instance_projection if instance_projection is not None
                       else _hc.db_card_instance_dynamic_projection(
-                          game.session_id.uid64, scid.uid.uid64, conn=_hc._db))
+                          game.session_id.uid64, scid.uid.uid64, conn=db._db))
             irow = joined
         t = None
         records_template = None
@@ -193,7 +194,7 @@ class CardStateMixin(_HostBase):
         native_cost = None
         from rules_port.static_rules import effective_cost
         native_cost = effective_cost(
-            _hc._db, game.session_id.uid64, native_bstate, scid.uid.uid64)
+            db._db, game.session_id.uid64, native_bstate, scid.uid.uid64)
         cost_mod = 0
         if tpl_guid != "00000000-0000-0000-0000-000000000000":
             records_template = (records_template if records_template and
@@ -232,7 +233,7 @@ class CardStateMixin(_HostBase):
             if records_template:
                 subtype = records_template[9] or ""
             else:
-                subtype = _hc.db_template_subtype(tpl_guid, conn=_hc._db) or ""
+                subtype = _hc.db_template_subtype(tpl_guid, conn=db._db) or ""
         except Exception:
             subtype = ""
         if subtype_override is not None:
@@ -276,7 +277,7 @@ class CardStateMixin(_HostBase):
             # combined value as one legacy gem enum.
             display_gems |= _hc.EMPTY_SOCKET_GEMS
         if gem_type:
-            gem_guids = _hc.db_gem_ability_guids(gem_type, conn=_hc._db)
+            gem_guids = _hc.db_gem_ability_guids(gem_type, conn=db._db)
             for gem_guid in gem_guids:
                 gem_guid = str(gem_guid).lower()
                 if gem_guid not in ability_guids:
@@ -300,14 +301,14 @@ class CardStateMixin(_HostBase):
                 if merged != current:
                     _hc.db_set_card_abilities(
                         game.session_id.uid64, scid.uid.uid64,
-                        json.dumps(merged), conn=_hc._db)
+                        json.dumps(merged), conn=db._db)
                     # _card_full_data() is also called immediately before the
                     # battle state is persisted.  That save uses the separate
                     # game_session connection, so leave the shared connection
                     # transaction closed or it can deadlock on its own write
                     # (especially during the opening hand when socketed cards
                     # are re-pushed).
-                    _hc._db.commit()
+                    db._db.commit()
         # Encounter scene statics are continuous effects. Apply them silently
         # when a card is materialized in the relevant zone, using the granted
         # ability's typed target filter. Beast Crossing therefore affects only
@@ -323,7 +324,7 @@ class CardStateMixin(_HostBase):
             scene_int_attrs = {}
             scene_int_attrs.update(persisted_int_attrs)
             for _ag in ability_guids:
-                for _eg, _et, _ep in _hc.db_ability_effect_rows(_ag, conn=_hc._db):
+                for _eg, _et, _ep in _hc.db_ability_effect_rows(_ag, conn=db._db):
                     if _et != "CardModifierAbilityEffectTemplate":
                         continue
                     try:
@@ -343,7 +344,7 @@ class CardStateMixin(_HostBase):
             for scene_ag in ((getattr(self, "_scene_global_ability_guids", []) or [])
                              + (getattr(self, "_scene_targeted_ability_guids", []) or [])):
                 target_ids_json = _hc.db_ability_target_template_ids(
-                    scene_ag, conn=_hc._db)
+                    scene_ag, conn=db._db)
                 try:
                     target_ids = json.loads(target_ids_json or "[]")
                 except (TypeError, ValueError):
@@ -364,7 +365,7 @@ class CardStateMixin(_HostBase):
                 qualifies = False
                 for target_id in target_ids:
                     filter_json = _hc.db_target_template_filter(
-                        target_id, conn=_hc._db)
+                        target_id, conn=db._db)
                     try:
                         filter_data = json.loads(filter_json or "{}")
                     except (TypeError, ValueError):
@@ -380,8 +381,8 @@ class CardStateMixin(_HostBase):
             if scene_added:
                 _hc.db_set_card_abilities(
                     game.session_id.uid64, scid.uid.uid64,
-                    json.dumps(ability_guids), conn=_hc._db)
-                _hc._db.commit()
+                    json.dumps(ability_guids), conn=db._db)
+                db._db.commit()
         # Effective attributes = static template attributes + any attributes
         # granted by the card's CURRENT passives. Attributes render as icons on
         # the card and must be present the whole time (not computed only during
@@ -411,13 +412,13 @@ class CardStateMixin(_HostBase):
                 if bstate is None:
                     try:
                         raw_state = _hc.db_session_turn_order(
-                            game.session_id.uid64, conn=_hc._db)
+                            game.session_id.uid64, conn=db._db)
                         data = json.loads(raw_state) if raw_state else {}
                         bstate = data if isinstance(data, dict) else {}
                     except Exception:
                         bstate = {}
                     self._current_bstate = bstate
-                static = effective_deltas(_hc._db, game.session_id.uid64, bstate,
+                static = effective_deltas(db._db, game.session_id.uid64, bstate,
                                           scid.uid.uid64)
                 atk += static["atk"]
                 def_ += static["def"]
@@ -427,7 +428,7 @@ class CardStateMixin(_HostBase):
                     try:
                         from rules_port.static_rules import effective_cost
                         cost = int(effective_cost(
-                            _hc._db, game.session_id.uid64, bstate,
+                            db._db, game.session_id.uid64, bstate,
                             scid.uid.uid64))
                     except Exception:
                         cost = max(0, cost + static["cost_mod"])
@@ -445,7 +446,7 @@ class CardStateMixin(_HostBase):
         if scid is not None:
             from rules_port.ability_usage import remaining_uses_per_game
             ability_uses = remaining_uses_per_game(
-                _hc._db, game.session_id.uid64, scid.uid.uid64, ability_guids,
+                db._db, game.session_id.uid64, scid.uid.uid64, ability_guids,
                 getattr(self, "_current_bstate", None) or {},
                 champion=ct == game_engine.ECardTypes.Champion)
             game.card_defs[scid].uses_per_game_counts = {
@@ -457,7 +458,7 @@ class CardStateMixin(_HostBase):
             try:
                 from pvp_db import db_card_cooldown_counts
                 cooldowns.update(db_card_cooldown_counts(
-                    game.session_id.uid64, scid.uid.uid64, conn=_hc._db))
+                    game.session_id.uid64, scid.uid.uid64, conn=db._db))
             except Exception:
                 pass
             state = getattr(self, "_current_bstate", None) or {}
@@ -481,7 +482,7 @@ class CardStateMixin(_HostBase):
         try:
             from rules_port.tunneling import tunneling_value
             game.card_defs[scid].tunneling = tunneling_value(
-                _hc._db, tpl_guid, persisted_int_attrs)
+                db._db, tpl_guid, persisted_int_attrs)
         except Exception:
             game.card_defs[scid].tunneling = int(
                 persisted_int_attrs.get("Tunneling", 0) or 0)
@@ -497,7 +498,7 @@ class CardStateMixin(_HostBase):
                     _et == "CardModifierAbilityEffectTemplate" and
                     "untamed" in str(_ep or "").lower()
                     for _eg, _et, _ep in _hc.db_ability_effect_rows(
-                        _ag, conn=_hc._db))
+                        _ag, conn=db._db))
                 if _has_untamed:
                     untamed = True
                     break
@@ -515,7 +516,7 @@ class CardStateMixin(_HostBase):
         if scid is not None:
             from rules_port.statistics import card_escalation_count
             game.card_defs[scid].escalation = card_escalation_count(
-                _hc._db, game.session_id.uid64,
+                db._db, game.session_id.uid64,
                 getattr(self, "_current_bstate", None) or {},
                 scid.uid.uid64)
         # Counters + voided-card relationships must survive every re-push: the
@@ -525,7 +526,7 @@ class CardStateMixin(_HostBase):
         try:
             from rules_port.counter_effects import card_counters_full
             c_counts, c_guids = card_counters_full(
-                _hc._db, game.session_id.uid64, scid.uid.uid64)
+                db._db, game.session_id.uid64, scid.uid.uid64)
             if c_counts:
                 cc = {}
                 for cname, cnum in c_counts.items():
@@ -565,7 +566,7 @@ class CardStateMixin(_HostBase):
                 from rules_port.static_rules import effective_stats
                 bstate = getattr(self, "_current_bstate", None) or {}
                 _atk, _def, _attrs, _flags, rage = effective_stats(
-                    _hc._db, game.session_id.uid64, bstate, scid.uid.uid64)
+                    db._db, game.session_id.uid64, bstate, scid.uid.uid64)
                 game.card_defs[scid].rage = int(rage or 0)
             except Exception:
                 game.card_defs[scid].rage = 0
@@ -698,11 +699,11 @@ class CardStateMixin(_HostBase):
         """
         import hconnect_server as _hc
         meta = _hc.db_ability_activation_metadata(
-            ability_guid, conn=_hc._db)
+            ability_guid, conn=db._db)
         if not meta or int(meta[1] or 0) != 1:
             return False
         row = _hc.db_card_mutation_snapshot(
-            session.session_id, int(card_uid), conn=_hc._db)
+            session.session_id, int(card_uid), conn=db._db)
         if not row:
             return False
         abilities = self._card_ability_list(session, card_uid)
@@ -710,12 +711,12 @@ class CardStateMixin(_HostBase):
         if ag not in abilities:
             return False
         abilities.remove(ag)
-        base_attrs = int(_hc.db_template_attributes(row[0], conn=_hc._db) or 0)
+        base_attrs = int(_hc.db_template_attributes(row[0], conn=db._db) or 0)
         attributes = base_attrs
         _hc.db_set_card_abilities_and_attributes(
             session.session_id, int(card_uid), json.dumps(abilities),
-            attributes, conn=_hc._db)
-        _hc._db.commit()
+            attributes, conn=db._db)
+        db._db.commit()
         if game is not None:
             scid = game_engine.SessionCardId(game_engine.UID(int(card_uid)))
             _tpl, ct, _name, cost, atk, defense, gems = self._card_full_data(
@@ -740,7 +741,7 @@ class CardStateMixin(_HostBase):
             from rules_port.context import EffectContext
             battle_state.pop("_rules_port_deck_out_owner", None)
             context = EffectContext.from_rules_port(
-                game, session, _hc._db, self, game.player_uid, ai_t,
+                game, session, db._db, self, game.player_uid, ai_t,
                 battle_state, "", ability=None)
             context.draw(1, owner=0)
             from rules_port.persistence import save_state
@@ -753,8 +754,8 @@ class CardStateMixin(_HostBase):
         `game`). Used by !addcard."""
         import hconnect_server as _hc
         _hc.db_move_card_to_location(
-            session.session_id, int(card_uid), "hand", position=100, conn=_hc._db)
-        _hc._db.commit()
+            session.session_id, int(card_uid), "hand", position=100, conn=db._db)
+        db._db.commit()
         scid = game_engine.SessionCardId(game_engine.UID(int(card_uid)))
         tpl_guid, ct, name, cost, atk, def_, gem_type = self._card_full_data(
             game, scid, tpl_guid, instance_id)
@@ -800,7 +801,7 @@ class CardStateMixin(_HostBase):
             from rules_port.context import EffectContext
             bstate.pop("_rules_port_deck_out_owner", None)
             context = EffectContext.from_rules_port(
-                game, session, _hc._db, self, draw_pl_t, ai_t, bstate,
+                game, session, db._db, self, draw_pl_t, ai_t, bstate,
                 "", ability=None)
             context.draw(1, owner=owner_id)
             if is_pvp:
@@ -821,7 +822,7 @@ class CardStateMixin(_HostBase):
             game, session, draw_pl_t, ai_t, bstate,
             "CardWouldBeDrawnEvent", None, owner_id)
         row = _hc.db_deck_top_card_details(
-            session.session_id, owner_id, conn=_hc._db)
+            session.session_id, owner_id, conn=db._db)
         if not row:
             if is_pvp:
                 log_req(f"    PvP debug draw: pid {owner_id} deck empty")
@@ -843,8 +844,8 @@ class CardStateMixin(_HostBase):
             log_req(f"    Player draw replaced (would-draw/would-enter trigger)")
             return
         scid = game_engine.SessionCardId(game_engine.UID(row[1]))
-        _hc.db_move_card_row_to_hand(session.session_id, row[0], conn=_hc._db)
-        _hc._db.commit()
+        _hc.db_move_card_row_to_hand(session.session_id, row[0], conn=db._db)
+        db._db.commit()
         tpl_guid, ct, name, cost, atk, def_, gem_type = self._card_full_data(game, scid, row[3], row[2])
         game.push_card_drawn(scid, draw_pl_t, 1)
         game.push_card_updated(scid, draw_pl_t, game_engine.ECardCollections.Hand, ct,

@@ -5,6 +5,7 @@ import json
 import random
 from db import log_req
 import game_engine
+import db
 
 
 def discarding_player(bstate, ability_controller):
@@ -28,7 +29,7 @@ class CombatMixin(_HostBase):
     def _clear_combat_damage(self, session, bstate):
         import hconnect_server as _hc
         from rules_port.lifecycle import clear_combat_damage
-        return clear_combat_damage(_hc._db, session.session_id)
+        return clear_combat_damage(db._db, session.session_id)
 
     def _announce_champion_board_cards(self, game, session, pl_t, state=None):
         """Re-announce the champions' HUD cards once the client is in battle.
@@ -196,11 +197,11 @@ class CombatMixin(_HostBase):
                                            project_visible_top_decks)
         current_state = getattr(self, "_current_bstate", {}) or {}
         project_visible_hands(
-            _hc._db, session, self, game, pl_t,
+            db._db, session, self, game, pl_t,
             getattr(game, "ai_uid", game_engine.UID.make(game_engine.SERVICE_AI_UID_TYPE, 1000)),
             current_state)
         project_visible_top_decks(
-            _hc._db, session, self, game, pl_t,
+            db._db, session, self, game, pl_t,
             getattr(game, "ai_uid", game_engine.UID.make(game_engine.SERVICE_AI_UID_TYPE, 1000)),
             current_state)
         # Placing the champions on the client's board is a one-shot projection
@@ -242,7 +243,7 @@ class CombatMixin(_HostBase):
                 if raw_sid is None:
                     continue
                 owner_id = _hc.db_card_owner_id(
-                    session.session_id, int(raw_sid), conn=_hc._db)
+                    session.session_id, int(raw_sid), conn=db._db)
                 if owner_id is None:
                     continue
                 projected_owner = owner_uid(owner_id, game.player_uid,
@@ -314,7 +315,7 @@ class CombatMixin(_HostBase):
                 # the same board view, and scanning twice doubled the cost of
                 # every opponent-turn priority window.
                 effective_attrs, cost = effective_option_projection(
-                    _hc._db, session.session_id, bstate, card_uid)
+                    db._db, session.session_id, bstate, card_uid)
                 effective_attrs = int(effective_attrs or 0)
             except Exception:
                 effective_attrs = 0
@@ -430,7 +431,7 @@ class CombatMixin(_HostBase):
         for uid, ct, state in rows:
             state = state or 0
             attrs = int(effective_attributes(
-                _hc._db, session.session_id, bstate, int(uid)) or 0)
+                db._db, session.session_id, bstate, int(uid)) or 0)
             # A troop with Speed may attack the turn it comes into play (the
             # client's HasSummoningSickness() exempts Speed) — e.g. a Blaze
             # Elemental summoned by Poca's charge power.
@@ -439,7 +440,7 @@ class CombatMixin(_HostBase):
                     and not (state & game_engine.ECardStates.Tapped)
                     and not (state & game_engine.ECardStates.Attacking)
                     and can_attack_card(
-                        _hc._db, session.session_id, bstate, uid, attrs or 0)):
+                        db._db, session.session_id, bstate, uid, attrs or 0)):
                 ready.append(game_engine.SessionCardId(game_engine.UID(uid)))
         from rules_port.runtime_adapter import defending_champion_immune
         if ready and defending_champion_immune(self, self.user_profile["id"]):
@@ -480,7 +481,7 @@ class CombatMixin(_HostBase):
         for uid, ct, state in rows:
             state = state or 0
             attrs = int(effective_attributes(
-                _hc._db, session.session_id, bstate, int(uid)) or 0)
+                db._db, session.session_id, bstate, int(uid)) or 0)
             if not (attrs & game_engine.ECardAttributes.ForceAttack):
                 continue
             if (state & (game_engine.ECardStates.Attacking |
@@ -489,7 +490,7 @@ class CombatMixin(_HostBase):
             if not (state & game_engine.ECardStates.StartedATurnOnYourSide) \
                     and not (attrs & game_engine.ECardAttributes.Speed):
                 continue
-            if not can_attack_card(_hc._db, session.session_id, bstate, uid, attrs):
+            if not can_attack_card(db._db, session.session_id, bstate, uid, attrs):
                 continue
             u = int(uid)
             if u in attackers:
@@ -519,7 +520,7 @@ class CombatMixin(_HostBase):
                 state_bits |= game_engine.ECardStates.Tapped
             _hc.db_card_set_attacking_state(session.session_id, u, state_bits)
             card_details = _hc.db_card_zone_details(
-                session.session_id, u, conn=_hc._db)
+                session.session_id, u, conn=db._db)
             tpl_guid = card_details[0] if card_details else None
             self._card_full_data(game, scid, tpl_guid)
             pushed_state = db_card_state_raw(session.session_id, u) or state_bits
@@ -547,7 +548,7 @@ class CombatMixin(_HostBase):
             from rules_port.combat_effects import apply_rage
             from rules_port.context import EffectContext
             apply_rage(EffectContext.from_rules_port(
-                game, session, _hc._db, self, pl_t, ai_t, bstate,
+                game, session, db._db, self, pl_t, ai_t, bstate,
                 "", ability=None), u)
         if combats:
             bstate["player_attackers"] = {
@@ -584,7 +585,7 @@ class CombatMixin(_HostBase):
         from rules_port.combat_rules import can_block
         rows = _hc.db_warzone_defender_rows(
             session.session_id, self.user_profile["id"],
-            game_engine.ECardStates.Tapped, conn=_hc._db)
+            game_engine.ECardStates.Tapped, conn=db._db)
         game = self._fresh_game(session, pl_t, ai_t, bstate)
         from pickers import BLOCK_DECLARATION_TEMPLATE as BLOCKING_TEMPLATE
         from pickers import PickOption, PickTarget, present_options
@@ -592,7 +593,7 @@ class CombatMixin(_HostBase):
         for uid, _battrs in rows:
             # This blocker's blockable targets: every attacker it may block.
             blockable = tuple(int(u) for u in attackers
-                              if can_block(_hc._db, session.session_id, bstate, int(u), int(uid)))
+                              if can_block(db._db, session.session_id, bstate, int(u), int(uid)))
             if not blockable:
                 continue
             options.append(PickOption(
@@ -628,14 +629,14 @@ class CombatMixin(_HostBase):
             attackers = None
         rows = _hc.db_warzone_blocker_uids(
             session.session_id, self.user_profile["id"],
-            _ge.ECardStates.Tapped, conn=_hc._db)
+            _ge.ECardStates.Tapped, conn=db._db)
         from rules_port.combat_rules import can_block
         from rules_port.static_rules import effective_attributes
         if attackers is None:
             return any(not (int(effective_attributes(
-                _hc._db, session.session_id, bstate, int(row[0])) or 0) &
+                db._db, session.session_id, bstate, int(row[0])) or 0) &
                 _ge.ECardAttributes.CantBlock) for row in rows)
-        return any(can_block(_hc._db, session.session_id, bstate, attacker_uid,
+        return any(can_block(db._db, session.session_id, bstate, attacker_uid,
                              int(row[0]))
                    for row in rows for attacker_uid in attackers)
 
@@ -650,7 +651,7 @@ class CombatMixin(_HostBase):
         import hconnect_server as _hc
         import commands as _cmd
         prepared = _hc.campaign.prepare_fra_battle_gameend(
-            self, _hc._db, session, won)
+            self, db._db, session, won)
         _cmd.push_battle_game_end(
             handler=self, session=session,
             winners=winners, losers=losers)
@@ -659,7 +660,7 @@ class CombatMixin(_HostBase):
                 self, prepared, _hc.SERVICE_MAIL_UID)
         else:
             _hc.campaign.handle_battle_gameend(
-                self, _hc._db, session, won, _hc.SERVICE_MAIL_UID,
+                self, db._db, session, won, _hc.SERVICE_MAIL_UID,
                 _hc.UID_TYPE["ServiceCampaign"])
         return prepared
 
@@ -682,7 +683,7 @@ class CombatMixin(_HostBase):
             from rules_port.death_effects import champion_would_lose
             bstate["_rules_port_attached"] = True
             champion_would_lose(EffectContext.from_rules_port(
-                loss_game, session, _hc._db, self, pl_t, ai_t, bstate,
+                loss_game, session, db._db, self, pl_t, ai_t, bstate,
                 "", ability=None), self.user_profile["id"])
             if loss_game.events:
                 self._send_battle_events(session, loss_game, pl_t)
@@ -693,7 +694,7 @@ class CombatMixin(_HostBase):
             from rules_port.death_effects import champion_would_lose
             bstate["_rules_port_attached"] = True
             champion_would_lose(EffectContext.from_rules_port(
-                loss_game, session, _hc._db, self, pl_t, ai_t, bstate,
+                loss_game, session, db._db, self, pl_t, ai_t, bstate,
                 "", ability=None), 0)
             if loss_game.events:
                 self._send_battle_events(session, loss_game, pl_t)
@@ -794,7 +795,7 @@ class CombatMixin(_HostBase):
             if user_id is None:
                 return False
             return player_has_eligible_attackers(
-                _hc._db, session.session_id, bstate or {}, int(user_id))
+                db._db, session.session_id, bstate or {}, int(user_id))
         import ai
         return ai.player_can_attack_troops(self, session, user_id)
 
@@ -808,7 +809,7 @@ class CombatMixin(_HostBase):
                 from rules_port.persistence import load_state
                 bstate = load_state(session)
             return player_has_eligible_attackers(
-                _hc._db, session.session_id, bstate or {}, 0)
+                db._db, session.session_id, bstate or {}, 0)
         import ai
         return ai.ai_can_attack_troops(self, session)
 
@@ -896,7 +897,7 @@ class CombatMixin(_HostBase):
                 save_state(session, bstate)
         game = self._fresh_game(session, pl_t, ai_t, bstate)
         context = EffectContext.from_rules_port(
-            game, session, _hc._db, self, pl_t, ai_t, bstate,
+            game, session, db._db, self, pl_t, ai_t, bstate,
             "", ability=None)
         result = resolve(context, first_strike=first_strike,
                          attacker_key="player_attackers",
@@ -936,7 +937,7 @@ class CombatMixin(_HostBase):
         # before mutating it: a stale TargetMap or a cross-player UID must
         # never move an opponent's permanent into the wrong graveyard.
         card_row = _hc.db_card_sacrifice_info(
-            session.session_id, int(card_uid), conn=_hc._db)
+            session.session_id, int(card_uid), conn=db._db)
         if not card_row:
             log_req(f"    Sacrifice rejected missing card {int(card_uid)}")
             return False
@@ -965,7 +966,7 @@ class CombatMixin(_HostBase):
         sacrifice_state["_rules_port_native_effect"] = True
         result = kill_troop(
             EffectContext.from_rules_port(
-                game, session, _hc._db, self, pl_t, ai_t, sacrifice_state,
+                game, session, db._db, self, pl_t, ai_t, sacrifice_state,
                 "", ability=None), int(card_uid), cause="sacrifice")
         save_state(session, sacrifice_state)
         return str(result).startswith("killed")
@@ -989,7 +990,7 @@ class CombatMixin(_HostBase):
             return
 
         def card_cost(uid):
-            row = db_card_zone_details(session.session_id, int(uid), conn=_hc._db)
+            row = db_card_zone_details(session.session_id, int(uid), conn=db._db)
             if not row:
                 return None
             scid = game_engine.SessionCardId(game_engine.UID(int(uid)))
@@ -997,7 +998,7 @@ class CombatMixin(_HostBase):
 
         cost = card_cost(voided)
         matching = [int(uid) for (uid,) in _hc.db_hand_card_uids(
-            session.session_id, victim_id, conn=_hc._db)
+            session.session_id, victim_id, conn=db._db)
             if card_cost(uid) == cost]
         for uid in matching:
             gd, _owner_uid = self._discard_card_to_owner(session, pl_t, ai_t, uid)
@@ -1034,7 +1035,7 @@ class CombatMixin(_HostBase):
             self.user_profile, dict) else None
         if discarder is not None and int(discarder or 0) != int(human_owner or -1):
             rows = [(row[1],) for row in _hc.db_ordered_zone_rows(
-                session.session_id, int(discarder), "hand", conn=_hc._db)]
+                session.session_id, int(discarder), "hand", conn=db._db)]
             if rows:
                 chosen = int(random.choice(rows)[0])
                 gd, _owner_uid = self._discard_card_to_owner(
@@ -1053,7 +1054,7 @@ class CombatMixin(_HostBase):
                 _hc.db_hand_card_uids(
                     session.session_id,
                     self.user_profile["id"] if self.user_profile else 0,
-                    conn=_hc._db)]
+                    conn=db._db)]
         if not hand:
             # The authored discard target allows a best-effort minimum.  An
             # empty hand therefore resolves the Deathcry as a no-op; opening
@@ -1101,7 +1102,7 @@ class CombatMixin(_HostBase):
         uids = bstate.get("champion_void_uids") or []
         if not uids:
             return
-        raw_json = _hc.db_ability_raw_json(ability_guid, conn=_hc._db)
+        raw_json = _hc.db_ability_raw_json(ability_guid, conn=db._db)
         if not raw_json:
             return
         try:
@@ -1116,7 +1117,7 @@ class CombatMixin(_HostBase):
         stats = {"atk": 0, "def": 0}
         for uid in uids:
             row = _hc.db_card_combat_identity(
-                session.session_id, int(uid), conn=_hc._db)
+                session.session_id, int(uid), conn=db._db)
             if not row or row[1] != "warzone":
                 continue
             # Bun'jitsu: "+[ATK] equal to the VOIDED TROOPS' [ATK] plus 3" —
@@ -1125,8 +1126,8 @@ class CombatMixin(_HostBase):
             stats["atk"] += int(row[3] or 0)
             stats["def"] += int(row[4] or 0)
             _hc.db_move_card_to_location(
-                session.session_id, int(uid), "void", position=0, conn=_hc._db)
-            _hc._db.commit()
+                session.session_id, int(uid), "void", position=0, conn=db._db)
+            db._db.commit()
             scid = game_engine.SessionCardId(game_engine.UID(int(uid)))
             tpl_guid = row[2]
             _tpl, ct, _n, _c, atk, def_, _g = self._card_full_data(
@@ -1170,7 +1171,7 @@ class CombatMixin(_HostBase):
                 continue
             for blocker_uid in blocker_values:
                 blocker_owner = _hc.db_card_owner_id(
-                    session.session_id, blocker_uid, conn=_hc._db)
+                    session.session_id, blocker_uid, conn=db._db)
                 self._dispatch_native_trigger(
                     game, session, pl_t, ai_t, bstate, "CardBlockedEvent",
                     blocker_uid, blocker_owner, target_card_id=attacker_uid)
@@ -1181,4 +1182,4 @@ class CombatMixin(_HostBase):
             self._dispatch_native_trigger(
                 game, session, pl_t, ai_t, bstate, "CardWasBlockedEvent",
                 attacker_uid,
-                _hc.db_card_owner_id(session.session_id, attacker_uid, conn=_hc._db))
+                _hc.db_card_owner_id(session.session_id, attacker_uid, conn=db._db))

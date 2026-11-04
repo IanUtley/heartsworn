@@ -9,6 +9,7 @@ import re
 import struct
 from db import log_req
 import game_engine
+import db
 
 
 if TYPE_CHECKING:
@@ -28,7 +29,7 @@ class TurnFlowMixin(_HostBase):
         import hconnect_server as _hc
         from rules_port.triggers import dispatch_native_trigger
         return dispatch_native_trigger(
-            db=_hc._db, handler=self, game=game, session=session,
+            db=db._db, handler=self, game=game, session=session,
             player_uid=pl_t, ai_uid=ai_t, battle_state=bstate,
             event_type=event_type, source_card_id=source_card_id,
             source_player_id=source_player_id,
@@ -40,7 +41,7 @@ class TurnFlowMixin(_HostBase):
         import hconnect_server as _hc
         from rules_port.lifecycle import clear_expired_temporary_attributes
         return clear_expired_temporary_attributes(
-            _hc._db, session.session_id, owner_id, boundary,
+            db._db, session.session_id, owner_id, boundary,
             clear_stat_buffs=clear_stat_buffs,
             battle_state=bstate, handler=self)
 
@@ -372,7 +373,7 @@ class TurnFlowMixin(_HostBase):
                 ability_guid = str(payload.get("ability_template_id") or "").lower()
                 activation = payload.get("activation_data")
                 triggered = (_hc.db_ability_is_triggered(
-                    ability_guid, conn=_hc._db) if ability_guid else None)
+                    ability_guid, conn=db._db) if ability_guid else None)
                 if (triggered is False and
                         payload.get("source_card_id") is not None and
                         isinstance(activation, (dict, tuple, list))):
@@ -776,7 +777,7 @@ class TurnFlowMixin(_HostBase):
                     "CanIgnoreCardsThresholds") <= 0:
                 return False
         card_details = _hc.db_card_zone_details(
-            session.session_id, card_uid, conn=_hc._db)
+            session.session_id, card_uid, conn=db._db)
         play_plan = self._card_play_plan(
             card_details[0] if card_details else "", card_uid,
             self.user_profile["id"] if self.user_profile else 0,
@@ -795,7 +796,7 @@ class TurnFlowMixin(_HostBase):
         if play_plan.cost_instances:
             from rules_port.costs import card_cost_targets
             for cost in card_cost_targets(
-                    play_plan, _hc._db, session.session_id,
+                    play_plan, db._db, session.session_id,
                     self.user_profile["id"] if self.user_profile else 0,
                     card_uid, champions=self._champion_targets(),
                     battle_state=getattr(self, "_current_bstate", None)):
@@ -861,7 +862,7 @@ class TurnFlowMixin(_HostBase):
         threshold = bstate.get("player_threshold", {})
         from rules_port.resources import can_play_resource, resource_play_limit
         resource_limit = resource_play_limit(
-            _hc._db, session.session_id, bstate,
+            db._db, session.session_id, bstate,
             int(self.user_profile.get("id", 0)))
         resource_played = not can_play_resource(
             bstate, "player", limit=resource_limit)
@@ -878,17 +879,17 @@ class TurnFlowMixin(_HostBase):
             session.session_id, owner_id))
         from rules_port.static_rules import player_int_attributes
         player_attrs = player_int_attributes(
-            _hc._db, session.session_id, bstate, owner_id)
+            db._db, session.session_id, bstate, owner_id)
         if int(player_attrs.get("CanPlayTopOfDeck", 0) or 0) > 0:
             top = db_deck_top_card_details(
-                session.session_id, owner_id, conn=_hc._db)
+                session.session_id, owner_id, conn=db._db)
             if top:
                 top_uid = int(top[1])
                 info = db_card_play_info(
-                    session.session_id, top_uid, conn=_hc._db)
+                    session.session_id, top_uid, conn=db._db)
                 if info:
                     threshold_row = db_card_template_thresholds(
-                        info[0], conn=_hc._db)
+                        info[0], conn=db._db)
                     top_template = _hc.db_template_by_guid(info[0])
                     rows.append((
                         top_uid, top_template[3] if top_template else 0, info[1],
@@ -898,7 +899,7 @@ class TurnFlowMixin(_HostBase):
         # ability; no hand card is playable while the controller has one in play.
         from rules_port.static_rules import controller_flags
         hand_flags = controller_flags(
-            _hc._db, session.session_id, bstate, self.user_profile["id"])
+            db._db, session.session_id, bstate, self.user_profile["id"])
         if {"cant_play_cards", "cant_play_cards_from_hand"} & hand_flags:
             rows = []
         for card_uid, cost, ct, thresh_json, abilities_json in rows:
@@ -909,7 +910,7 @@ class TurnFlowMixin(_HostBase):
             # discounted card.
             from rules_port.static_rules import effective_cost
             try:
-                cost = effective_cost(_hc._db, session.session_id, bstate, card_uid)
+                cost = effective_cost(db._db, session.session_id, bstate, card_uid)
             except Exception:
                 pass
             ability_guids = []
@@ -1038,7 +1039,7 @@ class TurnFlowMixin(_HostBase):
             if guid_map:
                 state["champ_guid_map"] = guid_map
         from rules_port.static_rules import hand_size_unlimited
-        return hand_size_unlimited(_hc._db, session.session_id, state)
+        return hand_size_unlimited(db._db, session.session_id, state)
 
     def _champion_cannot_draw(self, session, player):
         """Whether a side's champion has "can't draw cards" before the battle
@@ -1061,7 +1062,7 @@ class TurnFlowMixin(_HostBase):
         state = {"champ_map": {str(owner): int(scid.uid.uid64)},
                  "champ_guid_map": {str(owner): guid}}
         return "cant_draw_cards" in controller_flags(
-            _hc._db, session.session_id, state, owner)
+            db._db, session.session_id, state, owner)
 
     def _next_resolve_counter(self, session):
         """Increment and return the resolve counter from battle state.
@@ -1155,7 +1156,7 @@ class TurnFlowMixin(_HostBase):
         # persisted flag alone updates PlayerUpdated but leaves Unity's card
         # cache as black/nulling rectangles until a full CardUpdated arrives.
         project_visible_hands(
-            _hc._db, session, self, game, pl_t, ai_t, bstate)
+            db._db, session, self, game, pl_t, ai_t, bstate)
         # Attach the semantic rules host on every normal game build,
         # including Practice.  Combat-only construction is too late for
         # card-play transactions and leaves the dispatcher without a host.
@@ -1190,9 +1191,9 @@ class TurnFlowMixin(_HostBase):
         chain_sources = {int(i.get("source_uid") or 0)
                          for i in ((bstate or {}).get("stack") or [])
                          if i.get("source_uid")}
-        rows = _hc.db_warzone_display_rows(session.session_id, conn=_hc._db)
+        rows = _hc.db_warzone_display_rows(session.session_id, conn=db._db)
         projections = _hc.db_card_instance_dynamic_projections(
-            session.session_id, [row[0] for row in rows], conn=_hc._db)
+            session.session_id, [row[0] for row in rows], conn=db._db)
         for card_uid, tpl_guid, user_id, cstate, _card_type in rows:
             if int(card_uid) in chain_sources:
                 continue
@@ -1234,7 +1235,7 @@ class TurnFlowMixin(_HostBase):
             card_uid = int(card_uid)
             in_hand.add(card_uid)
             try:
-                cost = int(effective_cost(_hc._db, session.session_id, bstate,
+                cost = int(effective_cost(db._db, session.session_id, bstate,
                                           card_uid))
             except Exception:
                 continue
@@ -1268,7 +1269,7 @@ class TurnFlowMixin(_HostBase):
         import hconnect_server as _hc
         from rules_port.lifecycle import ready_step_for_turn
         changes = ready_step_for_turn(
-            _hc._db, session.session_id, owner_id, bstate, side, handler=self)
+            db._db, session.session_id, owner_id, bstate, side, handler=self)
         if changes is None:
             return None
         recipient = game.player_uid if side == "player" else game.ai_uid
@@ -1290,7 +1291,7 @@ class TurnFlowMixin(_HostBase):
             if int(previous_state) & tapped and not int(new_state) & tapped:
                 from rules_port.triggers import dispatch_native_trigger
                 dispatch_native_trigger(
-                    db=_hc._db, handler=self, game=game, session=session,
+                    db=db._db, handler=self, game=game, session=session,
                     player_uid=game.player_uid, ai_uid=game.ai_uid,
                     battle_state=bstate, event_type="CardReadiedEvent",
                     source_card_id=int(uid), source_player_id=owner_id,
@@ -1324,9 +1325,9 @@ class TurnFlowMixin(_HostBase):
             session, projection_game, bstate, owner_id, changes)
         from rules_port.cooldowns import decrement_and_project_ready_cooldowns
         decrement_and_project_ready_cooldowns(
-            _hc._db, session, self, projection_game, owner_id, pl_t, ai_t, bstate)
+            db._db, session, self, projection_game, owner_id, pl_t, ai_t, bstate)
         clear_expired_temporary_attributes(
-            _hc._db, session.session_id, owner_id, "prep",
+            db._db, session.session_id, owner_id, "prep",
             clear_stat_buffs=True, battle_state=bstate, handler=self)
         # Recompute the combat branch after Prep for whichever side is
         # active.  Previously this only ran for the human, leaving the AI's
@@ -1338,7 +1339,7 @@ class TurnFlowMixin(_HostBase):
             self._player_can_attack_troops(session)
             if is_player else self._ai_can_attack_troops(session))
         bstate["turn_phases"] = build_turn_phases(bstate)
-        _hc._db.commit()
+        db._db.commit()
         # The phase-entry resolver contract is "update the projection and
         # publish its wire events".  Readiness (and the resource refill above)
         # belong to Prep, but the events stayed queued until the drive stopped
@@ -1362,7 +1363,7 @@ class TurnFlowMixin(_HostBase):
             self.user_profile.get("id", 0)
             if isinstance(self.user_profile, dict) else 0)
         if "skips_draw_phase" in controller_flags(
-                _hc._db, session.session_id, bstate, controller):
+                db._db, session.session_id, bstate, controller):
             return False
         if side == "ai":
             return self._ai_draw_card(
@@ -1398,7 +1399,7 @@ class TurnFlowMixin(_HostBase):
         bstate["_rules_port_attached"] = True
         from rules_port.context import EffectContext
         context = EffectContext.from_rules_port(
-            game, session, _hc._db, self, pl_t, ai_t, bstate,
+            game, session, db._db, self, pl_t, ai_t, bstate,
             "", ability=None)
         active_champion_uid = context.champion_card_uid(active_owner)
         # Campaign scene mods with a round apply on that side's Nth turn
@@ -1410,7 +1411,7 @@ class TurnFlowMixin(_HostBase):
         round_side = "ai" if bstate.get("turn_player") == _be.AI else "player"
         round_turn = count_turn_start(bstate, round_side)
         apply_due_round_mods(
-            _hc._db, projection_game, session, bstate, round_side,
+            db._db, projection_game, session, bstate, round_side,
             round_turn, pl_t, ai_t)
         changes = advance(context, active_owner)
         # C# order: StartTurnState only enqueues TurnStartedEvent; ReadyState
@@ -1430,13 +1431,13 @@ class TurnFlowMixin(_HostBase):
             from rules_port.triggers import dispatch_native_trigger
             bstate["phase"] = game_engine.ETurnPhases.StartTurn
             dispatch_native_trigger(
-                db=_hc._db, handler=self, game=game, session=session,
+                db=db._db, handler=self, game=game, session=session,
                 player_uid=pl_t, ai_uid=ai_t, battle_state=bstate,
                 event_type="TurnPhaseEvent", source_card_id=None,
                 source_player_id=active_owner,
                 data={"phase": int(game_engine.ETurnPhases.StartTurn)})
             dispatch_native_trigger(
-                db=_hc._db, handler=self, game=game, session=session,
+                db=db._db, handler=self, game=game, session=session,
                 player_uid=pl_t, ai_uid=ai_t, battle_state=bstate,
                 # StartTurnState enqueues TurnStartedEvent with the active
                 # champion as SourceCardId. TriggerSource targets (including
@@ -1541,7 +1542,7 @@ class TurnFlowMixin(_HostBase):
             from rules_port.lifecycle import prime_cards_for_turn
             from rules_port.runtime_helpers import owner_uid
             changed = prime_cards_for_turn(
-                _hc._db, session.session_id, active_owner_id)
+                db._db, session.session_id, active_owner_id)
             for card_uid, tpl_guid, owner_id, new_state, _card_type in changed:
                 scid = game_engine.SessionCardId(game_engine.UID(card_uid))
                 _tpl, ct, _name, _cost, _atk, _def, _gem = \
@@ -1577,7 +1578,7 @@ class TurnFlowMixin(_HostBase):
             game_engine.ECardStates.VoidsIfDestroyed |
             game_engine.ECardStates.CameOutThisTurn |
             game_engine.ECardStates.StartedATurnOnYourSide)
-        rows = _hc.db_warzone_display_rows(session.session_id, conn=_hc._db)
+        rows = _hc.db_warzone_display_rows(session.session_id, conn=db._db)
         changed = 0
         for card_uid, tpl_guid, owner_id, old_state, _card_type in rows:
             old_state = int(old_state or 0)
@@ -1590,7 +1591,7 @@ class TurnFlowMixin(_HostBase):
             if new_state == old_state:
                 continue
             _hc.db_set_card_state_exact(
-                session.session_id, int(card_uid), new_state, conn=_hc._db)
+                session.session_id, int(card_uid), new_state, conn=db._db)
             changed += 1
             scid = game_engine.SessionCardId(game_engine.UID(int(card_uid)))
             _tpl, ct, _name, _cost, _atk, _def, _gem = \
@@ -1604,7 +1605,7 @@ class TurnFlowMixin(_HostBase):
                 template_id=tpl_guid,
                 attributes=(cdef.attributes if cdef else 0),
                 state=int(new_state))
-        _hc._db.commit()
+        db._db.commit()
         if changed:
             log_req(f"    ResetActiveCards: active={int(active_owner_id or 0)} "
                 f"updated {changed} warzone card(s)")
@@ -1641,7 +1642,7 @@ class TurnFlowMixin(_HostBase):
             from rules_port.static_rules import champion_static_intattrs
             attrs = dict(champion_attrs.get(str(int(scid.uid.uid64))) or {})
             for name, value in champion_static_intattrs(
-                    _hc._db, session.session_id, bstate, owner).items():
+                    db._db, session.session_id, bstate, owner).items():
                 attrs[name] = int(attrs.get(name, 0) or 0) + value
             return {str(k): int(v) for k, v in attrs.items() if v}
         ai_champ = getattr(self, "_ai_champ_scid", None)

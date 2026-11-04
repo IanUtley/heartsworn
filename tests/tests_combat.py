@@ -820,9 +820,9 @@ def test_speed_troop_can_attack_same_turn(db):
     offered as an attacker right after it is summoned."""
     import hconnect_server as hcs
     import db as dbmod
-    old_hcs_db = hcs._db
+    old_hcs_db = dbmod._db
     old_db = dbmod._db
-    hcs._db = db
+    dbmod._db = db
     dbmod._db = db
     captured = []
     try:
@@ -867,7 +867,7 @@ def test_speed_troop_can_attack_same_turn(db):
         assert 203 in offered, offered   # ready troop
         assert 202 not in offered, offered  # summoning-sick non-Speed
     finally:
-        hcs._db = old_hcs_db
+        dbmod._db = old_hcs_db
         dbmod._db = old_db
 
 
@@ -982,10 +982,10 @@ def test_x_cost_detection_and_damage(db):
     and the chosen X is paid and dealt as damage to the target."""
     import hconnect_server as hcs
     import db as dbmod
-    old_hcs_db = hcs._db
+    old_hcs_db = dbmod._db
     old_db = dbmod._db
     dbmod._db = db
-    hcs._db = db
+    dbmod._db = db
     try:
         src = sqlite3.connect(SRC)
         meta = src.execute(
@@ -1034,7 +1034,7 @@ def test_x_cost_detection_and_damage(db):
         assert game.ai_health == 16, game.ai_health
     finally:
         dbmod._db = old_db
-        hcs._db = old_hcs_db
+        dbmod._db = old_hcs_db
 
 
 def test_x_cost_recovers_labelled_resource_x_cost_from_raw_envelope(db):
@@ -1078,9 +1078,9 @@ def test_first_main_refresh_opens_combat_for_a_troop_played_this_turn(db):
     from rules_port.turn_states import default_phase_states
 
     old_db = dbmod._db
-    old_hcs_db = hcs._db
+    old_hcs_db = dbmod._db
     dbmod._db = db
-    hcs._db = db
+    dbmod._db = db
     try:
         tpl = "aaaaaaaa-1111-2222-3333-444444444444"
         db.execute(
@@ -1128,7 +1128,7 @@ def test_first_main_refresh_opens_combat_for_a_troop_played_this_turn(db):
         assert later["turn_phases"] == list(_lifecycle.BASE_TURN_PHASES)
     finally:
         dbmod._db = old_db
-        hcs._db = old_hcs_db
+        dbmod._db = old_hcs_db
 
 
 def test_deck_search_prompt_target_id(db):
@@ -1137,8 +1137,8 @@ def test_deck_search_prompt_target_id(db):
     ability GUID — otherwise the client can't render the candidate list and the
     answer submits the source card instead of a Darkspire deck card."""
     import hconnect_server as hcs
-    old = hcs._db
-    hcs._db = db
+    old = dbmod._db
+    dbmod._db = db
     try:
         src = sqlite3.connect(SRC)
         for ag in ("7361162f-ed16-fc00-16dd-22517295282b",
@@ -1213,7 +1213,7 @@ def test_deck_search_prompt_target_id(db):
         presented_uids = {int(ev.session_card_id.uid.uid64) for ev in presented}
         assert presented_uids == {102, 103}, presented_uids
     finally:
-        hcs._db = old
+        dbmod._db = old
 
 
 def test_gem_abilities_resolved(db):
@@ -1221,8 +1221,8 @@ def test_gem_abilities_resolved(db):
     gem_templates table at deck save time — gem 5 (Blood Minor 1, "Minor Blood
     Orb of Hatred") grants Rage 1 in all zones (ddb205d9)."""
     import hconnect_server as hcs
-    old = hcs._db
-    hcs._db = db
+    old = dbmod._db
+    dbmod._db = db
     try:
         db.execute(
             "INSERT OR REPLACE INTO gem_templates (gem_type, gem_type_name, name, abilities_json) VALUES (?,?,?,?)",
@@ -1239,7 +1239,7 @@ def test_gem_abilities_resolved(db):
                        "6517": ["ddb205d9-03e0-0a63-adee-d52035ab5b0c"],
                        "6518": ["a0806fbd-b6d8-e49f-145f-89833e2d7c49"]}, out
     finally:
-        hcs._db = old
+        dbmod._db = old
 
 
 def test_gem_rage_applies_as_static(db):
@@ -1250,9 +1250,9 @@ def test_gem_rage_applies_as_static(db):
     import db as dbmod
     from rules_port.static_rules import effective_stats
     old_db = dbmod._db
-    old_hcs_db = hcs._db
+    old_hcs_db = dbmod._db
     dbmod._db = db
-    hcs._db = db
+    dbmod._db = db
     try:
         src = sqlite3.connect(SRC)
         meta = src.execute(
@@ -1295,7 +1295,7 @@ def test_gem_rage_applies_as_static(db):
         assert _attrs & game_engine.ECardAttributes.Rage, hex(_attrs)
     finally:
         dbmod._db = old_db
-        hcs._db = old_hcs_db
+        dbmod._db = old_hcs_db
 
 
 def test_champion_zero_health_state_check(db):
@@ -1305,9 +1305,9 @@ def test_champion_zero_health_state_check(db):
     import db as dbmod
     from unittest import mock
     old_db = dbmod._db
-    old_hcs_db = hcs._db
+    old_hcs_db = dbmod._db
     dbmod._db = db
-    hcs._db = db
+    dbmod._db = db
     try:
         h = object.__new__(hcs.HCPHandler)
         h.user_profile = {"id": 5}
@@ -1331,7 +1331,7 @@ def test_champion_zero_health_state_check(db):
             assert not ended3 and pbe.call_count == 2
     finally:
         dbmod._db = old_db
-        hcs._db = old_hcs_db
+        dbmod._db = old_hcs_db
 
 
 def test_authoritative_resolution_deathcry(db):
@@ -1920,9 +1920,9 @@ def test_player_can_block_excludes_cantblock(db):
     import hconnect_server as hcs
     import db as dbmod
     old_db = dbmod._db
-    old_hcs_db = hcs._db
+    old_hcs_db = dbmod._db
     dbmod._db = db
-    hcs._db = db
+    dbmod._db = db
     try:
         db.execute(
             "INSERT OR REPLACE INTO card_templates (guid, name, card_type, cost, attack, defense, attributes, abilities_json, threshold_json, subtype) VALUES (?,?,?,?,?,?,?,?,?,?)",
@@ -1957,7 +1957,7 @@ def test_player_can_block_excludes_cantblock(db):
         assert [r[0] for r in rows] == [202], rows
     finally:
         dbmod._db = old_db
-        hcs._db = old_hcs_db
+        dbmod._db = old_hcs_db
 
 
 def test_block_rule_filter_uses_card_owner_and_zone(db):

@@ -9,6 +9,7 @@ import sqlite3
 import struct
 from db import log_req
 import game_engine
+import db
 
 
 if TYPE_CHECKING:
@@ -113,7 +114,7 @@ class CardPlayMixin(_HostBase):
                     continue
                 has_explicit_target = True
                 candidates = legal_targets_for(
-                    _hc._db, session.session_id, self.user_profile["id"], target,
+                    db._db, session.session_id, self.user_profile["id"], target,
                     # Playability is asking whether the card can be cast from
                     # hand.  The source is not yet in a gameplay collection;
                     # preserve the pre-port target query's source-less
@@ -236,7 +237,7 @@ class CardPlayMixin(_HostBase):
         if battle_state is None:
             battle_state = getattr(self, "_current_bstate", None)
         candidates = legal_targets(
-            _hc._db, session.session_id, self.user_profile["id"], tid, 0,
+            db._db, session.session_id, self.user_profile["id"], tid, 0,
             both_players=True, champions=self._champion_targets(),
             battle_state=battle_state)
         return [game_engine.SessionCardId(game_engine.UID(int(u)))
@@ -300,7 +301,7 @@ class CardPlayMixin(_HostBase):
         for opt in last_ev.options:
             card_uid = opt.card.uid.uid64
             card_details = _hc.db_card_zone_details(
-                session.session_id, card_uid, conn=_hc._db)
+                session.session_id, card_uid, conn=db._db)
             if not card_details:
                 continue
             play_plan = self._card_play_plan(card_details[0], card_uid,
@@ -334,7 +335,7 @@ class CardPlayMixin(_HostBase):
                 if graph is None or not graph.additional_cost_targets:
                     continue
                 costs = ability_cost_targets(
-                    graph, _hc._db, session.session_id, owner_id, card_uid,
+                    graph, db._db, session.session_id, owner_id, card_uid,
                     champions=self._champion_targets(),
                     battle_state=getattr(self, "_current_bstate", None))
                 # The client only opens an optional/additional-cost picker
@@ -410,7 +411,7 @@ class CardPlayMixin(_HostBase):
             # the sacrificed troop BEFORE the effect target. Without it the client
             # skips the cost and only asks for the single effect target.
             cost_candidates = card_cost_targets(
-                play_plan, _hc._db, session.session_id,
+                play_plan, db._db, session.session_id,
                 self.user_profile["id"] if self.user_profile else 0,
                 card_uid, champions=self._champion_targets(),
                 battle_state=getattr(self, "_current_bstate", None))
@@ -503,7 +504,7 @@ class CardPlayMixin(_HostBase):
                 f"best_effort={cost.allow_best_effort_minimum}")
 
         for cost in card_cost_targets(
-                play_plan, _hc._db, session.session_id,
+                play_plan, db._db, session.session_id,
                 self.user_profile["id"] if self.user_profile else 0,
                 source_uid, champions=self._champion_targets(),
                 battle_state=getattr(self, "_current_bstate", None)):
@@ -526,7 +527,7 @@ class CardPlayMixin(_HostBase):
                 # The client named this cost's payment (XCostData
                 # CardsToSacrifice).  Never steal an effect target to pay it.
                 chosen = validate_cost_target_selection(
-                    _hc._db, session.session_id,
+                    db._db, session.session_id,
                     self.user_profile["id"] if self.user_profile else 0,
                     source_uid, cost, tuple(named),
                     champions=self._champion_targets(),
@@ -559,7 +560,7 @@ class CardPlayMixin(_HostBase):
                     return None
             chosen = tuple(available[:maximum])
             chosen = validate_cost_target_selection(
-                _hc._db, session.session_id,
+                db._db, session.session_id,
                 self.user_profile["id"] if self.user_profile else 0,
                 source_uid, cost, chosen,
                 champions=self._champion_targets(),
@@ -606,14 +607,14 @@ class CardPlayMixin(_HostBase):
                 # payment rows to apply.
                 continue
             for cost in ability_cost_targets(
-                    graph, _hc._db, session.session_id, owner_id, source_uid,
+                    graph, db._db, session.session_id, owner_id, source_uid,
                     champions=champions, battle_state=battle_state):
                 selected = cost_map.get(cost.index,
                                         cost_map.get(str(cost.index), ()))
                 if cost.is_source_auto_target and not selected:
                     selected = (() if source_uid is None else (int(source_uid),))
                 chosen = validate_cost_target_selection(
-                    _hc._db, session.session_id, owner_id, source_uid, cost,
+                    db._db, session.session_id, owner_id, source_uid, cost,
                     selected, champions=champions,
                     battle_state=battle_state)
                 if chosen is None:
@@ -642,7 +643,7 @@ class CardPlayMixin(_HostBase):
                 continue
             for uid in selected:
                 row = _hc.db_card_sacrifice_info(
-                    session.session_id, int(uid), conn=_hc._db)
+                    session.session_id, int(uid), conn=db._db)
                 if not row:
                     return False
                 owner_id, location, card_type = row
@@ -678,7 +679,7 @@ class CardPlayMixin(_HostBase):
         def emit_trigger(event_type, source_uid, owner_id=None, **data):
             from rules_port.triggers import dispatch_native_trigger
             return dispatch_native_trigger(
-                db=_hc._db, handler=self, game=game, session=session,
+                db=db._db, handler=self, game=game, session=session,
                 player_uid=pl_t, ai_uid=ai_t, battle_state=bstate,
                 event_type=event_type, source_card_id=source_uid,
                 source_player_id=owner_id,
@@ -687,7 +688,7 @@ class CardPlayMixin(_HostBase):
 
         def push_zone(uid, owner_id, location):
             row = _hc.db_card_zone_projection(
-                session.session_id, int(uid), conn=_hc._db)
+                session.session_id, int(uid), conn=db._db)
             if not row:
                 return
             scid = game_engine.SessionCardId(game_engine.UID(int(uid)))
@@ -737,7 +738,7 @@ class CardPlayMixin(_HostBase):
         source_owner_id = expected_owner_id
         if source_owner_id is None and source_uid is not None:
             source_owner = _hc.db_card_owner_id(
-                session.session_id, int(source_uid), conn=_hc._db)
+                session.session_id, int(source_uid), conn=db._db)
             if source_owner is not None:
                 source_owner_id = int(source_owner)
 
@@ -750,7 +751,7 @@ class CardPlayMixin(_HostBase):
             for uid in selected:
                 uid = int(uid)
                 row = _hc.db_card_owner_zone_state(
-                    session.session_id, uid, conn=_hc._db)
+                    session.session_id, uid, conn=db._db)
                 if not row:
                     continue
                 owner_id = int(row[0] or 0)
@@ -764,8 +765,8 @@ class CardPlayMixin(_HostBase):
                 if kind == "exhaust":
                     _hc.db_update_card_state(
                         session.session_id, uid,
-                        set_bits=game_engine.ECardStates.Tapped, conn=_hc._db)
-                    _hc._db.commit()
+                        set_bits=game_engine.ECardStates.Tapped, conn=db._db)
+                    db._db.commit()
                     push_zone(uid, owner_id, row[1])
                     continue
                 destination = {
@@ -788,21 +789,21 @@ class CardPlayMixin(_HostBase):
                         game._push(event)
                     continue
                 if destination == "discard":
-                    db_discard_card(session.session_id, uid, connection=_hc._db)
+                    db_discard_card(session.session_id, uid, connection=db._db)
                 elif destination == "hand":
                     _hc.db_move_card_to_location(
-                        session.session_id, uid, "hand", position=100, conn=_hc._db)
-                    _hc._db.commit()
+                        session.session_id, uid, "hand", position=100, conn=db._db)
+                    db._db.commit()
                 else:
                     _hc.db_move_card_to_location(
                         session.session_id, uid, destination,
-                        reset_state=True, conn=_hc._db)
-                    _hc._db.commit()
+                        reset_state=True, conn=db._db)
+                    db._db.commit()
                     if destination == "void":
                         voided_uids.append(uid)
                     if destination == "deck":
                         db_randomly_insert_deck_cards(
-                            session.session_id, owner_id, [uid], connection=_hc._db)
+                            session.session_id, owner_id, [uid], connection=db._db)
                 push_zone(uid, owner_id, destination)
                 record_cost_card(kind, uid)
                 if destination in ("discard", "void"):
@@ -870,7 +871,7 @@ class CardPlayMixin(_HostBase):
                 continue
             if gem <= 0:
                 continue
-            abilities = _hc.db_gem_ability_guids(gem, conn=_hc._db)
+            abilities = _hc.db_gem_ability_guids(gem, conn=db._db)
             if abilities:
                 out[str(inst)] = abilities
         return out
@@ -887,7 +888,7 @@ class CardPlayMixin(_HostBase):
         import hconnect_server as _hc
         if instance_id is None and scid is not None:
             card_details = _hc.db_card_zone_details(
-                game.session_id.uid64, scid.uid.uid64, conn=_hc._db)
+                game.session_id.uid64, scid.uid.uid64, conn=db._db)
             if card_details and card_details[1]:
                 try:
                     instance_id = int(card_details[1])
@@ -904,7 +905,7 @@ class CardPlayMixin(_HostBase):
         owner_is_player = True
         if scid is not None:
             controller = _hc.db_card_owner_id(
-                game.session_id.uid64, scid.uid.uid64, conn=_hc._db)
+                game.session_id.uid64, scid.uid.uid64, conn=db._db)
             owner_is_player = (
                 controller is None or
                 int(controller) == int(self.user_profile["id"]))
@@ -917,7 +918,7 @@ class CardPlayMixin(_HostBase):
                 arena = _hc.db_get_arena_state(
                     self.user_profile["id"], initialize=False)
                 deck_id = self._resolve_fra_deck_id(arena["deck_id"]) or 0
-                active_gems_json = _hc.db_deck_active_gems(deck_id, conn=_hc._db)
+                active_gems_json = _hc.db_deck_active_gems(deck_id, conn=db._db)
                 if active_gems_json:
                     try:
                         gems = json.loads(active_gems_json)
@@ -936,7 +937,7 @@ class CardPlayMixin(_HostBase):
                 (not has_persisted_gem or not owner_is_player)):
             try:
                 persisted_gem = _hc.db_card_gem_type(
-                    game.session_id.uid64, scid.uid.uid64, conn=_hc._db)
+                    game.session_id.uid64, scid.uid.uid64, conn=db._db)
                 gem_type = int(persisted_gem or 0)
             except Exception:
                 # Older focused fixtures may not carry the optional gem
@@ -1060,7 +1061,7 @@ class CardPlayMixin(_HostBase):
             if isinstance(self.user_profile, dict) else 0
         try:
             return mobilize_discount(
-                _hc._db, session.session_id, owner, int(card_uid))
+                db._db, session.session_id, owner, int(card_uid))
         except Exception:
             return 0
 
@@ -1088,9 +1089,9 @@ class CardPlayMixin(_HostBase):
             from pvp_db import db_deck_top_card_details
             from rules_port.static_rules import player_int_attributes
             top = db_deck_top_card_details(
-                session.session_id, int(self.user_profile["id"]), conn=_hc._db)
+                session.session_id, int(self.user_profile["id"]), conn=db._db)
             allowed = player_int_attributes(
-                _hc._db, session.session_id, _be.load_state(session),
+                db._db, session.session_id, _be.load_state(session),
                 int(self.user_profile["id"])).get("CanPlayTopOfDeck", 0)
             if not top or int(top[1]) != card_uid or int(allowed or 0) <= 0:
                 return False
@@ -1111,7 +1112,7 @@ class CardPlayMixin(_HostBase):
         bstate = _be.load_state(session)
         from rules_port.resources import can_play_resource, resource_play_limit
         resource_limit = resource_play_limit(
-            _hc._db, session.session_id, bstate,
+            db._db, session.session_id, bstate,
             int(self.user_profile.get("id", 0)))
         if not can_play_resource(
                 bstate, "player", limit=resource_limit):
@@ -1122,9 +1123,9 @@ class CardPlayMixin(_HostBase):
         from rules_port.zone_effects import move_card_to_zone
         from pvp_db import db_card_owner_zone_state
         prior_card_zone = db_card_owner_zone_state(
-            session.session_id, card_uid, conn=_hc._db)
+            session.session_id, card_uid, conn=db._db)
         if not move_card_to_zone(
-                _hc._db, session.session_id, card_uid, "PlayedResources",
+                db._db, session.session_id, card_uid, "PlayedResources",
                 owner_id=int(self.user_profile["id"]),
                 expected_location=source_location,
                 position=PLAYED_CARD_POSITION):
@@ -1140,7 +1141,7 @@ class CardPlayMixin(_HostBase):
         threshold_changes = []
         if not shard_tpl and not resource_choice_ability:
             for flag, amount in resource_threshold_grants(
-                    _hc._db, session.session_id, int(self.user_profile.get("id", 0)),
+                    db._db, session.session_id, int(self.user_profile.get("id", 0)),
                     ability_guids, bstate, source_uid=card_uid):
                 change = apply_resource_change(
                     bstate, "player", "threshold", amount, color=flag)
@@ -1148,7 +1149,7 @@ class CardPlayMixin(_HostBase):
         from rules_port.resources import resource_charge_amount
         resource_play = play_resource(
             bstate, "player", current_grant, max_grant,
-            charge_amount=resource_charge_amount(_hc._db, ability_guids),
+            charge_amount=resource_charge_amount(db._db, ability_guids),
             additional_plays=max(0, resource_limit - 1))
         charge_delta = max(
             0, int(resource_play.charge.new_value) -
@@ -1195,7 +1196,7 @@ class CardPlayMixin(_HostBase):
                 bstate["gain_threshold_color"] = int(flag)
                 try:
                     dispatch_native_trigger(
-                        db=_hc._db, handler=self, game=game, session=session,
+                        db=db._db, handler=self, game=game, session=session,
                         player_uid=pl_t, ai_uid=ai_t, battle_state=bstate,
                         event_type="GainThresholdEvent",
                         source_card_id=int(self._player_champ_scid.uid.uid64),
@@ -1215,7 +1216,7 @@ class CardPlayMixin(_HostBase):
             from rules_port.triggers import dispatch_native_trigger
             for _ in range(charge_delta):
                 dispatch_native_trigger(
-                    db=_hc._db, handler=self, game=game, session=session,
+                    db=db._db, handler=self, game=game, session=session,
                     player_uid=pl_t, ai_uid=ai_t, battle_state=bstate,
                     event_type="GainChargeEvent",
                     source_card_id=int(self._player_champ_scid.uid.uid64),
@@ -1225,19 +1226,19 @@ class CardPlayMixin(_HostBase):
         )
         resource_owner = int(self.user_profile.get("id", 0))
         granted_logs = resolve_granted_resource_abilities(
-            game, session, _hc._db, self, pl_t, ai_t, bstate,
+            game, session, db._db, self, pl_t, ai_t, bstate,
             card_uid, resource_owner)
         if granted_logs:
             log_req("    RulesPort resource grants: " + "; ".join(granted_logs))
         if resource_choice_ability:
             from rules_port.resolution import resolve_port_ability
             resolve_port_ability(
-                self, game, session, _hc._db, pl_t, ai_t, bstate,
+                self, game, session, db._db, pl_t, ai_t, bstate,
                 resource_choice_ability, card_uid, resource_owner,
                 target_map={})
         from rules_port.resources import resolve_printed_resource_abilities
         printed_logs = resolve_printed_resource_abilities(
-            game, session, _hc._db, self, pl_t, ai_t, bstate,
+            game, session, db._db, self, pl_t, ai_t, bstate,
             card_uid, resource_owner,
             skip_guids=({resource_choice_ability}
                         if resource_choice_ability else ()))
@@ -1313,9 +1314,9 @@ class CardPlayMixin(_HostBase):
             from rules_port.static_rules import player_int_attributes
             owner = owner_id
             top = db_deck_top_card_details(
-                session.session_id, owner, conn=_hc._db)
+                session.session_id, owner, conn=db._db)
             allowed = player_int_attributes(
-                _hc._db, session.session_id, _be.load_state(session), owner).get(
+                db._db, session.session_id, _be.load_state(session), owner).get(
                     "CanPlayTopOfDeck", 0)
             if not top or int(top[1]) != card_uid or int(allowed or 0) <= 0:
                 return reject("deck-top-not-allowed")
@@ -1333,7 +1334,7 @@ class CardPlayMixin(_HostBase):
             game, scid, row[0], None)
         from rules_port.static_rules import effective_cost
         try:
-            cost = int(effective_cost(_hc._db, session.session_id, bstate, card_uid))
+            cost = int(effective_cost(db._db, session.session_id, bstate, card_uid))
         except Exception:
             cost = int(cost or 0)
         play_plan = self._card_play_plan(
@@ -1447,7 +1448,7 @@ class CardPlayMixin(_HostBase):
             # tapped this way reduces the resource cost by two.
             from rules_port.static_rules import mobilize_payment
             reduced = mobilize_payment(
-                _hc._db, session.session_id, owner_id, card_uid, payment,
+                db._db, session.session_id, owner_id, card_uid, payment,
                 mobilized)
             if reduced is None:
                 return reject("mobilize-payment")
@@ -1486,14 +1487,14 @@ class CardPlayMixin(_HostBase):
             for uid in mobilized:
                 db_update_card_state(
                     session.session_id, int(uid),
-                    set_bits=game_engine.ECardStates.Tapped, conn=_hc._db)
-            _hc._db.commit()
+                    set_bits=game_engine.ECardStates.Tapped, conn=db._db)
+            db._db.commit()
         from rules_port.card_transactions import apply_card_play
         from pvp_db import db_card_state_value
         previous_state = int(db_card_state_value(
-            session.session_id, card_uid, conn=_hc._db) or 0)
+            session.session_id, card_uid, conn=db._db) or 0)
         transition = apply_card_play(
-            _hc._db, session.session_id, bstate, card_uid,
+            db._db, session.session_id, bstate, card_uid,
             owner_id, payment,
             destination="CastSpells",
             expected_location=source_location)
@@ -1522,7 +1523,7 @@ class CardPlayMixin(_HostBase):
             mugid = int(uid)
             mscid = game_engine.SessionCardId(game_engine.UID(mugid))
             details = db_card_zone_details(
-                session.session_id, mugid, conn=_hc._db)
+                session.session_id, mugid, conn=db._db)
             mtpl, mct, _mname, mcost, matk, mdef, mgem = \
                 self._card_full_data(
                     game, mscid, details[0] if details else None)
@@ -1544,7 +1545,7 @@ class CardPlayMixin(_HostBase):
             from rules_port.card_transactions import \
                 automatic_instance_ability_guids
             ability_guids = automatic_instance_ability_guids(
-                _hc._db, session.session_id, card_uid,
+                db._db, session.session_id, card_uid,
                 [ability.ability_guid
                  for ability in play_plan.cast_abilities])
             chain_descriptor = {
@@ -1567,7 +1568,7 @@ class CardPlayMixin(_HostBase):
             from rules_port.card_transactions import \
                 automatic_instance_ability_guids
             ability_guids = automatic_instance_ability_guids(
-                _hc._db, session.session_id, card_uid,
+                db._db, session.session_id, card_uid,
                 [ability.ability_guid
                  for ability in play_plan.cast_abilities],
                 in_play=False)
@@ -1677,7 +1678,7 @@ class CardPlayMixin(_HostBase):
         phase = _be.current_phase(bstate)
         resources = bstate.get("player_resources", 0)
         rows = _hc.db_ability_option_cards(
-            session.session_id, self.user_profile["id"], conn=_hc._db)
+            session.session_id, self.user_profile["id"], conn=db._db)
         result = {}
         from rules_port.triggers import trigger_collection_allows
         for card_uid, tpl_guid, card_state, attrs, _card_type, card_location in rows:
@@ -1707,7 +1708,7 @@ class CardPlayMixin(_HostBase):
                     from rules_port.condition_context import ConditionContext
                     from rules_port.conditions import trigger_condition_met
                     cond_ctx = ConditionContext(
-                        _hc._db, session, bstate,
+                        db._db, session, bstate,
                         ability_source_uid=card_uid,
                         ability_source_owner_id=self.user_profile["id"])
                     if not trigger_condition_met(graph.source.to_dict(), cond_ctx):
@@ -1742,7 +1743,7 @@ class CardPlayMixin(_HostBase):
                             has_target = True
                             continue
                         cands = legal_targets_for(
-                            _hc._db, session.session_id, self.user_profile["id"],
+                            db._db, session.session_id, self.user_profile["id"],
                             target, card_uid,
                             champions=self._champion_targets(),
                             battle_state=bstate)
@@ -1795,7 +1796,7 @@ class CardPlayMixin(_HostBase):
                     continue
                 payment_unavailable = False
                 for cost_target in ability_cost_targets(
-                        graph, _hc._db, session.session_id,
+                        graph, db._db, session.session_id,
                         self.user_profile["id"], card_uid,
                         champions=self._champion_targets(),
                         battle_state=bstate):
@@ -1810,10 +1811,10 @@ class CardPlayMixin(_HostBase):
                                     db_card_cooldown_counts)
                 used_game, used_turn = db_card_ability_use_counts(
                     session.session_id, card_uid, ag,
-                    bstate.get("turn_number", 1), conn=_hc._db)
+                    bstate.get("turn_number", 1), conn=db._db)
                 if (graph.costs.cooldown and
                         int(db_card_cooldown_counts(
-                            session.session_id, card_uid, conn=_hc._db).get(
+                            session.session_id, card_uid, conn=db._db).get(
                                 ag, 0) or 0) > 0):
                     continue
                 if graph.costs.uses_per_game and used_game >= graph.costs.uses_per_game:
@@ -1888,7 +1889,7 @@ class CardPlayMixin(_HostBase):
                         inst.target_ids.append(
                             game_engine.ResourceId.from_str(tid))
                         others = legal_targets_for(
-                            _hc._db, session.session_id, self.user_profile["id"],
+                            db._db, session.session_id, self.user_profile["id"],
                             target, int(card_uid),
                             champions=self._champion_targets(),
                             battle_state=bstate)
@@ -1904,7 +1905,7 @@ class CardPlayMixin(_HostBase):
                             if not filt:
                                 others = [r[0] for r in _hc.db_card_uids_in_zone(
                                     session.session_id, self.user_profile["id"],
-                                    "warzone", conn=_hc._db)]
+                                    "warzone", conn=db._db)]
                         tgt = game._make_event(game_engine.TargetInstanceSessionEventArgs)
                         tgt.target_index = i
                         tgt.target_id = game_engine.ResourceId.from_str(tid)
@@ -1914,7 +1915,7 @@ class CardPlayMixin(_HostBase):
                     inst.max_target_counts = max_counts if built else []
                 if graph is not None:
                     for cost in ability_cost_targets(
-                            graph, _hc._db, session.session_id,
+                            graph, db._db, session.session_id,
                             self.user_profile["id"], int(card_uid),
                             champions=self._champion_targets(),
                             battle_state=bstate):
@@ -1953,7 +1954,7 @@ class CardPlayMixin(_HostBase):
                         game_engine.SessionCardId(game_engine.UID(int(uid)))
                         for (uid,) in _hc.db_card_uids_in_zone(
                             session.session_id, self.user_profile["id"],
-                            "hand", conn=_hc._db)]
+                            "hand", conn=db._db)]
                     if hand:
                         child = game._make_event(
                             game_engine.OptionInstanceSessionEventArgs)
@@ -2013,7 +2014,7 @@ class CardPlayMixin(_HostBase):
                 owner = (int(self.user_profile.get("id", 0) or 0)
                          if isinstance(self.user_profile, dict) else 0)
                 quick_charges = owner_has_card_int_attr(
-                    _hc._db, session.session_id, owner,
+                    db._db, session.session_id, owner,
                     "YouCanActivateYourChargePowersAsThoughTheyWereQuick")
             except Exception:
                 quick_charges = False
@@ -2219,7 +2220,7 @@ class CardPlayMixin(_HostBase):
                     continue
                 tid = target.guid
                 cands = legal_targets_for(
-                    _hc._db, session.session_id, self.user_profile["id"],
+                    db._db, session.session_id, self.user_profile["id"],
                     target, int(champ_uid or 0),
                     champions=self._champion_targets())
                 mn = target.minimum
@@ -2270,7 +2271,7 @@ class CardPlayMixin(_HostBase):
             if graph is None:
                 continue
             for cost in ability_cost_targets(
-                    graph, _hc._db, session.session_id,
+                    graph, db._db, session.session_id,
                     self.user_profile["id"], int(champ_uid or 0),
                     champions=self._champion_targets()):
                 out.setdefault(ag, []).append(

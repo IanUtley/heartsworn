@@ -6,6 +6,7 @@ import re
 import struct
 from db import log_req
 import game_engine
+import db
 
 
 if TYPE_CHECKING:
@@ -277,7 +278,7 @@ class TransactionsMixin(_HostBase):
                              for hand in hands.values()
                              for card_uid, _template_guid in hand]
                 hand_projections = _hc.db_card_instance_dynamic_projections(
-                    session.session_id, hand_uids, conn=_hc._db)
+                    session.session_id, hand_uids, conn=db._db)
                 for apid in pids:
                     h = _hc.player_handlers.get(apid)
                     if not h: continue
@@ -405,7 +406,7 @@ class TransactionsMixin(_HostBase):
                 session.session_id,
                 [int(card_uid) for hand in (player_hand, ai_hand)
                  for card_uid, _template_guid in hand],
-                conn=_hc._db)
+                conn=db._db)
             for idx, (cu, tg) in enumerate(player_hand):
                 scid = game_engine.SessionCardId(
                     game_engine.UID(int(cu)))
@@ -589,7 +590,7 @@ class TransactionsMixin(_HostBase):
             # passes, driven by the 3029 PassPriority handler.
             if (session.session_name or "").startswith("camp_"):
                 _hc.campaign.apply_starting_hand_talents(
-                    self, _hc._db, session, game, pl_t,
+                    self, db._db, session, game, pl_t,
                     getattr(self, "_campaign_starting_hand_effects", []))
             game.push_accepted_starting_hand(
                 pl_t, mulliganed=player_mulliganed)
@@ -713,7 +714,7 @@ class TransactionsMixin(_HostBase):
                     from rules_port.resolution import resolve_port_ability
                     fortune_source = int(self._ai_champ_scid.uid.uid64)
                     fortune_log = resolve_port_ability(
-                        self, game, session, _hc._db, pl_t, ai_t, bstate,
+                        self, game, session, db._db, pl_t, ai_t, bstate,
                         fortune_ability, fortune_source, 0, target_map={})
                     log_req(f"    Fortune {fortune_guid}: {fortune_log}")
                 except Exception as exc:
@@ -722,7 +723,7 @@ class TransactionsMixin(_HostBase):
                     for key in ("player_mod_target", "player_spell_target",
                                 "resolving_target_uid", "resolving_effect_guid"):
                         bstate.pop(key, None)
-                    _hc.campaign.consume_fortune(_hc._db, camp_id, fortune_guid)
+                    _hc.campaign.consume_fortune(db._db, camp_id, fortune_guid)
                     self._campaign_fortune_guid = None
                     self._campaign_fortune_ability_guid = None
             game.player_threshold = dict(bstate.get("player_threshold", {}))
@@ -882,7 +883,7 @@ class TransactionsMixin(_HostBase):
                 log_req(f"    Discarded card {card_uid}")
             except Exception:
                 continue
-        _hc._db.commit()
+        db._db.commit()
         if gd.events:
             self._send_battle_events(session, gd, pl_t)
         # Discard down to the max hand size (7): each DiscardTransaction
@@ -1479,7 +1480,7 @@ class TransactionsMixin(_HostBase):
             # by combat resolution.
             from rules_port.static_rules import effective_attributes
             attack_attributes = effective_attributes(
-                _hc._db, session.session_id, bstate, int(u))
+                db._db, session.session_id, bstate, int(u))
             project_attacking_card(self, game, cid, pl_t, tpl_guid,
                                    pushed_state, attack_attributes)
             # Attacking normally exhausts the troop.  Emit the same typed tap
@@ -1507,7 +1508,7 @@ class TransactionsMixin(_HostBase):
             from rules_port.context import EffectContext
             from rules_port.combat_effects import apply_rage
             apply_rage(EffectContext.from_rules_port(
-                game, session, _hc._db, self, pl_t, ai_t, bstate,
+                game, session, db._db, self, pl_t, ai_t, bstate,
                 "", ability=None), u)
         if attackers:
             # The client raises one champion-scoped CardsAttackedEvent after
@@ -1520,7 +1521,7 @@ class TransactionsMixin(_HostBase):
                 game, session, pl_t, ai_t, bstate, "CardsAttackedEvent",
                 int(player_champ.uid.uid64), self.user_profile["id"],
                 event_tac={_tac_attr_hash("NumAttackers"): len(attackers)})
-        _hc._db.commit()
+        db._db.commit()
         game.push_combat_listing(pl_t, combats)
         self._send_battle_events(session, game, pl_t)
         # Advance to DeclareAttackPriorityWindow (the next stop).

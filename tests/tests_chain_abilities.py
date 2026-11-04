@@ -611,8 +611,8 @@ def test_countermagic_offered_in_ai_chain_window(db):
     db.execute("UPDATE game_cards SET card_abilities=? WHERE card_uid=101",
                (json.dumps([AG_COUNTERMAGIC]),))
     db.commit()
-    old_db, old_hcs = dbmod._db, hcs._db
-    dbmod._db, hcs._db = db, db
+    old_db, old_hcs = dbmod._db, dbmod._db
+    dbmod._db, dbmod._db = db, db
     try:
         h = object.__new__(hcs.HCPHandler)
         h._db = db
@@ -636,7 +636,7 @@ def test_countermagic_offered_in_ai_chain_window(db):
                    any(int(x.uid.uid64) == 202 for x in ts)
                    for _, _, t, ts in targets), targets
     finally:
-        dbmod._db, hcs._db = old_db, old_hcs
+        dbmod._db, dbmod._db = old_db, old_hcs
 
 
 def test_strength_of_redwood_targets_combat_troop(db):
@@ -658,8 +658,8 @@ def test_strength_of_redwood_targets_combat_troop(db):
              state=game_engine.ECardStates.Attacking |
                    game_engine.ECardStates.HasAttacked)
     pl_t, ai_t = _pl_ai()
-    old_db, old_hcs = dbmod._db, hcs._db
-    dbmod._db, hcs._db = db, db
+    old_db, old_hcs = dbmod._db, dbmod._db
+    dbmod._db, dbmod._db = db, db
     try:
         h = object.__new__(hcs.HCPHandler)
         h._db = db
@@ -689,7 +689,7 @@ def test_strength_of_redwood_targets_combat_troop(db):
         assert any(102 in [int(x.uid.uid64) for x in candidate_uids]
                    for _, _, _, candidate_uids in targets), targets
     finally:
-        dbmod._db, hcs._db = old_db, old_hcs
+        dbmod._db, dbmod._db = old_db, old_hcs
 
 
 def test_multi_target_play_card_keeps_all_target_instances(db):
@@ -709,8 +709,8 @@ def test_multi_target_play_card_keeps_all_target_instances(db):
     add_card(db, 102, 5, TPL_SPAWN, loc="warzone")   # friendly troop
     add_card(db, 202, 0, TPL_SPAWN, loc="warzone")   # opposing troop
     pl_t, ai_t = _pl_ai()
-    old_db, old_hcs = dbmod._db, hcs._db
-    dbmod._db, hcs._db = db, db
+    old_db, old_hcs = dbmod._db, dbmod._db
+    dbmod._db, dbmod._db = db, db
     try:
         h = object.__new__(hcs.HCPHandler)
         h._db = db
@@ -748,7 +748,7 @@ def test_multi_target_play_card_keeps_all_target_instances(db):
         assert list(inst.min_target_counts) == [1, 1]
         assert list(inst.max_target_counts) == [1, 1]
     finally:
-        dbmod._db, hcs._db = old_db, old_hcs
+        dbmod._db, dbmod._db = old_db, old_hcs
 
 
 def test_bunjitsu_void_cost_is_a_cost_instance(db):
@@ -764,8 +764,8 @@ def test_bunjitsu_void_cost_is_a_cost_instance(db):
     add_card(db, 101, 5, "b7172b6a-ef85-4fef-91e1-81975b4ce7cd")
     add_card(db, 102, 5, "b7172b6a-ef85-4fef-91e1-81975b4ce7cd")
     db.commit()
-    old_db, old_hcs = dbmod._db, hcs._db
-    dbmod._db, hcs._db = db, db
+    old_db, old_hcs = dbmod._db, dbmod._db
+    dbmod._db, dbmod._db = db, db
     try:
         h = object.__new__(hcs.HCPHandler)
         h._db = db
@@ -799,7 +799,7 @@ def test_bunjitsu_void_cost_is_a_cost_instance(db):
         ev.target_template_id = game_engine.ResourceId.from_str(tid)
         assert ev.to_byte_array() and ev.CLASS_ID == 66
     finally:
-        dbmod._db, hcs._db = old_db, old_hcs
+        dbmod._db, dbmod._db = old_db, old_hcs
 
 
 def test_undying_weaver_offers_scrounge_cost_during_card_play(db):
@@ -816,8 +816,8 @@ def test_undying_weaver_offers_scrounge_cost_during_card_play(db):
     add_card(db, 201, 5, TPL_GLADIATOR, loc="discard")
     add_card(db, 202, 5, TPL_GLADIATOR, loc="discard")
     old_db, old_hcs, old_tournament_db = (
-        dbmod._db, hcs._db, tournament_game._db)
-    dbmod._db, hcs._db, tournament_game._db = db, db, db
+        dbmod._db, dbmod._db, tournament_game._db)
+    dbmod._db, dbmod._db, tournament_game._db = db, db, db
     try:
         h = object.__new__(hcs.HCPHandler)
         h._db = db
@@ -928,7 +928,7 @@ def test_undying_weaver_offers_scrounge_cost_during_card_play(db):
         assert payment_state["ability_lists"]["VoidedCards"] == [201, 202]
         assert "CardScroungedEvent" in dispatched
     finally:
-        dbmod._db, hcs._db, tournament_game._db = (
+        dbmod._db, dbmod._db, tournament_game._db = (
             old_db, old_hcs, old_tournament_db)
 
 
@@ -996,12 +996,15 @@ def test_practice_ability_chain_window_reaches_the_client(db):
             if isinstance(const, types.CodeType):
                 walk(const)
 
-    walk(hcs.HCPHandler._dispatch_rules_port_transaction_locked.__code__)
+    fn = hcs.HCPHandler._dispatch_rules_port_transaction_locked
+    walk(fn.__code__)
+    # The method lives in a mixin module, so resolve its globals there.
+    namespace = fn.__globals__
     missing = set()
     for code in codes:
         for instruction in dis.get_instructions(code):
             if (instruction.opname == "LOAD_GLOBAL" and
-                    instruction.argval not in vars(hcs) and
+                    instruction.argval not in namespace and
                     not hasattr(builtins, instruction.argval)):
                 missing.add(instruction.argval)
     assert not missing, missing
@@ -1108,8 +1111,8 @@ def test_champion_power_offer_requires_its_authored_cost_and_target(db):
     add_card(db, 501, 5, TPL_GLADIATOR, loc="underground")
     add_card(db, 601, 0, TPL_GLADIATOR, loc="warzone")
     db.commit()
-    old_db, old_hcs_db = dbmod._db, hcs._db
-    dbmod._db, hcs._db = db, db
+    old_db, old_hcs_db = dbmod._db, dbmod._db
+    dbmod._db, dbmod._db = db, db
     try:
         h = object.__new__(hcs.HCPHandler)
         h.user_profile = {"id": 5}
@@ -1161,7 +1164,7 @@ def test_champion_power_offer_requires_its_authored_cost_and_target(db):
         _targets, _costs, affordable = offer()
         assert affordable == [], affordable
     finally:
-        dbmod._db, hcs._db = old_db, old_hcs_db
+        dbmod._db, dbmod._db = old_db, old_hcs_db
 
 
 def test_bunjitsu_voided_stats_sum_both_troops(db):
@@ -1181,8 +1184,8 @@ def test_bunjitsu_voided_stats_sum_both_troops(db):
         "UPDATE game_cards SET card_defense_mod=-1 "
         "WHERE card_uid=102")
     db.commit()
-    old_db, old_hcs = dbmod._db, hcs._db
-    dbmod._db, hcs._db = db, db
+    old_db, old_hcs = dbmod._db, dbmod._db
+    dbmod._db, dbmod._db = db, db
     try:
         h = object.__new__(hcs.HCPHandler)
         h._db = db
@@ -1202,7 +1205,7 @@ def test_bunjitsu_voided_stats_sum_both_troops(db):
         stats = bstate.get("champion_voided_stats") or {}
         assert stats.get("atk") == 4 and stats.get("def") == 2, stats
     finally:
-        dbmod._db, hcs._db = old_db, old_hcs
+        dbmod._db, dbmod._db = old_db, old_hcs
 
 
 def test_lightning_armada_counts_only_your_hand(db):
@@ -1640,8 +1643,8 @@ def test_human_block_dispatches_the_attackers_blocked_trigger(db):
     game = game_engine.Game(1, pl_t, ai_t)
     bstate = {"player_health": 20, "ai_health": 15, "turn_number": 3,
               "stack": []}
-    old_db, old_hcs = dbmod._db, hcs._db
-    dbmod._db, hcs._db = db, db
+    old_db, old_hcs = dbmod._db, dbmod._db
+    dbmod._db, dbmod._db = db, db
     try:
         handler = object.__new__(hcs.HCPHandler)
         handler._db = db
@@ -1666,7 +1669,7 @@ def test_human_block_dispatches_the_attackers_blocked_trigger(db):
             "AND location='discard' ORDER BY card_uid").fetchall()]
         assert buried == [900, 901, 902, 903], buried
     finally:
-        dbmod._db, hcs._db = old_db, old_hcs
+        dbmod._db, dbmod._db = old_db, old_hcs
 
 
 def test_friendly_zone_trigger_ignores_cards_taken_from_an_opponent(db):
@@ -2105,13 +2108,13 @@ def test_native_chain_resolves_trigger_without_legacy_fallback(db):
 
     from rules_port.chain_items import resolve_trigger_item
 
-    old_db, old_hcs = dbmod._db, hcs._db
-    dbmod._db, hcs._db = db, db
+    old_db, old_hcs = dbmod._db, dbmod._db
+    dbmod._db, dbmod._db = db, db
     try:
         resolve_trigger_item(
             handler, SessionStub(), db, game, bstate, item, pl_t, ai_t)
     finally:
-        dbmod._db, hcs._db = old_db, old_hcs
+        dbmod._db, dbmod._db = old_db, old_hcs
     updates = [(int(ev.session_card_id.uid.uid64), ev.collection)
                for ev in game.events
                if isinstance(ev, game_engine.CardUpdatedSessionEventArgs)]
@@ -3224,7 +3227,7 @@ def test_hand_card_shows_its_current_cost(db):
     import db as db_module
     # The cards and the queries that read them must share the test database.
     previous_default = db_module._db
-    hcs._db = db
+    dbmod._db = db
     db_module._db = db
     live = db
     session_id = 97531

@@ -11,6 +11,7 @@ import random
 import struct
 from db import log_req
 import game_engine
+import db
 
 
 # ServiceLoadBalancer — QuitOnReconnectionGame (22011)
@@ -155,7 +156,7 @@ def handle_tryreconnectiontodisconnectedgame_22013(handler, target, instance, da
             except (IndexError, ValueError):
                 tournament_id = 0
             tournament_room = _hc.db_tournament_room_for_game(
-                tournament_id, conn=_hc._db)
+                tournament_id, conn=db._db)
             reconnect_flags = _hc._tournament_session_flags({
                 "format": tournament_room.get("format", 0)
                 if tournament_room else 0
@@ -175,7 +176,7 @@ def handle_tryreconnectiontodisconnectedgame_22013(handler, target, instance, da
             try:
                 arena_state = _hc.db_get_arena_state(
                     int((handler.user_profile or {}).get("id") or 0),
-                    initialize=False, conn=_hc._db)
+                    initialize=False, conn=db._db)
                 deck_db_id = handler._resolve_fra_deck_id(
                     arena_state.get("deck_id", 0))
             except Exception as exc:
@@ -591,10 +592,10 @@ def _army_of_myth_ai_resources(session):
     if str(scene or "").lower() != ARMY_OF_MYTH_SCENE:
         return None
     identity = _hc.db_campaign_identity_state(
-        int(session_name.split("_")[-1] or 0), conn=_hc._db)
+        int(session_name.split("_")[-1] or 0), conn=db._db)
     if not identity:
         return 0
-    loaded = progress.load(_hc._db, int(identity[0]))
+    loaded = progress.load(db._db, int(identity[0]))
     counters = (loaded[0] if loaded else {}).get("counters") or {}
     return int(counters.get(ARMY_LEVEL_COUNTER, 0) or 0)
 
@@ -715,7 +716,7 @@ def handle_readytostartgame_22031(handler, target, instance, data_type, reqid, c
         except (TypeError, ValueError, IndexError):
             camp_id = 0
         if camp_id:
-            profile_user_id = _hc.db_campaign_owner_user_id(camp_id, conn=_hc._db)
+            profile_user_id = _hc.db_campaign_owner_user_id(camp_id, conn=db._db)
             if profile_user_id:
                 restored_profile = _hc.db_get_user(profile_user_id)
                 if restored_profile is not None:
@@ -772,7 +773,7 @@ def handle_readytostartgame_22031(handler, target, instance, data_type, reqid, c
             camp_id = int((session.session_name or "camp_0").split("_")[-1] or 0)
         except (TypeError, ValueError):
             camp_id = 0
-        camp_identity = (_hc.db_campaign_identity_state(camp_id, conn=_hc._db)
+        camp_identity = (_hc.db_campaign_identity_state(camp_id, conn=db._db)
                          if camp_id else None)
         if camp_identity:
             try:
@@ -782,7 +783,7 @@ def handle_readytostartgame_22031(handler, target, instance, data_type, reqid, c
                 is_tutorial_session = True
         if camp_id:
             handler._pve_player_cannot_choose_play_first = \
-                _hc.campaign.player_cannot_choose_play_first(_hc._db, camp_id)
+                _hc.campaign.player_cannot_choose_play_first(db._db, camp_id)
             if handler._pve_player_cannot_choose_play_first:
                 log_req("    Campaign talent restriction: player cannot choose Play first")
     coin_winner_is_player = (
@@ -1077,7 +1078,7 @@ def handle_readytostartgame_22031(handler, target, instance, data_type, reqid, c
     if is_campaign:
         camp_id = int((session.session_name or "camp_0").split("_")[-1] or 0)
         cfg = _hc.campaign.resolve_battle_config(
-            handler, _hc._db, camp_id, session.session_name)
+            handler, db._db, camp_id, session.session_name)
         campaign_encounter_conversation_guid = cfg.get(
             "encounter_mod_conversation_guid")
         campaign_mod_choice_guid = cfg.get("encounter_mod_choice_guid")
@@ -1121,16 +1122,16 @@ def handle_readytostartgame_22031(handler, target, instance, data_type, reqid, c
         arena = _hc.db_get_arena_state(handler.user_profile["id"])
         deck_db_id = handler._resolve_fra_deck_id(arena["deck_id"])
         player_champ_guid = _hc.db_get_player_champion_guid(deck_db_id) or "1d462ffb-0744-4996-804c-ba61b2c5c2f1"
-        if _hc.db_champion_template_data_exists(player_champ_guid, conn=_hc._db):
+        if _hc.db_champion_template_data_exists(player_champ_guid, conn=db._db):
             player_starting_health = handler._champion_health_by_guid(player_champ_guid)
         else:
-            ext_health = _hc.db_extended_champion_health(player_champ_guid, conn=_hc._db)
+            ext_health = _hc.db_extended_champion_health(player_champ_guid, conn=db._db)
             player_starting_health = ext_health if ext_health is not None else 20
         # FRA uses the selected PvP deck rather than a campaign row,
         # but the champion record still owns the selected talent list.
         # Carry it into the same PreGame path used by campaign games.
         _talent_row = _hc.db_champion_talents_for_deck(
-            handler.user_profile["id"], deck_db_id, conn=_hc._db)
+            handler.user_profile["id"], deck_db_id, conn=db._db)
         if _talent_row and _talent_row[0]:
             player_talents_json = _talent_row[0]
         log_req(f"    {mode_name} battle: deck={deck_db_id} "
@@ -1144,7 +1145,7 @@ def handle_readytostartgame_22031(handler, target, instance, data_type, reqid, c
             # but its template, health, charge power, and abilities
             # must come from the same champion definition.
             ai_champ_guid = player_champ_guid
-            _mirror_name = _hc.db_champion_template_name(ai_champ_guid, conn=_hc._db)
+            _mirror_name = _hc.db_champion_template_name(ai_champ_guid, conn=db._db)
             ai_name = (_mirror_name if _mirror_name
                        else "AI Opponent")
             ai_deck_guid = None
@@ -1176,10 +1177,10 @@ def handle_readytostartgame_22031(handler, target, instance, data_type, reqid, c
     # encounter deck has no explicit strategy.
     from campaign_runtime.records import encounter_deck_sleeve
     ai_deck_sleeve_guid = (
-        _hc.db_encounter_deck_sleeve(ai_deck_guid, conn=_hc._db)
+        _hc.db_encounter_deck_sleeve(ai_deck_guid, conn=db._db)
         or encounter_deck_sleeve(ai_deck_guid)) if ai_deck_guid else None
     player_deck_sleeve_guid = (
-        _hc.db_deck_sleeve(deck_db_id, handler.user_profile["id"], conn=_hc._db)
+        _hc.db_deck_sleeve(deck_db_id, handler.user_profile["id"], conn=db._db)
         if deck_db_id else None)
     import ai as _ai
     if ai_deck_guid:
@@ -1206,7 +1207,7 @@ def handle_readytostartgame_22031(handler, target, instance, data_type, reqid, c
                                      for value in talent_guids]
         for tg in talent_guids:
             # All abilities granted by this talent (one-to-many).
-            ab_rows = _hc.db_talent_ability_rows(tg, conn=_hc._db)
+            ab_rows = _hc.db_talent_ability_rows(tg, conn=db._db)
             if ab_rows:
                 pl_abilities.extend(game_engine.ResourceId.from_str(r[0]) for r in ab_rows)
             else:
@@ -1234,7 +1235,7 @@ def handle_readytostartgame_22031(handler, target, instance, data_type, reqid, c
     handler._campaign_starting_hand_effects = []
     if is_campaign:
         hand_cfg = _hc.campaign.resolve_opening_hand_config(
-            _hc._db, session, handler.user_profile["id"], race_name, cls_name,
+            db._db, session, handler.user_profile["id"], race_name, cls_name,
             pl_abilities)
         handler._campaign_starting_hand_size = max(
             0, int(hand_cfg["starting_hand_size"]) +
@@ -1320,7 +1321,7 @@ def handle_readytostartgame_22031(handler, target, instance, data_type, reqid, c
             guard += 1
             from rules_port.resolution import resolve_port_trigger
             resolve_port_trigger(
-                handler, game, session, _hc._db, pl_uid_t, ai_uid_t,
+                handler, game, session, db._db, pl_uid_t, ai_uid_t,
                 state, state["stack"].pop())
         if state.get("stack"):
             raise RuntimeError("setup RulesPort trigger stack did not drain")
@@ -1356,8 +1357,8 @@ def handle_readytostartgame_22031(handler, target, instance, data_type, reqid, c
                       str(player_owner): int(player_champ_id.uid.uid64)},
         "champ_guid_map": {"0": ai_champ_guid, str(player_owner): player_champ_guid}}
     player_static = champion_static_intattrs(
-        _hc._db, session.session_id, start_state, player_owner)
-    ai_static = champion_static_intattrs(_hc._db, session.session_id, start_state, 0)
+        db._db, session.session_id, start_state, player_owner)
+    ai_static = champion_static_intattrs(db._db, session.session_id, start_state, 0)
     game.push_card_updated(player_champ_id, pl_uid_t, game_engine.ECardCollections.None_,
                            game_engine.ECardTypes.Champion, attack=0, defense=player_starting_health,
                            template_id=player_champ_guid,
@@ -1374,7 +1375,7 @@ def handle_readytostartgame_22031(handler, target, instance, data_type, reqid, c
     if not is_campaign:
         player_name = handler.user_profile["name"] if handler.user_profile else "TestPlayer"
         if deck_db_id:
-            deck_champion_name = _hc.db_deck_champion_name(deck_db_id, conn=_hc._db)
+            deck_champion_name = _hc.db_deck_champion_name(deck_db_id, conn=db._db)
             if deck_champion_name:
                 player_name = deck_champion_name
     log_req(f"    Battle HUD names: player={player_name} ai={ai_name}")
@@ -1399,7 +1400,7 @@ def handle_readytostartgame_22031(handler, target, instance, data_type, reqid, c
         deck_rows = (campaign_player_deck_json,)
     elif deck_db_id and handler.user_profile:
         deck_cards_json = _hc.db_deck_cards_json(
-            deck_db_id, handler.user_profile["id"], conn=_hc._db)
+            deck_db_id, handler.user_profile["id"], conn=db._db)
         deck_rows = (deck_cards_json,) if deck_cards_json is not None else None
     player_deck_cards = []
     player_card_tpl_ids = []
@@ -1411,7 +1412,7 @@ def handle_readytostartgame_22031(handler, target, instance, data_type, reqid, c
     deck_gem_types = {}
     if deck_db_id:
         active_gems_json = _hc.db_deck_active_gems(
-            deck_db_id, conn=_hc._db)
+            deck_db_id, conn=db._db)
         if active_gems_json:
             try:
                 active_gems = _gemj.loads(active_gems_json) or {}
@@ -1433,7 +1434,7 @@ def handle_readytostartgame_22031(handler, target, instance, data_type, reqid, c
     # deck does not.
     from profile_db import db_deck_equipment
     from services.equipment import equipped_variant
-    deck_equipment = (db_deck_equipment(deck_db_id, conn=_hc._db)
+    deck_equipment = (db_deck_equipment(deck_db_id, conn=db._db)
                       if deck_db_id and not campaign_player_deck_json else [])
     if deck_equipment:
         log_req(f"    Deck equipment: {deck_equipment}")
@@ -1486,8 +1487,8 @@ def handle_readytostartgame_22031(handler, target, instance, data_type, reqid, c
             })
             player_deck_cards.append(cid)
     if player_insert_rows:
-        _hc.db_insert_game_cards(player_insert_rows, conn=_hc._db)
-    _hc._db.commit()
+        _hc.db_insert_game_cards(player_insert_rows, conn=db._db)
+    db._db.commit()
     # Derive client definitions from the same prepared metadata used
     # for insertion; only socketed-gem ability merges need a later
     # update.
@@ -1542,12 +1543,12 @@ def handle_readytostartgame_22031(handler, target, instance, data_type, reqid, c
                      cid.uid.to_uint64()))
         else:
             # Missing instance — insert a placeholder instance
-            fallback = _hc.db_first_template_guid(conn=_hc._db)
+            fallback = _hc.db_first_template_guid(conn=db._db)
             if fallback:
                 tpl_guid = fallback
                 _hc.db_insert_card_instance(
                     handler.user_profile["id"], instance_id, tpl_guid,
-                    conn=_hc._db)
+                    conn=db._db)
         # Effective attributes = static template attributes + any
         # granted by the card's own abilities (passives), so attribute
         # icons show in hand from the first CardUpdated.
@@ -1562,7 +1563,7 @@ def handle_readytostartgame_22031(handler, target, instance, data_type, reqid, c
         game.push_card_updated(cid, pl_uid_t, game_engine.ECardCollections.Deck, ct,
                               nulling=True)
     if player_ability_updates:
-        _hc.db_update_game_card_abilities(player_ability_updates, conn=_hc._db)
+        _hc.db_update_game_card_abilities(player_ability_updates, conn=db._db)
     if player_deck_cards:
         game.push_deck_created_with_cards(
             pl_uid_t, player_deck_cards,
@@ -1599,7 +1600,7 @@ def handle_readytostartgame_22031(handler, target, instance, data_type, reqid, c
         active_gems = {}
         if deck_db_id:
             active_gems_json = _hc.db_deck_active_gems(
-                deck_db_id, conn=_hc._db)
+                deck_db_id, conn=db._db)
             if active_gems_json:
                 try:
                     active_gems = _aj.loads(active_gems_json) or {}
@@ -1622,7 +1623,7 @@ def handle_readytostartgame_22031(handler, target, instance, data_type, reqid, c
         fallback_deck = _hc._STARTER_DECKS.get("Human") or {}
         for card_guid, quantity in fallback_deck.get("cards", []):
             for _ in range(max(0, int(quantity or 0))):
-                if _hc.db_template_exists(card_guid, conn=_hc._db):
+                if _hc.db_template_exists(card_guid, conn=db._db):
                     ai_card_specs.append((card_guid, 0, []))
     if ai_deck_guid or ai_card_specs:
         gem_types_by_name = {
@@ -1630,10 +1631,10 @@ def handle_readytostartgame_22031(handler, target, instance, data_type, reqid, c
                         _aj.loads(abilities_json or "[]")
                         if abilities_json else [])
             for name, gem_type, abilities_json in _hc.db_gem_templates(
-                    conn=_hc._db)
+                    conn=db._db)
         }
         if ai_deck_guid:
-            rows = _hc.db_encounter_deck_cards(ai_deck_guid, conn=_hc._db)
+            rows = _hc.db_encounter_deck_cards(ai_deck_guid, conn=db._db)
             for cg, q, gem_json in rows:
                 try:
                     gem_slots = _aj.loads(gem_json or "[]")
@@ -1665,7 +1666,7 @@ def handle_readytostartgame_22031(handler, target, instance, data_type, reqid, c
         # is dealt so their GameStarted abilities can resolve.
         if is_campaign and scene_guid:
             # All players use the shared authored scene modifiers.
-            scene_mods_json = _hc.db_scene_mods(scene_guid, conn=_hc._db)
+            scene_mods_json = _hc.db_scene_mods(scene_guid, conn=db._db)
             try:
                 scene_mods = _aj.loads(scene_mods_json or "[]")
             except (TypeError, ValueError):
@@ -1710,22 +1711,22 @@ def handle_readytostartgame_22031(handler, target, instance, data_type, reqid, c
                 """
                 import hconnect_server as _hc
                 card_abilities_json = _hc.db_template_ability_guids(
-                    card_guid, conn=_hc._db)
+                    card_guid, conn=db._db)
                 try:
                     ability_guids = _aj.loads(
                         card_abilities_json or "[]")
                 except (TypeError, ValueError):
                     ability_guids = []
                 for ability_guid in ability_guids:
-                    meta = _hc.db_ability_metadata(ability_guid, conn=_hc._db)
+                    meta = _hc.db_ability_metadata(ability_guid, conn=db._db)
                     effect_exists = _hc.db_ability_has_effect(
-                        ability_guid, conn=_hc._db)
+                        ability_guid, conn=db._db)
                     if (meta and effect_exists and not meta[0] and
                             ("GameStartedEvent" in (meta[1] or "") or
                              not (meta[1] or ""))):
                         return True
                     for _eg, effect_type, raw_param in _hc.db_ability_effect_rows(
-                            ability_guid, conn=_hc._db):
+                            ability_guid, conn=db._db):
                         if effect_type != "GrantAbilityEffectTemplate":
                             continue
                         try:
@@ -1740,7 +1741,7 @@ def handle_readytostartgame_22031(handler, target, instance, data_type, reqid, c
                         if not granted_guid:
                             continue
                         trigger_row = _hc.db_ability_metadata(
-                            granted_guid, conn=_hc._db)
+                            granted_guid, conn=db._db)
                         if (trigger_row and
                                 "GameStartedEvent" in (trigger_row[1] or "")):
                             return True
@@ -1769,28 +1770,28 @@ def handle_readytostartgame_22031(handler, target, instance, data_type, reqid, c
                         # the Untamed Dire Toad passive) and apply them
                         # later to matching visible troops.
                         _mcard_json = _hc.db_template_ability_guids(
-                            mg, conn=_hc._db)
+                            mg, conn=db._db)
                         try:
                             _mags = _aj.loads(_mcard_json or "[]")
                         except (TypeError, ValueError):
                             _mags = []
                         for _mag in _mags:
                             for _meg, _met, _mep in _hc.db_ability_effect_rows(
-                                    _mag, conn=_hc._db):
+                                    _mag, conn=db._db):
                                 if _met != "GrantAbilityEffectTemplate":
                                     continue
                                 _granted = str(_mep or "").lower()
                                 if not _granted:
                                     continue
                                 _gtids_json = _hc.db_ability_target_template_ids(
-                                    _granted, conn=_hc._db)
+                                    _granted, conn=db._db)
                                 try:
                                     _gtids = _aj.loads(_gtids_json or "[]")
                                 except (TypeError, ValueError):
                                     _gtids = []
                                 for _gtid in _gtids:
                                     _filter_json = _hc.db_target_template_filter(
-                                        _gtid, conn=_hc._db)
+                                        _gtid, conn=db._db)
                                     if (_filter_json or "{}").strip() not in ("", "{}"):
                                         if _granted not in handler._scene_targeted_ability_guids:
                                             handler._scene_targeted_ability_guids.append(_granted)
@@ -1811,14 +1812,14 @@ def handle_readytostartgame_22031(handler, target, instance, data_type, reqid, c
                     if (mg and mg_key not in targeted_scene_mod_guids
                             and mg_key not in scene_setup_card_guids):
                         _abilities_json = _hc.db_template_ability_guids(
-                            mg, conn=_hc._db)
+                            mg, conn=db._db)
                         try:
                             _ags = _aj.loads(_abilities_json or "[]")
                         except (TypeError, ValueError):
                             _ags = []
                         for _ag in _ags:
                             for _eg, _etype, _param in _hc.db_ability_effect_rows(
-                                    _ag, conn=_hc._db):
+                                    _ag, conn=db._db):
                                 if _etype != "GrantAbilityEffectTemplate":
                                     continue
                                 try:
@@ -1854,7 +1855,7 @@ def handle_readytostartgame_22031(handler, target, instance, data_type, reqid, c
                 cg_key = str(cg).lower()
                 if cg_key not in ai_template_rows:
                     ai_template_rows[cg_key] = _hc.db_template_card_info(
-                        cg, conn=_hc._db)
+                        cg, conn=db._db)
                 r = ai_template_rows[cg_key]
                 if r:
                     ct2 = game_engine.card_type_from_db(r[0])
@@ -1887,8 +1888,8 @@ def handle_readytostartgame_22031(handler, target, instance, data_type, reqid, c
                      effective_attrs, "{}", gem_type or 0))
                 ai_materialized.append((cid, cg, _is_scene_mod, col))
             if ai_insert_rows:
-                _hc.db_insert_game_cards(ai_insert_rows, conn=_hc._db)
-            _hc._db.commit()
+                _hc.db_insert_game_cards(ai_insert_rows, conn=db._db)
+            db._db.commit()
             for cid, cg, _is_scene_mod, col in ai_materialized:
                 if not _is_scene_mod:
                     game.push_card_updated(
@@ -1907,7 +1908,7 @@ def handle_readytostartgame_22031(handler, target, instance, data_type, reqid, c
                     # special list of encounter names.
                     from rules_port.triggers import dispatch_native_trigger
                     dispatch_native_trigger(
-                        db=_hc._db, handler=handler, game=game,
+                        db=db._db, handler=handler, game=game,
                         session=session, player_uid=pl_uid_t,
                         ai_uid=ai_uid_t,
                         battle_state=hidden_bstate,
@@ -1928,10 +1929,10 @@ def handle_readytostartgame_22031(handler, target, instance, data_type, reqid, c
                         _hidden_item = hidden_bstate["stack"].pop()
                         from rules_port.resolution import resolve_port_trigger
                         resolve_port_trigger(
-                            handler, game, session, _hc._db, pl_uid_t,
+                            handler, game, session, db._db, pl_uid_t,
                             ai_uid_t, hidden_bstate, _hidden_item)
                         _hidden_resolved += 1
-            _hc._db.commit()
+            db._db.commit()
             source = (f"encounter {ai_deck_guid}" if ai_deck_guid
                       else "player mirror" if is_practice
                       else "Human starter fallback")
@@ -1943,7 +1944,7 @@ def handle_readytostartgame_22031(handler, target, instance, data_type, reqid, c
         from campaign_runtime import dungeon_buffs
         dungeon_camp = dungeon_buffs.camp_id_from_session(getattr(session, "session_name", ""))
         if dungeon_camp is not None:
-            dungeon_buffs.carry_into_battle(_hc._db, dungeon_camp, setup_bstate)
+            dungeon_buffs.carry_into_battle(db._db, dungeon_camp, setup_bstate)
         game.push_deck_created_with_cards(
             ai_uid_t, ai_deck_cards,
             sleeve_guid=ai_deck_sleeve_guid)
@@ -1953,7 +1954,7 @@ def handle_readytostartgame_22031(handler, target, instance, data_type, reqid, c
             fra_mod_setup.get("modifications") or [],
             player_deck_cards, ai_deck_cards,
             _drain_setup_stack)
-    _hc._db.commit()
+    db._db.commit()
     # C# writes StartingDeckSize to each champion card's
     # PlayerGameStats before it runs CardCreated/PreGame abilities.
     # Preserve that opening count in the shared runtime TAC projection
@@ -1984,7 +1985,7 @@ def handle_readytostartgame_22031(handler, target, instance, data_type, reqid, c
                      "tac_statistics", {})}
     for cid in player_deck_cards:
         dispatch_native_trigger(
-            db=_hc._db, handler=handler, game=game, session=session,
+            db=db._db, handler=handler, game=game, session=session,
             player_uid=pl_uid_t, ai_uid=ai_uid_t,
             battle_state=cc_bstate,
             event_type="CardCreatedEvent",
@@ -1994,7 +1995,7 @@ def handle_readytostartgame_22031(handler, target, instance, data_type, reqid, c
         _drain_setup_stack(cc_bstate)
     for cid in ai_deck_cards:
         dispatch_native_trigger(
-            db=_hc._db, handler=handler, game=game, session=session,
+            db=db._db, handler=handler, game=game, session=session,
             player_uid=pl_uid_t, ai_uid=ai_uid_t,
             battle_state=cc_bstate,
             event_type="CardCreatedEvent",
@@ -2023,7 +2024,7 @@ def handle_readytostartgame_22031(handler, target, instance, data_type, reqid, c
     }
     for owner in (handler.user_profile["id"], 0):
         dispatch_native_trigger(
-            db=_hc._db, handler=handler, game=game, session=session,
+            db=db._db, handler=handler, game=game, session=session,
             player_uid=pl_uid_t, ai_uid=ai_uid_t,
             battle_state=pregame_bstate,
             event_type="PreGameEvent", source_card_id=None,
@@ -2059,7 +2060,7 @@ def handle_readytostartgame_22031(handler, target, instance, data_type, reqid, c
             # duplicating native effects.
             from rules_port.pregame import apply_pregame_abilities
             apply_pregame_abilities(
-                game, session, _hc._db, handler, pl_uid_t,
+                game, session, db._db, handler, pl_uid_t,
                 handler.user_profile["id"], pl_guids,
                 "player_health", metadata_only=True)
             log_req("    Native PreGame: applied non-trigger champion modifiers")
@@ -2070,7 +2071,7 @@ def handle_readytostartgame_22031(handler, target, instance, data_type, reqid, c
         try:
             from rules_port.pregame import apply_pregame_abilities
             apply_pregame_abilities(
-                game, session, _hc._db, handler, ai_uid_t, 0,
+                game, session, db._db, handler, ai_uid_t, 0,
                 ai_guids, "ai_health", metadata_only=True)
             log_req("    Native PreGame: applied non-trigger AI modifiers")
         except Exception as e:

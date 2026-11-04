@@ -5,6 +5,7 @@ Registered in ``services/__init__.py``; routed by ``data_type``.
 
 import json
 from db import log_req
+import db
 
 
 # ServiceProfile (80000)
@@ -30,7 +31,7 @@ def handle_serviceprofile_80000(handler, target, instance, data_type, reqid, com
         # Profile deck templates (mercenary party decks).
         from services.deck_templates import handle_profile_action
         template_envelope = handle_profile_action(
-            _hc._db, handler.user_profile["id"], env_json)
+            db._db, handler.user_profile["id"], env_json)
     if isinstance(env_json, dict) and env_json.get("action") == "qreplaylst":
         from services.replay import replay_list
         resp_envelope = json.dumps(
