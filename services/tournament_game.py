@@ -90,6 +90,8 @@ from domain.constants import DEFAULT_MAX_HAND_SIZE
 
 # Session id -> ready count for tournament PvP setup, shared by ReadyForGameSetup.
 PVP_READY = {}
+# Session id -> ready count for tournament PvP events (ReadyForGameEvents).
+PVP_EVENTS_READY = {}
 
 
 _ECardCollections = _ge.ECardCollections

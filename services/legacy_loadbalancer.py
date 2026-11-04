@@ -293,19 +293,6 @@ def handle_tryreconnectiontodisconnectedgame_22013(handler, target, instance, da
     log_req(f"    Sent TryReconnection response ({len(dw_bytes)}b)")
 
 
-# ServiceLoadBalancer — ReadyForGameEvents (22029)
-def handle_readyforgameevents_22029(handler, target, instance, data_type, reqid, comp, session_id,
-                                    conh, inner_obj, inner_bytes, raw_data_wrapper_bytes):
-    import hconnect_server as _hc
-    log_req(">>> ReadyForGameEvents (dt=22029)")
-    player_uid = make_uid(UID_TYPE["ServicePlayer"], int(handler.client_reck_id))
-    session = _hc.game_session.find_session_by_player(player_uid)
-    # Tournament sessions
-    if session and (session.session_name or "").startswith("tourney-"):
-        from services.tournament_game import handle_ready_for_game_events
-        handle_ready_for_game_events(handler, session, _hc._pvp_events_ready)
-
-
 # Armies of Myth (AZ1 Node 66): the AI starts with the campaign's army level,
 # the counter the conversation sets from the difficulty picked (0-6).
 ARMY_OF_MYTH_SCENE = "0b1d5244-e9f6-46ec-bb06-73c36801f5ef"
@@ -1831,6 +1818,5 @@ def handle_readytostartgame_22031(handler, target, instance, data_type, reqid, c
 LEGACY_HANDLERS = {
     22011: handle_quitonreconnectiongame_22011,
     22013: handle_tryreconnectiontodisconnectedgame_22013,
-    22029: handle_readyforgameevents_22029,
     22031: handle_readytostartgame_22031,
 }

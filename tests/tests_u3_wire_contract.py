@@ -1311,7 +1311,7 @@ def test_fire_and_forget_setup_and_reconnect_routes_send_no_typed_reply():
     with mock.patch.object(
             hconnect_server.game_session, "find_session_by_player",
             return_value=session), \
-            mock.patch.object(hconnect_server, "_pvp_events_ready", ready), \
+            mock.patch.object(tournament_game, "PVP_EVENTS_READY", ready), \
             mock.patch.object(tournament_game, "pvp_start_priority_watchdog"), \
             mock.patch.object(tournament_game, "_session_has_reconnect_player",
                               return_value=True), \

@@ -17,7 +17,8 @@ from tests.test_db import fresh_database  # noqa: E402
 fresh_database()
 
 import hconnect_server as hc  # noqa: E402
-from services import legacy_loadbalancer as lb  # noqa: E402
+from services import dispatch as service_dispatch  # noqa: E402
+from services import tournament_game  # noqa: E402
 
 PLAYER_ID = 67890
 
@@ -36,13 +37,17 @@ class _StubHandler:
 
 
 def _drive(session):
+    """Drive the request through the services registry, as the hub does."""
+    import importlib
+    module_name, fn_name, extra = service_dispatch(22029)
+    fn = getattr(importlib.import_module(module_name), fn_name)
     handler = _StubHandler()
     with mock.patch.object(hc.game_session, "find_session_by_player",
                            return_value=session), \
-         mock.patch("services.tournament_game.handle_ready_for_game_events") as hand_off:
-        lb.handle_readyforgameevents_22029(
-            handler, "target", 3, 22029, 9000, False, "session-x", "conh-1",
-            {}, b"", b"")
+         mock.patch(f"{module_name}.handle_ready_for_game_events") as hand_off:
+        fn(handler, "target", 3, 9000, False, "session-x", "conh-1",
+           inner_obj={}, inner_bytes=b"", SERVICE_MAIL_UID=252,
+           SERVICE_PROFILE_UID=0, log_req=lambda *_a, **_k: True, **extra)
     return handler, hand_off
 
 
@@ -60,4 +65,4 @@ def test_tournament_session_is_handed_off_with_the_hub_events_state():
     hand_off.assert_called_once()
     args = hand_off.call_args.args
     assert args[0] is handler and args[1] is session
-    assert args[2] is hc._pvp_events_ready
+    assert args[2] is tournament_game.PVP_EVENTS_READY

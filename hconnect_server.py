@@ -379,7 +379,6 @@ def get_active_clients_snapshot():
     """Return a thread-safe snapshot copy of active clients."""
     with _active_clients_lock:
         return {uid: list(entries) for uid, entries in _active_clients.items()}
-_pvp_events_ready = {}  # session_id → ready_count for tournament PvP events (22029)
 _pending_tournament_starts = set()
 _pending_tournament_starts_lock = threading.Lock()
 _waiting_rooms = {}

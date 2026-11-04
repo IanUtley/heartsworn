@@ -2,6 +2,7 @@
 
 import campaign
 import game_engine
+import game_session
 from application.commands import (JoinSessionCommand, SetSessionStateCommand,
                                   StartEncounterCommand, StartSessionCommand)
 from domain.uids import UID_TYPE, make_uid
@@ -11,7 +12,9 @@ from encoder import compress_gzip, encode_datawrapper, encode_objfmt_response
 from domain.constants import SERVICE_AI_UID_TYPE
 from gamemodes.fra_arena import _fra_arena_session_state_data, _fra_arena_setup_values
 from gamemodes.tournament_engine import player_handlers
-from services.tournament_game import PVP_READY, handle_ready_for_game_setup
+from services.tournament_game import (PVP_EVENTS_READY, PVP_READY,
+                                      handle_ready_for_game_events,
+                                      handle_ready_for_game_setup)
 
 
 def handle_start_session(handler, target, instance, reqid, comp, session_id,
@@ -431,3 +434,15 @@ def handle_ready_for_game_setup_request(handler, target, instance, reqid, comp, 
         "reqid": resp_reqid, "c": comp, "conh": conh, "sid": handler.sid,
     }, dw_bytes)
     log_req(f"    Sent ReadyForGameSetup response ({len(dw_bytes)}b)")
+
+
+def handle_ready_for_game_events_request(handler, target, instance, reqid, comp, session_id,
+                                              conh, inner_obj, inner_bytes, *, SERVICE_MAIL_UID,
+                                              log_req, data_type):
+    """Hand a ready tournament session to the tournament module; regular sessions get no reply."""
+    log_req(">>> ReadyForGameEvents (dt=22029)")
+    player_uid = make_uid(UID_TYPE["ServicePlayer"], int(handler.client_reck_id))
+    session = game_session.find_session_by_player(player_uid)
+    # Tournament sessions
+    if session and (session.session_name or "").startswith("tourney-"):
+        handle_ready_for_game_events(handler, session, PVP_EVENTS_READY)
