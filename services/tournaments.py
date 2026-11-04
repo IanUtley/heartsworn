@@ -9,7 +9,11 @@ import threading
 import gamemodes.tournament_server as tournament_server
 from encoder import compress_gzip, encode_datawrapper, encode_objfmt_response
 from db import log_req
-from tournament_db import db_tournament_by_id
+import db
+from gamemodes.tournament_engine import record_tournament_forfeit
+from pvp_db import db_delete_game_session
+from tournament_db import (db_tournament_by_id, db_tournament_match_session,
+                           db_tournament_retire_player_run, db_tournament_status)
 
 
 # Waiting rooms created by CreateWaitingRoom, keyed by room id, and the lock and
@@ -185,3 +189,40 @@ def handle_test_tournament_entry(handler, target, instance, reqid, comp, session
          ("ErrorMessage", "string", "")])
     _send(handler, target, instance, reqid, comp, session_id, conh, data_type,
           resp_inner, "TestTournamentEntry", SERVICE_MAIL_UID)
+
+
+def handle_leave_tournament(handler, target, instance, reqid, comp, session_id,
+                            conh, inner_obj, inner_bytes,
+                            *, SERVICE_MAIL_UID, log_req, data_type, **_kw):
+    """Leave a tournament: record a forfeit or retire the run, then leave the waiting rooms."""
+    log_req(">>> LeaveTournament")
+    player_uid = int(handler.client_reck_id) if handler.client_reck_id else 0
+    tournament_id = int(inner_obj.get("TournamentID", 0) or 0)
+    active_tournament_session = db_tournament_match_session(
+        tournament_id, player_uid, conn=db._db) if tournament_id else None
+    forfeit_recorded = bool(
+        tournament_id and record_tournament_forfeit(
+            tournament_id, player_uid, handler))
+    if forfeit_recorded:
+        log_req(f"    Recorded tournament forfeit: tid={tournament_id} "
+                f"loser={player_uid}")
+        status = db_tournament_status(tournament_id, conn=db._db)
+        if (status and str(status).lower() == "complete"
+                and active_tournament_session):
+            db_delete_game_session(active_tournament_session[0])
+            log_req(f"    Tournament complete: cleaned PvP session "
+                    f"{active_tournament_session[0]}")
+    # record_tournament_forfeit already applies the async run-limit
+    # retirement and deckbuilder transition.  Applying a generic
+    # withdrawal afterwards would turn the returned player back into
+    # a withdrawn signup and leave the client in the lobby.
+    if tournament_id and not forfeit_recorded:
+        db_tournament_retire_player_run(tournament_id, player_uid, conn=db._db)
+    tournament_server.leave_all(player_uid)
+    resp_inner = encode_objfmt_response(
+        ["Game.Shared.Network.Tournaments.LeaveTournamentResponseArgs",
+         "System.UInt64"],
+        [("success", "bool", True),
+         ("TournamentID", "ulong", tournament_id)])
+    _send(handler, target, instance, reqid, comp, session_id, conh, data_type,
+          resp_inner, "LeaveTournament", SERVICE_MAIL_UID)

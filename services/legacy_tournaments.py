@@ -480,51 +480,9 @@ def handle_request_25011(handler, target, instance, data_type, reqid, comp, sess
     }, dw_bytes)
 
 
-def handle_request_25031(handler, target, instance, data_type, reqid, comp, session_id,
-                         conh, inner_obj, inner_bytes, raw_data_wrapper_bytes):
-    import hconnect_server as _hc
-    log_req(">>> LeaveTournament")
-    player_uid = int(handler.client_reck_id) if handler.client_reck_id else 0
-    tournament_id = int(inner_obj.get("TournamentID", 0) or 0)
-    active_tournament_session = db_tournament_match_session(
-    tournament_id, player_uid, conn=db._db) if tournament_id else None
-    forfeit_recorded = bool(
-        tournament_id and record_tournament_forfeit(
-        tournament_id, player_uid, handler))
-    if forfeit_recorded:
-        log_req(f"    Recorded tournament forfeit: tid={tournament_id} "
-            f"loser={player_uid}")
-        status = db_tournament_status(tournament_id, conn=db._db)
-        if (status and str(status).lower() == "complete"
-                and active_tournament_session):
-            db_delete_game_session(active_tournament_session[0])
-            log_req(f"    Tournament complete: cleaned PvP session "
-                f"{active_tournament_session[0]}")
-    # record_tournament_forfeit already applies the async run-limit
-    # retirement and deckbuilder transition.  Applying a generic
-    # withdrawal afterwards would turn the returned player back into
-    # a withdrawn signup and leave the client in the lobby.
-    if tournament_id and not forfeit_recorded:
-        db_tournament_retire_player_run(
-        tournament_id, player_uid, conn=db._db)
-    tournament_server.leave_all(player_uid)
-    resp_inner = encode_objfmt_response(
-    ["Game.Shared.Network.Tournaments.LeaveTournamentResponseArgs",
-     "System.UInt64"],
-    [("success", "bool", True),
-     ("TournamentID", "ulong", tournament_id)])
-    resp_body = compress_gzip(resp_inner) if comp else resp_inner
-    dw_bytes = encode_datawrapper(reqid | 1, data_type, resp_body, comp, session_id)
-    handler.scnt += 1
-    handler.send({"issuer": f"0.0.0.0.ServiceTournaments.{SERVICE_MAIL_UID}.ServicePlayer.{handler.client_uid}.{reqid|1}",
-               "target": target, "instance": instance, "reqid": reqid | 1, "c": comp, "conh": conh, "sid": handler.sid}, dw_bytes)
-    log_req(f"    Sent LeaveTournament response ({len(dw_bytes)}b)")    
-
-
 LEGACY_HANDLERS = {
     25021: handle_tryreconnection_25021,
     25029: handle_entertournament_25029,
     25039: handle_request_25039,
     25011: handle_request_25011,
-    25031: handle_request_25031,
 }
