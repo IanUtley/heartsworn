@@ -347,15 +347,15 @@ game_engine.event_logger = _record_session_events
 from application.objfmt_wire import parse_datawrapper
 # === ObjFmt encoder ===
 
-from application.response_encoding import (
+from encoder import (
     client_session_guid, compress_gzip, decompress_gzip,
     encode_challenger_list, encode_datawrapper,
-    encode_get_challengers_response, encode_get_store_items_response,
-    encode_get_unread_mail_count_response, encode_login_stream_done,
-    encode_objfmt_response, encode_objfmt_string, encode_ping_mail_server_response,
-    encode_profile_response, encode_session_state, encode_store_item_set1_booster,
+    encode_get_challengers_response, encode_get_unread_mail_count_response,
+    encode_login_stream_done, encode_objfmt_response, encode_objfmt_string,
+    encode_ping_mail_server_response, encode_profile_response, encode_session_state,
     encode_store_response, encode_sync_event, make_uid,
 )
+from services.store import encode_get_store_items_response, encode_store_item_set1_booster
 from services.card_pools import (
     load_card_templates as _load_card_templates,
     get_pvp_sets as _get_pvp_sets,

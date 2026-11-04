@@ -424,3 +424,11 @@ def handle_redeem(handler, target, instance, reqid, comp, session_id, conh,
         "reqid": resp_reqid, "c": comp, "conh": conh, "sid": handler.sid,
     }, dw_bytes, 6013, reqid, target, instance)
     log_req(f"    Sent RedeemCode response ({len(dw_bytes)}b)")
+
+
+def encode_get_store_items_response():
+    return encode_store_response(db_get_store_items())
+
+
+def encode_store_item_set1_booster():
+    return encode_get_store_items_response()

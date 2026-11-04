@@ -5,7 +5,7 @@ import json
 import struct
 from binascii import hexlify, unhexlify
 
-from application.response_encoding import compress_gzip, encode_datawrapper
+from encoder import compress_gzip, encode_datawrapper
 from profile_db import db_get_decks
 
 
