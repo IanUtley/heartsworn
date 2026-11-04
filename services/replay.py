@@ -404,3 +404,39 @@ def replay_fetch(raw):
         data = b""
     next_offset = offset + len(data)
     return data + bytes([1 if next_offset < total else 0]) + int(total).to_bytes(4, "little")
+
+
+def handle_replay_fetch_request(handler, target, instance, reqid, comp, session_id,
+                                conh, inner_obj, inner_bytes,
+                                *, SERVICE_MAIL_UID, log_req, data_type, **_kw):
+    """Answer a ReplayFetch envelope; an invalid envelope gets an empty reply."""
+    from domain.uids import SERVICE_GAME_SESSION_UID
+    from encoder import compress_gzip, encode_datawrapper, encode_objfmt_response
+    envelope = inner_obj.get("Envelope", b"{}")
+    try:
+        env_json = json.loads(envelope.decode("utf-8"))
+    except (TypeError, ValueError, UnicodeDecodeError):
+        env_json = {}
+    if isinstance(env_json, dict) and env_json.get("action") == "replayfetch":
+        resp_envelope = replay_fetch(env_json)
+        log_req(
+            f">>> ReplayFetch session={env_json.get('Session', '')} "
+            f"offset={env_json.get('Offset', 0)} size={len(resp_envelope)}"
+        )
+    else:
+        resp_envelope = b"\0\0\0\0\0"
+        log_req(">>> ReplayFetch invalid request")
+    resp_inner = encode_objfmt_response(
+        ["Game.Shared.GameReq.GameReq+Response", "System.Byte[]"],
+        [("Envelope", "bytes", resp_envelope)],
+    )
+    resp_body = compress_gzip(resp_inner) if comp else resp_inner
+    resp_reqid = reqid | 1
+    dw_bytes = encode_datawrapper(resp_reqid, data_type, resp_body, comp, session_id)
+    issuer_str = f"0.0.0.0.ServiceGameSession.{SERVICE_GAME_SESSION_UID}.{instance}.{resp_reqid}"
+    handler.scnt += 1
+    handler.send({
+        "issuer": issuer_str, "target": target, "instance": instance,
+        "reqid": resp_reqid, "c": comp, "conh": conh, "sid": handler.sid,
+    }, dw_bytes)
+    log_req(f"    Sent ReplayFetch response ({len(dw_bytes)}b)")

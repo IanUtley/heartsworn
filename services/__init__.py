@@ -60,6 +60,7 @@ _SERVICE_TABLE = {
     70015: ("services.tournaments", "handle_pooled_messaging_flush", {"data_type": 70015}),
     70027: ("services.tournaments", "handle_ladder_tier_rewards_list", {"data_type": 70027}),
     70028: ("services.tournaments", "handle_ladder_ranking_list", {"data_type": 70028}),
+    160000: ("services.replay", "handle_replay_fetch_request", {"data_type": 160000}),
     22013: ("services.loadbalancer", "handle_try_reconnection", {"data_type": 22013}),
 
     # Matchmaking and direct challenges

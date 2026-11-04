@@ -26,43 +26,6 @@ import game_session
 
 
 # ServiceGameSession ReplayFetch (160000)
-def handle_servicegamesession_replayfetch_160000(handler, target, instance, data_type, reqid, comp, session_id,
-                                                 conh, inner_obj, inner_bytes, raw_data_wrapper_bytes):
-    import hconnect_server as _hc
-    envelope = inner_obj.get("Envelope", b"{}")
-    try:
-        env_json = json.loads(envelope.decode("utf-8"))
-    except (TypeError, ValueError, UnicodeDecodeError):
-        env_json = {}
-    if isinstance(env_json, dict) and env_json.get("action") == "replayfetch":
-        from services.replay import replay_fetch
-        resp_envelope = replay_fetch(env_json)
-        log_req(
-        f">>> ReplayFetch session={env_json.get('Session', '')} "
-        f"offset={env_json.get('Offset', 0)} size={len(resp_envelope)}"
-    )
-    else:
-        resp_envelope = b"\0\0\0\0\0"
-        log_req(">>> ReplayFetch invalid request")
-    resp_inner = encode_objfmt_response(
-    ["Game.Shared.GameReq.GameReq+Response", "System.Byte[]"],
-    [("Envelope", "bytes", resp_envelope)],
-)
-    resp_body = compress_gzip(resp_inner) if comp else resp_inner
-    resp_reqid = reqid | 1
-    dw_bytes = encode_datawrapper(resp_reqid, data_type, resp_body, comp, session_id)
-    issuer_str = (
-        f"0.0.0.0.ServiceGameSession.{SERVICE_GAME_SESSION_UID}."
-        f"{instance}.{resp_reqid}"
-    )
-    handler.scnt += 1
-    handler.send({
-        "issuer": issuer_str, "target": target, "instance": instance,
-        "reqid": resp_reqid, "c": comp, "conh": conh, "sid": handler.sid,
-    }, dw_bytes)
-    log_req(f"    Sent ReplayFetch response ({len(dw_bytes)}b)")
-
-
 # GameSession Service — PlayerTransaction (3029)
 def handle_playertransaction_3029(handler, target, instance, data_type, reqid, comp, session_id,
                                   conh, inner_obj, inner_bytes, raw_data_wrapper_bytes):
@@ -387,6 +350,5 @@ def handle_playertransaction_3029(handler, target, instance, data_type, reqid, c
 
 
 LEGACY_HANDLERS = {
-    160000: handle_servicegamesession_replayfetch_160000,
     3029: handle_playertransaction_3029,
 }
