@@ -44,6 +44,9 @@ _SERVICE_TABLE = {
     2163: ("services.social", "handle_ignore_player", {}),
     2165: ("services.social", "handle_unignore_player", {}),
 
+    # ServiceLoadBalancer session requests
+    22015: ("services.loadbalancer", "handle_start_session", {"data_type": 22015}),
+
     # Matchmaking and direct challenges
     4001: ("services.matchmaking", "handle_ping_matchmaking", {}),
     4013: ("services.matchmaking", "handle_send_quick_match_challenge", {}),
