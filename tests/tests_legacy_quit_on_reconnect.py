@@ -18,7 +18,7 @@ from tests.test_db import fresh_database  # noqa: E402
 fresh_database()
 
 import hconnect_server as hc  # noqa: E402
-from services import legacy_loadbalancer as lb  # noqa: E402
+from services import dispatch as service_dispatch  # noqa: E402
 
 PLAYER_ID = 67890
 
@@ -36,21 +36,22 @@ class _StubHandler:
         self.sent.append((headers, body))
 
 
-def _drive(session, pvp_state=None, pvp_saved=None):
-    """Run the handler; return (log lines, pvp_save calls, handler)."""
+def _drive(session, pvp_state=None):
+    """Drive the request through the services registry; return (logs, save mock, handler)."""
+    import importlib
+    module_name, fn_name, extra = service_dispatch(22011)
+    fn = getattr(importlib.import_module(module_name), fn_name)
     logs = []
     handler = _StubHandler()
     lock = mock.MagicMock()
     with mock.patch.object(hc.game_session, "find_session_by_player",
                            return_value=session), \
-         mock.patch.object(lb, "log_req", side_effect=logs.append), \
-         mock.patch("services.tournament_game.pvp_session_lock", return_value=lock), \
-         mock.patch("services.tournament_game.pvp_load_state",
-                    return_value=pvp_state), \
-         mock.patch("services.tournament_game.pvp_save_state") as save:
-        lb.handle_quitonreconnectiongame_22011(
-            handler, "target", 3, 22011, 9000, False, "session-x", "conh-1",
-            {}, b"", b"")
+         mock.patch(f"{module_name}.pvp_session_lock", return_value=lock), \
+         mock.patch(f"{module_name}.pvp_load_state", return_value=pvp_state), \
+         mock.patch(f"{module_name}.pvp_save_state") as save:
+        fn(handler, "target", 3, 9000, False, "session-x", "conh-1",
+           inner_obj={}, inner_bytes=b"", SERVICE_MAIL_UID=252,
+           SERVICE_PROFILE_UID=0, log_req=logs.append, **extra)
     return logs, save, handler
 
 

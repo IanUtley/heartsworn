@@ -33,7 +33,6 @@ from pve_db import db_get_arena_state
 from pvp_db import db_target_template_filter
 from pvp_db import db_template_exists
 from pvp_db import db_template_card_info
-from services.reconnect import _record_reconnect_decline
 from gamemodes.tournament_engine import player_decks
 from pvp_db import db_insert_game_cards
 from pvp_db import db_ability_metadata
@@ -61,59 +60,6 @@ from pvp_db import db_gem_templates
 from pvp_db import db_encounter_deck_cards
 from pvp_db import db_scene_mods
 from pvp_db import db_ability_has_effect
-
-
-# ServiceLoadBalancer — QuitOnReconnectionGame (22011)
-def handle_quitonreconnectiongame_22011(handler, target, instance, data_type, reqid, comp, session_id,
-                                        conh, inner_obj, inner_bytes, raw_data_wrapper_bytes):
-    # The client sends this when the player declines the reconnect
-    # dialog. Remember the choice in this game's checkpoint so the
-    # same player is not prompted again, while another participant
-    # can still reconnect. This request is fire-and-forget.
-    import hconnect_server as _hc
-    reconnect_pid = int(handler.client_reck_id or 0)
-    reconnect_session = _hc.game_session.find_session_by_player(reconnect_pid)
-    if reconnect_session:
-        try:
-            from services.tournament_game import (
-                pvp_load_state, pvp_save_state, pvp_session_lock,
-            )
-            fra_setup = _fra_arena_setup_values(
-            getattr(reconnect_session, "encounter_data", None))
-            if getattr(reconnect_session, "state", "") == "ended":
-                log_req(
-                f">>> QuitOnReconnectionGame: ignored ended session "
-                f"for pid {reconnect_pid}")
-            else:
-                with pvp_session_lock(reconnect_session):
-                    reconnect_state = pvp_load_state(reconnect_session) or {}
-                    if reconnect_state.get("pvp"):
-                        _record_reconnect_decline(
-                        reconnect_state, reconnect_pid)
-                        pvp_save_state(reconnect_session, reconnect_state)
-                        session_kind = "PvP"
-                    elif fra_setup:
-                        from rules_port.persistence import load_state, save_state
-                        reconnect_state = load_state(reconnect_session) or {}
-                        _record_reconnect_decline(
-                        reconnect_state, reconnect_pid)
-                        save_state(reconnect_session, reconnect_state)
-                        session_kind = "FRA"
-                    else:
-                        session_kind = None
-                if session_kind:
-                    log_req(
-                    f">>> QuitOnReconnectionGame: pid {reconnect_pid} "
-                    f"declined reconnect for {session_kind} session; "
-                    f"other participants remain eligible")
-                else:
-                    log_req(
-                    f">>> QuitOnReconnectionGame: ignored non-reconnectable "
-                    f"session for pid {reconnect_pid}")
-        except Exception as exc:
-            log_req(f">>> QuitOnReconnectionGame failed: {exc}")
-    else:
-        log_req(">>> QuitOnReconnectionGame: no session")
 
 
 # ServiceLoadBalancer — TryReconnectionToDisconnectedGame (22013)
@@ -1816,7 +1762,6 @@ def handle_readytostartgame_22031(handler, target, instance, data_type, reqid, c
 
 
 LEGACY_HANDLERS = {
-    22011: handle_quitonreconnectiongame_22011,
     22013: handle_tryreconnectiontodisconnectedgame_22013,
     22031: handle_readytostartgame_22031,
 }
