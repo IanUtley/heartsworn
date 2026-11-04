@@ -11,6 +11,7 @@ import game_engine
 from encoder import encode_datawrapper
 from encoder import compress_gzip
 from encoder import encode_objfmt_response
+from application.practice_flow import _same_uid
 
 
 # ServiceGameSession ReplayFetch (160000)
@@ -285,7 +286,7 @@ def handle_playertransaction_3029(handler, target, instance, data_type, reqid, c
             _rules_players = [p for p, _position in
                               (getattr(session, "players", ()) or ())]
             _rules_ai = next((p for p in _rules_players
-                              if not _hc._same_uid(p, player_uid)), None)
+                              if not _same_uid(p, player_uid)), None)
             if _rules_ai is None:
                 # Practice persists the human participant twice, so
                 # the session list has no distinct opponent.  Fall

@@ -9,6 +9,7 @@ import game_engine
 import db
 from encoder import encode_datawrapper
 from encoder import compress_gzip
+import campaign
 
 
 if TYPE_CHECKING:
@@ -591,7 +592,7 @@ class TransactionsMixin(_HostBase):
             # FirstMainPhase are advanced one-by-one as the client (auto-)
             # passes, driven by the 3029 PassPriority handler.
             if (session.session_name or "").startswith("camp_"):
-                _hc.campaign.apply_starting_hand_talents(
+                campaign.apply_starting_hand_talents(
                     self, db._db, session, game, pl_t,
                     getattr(self, "_campaign_starting_hand_effects", []))
             game.push_accepted_starting_hand(
@@ -725,7 +726,7 @@ class TransactionsMixin(_HostBase):
                     for key in ("player_mod_target", "player_spell_target",
                                 "resolving_target_uid", "resolving_effect_guid"):
                         bstate.pop(key, None)
-                    _hc.campaign.consume_fortune(db._db, camp_id, fortune_guid)
+                    campaign.consume_fortune(db._db, camp_id, fortune_guid)
                     self._campaign_fortune_guid = None
                     self._campaign_fortune_ability_guid = None
             game.player_threshold = dict(bstate.get("player_threshold", {}))

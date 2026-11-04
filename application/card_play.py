@@ -10,6 +10,7 @@ import struct
 from db import log_req
 import game_engine
 import db
+from application.practice_flow import _same_uid
 
 
 if TYPE_CHECKING:
@@ -1627,7 +1628,7 @@ class CardPlayMixin(_HostBase):
         top_item = native_port.action_stack.peek() if native_port is not None else None
         holder = getattr(top_item, "priority_player_id", None)
         game.push_green_light(
-            pl_t if holder is None or _hc._same_uid(holder, pl_t) else ai_t,
+            pl_t if holder is None or _same_uid(holder, pl_t) else ai_t,
             game_engine.EPriorityContext.ResolveTopOfChain)
         if payment:
             event = game_engine.PlayerCurrentResourcePoolChangedSessionEventArgs()

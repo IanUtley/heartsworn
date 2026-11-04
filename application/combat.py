@@ -8,6 +8,8 @@ import game_engine
 import db
 from encoder import encode_datawrapper
 from encoder import compress_gzip
+from application.practice_flow import _same_uid
+import campaign
 
 
 def discarding_player(bstate, ability_controller):
@@ -387,7 +389,7 @@ class CombatMixin(_HostBase):
         pl_t = game_engine.UID.make(244, int(self.client_reck_id))
         ai_t = game_engine.UID.make(game_engine.SERVICE_AI_UID_TYPE, 1000)
         priority = port.action_stack.priority_player_id
-        if not _hc._same_uid(priority, pl_t):
+        if not _same_uid(priority, pl_t):
             return False
         self._push_phase_options_empty(session, game.player_uid, game.ai_uid)
         from rules_port.persistence import load_state as _load_state
@@ -400,7 +402,7 @@ class CombatMixin(_HostBase):
             pl_t, game_engine.EPriorityContext.ResolveTopOfChain)
         chain_game.push_turn_phase(
             port.current_turn_phase,
-            pl_t if _hc._same_uid(port.active_player_id, pl_t) else ai_t,
+            pl_t if _same_uid(port.active_player_id, pl_t) else ai_t,
             pl_t)
         self._send_battle_events(session, chain_game, pl_t)
         log_req("    RulesPort Practice ability priority window: "
@@ -652,16 +654,16 @@ class CombatMixin(_HostBase):
         """
         import hconnect_server as _hc
         import commands as _cmd
-        prepared = _hc.campaign.prepare_fra_battle_gameend(
+        prepared = campaign.prepare_fra_battle_gameend(
             self, db._db, session, won)
         _cmd.push_battle_game_end(
             handler=self, session=session,
             winners=winners, losers=losers)
         if prepared is not None:
-            _hc.campaign.publish_fra_battle_gameend(
+            campaign.publish_fra_battle_gameend(
                 self, prepared, _hc.SERVICE_MAIL_UID)
         else:
-            _hc.campaign.handle_battle_gameend(
+            campaign.handle_battle_gameend(
                 self, db._db, session, won, _hc.SERVICE_MAIL_UID,
                 _hc.UID_TYPE["ServiceCampaign"])
         return prepared

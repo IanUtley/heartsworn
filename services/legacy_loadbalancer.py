@@ -15,6 +15,7 @@ import db
 from encoder import encode_datawrapper
 from encoder import compress_gzip
 from encoder import encode_objfmt_response
+import campaign
 
 
 # ServiceLoadBalancer — QuitOnReconnectionGame (22011)
@@ -406,7 +407,7 @@ def handle_startencounter_22017(handler, target, instance, data_type, reqid, com
     response_encounter_data = ("class", "Game.Shared.SessionStateEncounterData")
     fra_setup = _hc._fra_arena_setup_values(encounter_data_raw)
     if str(session_name).startswith("camp_"):
-        scene_guid = _hc.campaign._last_encounter_scene.get(str(session_name))
+        scene_guid = campaign._last_encounter_scene.get(str(session_name))
         if scene_guid:
             response_encounter_data = ("struct", (
                 "Game.Shared.SessionStateEncounterData", [
@@ -591,7 +592,7 @@ def _army_of_myth_ai_resources(session):
     import hconnect_server as _hc
     from campaign_runtime import progress
     session_name = str(session.session_name or "")
-    scene = _hc.campaign._last_encounter_scene.get(session_name)
+    scene = campaign._last_encounter_scene.get(session_name)
     if str(scene or "").lower() != ARMY_OF_MYTH_SCENE:
         return None
     identity = _hc.db_campaign_identity_state(
@@ -786,7 +787,7 @@ def handle_readytostartgame_22031(handler, target, instance, data_type, reqid, c
                 is_tutorial_session = True
         if camp_id:
             handler._pve_player_cannot_choose_play_first = \
-                _hc.campaign.player_cannot_choose_play_first(db._db, camp_id)
+                campaign.player_cannot_choose_play_first(db._db, camp_id)
             if handler._pve_player_cannot_choose_play_first:
                 log_req("    Campaign talent restriction: player cannot choose Play first")
     coin_winner_is_player = (
@@ -1080,7 +1081,7 @@ def handle_readytostartgame_22031(handler, target, instance, data_type, reqid, c
     campaign_extra_deck_cards = []
     if is_campaign:
         camp_id = int((session.session_name or "camp_0").split("_")[-1] or 0)
-        cfg = _hc.campaign.resolve_battle_config(
+        cfg = campaign.resolve_battle_config(
             handler, db._db, camp_id, session.session_name)
         campaign_encounter_conversation_guid = cfg.get(
             "encounter_mod_conversation_guid")
@@ -1237,7 +1238,7 @@ def handle_readytostartgame_22031(handler, target, instance, data_type, reqid, c
     handler._campaign_max_hand_size = 10
     handler._campaign_starting_hand_effects = []
     if is_campaign:
-        hand_cfg = _hc.campaign.resolve_opening_hand_config(
+        hand_cfg = campaign.resolve_opening_hand_config(
             db._db, session, handler.user_profile["id"], race_name, cls_name,
             pl_abilities)
         handler._campaign_starting_hand_size = max(

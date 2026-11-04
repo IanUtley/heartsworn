@@ -9,6 +9,7 @@ import db
 from encoder import encode_datawrapper
 from encoder import compress_gzip
 from encoder import encode_objfmt_response
+import campaign
 
 
 # ServiceCampaign Siege (150000)
@@ -48,7 +49,7 @@ def handle_servicecampaign_siege_150000(handler, target, instance, data_type, re
 def handle_campaign_adventure_system_110000(handler, target, instance, data_type, reqid, comp, session_id,
                                             conh, inner_obj, inner_bytes, raw_data_wrapper_bytes):
     import hconnect_server as _hc
-    _hc.campaign.handle_campaign_request(handler, db._db, inner_obj, comp,
+    campaign.handle_campaign_request(handler, db._db, inner_obj, comp,
                                        session_id, reqid,
                                        target, instance, conh,
                                        _hc.SERVICE_MAIL_UID)

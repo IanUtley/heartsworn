@@ -10,6 +10,7 @@ import struct
 from db import log_req
 import game_engine
 import db
+from application.practice_flow import _same_uid
 
 
 if TYPE_CHECKING:
@@ -131,9 +132,9 @@ class TurnFlowMixin(_HostBase):
                         not setup_state.get("pvp") and
                         not setup_state.get("turn_phases") and
                         chose_first and
-                        _hc._same_uid(port.active_player_id, setup_player) and
-                        _hc._same_uid(port.action_stack.priority_player_id,
-                                  setup_player)):
+                        _same_uid(port.active_player_id, setup_player) and
+                        _same_uid(port.action_stack.priority_player_id,
+                              setup_player)):
                     self._sync_rules_port_setup_checkpoint(
                         session, setup_phase, setup_player)
             except Exception as exc:
@@ -714,8 +715,8 @@ class TurnFlowMixin(_HostBase):
                 game_engine.ETurnPhases.SecondMainPhase)
             action = port.action_stack.peek()
             player_has_priority = (
-                _hc._same_uid(intent_player, port.action_stack.priority_player_id)
-                and _hc._same_uid(intent_player, port.active_player_id))
+                _same_uid(intent_player, port.action_stack.priority_player_id)
+                and _same_uid(intent_player, port.active_player_id))
             from rules_port.lifecycle import load_state
             battle_state = load_state(session)
             waiting_for_input = (
@@ -1731,14 +1732,14 @@ class TurnFlowMixin(_HostBase):
         except ValueError:
             pass
         current["turn_player"] = (
-            "player" if _hc._same_uid(port.active_player_id, pl_t) else "ai")
+            "player" if _same_uid(port.active_player_id, pl_t) else "ai")
         bstate.update(current)
         action = port.action_stack.peek()
         if not isinstance(action, PriorityWindowAction):
             return False
         priority = action.priority_player_id
-        if (_hc._same_uid(port.active_player_id, ai_t) and
-                _hc._same_uid(priority, ai_t)):
+        if (_same_uid(port.active_player_id, ai_t) and
+                _same_uid(priority, ai_t)):
             try:
                 ai_idx = phases.index(phase)
             except ValueError:
@@ -1747,7 +1748,7 @@ class TurnFlowMixin(_HostBase):
                               start_idx=ai_idx)
             _hc.trace_rules_port(log_req, "project-after-ai", port, bstate)
             return False
-        if _hc._same_uid(priority, ai_t):
+        if _same_uid(priority, ai_t):
             # During a human attack the human remains the native active
             # player, but DeclareDefense belongs to the defending AI.  This
             # is a real server-owned input window, not stale AI priority.
@@ -1808,7 +1809,7 @@ class TurnFlowMixin(_HostBase):
             f"    RulesPort ignored stale AI priority: active="
             f"{port.active_player_id!r} ai={ai_t!r} phase={phase!r}")
             return False
-        if not _hc._same_uid(priority, pl_t):
+        if not _same_uid(priority, pl_t):
             return False
 
         game = self._fresh_game(session, pl_t, ai_t, bstate)
@@ -1823,7 +1824,7 @@ class TurnFlowMixin(_HostBase):
         if not in_chain_declare:
             game.push_turn_phase(
                 phase,
-                pl_t if _hc._same_uid(port.active_player_id, pl_t) else ai_t,
+                pl_t if _same_uid(port.active_player_id, pl_t) else ai_t,
                 pl_t)
         priority_context = self._priority_context_for(phase, bstate)
         if chain_open:

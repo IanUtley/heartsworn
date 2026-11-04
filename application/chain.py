@@ -7,6 +7,7 @@ import game_engine
 import db
 from encoder import encode_datawrapper
 from encoder import compress_gzip
+from application.practice_flow import _same_uid
 
 if TYPE_CHECKING:
     from application._host_surface import HostSurface as _HostBase
@@ -341,7 +342,7 @@ class ChainMixin(_HostBase):
         if len(getattr(native_chain, "_instance_ids", ())) > 1:
             return
         active_player = getattr(port, "active_player_id", None)
-        if active_player is None or not _hc._same_uid(active_player, player_uid):
+        if active_player is None or not _same_uid(active_player, player_uid):
             return
         game.push_green_light(
             player_uid, game_engine.EPriorityContext.Normal)
@@ -362,9 +363,9 @@ class ChainMixin(_HostBase):
             return owner_id
         player_owner = int((self.user_profile or {}).get("id", 0)) \
             if isinstance(self.user_profile, dict) else 0
-        if _hc._same_uid(owner_id, player_uid) or owner_id == player_owner:
+        if _same_uid(owner_id, player_uid) or owner_id == player_owner:
             return player_owner
-        if _hc._same_uid(owner_id, ai_uid) or owner_id == 0:
+        if _same_uid(owner_id, ai_uid) or owner_id == 0:
             return 0
         return owner_id
 
@@ -737,8 +738,8 @@ class ChainMixin(_HostBase):
                 log_req(
                 "    RequestPrioritySync: no PvP participants for native chain")
                 return False
-            priority_pid = next((pid for pid in pids if _hc._same_uid(
-                priority, game_engine.UID.make(244, pid))), None)
+            priority_pid = next((pid for pid in pids if _same_uid(
+            priority, game_engine.UID.make(244, pid))), None)
             if priority_pid is None:
                 log_req(
                 "    RequestPrioritySync: unknown PvP native chain owner")
@@ -770,8 +771,8 @@ class ChainMixin(_HostBase):
         player_uid = game_engine.UID.make(244, int(self.client_reck_id))
         ai_uid = game_engine.UID.make(
             game_engine.SERVICE_AI_UID_TYPE, 1000)
-        sync_priority_uid = (player_uid if _hc._same_uid(priority, player_uid)
-                             else ai_uid if _hc._same_uid(priority, ai_uid)
+        sync_priority_uid = (player_uid if _same_uid(priority, player_uid)
+                             else ai_uid if _same_uid(priority, ai_uid)
                              else None)
         if sync_priority_uid is None:
             log_req(
@@ -781,13 +782,13 @@ class ChainMixin(_HostBase):
         self._current_bstate = checkpoint
         game = self._fresh_game(session, player_uid, ai_uid, checkpoint)
         active_owner = getattr(port, "active_player_id", None)
-        active_uid = (player_uid if _hc._same_uid(active_owner, player_uid)
-                      else ai_uid if _hc._same_uid(active_owner, ai_uid)
+        active_uid = (player_uid if _same_uid(active_owner, player_uid)
+                      else ai_uid if _same_uid(active_owner, ai_uid)
                       else player_uid)
         game.push_green_light(
             sync_priority_uid, game_engine.EPriorityContext.ResolveTopOfChain)
         game.push_turn_phase(port.current_turn_phase, active_uid, sync_priority_uid)
-        if _hc._same_uid(sync_priority_uid, player_uid):
+        if _same_uid(sync_priority_uid, player_uid):
             # The human is the response player; restore the legal quick actions
             # and champion powers alongside the ResolveTopOfChain button.  They
             # go after the green light in the same packet: sent before it, the
