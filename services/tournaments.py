@@ -11,14 +11,17 @@ from encoder import compress_gzip, encode_datawrapper, encode_objfmt_response
 from db import log_req
 import db
 from gamemodes.tournament_engine import record_tournament_forfeit
-from pvp_db import db_delete_game_session
 from application.protocol_wire import tournament_deck_card_ids
 from domain.enums import ETournamentFormats
 from gamemodes.tournament_engine import (CORINTH_SHARD_GUIDS, _encode_enter_tournament_error,
                                          _is_corinth_room, _make_deck_data,
                                          _push_corinth_deck_construction, player_decks,
                                          player_handler_lock, player_handlers,
-                                         start_waiting_room_game, uid_instance)
+                                         push_tournament_session_start,
+                                         start_waiting_room_game, try_start_corinth_match,
+                                         uid_instance)
+from pvp_db import (db_apply_tournament_main_deck, db_delete_game_session,
+                    db_game_session_pids)
 from tournament_db import (db_seed_tournament_pool, db_tournament_by_id,
                            db_tournament_match_session, db_tournament_player_run_live,
                            db_tournament_pool, db_tournament_pool_replace,
@@ -26,7 +29,7 @@ from tournament_db import (db_seed_tournament_pool, db_tournament_by_id,
                            db_tournament_signup_by_player,
                            db_tournament_signup_set_async_state,
                            db_tournament_signup_set_status, db_tournament_status,
-                           db_tournament_signups_by_tournament)
+                           db_tournament_signups_by_tournament, db_tournament_discard_match)
 
 
 # Waiting rooms created by CreateWaitingRoom, keyed by room id, and the lock and
@@ -475,3 +478,106 @@ def handle_enter_tournament(handler, target, instance, reqid, comp, session_id,
                 signup_pid = int(signup["player_uid"])
                 room_handlers.setdefault(signup_pid, player_handlers.get(signup_pid))
         start_waiting_room_game(tournament_id, handler_overrides=room_handlers)
+
+
+def handle_game_entrance(handler, target, instance, reqid, comp, session_id,
+                         conh, inner_obj, inner_bytes,
+                         *, SERVICE_MAIL_UID, log_req, data_type, **_kw):
+    """Start or cancel a search for a tournament match; Corinth searches queue for an opponent."""
+    # GameEntrance is the async-gauntlet matchmaking boundary.  A
+    # saved Corinth deck is applied to the session only when the
+    # player starts searching; cancelling search leaves the pool.
+    player_uid = int(handler.client_reck_id) if handler.client_reck_id else 0
+    tournament_id = int(inner_obj.get("TournamentID", 0) or 0)
+    searching = bool(inner_obj.get("searching", False))
+    room = db_tournament_room_for_game(tournament_id, conn=db._db)
+    pool = db_tournament_pool(tournament_id, player_uid, conn=db._db)
+    main_ids = [card_uid for card_uid, _guid, location in pool if int(location) == 0]
+    corinth_entry = _is_corinth_room(room or {})
+    ok = bool(room and (int(room.get("format") or 0) &
+                        int(ETournamentFormats.Iconoclast)))
+    match = None
+    if corinth_entry:
+        if searching:
+            # A client can return to the deckbuilder after the
+            # battle connection was lost and press Play Game again.
+            # That player is already assigned to an unfinished match;
+            # do not put them back into the queue (the matcher will
+            # correctly exclude them) and do not leave searching=1
+            # falsely displayed in the lobby.
+            active_match = db_tournament_match_session(tournament_id, player_uid, conn=db._db)
+            if active_match:
+                other_pid = next(
+                    (int(pid) for pid in db_game_session_pids(int(active_match[0]))
+                     if int(pid) != player_uid), 0)
+                other_signup = db_tournament_signup_by_player(
+                    tournament_id, other_pid, conn=db._db)
+                other_searching = bool(
+                    other_signup and other_signup.get("status") == "active"
+                    and int(other_signup.get("searching", 0) or 0))
+                if other_searching:
+                    # Both players explicitly pressed Play Game after
+                    # declining the stale reconnect. Discard only this
+                    # unfinished assignment and its game state; it is
+                    # not a win or loss in the async event.
+                    db_tournament_discard_match(tournament_id, active_match[0], conn=db._db)
+                    db_delete_game_session(active_match[0], conn=db._db)
+                    db._db.commit()
+                    log_req(f">>> GameEntrance: discarded stale Corinth "
+                            f"match session={active_match[0]} for new search")
+                else:
+                    # Wait for the opponent's explicit new-search
+                    # request; do not silently reconnect this client.
+                    db_tournament_signup_set_async_state(
+                        tournament_id, player_uid,
+                        deck_ready=True, searching=True, conn=db._db)
+                    db._db.commit()
+                    ok = True
+                    log_req(f">>> GameEntrance: player {player_uid} "
+                            f"requested new search; awaiting opponent")
+            ok = ok and len(main_ids) == 20
+            if ok:
+                # Corinth is a persistent async event. A prior
+                # LeaveTournament marks the signup withdrawn, but
+                # an explicit Play Game/Find Player action is a
+                # new search request and must re-enter that queue.
+                signup = db_tournament_signup_by_player(tournament_id, player_uid, conn=db._db)
+                if signup and signup.get("status") != "active":
+                    db_tournament_signup_set_status(
+                        tournament_id, player_uid, "active", conn=db._db)
+                db_tournament_signup_set_async_state(
+                    tournament_id, player_uid,
+                    deck_ready=True, searching=True, conn=db._db)
+                db._db.commit()
+                try_start_corinth_match(tournament_id, handler_override=handler)
+        else:
+            # Cancelling the search leaves the saved deck/pool
+            # intact but removes this entrant from the match queue.
+            db_tournament_signup_set_async_state(
+                tournament_id, player_uid, searching=False, conn=db._db)
+            db._db.commit()
+        # Searching is a valid asynchronous state even when no
+        # opponent is available yet; the match transition is pushed
+        # later when the second ready player arrives.
+    elif searching:
+        ok = ok and len(main_ids) == 20
+        match = (db_tournament_match_session(tournament_id, player_uid, conn=db._db)
+                 if ok else None)
+        ok = ok and bool(match)
+        if ok:
+            db_apply_tournament_main_deck(match[0], player_uid, main_ids, conn=db._db)
+    log_req(f">>> GameEntrance (dt=25039) tid={tournament_id} "
+            f"player={player_uid} searching={searching} ok={ok}")
+    resp_inner = encode_objfmt_response(
+        ["Game.Shared.Network.Tournaments.GameEntranceResponseArgs",
+         "System.Boolean"], [("success", "bool", bool(ok))])
+    _send(handler, target, instance, reqid, comp, session_id, conh, data_type,
+          resp_inner, None, SERVICE_MAIL_UID)
+    # Corinth matchmaking is started inside try_start_corinth_match
+    # once two ready players exist; that path pushes the session-start
+    # events to both handlers.  Do not index ``match`` for the normal
+    # one-player-waiting case.
+    if ok and searching and match:
+        push_tournament_session_start(
+            handler, tournament_id, int(match[0]),
+            f"tourney-{tournament_id}", 0, room)
