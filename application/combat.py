@@ -6,6 +6,8 @@ import random
 from db import log_req
 import game_engine
 import db
+from encoder import encode_datawrapper
+from encoder import compress_gzip
 
 
 def discarding_player(bstate, ability_controller):
@@ -267,8 +269,8 @@ class CombatMixin(_HostBase):
                 if type(e).__name__ == "TurnPhaseUpdatedSessionEventArgs" else "")
             for e in batch))
             pkt = game.make_network_packet(pl_t)
-            dw = _hc.encode_datawrapper(0, 3055, _hc.compress_gzip(_hc.encode_sync_event(pkt)), 1,
-                                    "00000000-0000-0000-0000-000000000000")
+            dw = encode_datawrapper(0, 3055, compress_gzip(_hc.encode_sync_event(pkt)), 1,
+                                "00000000-0000-0000-0000-000000000000")
             self._game_scnt = max(self._game_scnt, self.scnt) + 1
             self.scnt = self._game_scnt
             gs_inst = str(session.server_id)

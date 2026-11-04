@@ -5,6 +5,8 @@ from typing import TYPE_CHECKING
 from db import log_req
 import game_engine
 import db
+from encoder import encode_datawrapper
+from encoder import compress_gzip
 
 if TYPE_CHECKING:
     from application._host_surface import HostSurface as _HostBase
@@ -125,8 +127,8 @@ class ChainMixin(_HostBase):
             pl_t = game_engine.UID.make(244, int(self.client_reck_id))
             game = game_engine.Game(session.session_id, pl_t, game_engine.UID.make(game_engine.SERVICE_AI_UID_TYPE, 1000))
             pkt = game.make_network_packet(pl_t)  # no events -> empty packet
-            dw = _hc.encode_datawrapper(0, 3055, _hc.compress_gzip(_hc.encode_sync_event(pkt)), 1,
-                                    "00000000-0000-0000-0000-000000000000")
+            dw = encode_datawrapper(0, 3055, compress_gzip(_hc.encode_sync_event(pkt)), 1,
+                                "00000000-0000-0000-0000-000000000000")
             self._game_scnt = max(self._game_scnt, self.scnt) + 1
             self.scnt = self._game_scnt
             gs_inst = str(session.server_id)

@@ -6,6 +6,9 @@ Moved out of hconnect_server.HCPHandler._handle_service_request_legacy.
 import gamemodes.tournament_server as tournament_server
 from db import log_req
 import db
+from encoder import encode_datawrapper
+from encoder import compress_gzip
+from encoder import encode_objfmt_response
 
 
 # ServiceTournaments — TryReconnection (25021)
@@ -26,16 +29,16 @@ def handle_tryreconnection_25021(handler, target, instance, data_type, reqid, co
         reconnect_ok = bool(reconnect_tid)
         log_req(f">>> TryReconnection: deferred until auth "
             f"tid={reconnect_tid}")
-        resp_inner = _hc.encode_objfmt_response(
-            ["Game.Shared.Network.Tournaments.TryReconnectionToDisconnectedTournamentResponseArgs"],
-            [("Error", "enum1", (
-                "Game.Shared.Network.Tournaments.ETryReconnectionToDisconnectedTournamentError",
-                0 if reconnect_ok else -1)),
-             ("ErrorMessage", "string", "")])
-        resp_body = _hc.compress_gzip(resp_inner) if comp else resp_inner
+        resp_inner = encode_objfmt_response(
+        ["Game.Shared.Network.Tournaments.TryReconnectionToDisconnectedTournamentResponseArgs"],
+        [("Error", "enum1", (
+            "Game.Shared.Network.Tournaments.ETryReconnectionToDisconnectedTournamentError",
+            0 if reconnect_ok else -1)),
+         ("ErrorMessage", "string", "")])
+        resp_body = compress_gzip(resp_inner) if comp else resp_inner
         resp_reqid = reqid | 1
-        dw_bytes = _hc.encode_datawrapper(
-            resp_reqid, data_type, resp_body, comp, session_id)
+        dw_bytes = encode_datawrapper(
+        resp_reqid, data_type, resp_body, comp, session_id)
         handler.scnt += 1
         handler.send({"issuer": f"0.0.0.0.ServiceTournaments.{_hc.SERVICE_MAIL_UID}.ServicePlayer.{handler.client_uid}.{resp_reqid}",
                    "target": target, "instance": instance,
@@ -105,17 +108,17 @@ def handle_tryreconnection_25021(handler, target, instance, data_type, reqid, co
     else:
         log_req(f">>> TryReconnection: no active tournament "
             f"tid={reconnect_tid} player={reconnect_uid}")
-    resp_inner = _hc.encode_objfmt_response(
-        ["Game.Shared.Network.Tournaments.TryReconnectionToDisconnectedTournamentResponseArgs"],
-        [("Error", "enum1", (
-            "Game.Shared.Network.Tournaments.ETryReconnectionToDisconnectedTournamentError",
-            0 if reconnect_ok else -1)),
-         ("ErrorMessage", "string", "" if reconnect_ok else
-          "No active tournament")]
-    )
-    resp_body = _hc.compress_gzip(resp_inner) if comp else resp_inner
+    resp_inner = encode_objfmt_response(
+    ["Game.Shared.Network.Tournaments.TryReconnectionToDisconnectedTournamentResponseArgs"],
+    [("Error", "enum1", (
+        "Game.Shared.Network.Tournaments.ETryReconnectionToDisconnectedTournamentError",
+        0 if reconnect_ok else -1)),
+     ("ErrorMessage", "string", "" if reconnect_ok else
+      "No active tournament")]
+)
+    resp_body = compress_gzip(resp_inner) if comp else resp_inner
     resp_reqid = reqid | 1
-    dw_bytes = _hc.encode_datawrapper(resp_reqid, data_type, resp_body, comp, session_id)
+    dw_bytes = encode_datawrapper(resp_reqid, data_type, resp_body, comp, session_id)
     issuer_str = f"0.0.0.0.ServiceTournaments.{_hc.SERVICE_MAIL_UID}.ServicePlayer.{handler.client_uid}.{resp_reqid}"
     handler.scnt += 1
     handler.send({
@@ -144,10 +147,10 @@ def handle_ladderrecord_70023(handler, target, instance, data_type, reqid, comp,
         ("limitedSleeves", "coll", ("System.Collections.Generic.List`1#Game.Shared.ResourceId", 0)),
         ("constructedSleeves", "coll", ("System.Collections.Generic.List`1#Game.Shared.ResourceId", 0)),
         ("includesDebugData", "bool", False), ("MMR", "int", 0), ("LimitedMMR", "int", 0)]
-    resp_inner = _hc.encode_objfmt_response(
-        ["Game.Shared.Tournaments.Messages.Tournament+LadderRecord+Response"], resp_fields)
-    resp_body = _hc.compress_gzip(resp_inner) if comp else resp_inner
-    dw_bytes = _hc.encode_datawrapper(reqid | 1, data_type, resp_body, comp, session_id)
+    resp_inner = encode_objfmt_response(
+    ["Game.Shared.Tournaments.Messages.Tournament+LadderRecord+Response"], resp_fields)
+    resp_body = compress_gzip(resp_inner) if comp else resp_inner
+    dw_bytes = encode_datawrapper(reqid | 1, data_type, resp_body, comp, session_id)
     handler.scnt += 1
     handler.send({"issuer": f"0.0.0.0.ServiceTournaments.{_hc.SERVICE_MAIL_UID}.ServicePlayer.{handler.client_uid}.{reqid|1}",
                "target": target, "instance": instance, "reqid": reqid | 1, "c": comp, "conh": conh, "sid": handler.sid}, dw_bytes)
@@ -158,11 +161,11 @@ def handle_request_70027(handler, target, instance, data_type, reqid, comp, sess
                          conh, inner_obj, inner_bytes, raw_data_wrapper_bytes):
     import hconnect_server as _hc
     log_req(">>> Respond LadderTierRewardsList — empty")
-    resp_inner = _hc.encode_objfmt_response(
-        ["Game.Shared.Tournaments.Messages.Tournament+LadderTierRewardsList+Response"],
-        [("tier_rewards", "coll", ("System.Collections.Generic.Dictionary`2#System.UInt32!Game.Shared.Tournaments.TournamentRewardInfo", 0))])
-    resp_body = _hc.compress_gzip(resp_inner) if comp else resp_inner
-    dw_bytes = _hc.encode_datawrapper(reqid | 1, data_type, resp_body, comp, session_id)
+    resp_inner = encode_objfmt_response(
+    ["Game.Shared.Tournaments.Messages.Tournament+LadderTierRewardsList+Response"],
+    [("tier_rewards", "coll", ("System.Collections.Generic.Dictionary`2#System.UInt32!Game.Shared.Tournaments.TournamentRewardInfo", 0))])
+    resp_body = compress_gzip(resp_inner) if comp else resp_inner
+    dw_bytes = encode_datawrapper(reqid | 1, data_type, resp_body, comp, session_id)
     handler.scnt += 1
     handler.send({"issuer": f"0.0.0.0.ServiceTournaments.{_hc.SERVICE_MAIL_UID}.ServicePlayer.{handler.client_uid}.{reqid|1}",
                "target": target, "instance": instance, "reqid": reqid | 1, "c": comp, "conh": conh, "sid": handler.sid}, dw_bytes)
@@ -173,12 +176,12 @@ def handle_request_70028(handler, target, instance, data_type, reqid, comp, sess
                          conh, inner_obj, inner_bytes, raw_data_wrapper_bytes):
     import hconnect_server as _hc
     log_req(">>> Respond LadderRankingList — empty")
-    resp_inner = _hc.encode_objfmt_response(
-        ["Game.Shared.Tournaments.Messages.Tournament+LadderRankingList+Response"],
-        [("ConstructedLadderRanking", "coll", ("System.Collections.Generic.List`1#System.String", 0)),
-         ("LimitedLadderRanking", "coll", ("System.Collections.Generic.List`1#System.String", 0))])
-    resp_body = _hc.compress_gzip(resp_inner) if comp else resp_inner
-    dw_bytes = _hc.encode_datawrapper(reqid | 1, data_type, resp_body, comp, session_id)
+    resp_inner = encode_objfmt_response(
+    ["Game.Shared.Tournaments.Messages.Tournament+LadderRankingList+Response"],
+    [("ConstructedLadderRanking", "coll", ("System.Collections.Generic.List`1#System.String", 0)),
+     ("LimitedLadderRanking", "coll", ("System.Collections.Generic.List`1#System.String", 0))])
+    resp_body = compress_gzip(resp_inner) if comp else resp_inner
+    dw_bytes = encode_datawrapper(reqid | 1, data_type, resp_body, comp, session_id)
     handler.scnt += 1
     handler.send({"issuer": f"0.0.0.0.ServiceTournaments.{_hc.SERVICE_MAIL_UID}.ServicePlayer.{handler.client_uid}.{reqid|1}",
                "target": target, "instance": instance, "reqid": reqid | 1, "c": comp, "conh": conh, "sid": handler.sid}, dw_bytes)
@@ -189,10 +192,10 @@ def handle_request_70015(handler, target, instance, data_type, reqid, comp, sess
                          conh, inner_obj, inner_bytes, raw_data_wrapper_bytes):
     import hconnect_server as _hc
     log_req(">>> PooledMsg reqflush — acking")
-    resp_inner = _hc.encode_objfmt_response(
-        ["Game.Shared.PooledMessaging.PooledMessagingRequestsInterface+Response"], [])
-    resp_body = _hc.compress_gzip(resp_inner) if comp else resp_inner
-    dw_bytes = _hc.encode_datawrapper(reqid | 1, data_type, resp_body, comp, session_id)
+    resp_inner = encode_objfmt_response(
+    ["Game.Shared.PooledMessaging.PooledMessagingRequestsInterface+Response"], [])
+    resp_body = compress_gzip(resp_inner) if comp else resp_inner
+    dw_bytes = encode_datawrapper(reqid | 1, data_type, resp_body, comp, session_id)
     handler.scnt += 1
     handler.send({"issuer": f"0.0.0.0.ServiceTournaments.{_hc.SERVICE_MAIL_UID}.ServicePlayer.{handler.client_uid}.{reqid|1}",
                "target": target, "instance": instance, "reqid": reqid | 1, "c": comp, "conh": conh, "sid": handler.sid}, dw_bytes)
@@ -208,10 +211,10 @@ def handle_request_25019(handler, target, instance, data_type, reqid, comp, sess
             "format": fmt, "playerCount": int(inner_obj.get("playerCount", 2)),
             "players": {}, "status": "waiting"}
     log_req(f">>> CreateWaitingRoom: id={room_id}")
-    resp_inner = _hc.encode_objfmt_response(
-        ["Game.Shared.Network.Tournaments.CreateWaitingRoomResponseArgs"], [])
-    resp_body = _hc.compress_gzip(resp_inner) if comp else resp_inner
-    dw_bytes = _hc.encode_datawrapper(reqid | 1, data_type, resp_body, comp, session_id)
+    resp_inner = encode_objfmt_response(
+    ["Game.Shared.Network.Tournaments.CreateWaitingRoomResponseArgs"], [])
+    resp_body = compress_gzip(resp_inner) if comp else resp_inner
+    dw_bytes = encode_datawrapper(reqid | 1, data_type, resp_body, comp, session_id)
     handler.scnt += 1
     handler.send({"issuer": f"0.0.0.0.ServiceTournaments.{_hc.SERVICE_MAIL_UID}.ServicePlayer.{handler.client_uid}.{reqid|1}",
                "target": target, "instance": instance, "reqid": reqid | 1, "c": comp, "conh": conh, "sid": handler.sid}, dw_bytes)
@@ -235,14 +238,14 @@ def handle_testtournamententry_25027(handler, target, instance, data_type, reqid
         room and room_status != "closed" and
         (room_status == "waiting" or
          room_style in {"async", "asynchronous"}))
-    resp_inner = _hc.encode_objfmt_response(
-        ["Game.Shared.Network.Tournaments.TestTournamentEntryResponseArgs"],
-        [("success", "bool", success),
-         ("qualifyingEntryGroups", "intlist", ("System.Collections.Generic.List`1#System.Int32", 0, [])),
-         ("Error", "enum1", ("Game.Shared.Network.Tournaments.ETestTournamentEntryError", 0)),
-         ("ErrorMessage", "string", "")])
-    resp_body = _hc.compress_gzip(resp_inner) if comp else resp_inner
-    dw_bytes = _hc.encode_datawrapper(reqid | 1, data_type, resp_body, comp, session_id)
+    resp_inner = encode_objfmt_response(
+    ["Game.Shared.Network.Tournaments.TestTournamentEntryResponseArgs"],
+    [("success", "bool", success),
+     ("qualifyingEntryGroups", "intlist", ("System.Collections.Generic.List`1#System.Int32", 0, [])),
+     ("Error", "enum1", ("Game.Shared.Network.Tournaments.ETestTournamentEntryError", 0)),
+     ("ErrorMessage", "string", "")])
+    resp_body = compress_gzip(resp_inner) if comp else resp_inner
+    dw_bytes = encode_datawrapper(reqid | 1, data_type, resp_body, comp, session_id)
     handler.scnt += 1
     handler.send({"issuer": f"0.0.0.0.ServiceTournaments.{_hc.SERVICE_MAIL_UID}.ServicePlayer.{handler.client_uid}.{reqid|1}",
                "target": target, "instance": instance, "reqid": reqid | 1, "c": comp, "conh": conh, "sid": handler.sid}, dw_bytes)
@@ -294,18 +297,18 @@ def handle_entertournament_25029(handler, target, instance, data_type, reqid, co
                     _hc.tournament_server.generate_sealed_deck(tournament_id, player_uid, set_id)
                 else:
                     _hc.tournament_server.generate_draft_deck(tournament_id, player_uid, set_id)
-    resp_inner = _hc.encode_objfmt_response(
-        ["Game.Shared.Network.Tournaments.EnterTournamentResponseArgs",
-         "Game.Shared.Domain.deck_bits", "System.UInt64", "System.String",
-         "Game.Shared.ResourceId", "System.Guid",
-         "System.Collections.Generic.List`1#Game.Shared.Domain.card_instance_bits",
-         "Game.Shared.Mechanics.EDeckLock", "Game.Shared.Mechanics.EDeckPersonality", "System.Int32"],
-        [("isWaitingRoom", "bool", is_waiting_room),
-         ("TournamentID", "ulong", tournament_id),
-         ("TournamentDeckInfo", "deckbits", _hc._make_deck_data(deck_id if deck_id else 0)),
-         ("Error", "enum1", ("Game.Shared.Network.Tournaments.EEnterTournamentError", 0))])
-    resp_body = _hc.compress_gzip(resp_inner) if comp else resp_inner
-    dw_bytes = _hc.encode_datawrapper(reqid | 1, data_type, resp_body, comp, session_id)
+    resp_inner = encode_objfmt_response(
+    ["Game.Shared.Network.Tournaments.EnterTournamentResponseArgs",
+     "Game.Shared.Domain.deck_bits", "System.UInt64", "System.String",
+     "Game.Shared.ResourceId", "System.Guid",
+     "System.Collections.Generic.List`1#Game.Shared.Domain.card_instance_bits",
+     "Game.Shared.Mechanics.EDeckLock", "Game.Shared.Mechanics.EDeckPersonality", "System.Int32"],
+    [("isWaitingRoom", "bool", is_waiting_room),
+     ("TournamentID", "ulong", tournament_id),
+     ("TournamentDeckInfo", "deckbits", _hc._make_deck_data(deck_id if deck_id else 0)),
+     ("Error", "enum1", ("Game.Shared.Network.Tournaments.EEnterTournamentError", 0))])
+    resp_body = compress_gzip(resp_inner) if comp else resp_inner
+    dw_bytes = encode_datawrapper(reqid | 1, data_type, resp_body, comp, session_id)
     handler.scnt += 1
     handler.send({"issuer": f"0.0.0.0.ServiceTournaments.{_hc.SERVICE_MAIL_UID}.ServicePlayer.{handler.client_uid}.{reqid|1}",
                "target": target, "instance": instance, "reqid": reqid | 1, "c": comp, "conh": conh, "sid": handler.sid}, dw_bytes)
@@ -318,22 +321,22 @@ def handle_entertournament_25029(handler, target, instance, data_type, reqid, co
                 _hc.push_tournament_room_data(handler, f"tourn:tournament-{tournament_id}_full", "")
                 _hc.push_tournament_room_data(handler, "tourn:lobby_full", "")
                 # Also push TournamentInfo (25058) to populate m_TournamentInfos
-                ti_inner = _hc.encode_objfmt_response(
-                    ["Game.Shared.Network.Tournaments.TournamentInfoEventArgs",
-                     "Game.Shared.Tournaments.TournamentInfo",
-                     "Game.Shared.Tournaments.ETournamentStatus",
-                     "Game.Shared.Tournaments.ETournamentCompletionType",
-                     "System.UInt64", "System.Int32", "System.Int64", "System.Boolean"],
-                    [("Info", "struct", ("Game.Shared.Tournaments.TournamentInfo", [
-                        ("TournamentID", "ulong", tournament_id),
-                        ("TournamentStatus", "enum1", (
-                            "Game.Shared.Tournaments.ETournamentStatus", 2)),
-                        ("CompletionType", "enum1", (
-                            "Game.Shared.Tournaments.ETournamentCompletionType", 0)),
-                        ("ResgistrationOpenTime", "long", 0),
-                        ("Public", "bool", False)]))])
-                ti_body = _hc.compress_gzip(ti_inner)
-                ti_dw = _hc.encode_datawrapper(0, 25058, ti_body, 1, "00000000-0000-0000-0000-000000000000")
+                ti_inner = encode_objfmt_response(
+                ["Game.Shared.Network.Tournaments.TournamentInfoEventArgs",
+                 "Game.Shared.Tournaments.TournamentInfo",
+                 "Game.Shared.Tournaments.ETournamentStatus",
+                 "Game.Shared.Tournaments.ETournamentCompletionType",
+                 "System.UInt64", "System.Int32", "System.Int64", "System.Boolean"],
+                [("Info", "struct", ("Game.Shared.Tournaments.TournamentInfo", [
+                    ("TournamentID", "ulong", tournament_id),
+                    ("TournamentStatus", "enum1", (
+                        "Game.Shared.Tournaments.ETournamentStatus", 2)),
+                    ("CompletionType", "enum1", (
+                        "Game.Shared.Tournaments.ETournamentCompletionType", 0)),
+                    ("ResgistrationOpenTime", "long", 0),
+                    ("Public", "bool", False)]))])
+                ti_body = compress_gzip(ti_inner)
+                ti_dw = encode_datawrapper(0, 25058, ti_body, 1, "00000000-0000-0000-0000-000000000000")
                 handler.scnt += 1
                 handler.send({
                     "issuer": f"0.0.0.0.ServiceTournaments.{_hc.SERVICE_MAIL_UID}.ServicePlayer.{handler.client_uid}.{handler.scnt}",
@@ -485,12 +488,12 @@ def handle_request_25039(handler, target, instance, data_type, reqid, comp, sess
                 match[0], player_uid, main_ids, conn=db._db)
     log_req(f">>> GameEntrance (dt=25039) tid={tournament_id} "
         f"player={player_uid} searching={searching} ok={ok}")
-    resp_inner = _hc.encode_objfmt_response(
-        ["Game.Shared.Network.Tournaments.GameEntranceResponseArgs",
-         "System.Boolean"], [("success", "bool", bool(ok))])
-    resp_body = _hc.compress_gzip(resp_inner) if comp else resp_inner
-    dw_bytes = _hc.encode_datawrapper(reqid | 1, data_type, resp_body,
-                                  comp, session_id)
+    resp_inner = encode_objfmt_response(
+    ["Game.Shared.Network.Tournaments.GameEntranceResponseArgs",
+     "System.Boolean"], [("success", "bool", bool(ok))])
+    resp_body = compress_gzip(resp_inner) if comp else resp_inner
+    dw_bytes = encode_datawrapper(reqid | 1, data_type, resp_body,
+                              comp, session_id)
     handler.scnt += 1
     handler.send({
         "issuer": f"0.0.0.0.ServiceTournaments.{_hc.SERVICE_MAIL_UID}.ServicePlayer.{handler.client_uid}.{reqid | 1}",
@@ -546,13 +549,13 @@ def handle_request_25011(handler, target, instance, data_type, reqid, comp, sess
     log_req(f">>> SaveTournamentDeck (dt=25011) tid={tournament_id} "
         f"player={player_uid} main={len(main_cards)} "
         f"side={len(side_cards)} valid={valid}")
-    resp_inner = _hc.encode_objfmt_response(
-        ["Game.Shared.Network.Tournaments.SaveTournamentDeckResponseArgs",
-         "System.Boolean"],
-        [("Success", "bool", bool(valid))])
-    resp_body = _hc.compress_gzip(resp_inner) if comp else resp_inner
-    dw_bytes = _hc.encode_datawrapper(reqid | 1, data_type, resp_body,
-                                  comp, session_id)
+    resp_inner = encode_objfmt_response(
+    ["Game.Shared.Network.Tournaments.SaveTournamentDeckResponseArgs",
+     "System.Boolean"],
+    [("Success", "bool", bool(valid))])
+    resp_body = compress_gzip(resp_inner) if comp else resp_inner
+    dw_bytes = encode_datawrapper(reqid | 1, data_type, resp_body,
+                              comp, session_id)
     handler.scnt += 1
     handler.send({
         "issuer": f"0.0.0.0.ServiceTournaments.{_hc.SERVICE_MAIL_UID}.ServicePlayer.{handler.client_uid}.{reqid | 1}",
@@ -565,10 +568,10 @@ def handle_request_25005(handler, target, instance, data_type, reqid, comp, sess
                          conh, inner_obj, inner_bytes, raw_data_wrapper_bytes):
     import hconnect_server as _hc
     log_req(">>> UnsubscribeDescriptionListener — ack")
-    resp_inner = _hc.encode_objfmt_response(
-        ["Game.Shared.Network.Tournaments.UnsubscribeDescriptionListenerResponseArgs"], [])
-    resp_body = _hc.compress_gzip(resp_inner) if comp else resp_inner
-    dw_bytes = _hc.encode_datawrapper(reqid | 1, data_type, resp_body, comp, session_id)
+    resp_inner = encode_objfmt_response(
+    ["Game.Shared.Network.Tournaments.UnsubscribeDescriptionListenerResponseArgs"], [])
+    resp_body = compress_gzip(resp_inner) if comp else resp_inner
+    dw_bytes = encode_datawrapper(reqid | 1, data_type, resp_body, comp, session_id)
     handler.scnt += 1
     handler.send({"issuer": f"0.0.0.0.ServiceTournaments.{_hc.SERVICE_MAIL_UID}.ServicePlayer.{handler.client_uid}.{reqid|1}",
                "target": target, "instance": instance, "reqid": reqid | 1, "c": comp, "conh": conh, "sid": handler.sid}, dw_bytes)
@@ -580,18 +583,18 @@ def handle_request_25007(handler, target, instance, data_type, reqid, comp, sess
     import hconnect_server as _hc
     tournament_id = int(inner_obj.get("TournamentID", 0))
     log_req(f">>> GetTournamentInfo: tid={tournament_id}")
-    resp_inner = _hc.encode_objfmt_response(
-        ["Game.Client.Network.Tournaments.GetTournamentInfoResponse",
-         "Game.Shared.Tournaments.TournamentInfo",
-         "System.UInt64",
-         "Game.Shared.Network.Tournaments.EGetTournamentInfoError",
-         "System.String"],
-        [("Results", "struct", ("Game.Shared.Tournaments.TournamentInfo", [
-            ("TournamentID", "ulong", tournament_id)])),
-         ("Error", "enum1", ("Game.Shared.Network.Tournaments.EGetTournamentInfoError", 0)),
-         ("ErrorMessage", "string", "")])
-    resp_body = _hc.compress_gzip(resp_inner) if comp else resp_inner
-    dw_bytes = _hc.encode_datawrapper(reqid | 1, data_type, resp_body, comp, session_id)
+    resp_inner = encode_objfmt_response(
+    ["Game.Client.Network.Tournaments.GetTournamentInfoResponse",
+     "Game.Shared.Tournaments.TournamentInfo",
+     "System.UInt64",
+     "Game.Shared.Network.Tournaments.EGetTournamentInfoError",
+     "System.String"],
+    [("Results", "struct", ("Game.Shared.Tournaments.TournamentInfo", [
+        ("TournamentID", "ulong", tournament_id)])),
+     ("Error", "enum1", ("Game.Shared.Network.Tournaments.EGetTournamentInfoError", 0)),
+     ("ErrorMessage", "string", "")])
+    resp_body = compress_gzip(resp_inner) if comp else resp_inner
+    dw_bytes = encode_datawrapper(reqid | 1, data_type, resp_body, comp, session_id)
     handler.scnt += 1
     handler.send({"issuer": f"0.0.0.0.ServiceTournaments.{_hc.SERVICE_MAIL_UID}.ServicePlayer.{handler.client_uid}.{reqid|1}",
                "target": target, "instance": instance, "reqid": reqid | 1, "c": comp, "conh": conh, "sid": handler.sid}, dw_bytes)
@@ -604,9 +607,9 @@ def handle_request_25035(handler, target, instance, data_type, reqid, comp, sess
     log_req(">>> LeaveWaitingRoom")
     player_uid = int(handler.client_reck_id) if handler.client_reck_id else 0
     _hc.tournament_server.leave_all(player_uid)
-    resp_inner = _hc.encode_objfmt_response(["Game.Shared.Network.Tournaments.LeaveWaitingRoomResponseArgs"], [])
-    resp_body = _hc.compress_gzip(resp_inner) if comp else resp_inner
-    dw_bytes = _hc.encode_datawrapper(reqid | 1, data_type, resp_body, comp, session_id)
+    resp_inner = encode_objfmt_response(["Game.Shared.Network.Tournaments.LeaveWaitingRoomResponseArgs"], [])
+    resp_body = compress_gzip(resp_inner) if comp else resp_inner
+    dw_bytes = encode_datawrapper(reqid | 1, data_type, resp_body, comp, session_id)
     handler.scnt += 1
     handler.send({"issuer": f"0.0.0.0.ServiceTournaments.{_hc.SERVICE_MAIL_UID}.ServicePlayer.{handler.client_uid}.{reqid|1}",
                "target": target, "instance": instance, "reqid": reqid | 1, "c": comp, "conh": conh, "sid": handler.sid}, dw_bytes)
@@ -641,13 +644,13 @@ def handle_request_25031(handler, target, instance, data_type, reqid, comp, sess
         _hc.db_tournament_retire_player_run(
             tournament_id, player_uid, conn=db._db)
     _hc.tournament_server.leave_all(player_uid)
-    resp_inner = _hc.encode_objfmt_response(
-        ["Game.Shared.Network.Tournaments.LeaveTournamentResponseArgs",
-         "System.UInt64"],
-        [("success", "bool", True),
-         ("TournamentID", "ulong", tournament_id)])
-    resp_body = _hc.compress_gzip(resp_inner) if comp else resp_inner
-    dw_bytes = _hc.encode_datawrapper(reqid | 1, data_type, resp_body, comp, session_id)
+    resp_inner = encode_objfmt_response(
+    ["Game.Shared.Network.Tournaments.LeaveTournamentResponseArgs",
+     "System.UInt64"],
+    [("success", "bool", True),
+     ("TournamentID", "ulong", tournament_id)])
+    resp_body = compress_gzip(resp_inner) if comp else resp_inner
+    dw_bytes = encode_datawrapper(reqid | 1, data_type, resp_body, comp, session_id)
     handler.scnt += 1
     handler.send({"issuer": f"0.0.0.0.ServiceTournaments.{_hc.SERVICE_MAIL_UID}.ServicePlayer.{handler.client_uid}.{reqid|1}",
                "target": target, "instance": instance, "reqid": reqid | 1, "c": comp, "conh": conh, "sid": handler.sid}, dw_bytes)

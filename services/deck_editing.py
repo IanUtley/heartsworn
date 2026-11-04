@@ -11,6 +11,9 @@ import json
 import struct
 from db import log_req
 import db
+from encoder import encode_datawrapper
+from encoder import compress_gzip
+from encoder import encode_objfmt_response
 
 
 # CreateNewDeckFromTemplate (2091)
@@ -18,25 +21,25 @@ def handle_createnewdeckfromtemplate_2091(handler, target, instance, data_type, 
                                           conh, inner_obj, inner_bytes, raw_data_wrapper_bytes):
     import hconnect_server as _hc
     log_req(f">>> CreateNewDeckFromTemplate (dt=2091)")
-    resp_inner = _hc.encode_objfmt_response(
-        ["Game.Client.Network.Profile.CreateNewDeckFromTemplateResponse",
-         "System.Boolean",
-         "Game.Shared.Domain.deck_bits",
-         "Game.Shared.UID",
-         "System.String",
-         "System.UInt64",
-         "System.Collections.Generic.List`1#Game.Shared.Domain.card_instance_bits",
-         "System.Collections.Generic.List`1#Game.Shared.Domain.card_instance_bits",
-         "System.Collections.Generic.List`1#Game.Shared.ResourceId",
-         "Game.Shared.ResourceId",
-         "System.Guid"],
-        [("succeded", "bool", True),
-         ("Deckbits", "class", "Game.Shared.Domain.deck_bits"),
-         ("failingCardTemplaes", "coll", ("System.Collections.Generic.List`1#Game.Shared.ResourceId", 0))]
-    )
-    resp_body = _hc.compress_gzip(resp_inner) if comp else resp_inner
+    resp_inner = encode_objfmt_response(
+    ["Game.Client.Network.Profile.CreateNewDeckFromTemplateResponse",
+     "System.Boolean",
+     "Game.Shared.Domain.deck_bits",
+     "Game.Shared.UID",
+     "System.String",
+     "System.UInt64",
+     "System.Collections.Generic.List`1#Game.Shared.Domain.card_instance_bits",
+     "System.Collections.Generic.List`1#Game.Shared.Domain.card_instance_bits",
+     "System.Collections.Generic.List`1#Game.Shared.ResourceId",
+     "Game.Shared.ResourceId",
+     "System.Guid"],
+    [("succeded", "bool", True),
+     ("Deckbits", "class", "Game.Shared.Domain.deck_bits"),
+     ("failingCardTemplaes", "coll", ("System.Collections.Generic.List`1#Game.Shared.ResourceId", 0))]
+)
+    resp_body = compress_gzip(resp_inner) if comp else resp_inner
     resp_reqid = reqid | 1
-    dw_bytes = _hc.encode_datawrapper(resp_reqid, data_type, resp_body, comp, session_id)
+    dw_bytes = encode_datawrapper(resp_reqid, data_type, resp_body, comp, session_id)
     issuer_str = f"0.0.0.0.ServiceProfile.{_hc.SERVICE_PROFILE_UID}.ServicePlayer.{handler.client_uid}.{resp_reqid}"
     handler.scnt += 1
     handler.send({
@@ -147,15 +150,15 @@ def handle_addnewdeck_2089(handler, target, instance, data_type, reqid, comp, se
         # No authenticated user — error out rather than fabricate a
         # bogus deck ID that the client can't look up again.
         log_req("    ERROR: No user_profile for AddNewDeck — rejecting")
-        err_inner = _hc.encode_objfmt_response(
-            ["Game.Client.Network.Profile.AddNewDeckResponse",
-             "Game.Shared.Network.Profile.EAddNewDeckError", "System.String"],
-            [("Error", "enum", ("Game.Shared.Network.Profile.EAddNewDeckError", "InternalServerError")),
-             ("ErrorMessage", "string", "Not authenticated")]
-        )
-        err_body = _hc.compress_gzip(err_inner) if comp else err_inner
+        err_inner = encode_objfmt_response(
+        ["Game.Client.Network.Profile.AddNewDeckResponse",
+         "Game.Shared.Network.Profile.EAddNewDeckError", "System.String"],
+        [("Error", "enum", ("Game.Shared.Network.Profile.EAddNewDeckError", "InternalServerError")),
+         ("ErrorMessage", "string", "Not authenticated")]
+    )
+        err_body = compress_gzip(err_inner) if comp else err_inner
         err_reqid = reqid | 1
-        dw_err = _hc.encode_datawrapper(err_reqid, data_type, err_body, comp, session_id)
+        dw_err = encode_datawrapper(err_reqid, data_type, err_body, comp, session_id)
         issuer_err = f"0.0.0.0.ServiceProfile.{_hc.SERVICE_PROFILE_UID}.ServicePlayer.{handler.client_uid}.{err_reqid}"
         handler.scnt += 1
         handler.send({
@@ -327,9 +330,9 @@ def handle_addnewdeck_2089(handler, target, instance, data_type, reqid, comp, se
         if i > 0: S()
         W(str(v))
     resp_inner = b.getvalue()
-    resp_body = _hc.compress_gzip(resp_inner) if comp else resp_inner
+    resp_body = compress_gzip(resp_inner) if comp else resp_inner
     resp_reqid = reqid | 1
-    dw_bytes = _hc.encode_datawrapper(resp_reqid, data_type, resp_body, comp, session_id)
+    dw_bytes = encode_datawrapper(resp_reqid, data_type, resp_body, comp, session_id)
     issuer_str = f"0.0.0.0.ServiceProfile.{_hc.SERVICE_PROFILE_UID}.ServicePlayer.{handler.client_uid}.{resp_reqid}"
     handler.scnt += 1
     handler.send({
@@ -484,15 +487,15 @@ def handle_updatedeck_2095(handler, target, instance, data_type, reqid, comp, se
     # Only report a real deck UID; on failure return invalid (updated=False
     # tells the client it didn't save).
     deck_uid64 = (deck_id << 8) | 17 if deck_id > 0 else 0
-    resp_inner = _hc.encode_objfmt_response(
-        ["Game.Client.Network.Profile.UpdateDeckResponse",
-         "Game.Shared.UID", "System.UInt64", "System.Boolean"],
-        [("DeckID", "uid", deck_uid64),
-         ("updated", "bool", success)]
-    )
-    resp_body = _hc.compress_gzip(resp_inner) if comp else resp_inner
+    resp_inner = encode_objfmt_response(
+    ["Game.Client.Network.Profile.UpdateDeckResponse",
+     "Game.Shared.UID", "System.UInt64", "System.Boolean"],
+    [("DeckID", "uid", deck_uid64),
+     ("updated", "bool", success)]
+)
+    resp_body = compress_gzip(resp_inner) if comp else resp_inner
     resp_reqid = reqid | 1
-    dw_bytes = _hc.encode_datawrapper(resp_reqid, data_type, resp_body, comp, session_id)
+    dw_bytes = encode_datawrapper(resp_reqid, data_type, resp_body, comp, session_id)
     issuer_str = f"0.0.0.0.ServiceProfile.{_hc.SERVICE_PROFILE_UID}.ServicePlayer.{handler.client_uid}.{resp_reqid}"
     handler.scnt += 1
     handler.send({"issuer": issuer_str, "target": target, "instance": instance,
@@ -578,9 +581,9 @@ def handle_getplayercardidlist_2043(handler, target, instance, data_type, reqid,
         if i > 0: w(";")
         w(str(s))
     resp_inner = cbuf.getvalue()
-    resp_body = _hc.compress_gzip(resp_inner) if comp else resp_inner
+    resp_body = compress_gzip(resp_inner) if comp else resp_inner
     resp_reqid = reqid | 1
-    dw_bytes = _hc.encode_datawrapper(resp_reqid, data_type, resp_body, comp, session_id)
+    dw_bytes = encode_datawrapper(resp_reqid, data_type, resp_body, comp, session_id)
     issuer_str = f"0.0.0.0.ServiceProfile.{_hc.SERVICE_PROFILE_UID}.ServicePlayer.{handler.client_uid}.{resp_reqid}"
     handler.scnt += 1
     handler.send({"issuer": issuer_str, "target": target, "instance": instance,
@@ -640,9 +643,9 @@ def handle_deletechampion_2035(handler, target, instance, data_type, reqid, comp
         dw(str(s))
     
     resp_inner = dbuf.getvalue()
-    resp_body = _hc.compress_gzip(resp_inner) if comp else resp_inner
+    resp_body = compress_gzip(resp_inner) if comp else resp_inner
     resp_reqid = reqid | 1
-    dw_bytes = _hc.encode_datawrapper(resp_reqid, data_type, resp_body, comp, session_id)
+    dw_bytes = encode_datawrapper(resp_reqid, data_type, resp_body, comp, session_id)
     issuer_str = f"0.0.0.0.ServiceProfile.{_hc.SERVICE_PROFILE_UID}.ServicePlayer.{handler.client_uid}.{resp_reqid}"
     handler.scnt += 1
     handler.send({
@@ -881,9 +884,9 @@ def handle_addchampion_2033(handler, target, instance, data_type, reqid, comp, s
         w(str(s))
 
     resp_inner = buf.getvalue()
-    resp_body = _hc.compress_gzip(resp_inner) if comp else resp_inner
+    resp_body = compress_gzip(resp_inner) if comp else resp_inner
     resp_reqid = reqid | 1
-    dw_bytes = _hc.encode_datawrapper(resp_reqid, data_type, resp_body, comp, session_id)
+    dw_bytes = encode_datawrapper(resp_reqid, data_type, resp_body, comp, session_id)
     issuer_str = f"0.0.0.0.ServiceProfile.{_hc.SERVICE_PROFILE_UID}.ServicePlayer.{handler.client_uid}.{resp_reqid}"
     handler.scnt += 1
     handler.send({
@@ -935,13 +938,13 @@ def handle_updatechampiondeckid_2187(handler, target, instance, data_type, reqid
             champ_db_id, deck_id, handler.user_profile["id"], conn=db._db)
         log_req(f"    Updated champion {champ_db_id} last_deck_id={deck_id}")
     # Return success response with Error=Ok
-    resp_inner = _hc.encode_objfmt_response(
-        ["Game.Client.Network.Profile.UpdateChampionDeckIDResponse",
-         "Game.Shared.Network.Profile.EUpdateChampionDeckIDError"],
-        [("Error", "enum1", ("Game.Shared.Network.Profile.EUpdateChampionDeckIDError", 0))])
-    resp_body = _hc.compress_gzip(resp_inner) if comp else resp_inner
+    resp_inner = encode_objfmt_response(
+    ["Game.Client.Network.Profile.UpdateChampionDeckIDResponse",
+     "Game.Shared.Network.Profile.EUpdateChampionDeckIDError"],
+    [("Error", "enum1", ("Game.Shared.Network.Profile.EUpdateChampionDeckIDError", 0))])
+    resp_body = compress_gzip(resp_inner) if comp else resp_inner
     resp_reqid = reqid | 1
-    dw_bytes = _hc.encode_datawrapper(resp_reqid, data_type, resp_body, comp, session_id)
+    dw_bytes = encode_datawrapper(resp_reqid, data_type, resp_body, comp, session_id)
     issuer_str = f"0.0.0.0.ServiceProfile.{_hc.SERVICE_PROFILE_UID}.ServicePlayer.{handler.client_uid}.{resp_reqid}"
     handler.scnt += 1
     handler.send({"issuer": issuer_str, "target": target, "instance": instance,
@@ -1097,9 +1100,9 @@ def handle_updatechampiontalents_2037(handler, target, instance, data_type, reqi
         w(str(s))
 
     resp_inner = buf.getvalue()
-    resp_body = _hc.compress_gzip(resp_inner) if comp else resp_inner
+    resp_body = compress_gzip(resp_inner) if comp else resp_inner
     resp_reqid = reqid | 1
-    dw_bytes = _hc.encode_datawrapper(resp_reqid, data_type, resp_body, comp, session_id)
+    dw_bytes = encode_datawrapper(resp_reqid, data_type, resp_body, comp, session_id)
     issuer_str = f"0.0.0.0.ServiceProfile.{_hc.SERVICE_PROFILE_UID}.ServicePlayer.{handler.client_uid}.{resp_reqid}"
     handler.scnt += 1
     handler.send({"issuer": issuer_str, "target": target, "instance": instance,
@@ -1173,17 +1176,17 @@ def handle_upgradeextendedartoncard_2185(handler, target, instance, data_type, r
                 user_id, card_instance_id, conn=db._db)
             log_req(f"    Upgraded card instance {card_instance_id} to extended art")
     db._db.commit()
-    resp_inner = _hc.encode_objfmt_response(
-        ["Game.Client.Network.Profile.UpgradeExtendedArtOnCardResponse",
-         "System.UInt64", "System.UInt64", "enum1", _EXTENDED_ART_ERR_TYPE,
-         "System.String"],
-        [("StardustInventoryId", "ulong", stardust_id or 0),
-         ("CardInstanceId", "ulong", card_instance_id),
-         ("Error", "enum1", (_EXTENDED_ART_ERR_TYPE, error)),
-         ("ErrorMessage", "string", "" if error == _EXTENDED_ART_OK else "Upgrade failed")])
-    resp_body = _hc.compress_gzip(resp_inner) if comp else resp_inner
+    resp_inner = encode_objfmt_response(
+    ["Game.Client.Network.Profile.UpgradeExtendedArtOnCardResponse",
+     "System.UInt64", "System.UInt64", "enum1", _EXTENDED_ART_ERR_TYPE,
+     "System.String"],
+    [("StardustInventoryId", "ulong", stardust_id or 0),
+     ("CardInstanceId", "ulong", card_instance_id),
+     ("Error", "enum1", (_EXTENDED_ART_ERR_TYPE, error)),
+     ("ErrorMessage", "string", "" if error == _EXTENDED_ART_OK else "Upgrade failed")])
+    resp_body = compress_gzip(resp_inner) if comp else resp_inner
     resp_reqid = reqid | 1
-    dw_bytes = _hc.encode_datawrapper(resp_reqid, data_type, resp_body, comp, session_id)
+    dw_bytes = encode_datawrapper(resp_reqid, data_type, resp_body, comp, session_id)
     issuer_str = f"0.0.0.0.ServiceProfile.{_hc.SERVICE_PROFILE_UID}.ServicePlayer.{handler.client_uid}.{resp_reqid}"
     handler.scnt += 1
     handler.send({

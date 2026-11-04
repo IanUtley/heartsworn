@@ -4,6 +4,9 @@ import json
 from db import log_req
 import game_engine
 import db
+from encoder import encode_datawrapper
+from encoder import compress_gzip
+from encoder import encode_objfmt_response
 
 
 class FraBattleMixin:
@@ -449,10 +452,10 @@ class FraBattleMixin:
             if not game.events:
                 return
             packet = game.make_network_packet(player_uid)
-            body = _hc.encode_datawrapper(
-                0, 3055,
-                _hc.compress_gzip(_hc.encode_sync_event(packet)), 1,
-                "00000000-0000-0000-0000-000000000000")
+            body = encode_datawrapper(
+            0, 3055,
+            compress_gzip(_hc.encode_sync_event(packet)), 1,
+            "00000000-0000-0000-0000-000000000000")
             self._game_scnt = max(
                 int(getattr(self, "_game_scnt", 0) or 0),
                 int(getattr(self, "scnt", 0) or 0)) + 1
@@ -470,16 +473,16 @@ class FraBattleMixin:
         # JoinDisconnectedGame adds only the reconnecting client locally. Add
         # the AI before GameStarted so Unity has both Player objects when it
         # handles the champion, deck, and board snapshot that follows.
-        added = _hc.encode_objfmt_response(
-            ["Game.Shared.Network.GameSession.PlayerAddedEventArgs",
-             "Game.Shared.UID", "Game.Shared.PlayerState", "System.Int32"],
-            [("RoutingPlayerId", "uid", int(ai_uid.uid64)),
-             ("PlayerState", "struct", ("Game.Shared.PlayerState", [
-                 ("PlayerId", "uid", int(ai_uid.uid64)),
-                 ("PlayerPosition", "int", 1),
-             ]))])
-        added_dw = _hc.encode_datawrapper(
-            0, 3050, _hc.compress_gzip(added), 1, _hc.client_session_guid(self))
+        added = encode_objfmt_response(
+        ["Game.Shared.Network.GameSession.PlayerAddedEventArgs",
+         "Game.Shared.UID", "Game.Shared.PlayerState", "System.Int32"],
+        [("RoutingPlayerId", "uid", int(ai_uid.uid64)),
+         ("PlayerState", "struct", ("Game.Shared.PlayerState", [
+             ("PlayerId", "uid", int(ai_uid.uid64)),
+             ("PlayerPosition", "int", 1),
+         ]))])
+        added_dw = encode_datawrapper(
+        0, 3050, compress_gzip(added), 1, _hc.client_session_guid(self))
         self.scnt += 1
         self.send({
             "issuer": (f"0.0.0.0.ServiceGameSession.246."

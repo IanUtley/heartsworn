@@ -1,4 +1,7 @@
 from db import log_req
+from encoder import encode_datawrapper
+from encoder import compress_gzip
+from encoder import encode_objfmt_response
 """Store requests (item listing, redeem codes) still served by the legacy fallback.
 
 Moved out of hconnect_server.HCPHandler._handle_service_request_legacy.
@@ -12,9 +15,9 @@ def handle_getstoreitems_6009(handler, target, instance, data_type, reqid, comp,
     import hconnect_server as _hc
     log_req(">>> Respond GetStoreItems -> 1 booster pack")
     resp_inner = _hc.encode_get_store_items_response()
-    resp_body = _hc.compress_gzip(resp_inner) if comp else resp_inner
+    resp_body = compress_gzip(resp_inner) if comp else resp_inner
     resp_reqid = reqid | 1
-    dw_bytes = _hc.encode_datawrapper(resp_reqid, data_type, resp_body, comp, session_id)
+    dw_bytes = encode_datawrapper(resp_reqid, data_type, resp_body, comp, session_id)
     issuer_str = f"0.0.0.0.ServiceEscrow.{_hc.SERVICE_MAIL_UID}.ServicePlayer.{handler.client_uid}.{resp_reqid}"
     handler.scnt += 1
     handler.send({
@@ -40,26 +43,26 @@ def handle_redeemcode_6013(handler, target, instance, data_type, reqid, comp, se
     result = _hc.db_redeem_code(redeem_code, p["id"])
     if not result["redeemed"]:
         log_req(f"    RedeemCode invalid: {redeem_code}")
-        resp_inner = _hc.encode_objfmt_response(
-            ["Game.Client.Network.Escrow.RedeemCodeResponse",
-             "System.Collections.Generic.List`1#Game.Shared.ResourceId",
-             "Game.Shared.ResourceId",
-             "System.Guid",
-             "System.Int32",
-             "System.Collections.Generic.List`1#Game.Shared.Domain.card_instance_bits",
-             "System.Collections.Generic.List`1#Game.Shared.Domain.deck_bits",
-             "Game.Shared.Network.Escrow.ERedeemCodeError", "System.String"],
-            [("ItemTemplateIds", "coll", ("System.Collections.Generic.List`1#Game.Shared.ResourceId", 0)),
-             ("GoldDelta", "int", 0),
-             ("PlatinumDelta", "int", 0),
-             ("CardBits", "coll", ("System.Collections.Generic.List`1#Game.Shared.Domain.card_instance_bits", 0)),
-             ("StarterDecksBits", "coll", ("System.Collections.Generic.List`1#Game.Shared.Domain.deck_bits", 0)),
-             ("Error", "enum1", ("Game.Shared.Network.Escrow.ERedeemCodeError", 1)),
-             ("ErrorMessage", "string", result["error_message"])]
-        )
-        resp_body = _hc.compress_gzip(resp_inner) if comp else resp_inner
+        resp_inner = encode_objfmt_response(
+        ["Game.Client.Network.Escrow.RedeemCodeResponse",
+         "System.Collections.Generic.List`1#Game.Shared.ResourceId",
+         "Game.Shared.ResourceId",
+         "System.Guid",
+         "System.Int32",
+         "System.Collections.Generic.List`1#Game.Shared.Domain.card_instance_bits",
+         "System.Collections.Generic.List`1#Game.Shared.Domain.deck_bits",
+         "Game.Shared.Network.Escrow.ERedeemCodeError", "System.String"],
+        [("ItemTemplateIds", "coll", ("System.Collections.Generic.List`1#Game.Shared.ResourceId", 0)),
+         ("GoldDelta", "int", 0),
+         ("PlatinumDelta", "int", 0),
+         ("CardBits", "coll", ("System.Collections.Generic.List`1#Game.Shared.Domain.card_instance_bits", 0)),
+         ("StarterDecksBits", "coll", ("System.Collections.Generic.List`1#Game.Shared.Domain.deck_bits", 0)),
+         ("Error", "enum1", ("Game.Shared.Network.Escrow.ERedeemCodeError", 1)),
+         ("ErrorMessage", "string", result["error_message"])]
+    )
+        resp_body = compress_gzip(resp_inner) if comp else resp_inner
         resp_reqid = reqid | 1
-        dw_bytes = _hc.encode_datawrapper(resp_reqid, data_type, resp_body, comp, session_id)
+        dw_bytes = encode_datawrapper(resp_reqid, data_type, resp_body, comp, session_id)
         issuer_str = f"0.0.0.0.ServiceEscrow.{_hc.SERVICE_MAIL_UID}.ServicePlayer.{handler.client_uid}.{resp_reqid}"
         handler.scnt += 1
         handler.send({
@@ -96,26 +99,26 @@ def handle_redeemcode_6013(handler, target, instance, data_type, reqid, comp, se
         if card_grants:
             handler.push_cards_to_client()
     
-        resp_inner = _hc.encode_objfmt_response(
-            ["Game.Client.Network.Escrow.RedeemCodeResponse",
-             "System.Collections.Generic.List`1#Game.Shared.ResourceId",
-             "Game.Shared.ResourceId",
-             "System.Guid",
-             "System.Int32",
-             "System.Collections.Generic.List`1#Game.Shared.Domain.card_instance_bits",
-             "System.Collections.Generic.List`1#Game.Shared.Domain.deck_bits",
-             "Game.Shared.Network.Escrow.ERedeemCodeError", "System.String"],
-            [("ItemTemplateIds", "coll", ("System.Collections.Generic.List`1#Game.Shared.ResourceId", 0)),
-             ("GoldDelta", "int", gold_delta),
-             ("PlatinumDelta", "int", plat_delta),
-             ("CardBits", "coll", ("System.Collections.Generic.List`1#Game.Shared.Domain.card_instance_bits", 0)),
-             ("StarterDecksBits", "coll", ("System.Collections.Generic.List`1#Game.Shared.Domain.deck_bits", 0)),
-             ("Error", "enum1", ("Game.Shared.Network.Escrow.ERedeemCodeError", 0)),
-             ("ErrorMessage", "string", "")]
-        )
-        resp_body = _hc.compress_gzip(resp_inner) if comp else resp_inner
+        resp_inner = encode_objfmt_response(
+        ["Game.Client.Network.Escrow.RedeemCodeResponse",
+         "System.Collections.Generic.List`1#Game.Shared.ResourceId",
+         "Game.Shared.ResourceId",
+         "System.Guid",
+         "System.Int32",
+         "System.Collections.Generic.List`1#Game.Shared.Domain.card_instance_bits",
+         "System.Collections.Generic.List`1#Game.Shared.Domain.deck_bits",
+         "Game.Shared.Network.Escrow.ERedeemCodeError", "System.String"],
+        [("ItemTemplateIds", "coll", ("System.Collections.Generic.List`1#Game.Shared.ResourceId", 0)),
+         ("GoldDelta", "int", gold_delta),
+         ("PlatinumDelta", "int", plat_delta),
+         ("CardBits", "coll", ("System.Collections.Generic.List`1#Game.Shared.Domain.card_instance_bits", 0)),
+         ("StarterDecksBits", "coll", ("System.Collections.Generic.List`1#Game.Shared.Domain.deck_bits", 0)),
+         ("Error", "enum1", ("Game.Shared.Network.Escrow.ERedeemCodeError", 0)),
+         ("ErrorMessage", "string", "")]
+    )
+        resp_body = compress_gzip(resp_inner) if comp else resp_inner
         resp_reqid = reqid | 1
-        dw_bytes = _hc.encode_datawrapper(resp_reqid, data_type, resp_body, comp, session_id)
+        dw_bytes = encode_datawrapper(resp_reqid, data_type, resp_body, comp, session_id)
         issuer_str = f"0.0.0.0.ServiceEscrow.{_hc.SERVICE_MAIL_UID}.ServicePlayer.{handler.client_uid}.{resp_reqid}"
         handler.scnt += 1
         handler.send_and_cache({

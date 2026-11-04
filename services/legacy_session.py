@@ -8,6 +8,9 @@ import json
 import os
 from db import log_req
 import game_engine
+from encoder import encode_datawrapper
+from encoder import compress_gzip
+from encoder import encode_objfmt_response
 
 
 # ServiceGameSession ReplayFetch (160000)
@@ -29,13 +32,13 @@ def handle_servicegamesession_replayfetch_160000(handler, target, instance, data
     else:
         resp_envelope = b"\0\0\0\0\0"
         log_req(">>> ReplayFetch invalid request")
-    resp_inner = _hc.encode_objfmt_response(
-        ["Game.Shared.GameReq.GameReq+Response", "System.Byte[]"],
-        [("Envelope", "bytes", resp_envelope)],
-    )
-    resp_body = _hc.compress_gzip(resp_inner) if comp else resp_inner
+    resp_inner = encode_objfmt_response(
+    ["Game.Shared.GameReq.GameReq+Response", "System.Byte[]"],
+    [("Envelope", "bytes", resp_envelope)],
+)
+    resp_body = compress_gzip(resp_inner) if comp else resp_inner
     resp_reqid = reqid | 1
-    dw_bytes = _hc.encode_datawrapper(resp_reqid, data_type, resp_body, comp, session_id)
+    dw_bytes = encode_datawrapper(resp_reqid, data_type, resp_body, comp, session_id)
     issuer_str = (
         f"0.0.0.0.ServiceGameSession.{_hc.SERVICE_GAME_SESSION_UID}."
         f"{instance}.{resp_reqid}"

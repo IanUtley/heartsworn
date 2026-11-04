@@ -12,6 +12,9 @@ import struct
 from db import log_req
 import game_engine
 import db
+from encoder import encode_datawrapper
+from encoder import compress_gzip
+from encoder import encode_objfmt_response
 
 
 # ServiceLoadBalancer — QuitOnReconnectionGame (22011)
@@ -182,32 +185,32 @@ def handle_tryreconnectiontodisconnectedgame_22013(handler, target, instance, da
             except Exception as exc:
                 log_req(f"    FRA reconnect deck lookup failed: {exc}")
         deck_uid = _hc.encoder.make_uid(244, deck_db_id) if deck_db_id else 0
-        resp_inner = _hc.encode_objfmt_response(
-            ["Game.Client.Network.LoadBalancer.TryReconnectionToDisconnectedGameResponse",
-             "Game.Shared.SessionState", "Game.Shared.UID",
-             "Game.Shared.SessionStateEncounterData",
-             "Game.Shared.ResourceId", "System.Guid",
-             "Game.Shared.ESessionFlags", "System.UInt64",
-             "System.Int32", "System.String", "System.Boolean",
-             "Game.Shared.Network.LoadBalancer.ETryReconnectionToDisconnectedGameError",
-             "System.String"],
-            [("SessionState", "struct", ("Game.Shared.SessionState", [
-                ("SessionId", "uid", session_uid),
-                ("SessionName", "string", _client_session_name(reconnect_session)),
-                ("MinimumPlayerCount", "int", 2),
-                ("MaximumPlayerCount", "int", 2),
-                # The client dereferences EncounterData before it
-                # enters Battle and UIBattle later reads the flags.
-                # An empty `class` field decodes as null on the fixed
-                # client, so encode the saved tournament/FRA identity;
-                # the reconnect snapshot restores the actual board.
-                ("EncounterData", "struct", reconnect_encounter_data),
-                ("JoinInsteadOfReconnect", "bool", False),
-            ])),
-             ("DeckID", "uid", deck_uid),
-             ("Error", "enum1", (
-                 "Game.Shared.Network.LoadBalancer.ETryReconnectionToDisconnectedGameError", 0)),
-             ("ErrorMessage", "string", "")])
+        resp_inner = encode_objfmt_response(
+        ["Game.Client.Network.LoadBalancer.TryReconnectionToDisconnectedGameResponse",
+         "Game.Shared.SessionState", "Game.Shared.UID",
+         "Game.Shared.SessionStateEncounterData",
+         "Game.Shared.ResourceId", "System.Guid",
+         "Game.Shared.ESessionFlags", "System.UInt64",
+         "System.Int32", "System.String", "System.Boolean",
+         "Game.Shared.Network.LoadBalancer.ETryReconnectionToDisconnectedGameError",
+         "System.String"],
+        [("SessionState", "struct", ("Game.Shared.SessionState", [
+            ("SessionId", "uid", session_uid),
+            ("SessionName", "string", _client_session_name(reconnect_session)),
+            ("MinimumPlayerCount", "int", 2),
+            ("MaximumPlayerCount", "int", 2),
+            # The client dereferences EncounterData before it
+            # enters Battle and UIBattle later reads the flags.
+            # An empty `class` field decodes as null on the fixed
+            # client, so encode the saved tournament/FRA identity;
+            # the reconnect snapshot restores the actual board.
+            ("EncounterData", "struct", reconnect_encounter_data),
+            ("JoinInsteadOfReconnect", "bool", False),
+        ])),
+         ("DeckID", "uid", deck_uid),
+         ("Error", "enum1", (
+             "Game.Shared.Network.LoadBalancer.ETryReconnectionToDisconnectedGameError", 0)),
+         ("ErrorMessage", "string", "")])
         log_req(f">>> Respond TryReconnectionToDisconnectedGame -> "
             f"{reconnect_session.session_name} "
             f"({'FRA' if is_fra_reconnect else 'campaign' if is_campaign_reconnect else 'tournament'})")
@@ -218,18 +221,18 @@ def handle_tryreconnectiontodisconnectedgame_22013(handler, target, instance, da
             f"pid {reconnect_pid} previously declined this session")
         else:
             log_req(">>> Respond TryReconnectionToDisconnectedGame -> no game")
-        resp_inner = _hc.encode_objfmt_response(
-            ["Game.Client.Network.LoadBalancer.TryReconnectionToDisconnectedGameResponse",
-             "Game.Shared.UID",
-             "Game.Shared.Network.LoadBalancer.ETryReconnectionToDisconnectedGameError",
-             "System.String"],
-            [("DeckID", "uid", 0),
-             ("Error", "enum1", (
-                 "Game.Shared.Network.LoadBalancer.ETryReconnectionToDisconnectedGameError", 0)),
-             ("ErrorMessage", "string", "")])
-    resp_body = _hc.compress_gzip(resp_inner) if comp else resp_inner
+        resp_inner = encode_objfmt_response(
+        ["Game.Client.Network.LoadBalancer.TryReconnectionToDisconnectedGameResponse",
+         "Game.Shared.UID",
+         "Game.Shared.Network.LoadBalancer.ETryReconnectionToDisconnectedGameError",
+         "System.String"],
+        [("DeckID", "uid", 0),
+         ("Error", "enum1", (
+             "Game.Shared.Network.LoadBalancer.ETryReconnectionToDisconnectedGameError", 0)),
+         ("ErrorMessage", "string", "")])
+    resp_body = compress_gzip(resp_inner) if comp else resp_inner
     resp_reqid = reqid | 1
-    dw_bytes = _hc.encode_datawrapper(resp_reqid, data_type, resp_body, comp, session_id)
+    dw_bytes = encode_datawrapper(resp_reqid, data_type, resp_body, comp, session_id)
     issuer_str = f"0.0.0.0.ServiceLoadBalancer.{_hc.SERVICE_MAIL_UID}.ServicePlayer.{handler.client_uid}.{resp_reqid}"
     handler.scnt += 1
     handler.send({
@@ -293,35 +296,35 @@ def handle_findsession_22019(handler, target, instance, data_type, reqid, comp, 
     if resume is not None:
         # A live campaign battle: the client joins it, rather than starting a new encounter.
         log_req(f">>> Respond FindSession -> campaign {resume.session_name} (resume)")
-        resp_inner = _hc.encode_objfmt_response(
-            ["Game.Shared.Network.LoadBalancer.FindSessionResponseArgs",
-             "Game.Shared.UID", "System.Boolean", "Game.Shared.SessionState",
-             "Game.Shared.SessionStateEncounterData", "Game.Shared.ResourceId",
-             "System.Guid", "Game.Shared.ESessionFlags", "System.UInt64",
-             "System.Int32", "System.String", "System.Boolean"],
-            [("RoutingPlayerId", "uid", player_uid),
-             ("Success", "bool", True),
-             ("SessionState", "struct", ("Game.Shared.SessionState", [
-                 ("SessionId", "uid", resume.session_id),
-                 ("SessionName", "string", _client_session_name(resume)),
-                 ("MinimumPlayerCount", "int", 2),
-                 ("MaximumPlayerCount", "int", 2),
-                 ("EncounterData", "struct", _campaign_encounter_struct(resume)),
-                 ("JoinInsteadOfReconnect", "bool", False),
-             ]))]
-        )
+        resp_inner = encode_objfmt_response(
+        ["Game.Shared.Network.LoadBalancer.FindSessionResponseArgs",
+         "Game.Shared.UID", "System.Boolean", "Game.Shared.SessionState",
+         "Game.Shared.SessionStateEncounterData", "Game.Shared.ResourceId",
+         "System.Guid", "Game.Shared.ESessionFlags", "System.UInt64",
+         "System.Int32", "System.String", "System.Boolean"],
+        [("RoutingPlayerId", "uid", player_uid),
+         ("Success", "bool", True),
+         ("SessionState", "struct", ("Game.Shared.SessionState", [
+             ("SessionId", "uid", resume.session_id),
+             ("SessionName", "string", _client_session_name(resume)),
+             ("MinimumPlayerCount", "int", 2),
+             ("MaximumPlayerCount", "int", 2),
+             ("EncounterData", "struct", _campaign_encounter_struct(resume)),
+             ("JoinInsteadOfReconnect", "bool", False),
+         ]))]
+    )
     else:
         log_req(">>> Respond FindSession -> no session")
-        resp_inner = _hc.encode_objfmt_response(
-            ["Game.Shared.Network.LoadBalancer.FindSessionResponseArgs",
-             "Game.Shared.UID", "System.Boolean", "Game.Shared.SessionState"],
-            [("RoutingPlayerId", "uid", player_uid),
-             ("Success", "bool", False),
-             ("SessionState", "class", "Game.Shared.SessionState")]
-        )
-    resp_body = _hc.compress_gzip(resp_inner) if comp else resp_inner
+        resp_inner = encode_objfmt_response(
+        ["Game.Shared.Network.LoadBalancer.FindSessionResponseArgs",
+         "Game.Shared.UID", "System.Boolean", "Game.Shared.SessionState"],
+        [("RoutingPlayerId", "uid", player_uid),
+         ("Success", "bool", False),
+         ("SessionState", "class", "Game.Shared.SessionState")]
+    )
+    resp_body = compress_gzip(resp_inner) if comp else resp_inner
     resp_reqid = reqid | 1
-    dw_bytes = _hc.encode_datawrapper(resp_reqid, data_type, resp_body, comp, session_id)
+    dw_bytes = encode_datawrapper(resp_reqid, data_type, resp_body, comp, session_id)
     issuer_str = f"0.0.0.0.ServiceLoadBalancer.{_hc.SERVICE_MAIL_UID}.ServicePlayer.{handler.client_uid}.{resp_reqid}"
     handler.scnt += 1
     handler.send({
@@ -349,26 +352,26 @@ def handle_startsession_22015(handler, target, instance, data_type, reqid, comp,
     )).value
     sess_id = session.session_id
 
-    resp_inner = _hc.encode_objfmt_response(
-        ["Game.Shared.Network.LoadBalancer.StartSessionResponseArgs",
-         "Game.Shared.UID", "System.Boolean", "Game.Shared.SessionState",
-         "Game.Shared.UID", "System.String",
-         "System.Int32", "System.Int32",
-         "Game.Shared.SessionStateEncounterData", "System.Boolean"],
-        [("RoutingPlayerId", "uid", player_uid),
-         ("Success", "bool", True),
-         ("SessionState", "struct", ("Game.Shared.SessionState", [
-             ("SessionId", "uid", sess_id),
-             ("SessionName", "string", session_name),
-             ("MinimumPlayerCount", "int", 2),
-             ("MaximumPlayerCount", "int", 2),
-             ("EncounterData", "class", "Game.Shared.SessionStateEncounterData"),
-             ("JoinInsteadOfReconnect", "bool", False),
-         ]))]
-    )
-    resp_body = _hc.compress_gzip(resp_inner) if comp else resp_inner
+    resp_inner = encode_objfmt_response(
+    ["Game.Shared.Network.LoadBalancer.StartSessionResponseArgs",
+     "Game.Shared.UID", "System.Boolean", "Game.Shared.SessionState",
+     "Game.Shared.UID", "System.String",
+     "System.Int32", "System.Int32",
+     "Game.Shared.SessionStateEncounterData", "System.Boolean"],
+    [("RoutingPlayerId", "uid", player_uid),
+     ("Success", "bool", True),
+     ("SessionState", "struct", ("Game.Shared.SessionState", [
+         ("SessionId", "uid", sess_id),
+         ("SessionName", "string", session_name),
+         ("MinimumPlayerCount", "int", 2),
+         ("MaximumPlayerCount", "int", 2),
+         ("EncounterData", "class", "Game.Shared.SessionStateEncounterData"),
+         ("JoinInsteadOfReconnect", "bool", False),
+     ]))]
+)
+    resp_body = compress_gzip(resp_inner) if comp else resp_inner
     resp_reqid = reqid | 1
-    dw_bytes = _hc.encode_datawrapper(resp_reqid, data_type, resp_body, comp, session_id)
+    dw_bytes = encode_datawrapper(resp_reqid, data_type, resp_body, comp, session_id)
     issuer_str = f"0.0.0.0.ServiceLoadBalancer.{_hc.SERVICE_MAIL_UID}.ServicePlayer.{handler.client_uid}.{resp_reqid}"
     handler.scnt += 1
     handler.send({
@@ -431,30 +434,30 @@ def handle_startencounter_22017(handler, target, instance, data_type, reqid, com
         response_encounter_data = _hc._fra_arena_session_state_data(
             fra_setup, flags=0)
 
-    resp_inner = _hc.encode_objfmt_response(
-        ["Game.Shared.Network.LoadBalancer.StartEncounterResponseArgs",
-         "Game.Shared.UID", "System.Boolean", "Game.Shared.SessionState",
-         "Game.Shared.UID", "System.String",
-         "System.Int32", "System.Int32",
-             "Game.Shared.SessionStateEncounterData", "System.Boolean",
-             "Game.Shared.ResourceId", "System.Guid", "Game.Shared.ESessionFlags", "System.Int32",
-         "Game.Shared.UID", "System.UInt64"],
-        [("RoutingPlayerId", "uid", player_uid),
-         ("Success", "bool", True),
-         ("SessionState", "struct", ("Game.Shared.SessionState", [
-             ("SessionId", "uid", sess_id),
-             ("SessionName", "string", session_name),
-             ("MinimumPlayerCount", "int", 2),
-             ("MaximumPlayerCount", "int", 2),
-             ("EncounterData", response_encounter_data[0], response_encounter_data[1]),
-             ("JoinInsteadOfReconnect", "bool", False),
-         ])),
-         ("SessionID", "uid", sess_id),
-         ("ServerID", "uid", server_id)]
-    )
-    resp_body = _hc.compress_gzip(resp_inner) if comp else resp_inner
+    resp_inner = encode_objfmt_response(
+    ["Game.Shared.Network.LoadBalancer.StartEncounterResponseArgs",
+     "Game.Shared.UID", "System.Boolean", "Game.Shared.SessionState",
+     "Game.Shared.UID", "System.String",
+     "System.Int32", "System.Int32",
+         "Game.Shared.SessionStateEncounterData", "System.Boolean",
+         "Game.Shared.ResourceId", "System.Guid", "Game.Shared.ESessionFlags", "System.Int32",
+     "Game.Shared.UID", "System.UInt64"],
+    [("RoutingPlayerId", "uid", player_uid),
+     ("Success", "bool", True),
+     ("SessionState", "struct", ("Game.Shared.SessionState", [
+         ("SessionId", "uid", sess_id),
+         ("SessionName", "string", session_name),
+         ("MinimumPlayerCount", "int", 2),
+         ("MaximumPlayerCount", "int", 2),
+         ("EncounterData", response_encounter_data[0], response_encounter_data[1]),
+         ("JoinInsteadOfReconnect", "bool", False),
+     ])),
+     ("SessionID", "uid", sess_id),
+     ("ServerID", "uid", server_id)]
+)
+    resp_body = compress_gzip(resp_inner) if comp else resp_inner
     resp_reqid = reqid | 1
-    dw_bytes = _hc.encode_datawrapper(resp_reqid, data_type, resp_body, comp, session_id)
+    dw_bytes = encode_datawrapper(resp_reqid, data_type, resp_body, comp, session_id)
     issuer_str = f"0.0.0.0.ServiceLoadBalancer.{_hc.SERVICE_MAIL_UID}.ServicePlayer.{handler.client_uid}.{resp_reqid}"
     handler.scnt += 1
     handler.send({
@@ -522,38 +525,38 @@ def handle_joinsession_22021(handler, target, instance, data_type, reqid, comp, 
         player_uid=player_uid,
     )).value if session_id_val else None)
     if session:
-        resp_inner = _hc.encode_objfmt_response(
-            ["Game.Shared.Network.LoadBalancer.JoinSessionResponseArgs",
-             "Game.Shared.UID", "System.Boolean", "Game.Shared.SessionState",
-             "System.Collections.Generic.List`1#Game.Shared.PlayerState",
-             "Game.Shared.UID", "System.String",
-             "System.Int32", "System.Int32",
-             "Game.Shared.SessionStateEncounterData", "System.Boolean"],
-            [("RoutingPlayerId", "uid", player_uid),
-             ("Success", "bool", True),
-             ("SessionState", "struct", ("Game.Shared.SessionState", [
-                 ("SessionId", "uid", session.session_id),
-                 ("SessionName", "string", session.session_name),
-                 ("MinimumPlayerCount", "int", 2),
-                 ("MaximumPlayerCount", "int", 2),
-                 ("EncounterData", "class", "Game.Shared.SessionStateEncounterData"),
-                 ("JoinInsteadOfReconnect", "bool", False),
-             ])),
-             ("SessionPlayers", "coll", ("System.Collections.Generic.List`1#Game.Shared.PlayerState",
-                 0, []))]
-        )
+        resp_inner = encode_objfmt_response(
+        ["Game.Shared.Network.LoadBalancer.JoinSessionResponseArgs",
+         "Game.Shared.UID", "System.Boolean", "Game.Shared.SessionState",
+         "System.Collections.Generic.List`1#Game.Shared.PlayerState",
+         "Game.Shared.UID", "System.String",
+         "System.Int32", "System.Int32",
+         "Game.Shared.SessionStateEncounterData", "System.Boolean"],
+        [("RoutingPlayerId", "uid", player_uid),
+         ("Success", "bool", True),
+         ("SessionState", "struct", ("Game.Shared.SessionState", [
+             ("SessionId", "uid", session.session_id),
+             ("SessionName", "string", session.session_name),
+             ("MinimumPlayerCount", "int", 2),
+             ("MaximumPlayerCount", "int", 2),
+             ("EncounterData", "class", "Game.Shared.SessionStateEncounterData"),
+             ("JoinInsteadOfReconnect", "bool", False),
+         ])),
+         ("SessionPlayers", "coll", ("System.Collections.Generic.List`1#Game.Shared.PlayerState",
+             0, []))]
+    )
         log_req(f"    JoinSession success, {len(session.players)} players")
     else:
-        resp_inner = _hc.encode_objfmt_response(
-            ["Game.Shared.Network.LoadBalancer.JoinSessionResponseArgs",
-             "Game.Shared.UID", "System.Boolean"],
-            [("RoutingPlayerId", "uid", player_uid),
-             ("Success", "bool", False)]
-        )
+        resp_inner = encode_objfmt_response(
+        ["Game.Shared.Network.LoadBalancer.JoinSessionResponseArgs",
+         "Game.Shared.UID", "System.Boolean"],
+        [("RoutingPlayerId", "uid", player_uid),
+         ("Success", "bool", False)]
+    )
         log_req(f"    JoinSession failed: session not found")
-    resp_body = _hc.compress_gzip(resp_inner) if comp else resp_inner
+    resp_body = compress_gzip(resp_inner) if comp else resp_inner
     resp_reqid = reqid | 1
-    dw_bytes = _hc.encode_datawrapper(resp_reqid, data_type, resp_body, comp, session_id)
+    dw_bytes = encode_datawrapper(resp_reqid, data_type, resp_body, comp, session_id)
     issuer_str = f"0.0.0.0.ServiceLoadBalancer.{_hc.SERVICE_MAIL_UID}.ServicePlayer.{handler.client_uid}.{resp_reqid}"
     handler.scnt += 1
     handler.send({
@@ -616,40 +619,40 @@ def handle_readyforgamesetup_22027(handler, target, instance, data_type, reqid, 
             _hc._fra_arena_session_state_data(fra_setup)
             if fra_setup is not None else
             ("class", "Game.Shared.SessionStateEncounterData"))
-        resp_inner = _hc.encode_objfmt_response(
-            ["Game.Client.Network.LoadBalancer.ReadyForGameSetupResponse",
-             "Game.Shared.SessionState", "Game.Shared.UID",
-             "Game.Shared.ResourceId", "System.Guid",
-             "System.Collections.Generic.List`1#Game.Shared.PlayerState",
-             "System.Collections.Generic.List`1#Game.Shared.UID",
-             "System.UInt64", "System.Int32",
-             "Game.Shared.Network.LoadBalancer.EReadyForGameSetupError",
-             "System.String"],
-            [("SessionState", "struct", ("Game.Shared.SessionState", [
-                 ("SessionId", "uid", session.session_id),
-                 ("SessionName", "string", session.session_name),
-                 ("MinimumPlayerCount", "int", 1),
-                 ("MaximumPlayerCount", "int", 2),
-                 ("EncounterData", setup_encounter_data[0], setup_encounter_data[1]),
-                 ("JoinInsteadOfReconnect", "bool", False)])),
-             ("DeckId", "uid", player_uid),
-             ("DeckTemplateId", "struct", ("Game.Shared.ResourceId", [
-                 ("guid", "guid", "00000000-0000-0000-0000-000000000000")])),
-             ("OpponentsInfo", "coll", ("System.Collections.Generic.List`1#Game.Shared.PlayerState", 0, [])),
-             ("TurnOrder", "coll", ("System.Collections.Generic.List`1#Game.Shared.UID", 0, [])),
-             ("seedZ", "ulong", 22222),
-             ("seedW", "ulong", 11111),
-             ("Error", "enum1", ("Game.Shared.Network.LoadBalancer.EReadyForGameSetupError", 0)),
-             ("ErrorMessage", "string", "")]
-        )
+        resp_inner = encode_objfmt_response(
+        ["Game.Client.Network.LoadBalancer.ReadyForGameSetupResponse",
+         "Game.Shared.SessionState", "Game.Shared.UID",
+         "Game.Shared.ResourceId", "System.Guid",
+         "System.Collections.Generic.List`1#Game.Shared.PlayerState",
+         "System.Collections.Generic.List`1#Game.Shared.UID",
+         "System.UInt64", "System.Int32",
+         "Game.Shared.Network.LoadBalancer.EReadyForGameSetupError",
+         "System.String"],
+        [("SessionState", "struct", ("Game.Shared.SessionState", [
+             ("SessionId", "uid", session.session_id),
+             ("SessionName", "string", session.session_name),
+             ("MinimumPlayerCount", "int", 1),
+             ("MaximumPlayerCount", "int", 2),
+             ("EncounterData", setup_encounter_data[0], setup_encounter_data[1]),
+             ("JoinInsteadOfReconnect", "bool", False)])),
+         ("DeckId", "uid", player_uid),
+         ("DeckTemplateId", "struct", ("Game.Shared.ResourceId", [
+             ("guid", "guid", "00000000-0000-0000-0000-000000000000")])),
+         ("OpponentsInfo", "coll", ("System.Collections.Generic.List`1#Game.Shared.PlayerState", 0, [])),
+         ("TurnOrder", "coll", ("System.Collections.Generic.List`1#Game.Shared.UID", 0, [])),
+         ("seedZ", "ulong", 22222),
+         ("seedW", "ulong", 11111),
+         ("Error", "enum1", ("Game.Shared.Network.LoadBalancer.EReadyForGameSetupError", 0)),
+         ("ErrorMessage", "string", "")]
+    )
     else:
-        resp_inner = _hc.encode_objfmt_response(
-            ["Game.Client.Network.LoadBalancer.ReadyForGameSetupResponse",
-             "Game.Shared.Network.LoadBalancer.EReadyForGameSetupError",
-             "System.Int32", "System.String"],
-            [("Error", "enum1", ("Game.Shared.Network.LoadBalancer.EReadyForGameSetupError", 2)),
-             ("ErrorMessage", "string", "No session")]
-        )
+        resp_inner = encode_objfmt_response(
+        ["Game.Client.Network.LoadBalancer.ReadyForGameSetupResponse",
+         "Game.Shared.Network.LoadBalancer.EReadyForGameSetupError",
+         "System.Int32", "System.String"],
+        [("Error", "enum1", ("Game.Shared.Network.LoadBalancer.EReadyForGameSetupError", 2)),
+         ("ErrorMessage", "string", "No session")]
+    )
     # Tournament PvP: OpponentsInfo + PvP ready → delegated to reloadable module
     if session:
         # GameClient uses this request's PlayerId as its LocalPlayer
@@ -684,9 +687,9 @@ def handle_readyforgamesetup_22027(handler, target, instance, data_type, reqid, 
         new_resp, game_started = handle_ready_for_game_setup(handler, session, _hc._pvp_ready, _hc.player_handlers)
         if new_resp is not None:
             resp_inner = new_resp
-    resp_body = _hc.compress_gzip(resp_inner) if comp else resp_inner
+    resp_body = compress_gzip(resp_inner) if comp else resp_inner
     resp_reqid = reqid | 1
-    dw_bytes = _hc.encode_datawrapper(resp_reqid, data_type, resp_body, comp, session_id)
+    dw_bytes = encode_datawrapper(resp_reqid, data_type, resp_body, comp, session_id)
     issuer_str = f"0.0.0.0.ServiceLoadBalancer.{_hc.SERVICE_MAIL_UID}.ServicePlayer.{handler.client_uid}.{resp_reqid}"
     handler.scnt += 1
     handler.send({
@@ -745,13 +748,13 @@ def handle_readytostartgame_22031(handler, target, instance, data_type, reqid, c
     # PvP/tournament sessions and restored campaign battles: skip PvE encounter setup
     if campaign_reconnect or (session.session_name and (session.session_name.startswith("pvp-") or session.session_name.startswith("tourney-"))):
         log_req("    PvP/tourney/campaign reconnect — ReadyToStartGame ack only")
-        rts_resp = _hc.encode_objfmt_response(
-            ["Game.Client.Network.LoadBalancer.ReadyToStartGameResponse",
-             "System.Boolean"],
-            [("IsReady", "bool", True)]
-        )
-        rts_body = _hc.compress_gzip(rts_resp) if comp else rts_resp
-        rts_dw = _hc.encode_datawrapper(reqid | 1, 22031, rts_body, comp and 1 or 0, "00000000-0000-0000-0000-000000000000")
+        rts_resp = encode_objfmt_response(
+        ["Game.Client.Network.LoadBalancer.ReadyToStartGameResponse",
+         "System.Boolean"],
+        [("IsReady", "bool", True)]
+    )
+        rts_body = compress_gzip(rts_resp) if comp else rts_resp
+        rts_dw = encode_datawrapper(reqid | 1, 22031, rts_body, comp and 1 or 0, "00000000-0000-0000-0000-000000000000")
         handler.send({
             "issuer": f"0.0.0.0.ServiceLoadBalancer.{_hc.SERVICE_MAIL_UID}.ServicePlayer.{handler.client_uid}.{reqid | 1}",
             "target": target, "instance": instance,
@@ -791,13 +794,13 @@ def handle_readytostartgame_22031(handler, target, instance, data_type, reqid, c
     handler._pve_coin_winner_is_player = coin_winner_is_player
 
     # Respond to 22031
-    rts_resp = _hc.encode_objfmt_response(
-        ["Game.Client.Network.LoadBalancer.ReadyToStartGameResponse",
-         "System.Boolean"],
-        [("IsReady", "bool", True)]
-    )
-    rts_body = _hc.compress_gzip(rts_resp) if comp else rts_resp
-    rts_dw = _hc.encode_datawrapper(reqid | 1, 22031, rts_body, comp and 1 or 0, "00000000-0000-0000-0000-000000000000")
+    rts_resp = encode_objfmt_response(
+    ["Game.Client.Network.LoadBalancer.ReadyToStartGameResponse",
+     "System.Boolean"],
+    [("IsReady", "bool", True)]
+)
+    rts_body = compress_gzip(rts_resp) if comp else rts_resp
+    rts_dw = encode_datawrapper(reqid | 1, 22031, rts_body, comp and 1 or 0, "00000000-0000-0000-0000-000000000000")
     handler.send({
         "issuer": f"0.0.0.0.ServiceLoadBalancer.{_hc.SERVICE_MAIL_UID}.ServicePlayer.{handler.client_uid}.{reqid | 1}",
         "target": target, "instance": instance,
@@ -1001,8 +1004,8 @@ def handle_readytostartgame_22031(handler, target, instance, data_type, reqid, c
         if i > 0: rfg_sp()
         rfg_w(str(s))
     rfg_resp = rfg_buf.getvalue()
-    rfg_body = _hc.compress_gzip(rfg_resp) if comp else rfg_resp
-    rfg_dw = _hc.encode_datawrapper(0, 22027, rfg_body, comp and 1 or 0, "00000000-0000-0000-0000-000000000000")
+    rfg_body = compress_gzip(rfg_resp) if comp else rfg_resp
+    rfg_dw = encode_datawrapper(0, 22027, rfg_body, comp and 1 or 0, "00000000-0000-0000-0000-000000000000")
     handler.scnt += 1
     handler.send({
         "issuer": f"0.0.0.0.ServiceLoadBalancer.{_hc.SERVICE_MAIL_UID}.ServicePlayer.{handler.client_uid}.{handler.scnt}",
@@ -1021,8 +1024,8 @@ def handle_readytostartgame_22031(handler, target, instance, data_type, reqid, c
         seed_w=0xABCDEF0102030405,
         seed_z=0x1234567890ABCDEF,
         success=True)
-    gs_body = _hc.compress_gzip(gs_inner)
-    gs_dw = _hc.encode_datawrapper(0, 3053, gs_body, 1, "00000000-0000-0000-0000-000000000000")
+    gs_body = compress_gzip(gs_inner)
+    gs_dw = encode_datawrapper(0, 3053, gs_body, 1, "00000000-0000-0000-0000-000000000000")
     handler.scnt += 1
     handler.send({
         "issuer": f"0.0.0.0.ServiceGameSession.{_hc.SERVICE_GAME_SESSION_UID}.{session.session_id}.{handler.scnt}",
@@ -2138,8 +2141,8 @@ def handle_readytostartgame_22031(handler, target, instance, data_type, reqid, c
             log_req("    FRA challenge conversation queued internally: "
                 + ",".join(value[:8] for value in conversation_ids))
     pkt = game.make_network_packet(pl_uid_t)
-    evt_bytes = _hc.compress_gzip(_hc.encode_sync_event(pkt))
-    evt_dw = _hc.encode_datawrapper(0, 3055, evt_bytes, 1, "00000000-0000-0000-0000-000000000000")
+    evt_bytes = compress_gzip(_hc.encode_sync_event(pkt))
+    evt_dw = encode_datawrapper(0, 3055, evt_bytes, 1, "00000000-0000-0000-0000-000000000000")
     handler.scnt += 1
     handler._game_scnt = handler.scnt  # Save game scnt for subsequent events
     handler.send({"issuer": f"0.0.0.0.ServiceGameSession.{_hc.SERVICE_GAME_SESSION_UID}.{session.session_id}.{handler.scnt}", "target": "ServiceGameSession", "instance": gs_instance, "reqid": 0, "c": 0, "conh": 0, "sid": handler.sid}, evt_dw)
@@ -2168,8 +2171,8 @@ def handle_readytostartgame_22031(handler, target, instance, data_type, reqid, c
             handler._sync_rules_port_setup_checkpoint(
                 session, game_engine.ETurnPhases.PickGoesFirst, pl_uid_t)
             pkt2 = game2.make_network_packet(pl_uid_t)
-            evt_bytes2 = _hc.compress_gzip(_hc.encode_sync_event(pkt2))
-            evt_dw2 = _hc.encode_datawrapper(0, 3055, evt_bytes2, 1, "00000000-0000-0000-0000-000000000000")
+            evt_bytes2 = compress_gzip(_hc.encode_sync_event(pkt2))
+            evt_dw2 = encode_datawrapper(0, 3055, evt_bytes2, 1, "00000000-0000-0000-0000-000000000000")
             handler.scnt += 1
             handler._game_scnt = handler.scnt  # Save game scnt for subsequent events
             handler.send({"issuer": f"0.0.0.0.ServiceGameSession.{_hc.SERVICE_GAME_SESSION_UID}.{session.session_id}.{handler.scnt}", "target": "ServiceGameSession", "instance": gs_instance, "reqid": 0, "c": 0, "conh": 0, "sid": handler.sid}, evt_dw2)

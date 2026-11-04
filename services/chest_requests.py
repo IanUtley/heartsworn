@@ -9,6 +9,9 @@ import random
 import re
 from db import log_req
 import db
+from encoder import encode_datawrapper
+from encoder import compress_gzip
+from encoder import encode_objfmt_response
 
 
 def handle_chest_spinning_2049(handler, target, instance, data_type, reqid, comp, session_id,
@@ -48,13 +51,13 @@ def handle_chest_spinning_2049(handler, target, instance, data_type, reqid, comp
         resp_inner = _hc._encode_spin_response(spin, chest_uid)
 
     if not resp_inner:
-        resp_inner = _hc.encode_objfmt_response(
-            ["Game.Client.Network.Profile.SpinWheelOfFateResponse"],
-            []
-        )
-    resp_body = _hc.compress_gzip(resp_inner) if comp else resp_inner
+        resp_inner = encode_objfmt_response(
+        ["Game.Client.Network.Profile.SpinWheelOfFateResponse"],
+        []
+    )
+    resp_body = compress_gzip(resp_inner) if comp else resp_inner
     resp_reqid = reqid | 1
-    dw_bytes = _hc.encode_datawrapper(resp_reqid, data_type, resp_body, comp, session_id)
+    dw_bytes = encode_datawrapper(resp_reqid, data_type, resp_body, comp, session_id)
     issuer_str = f"0.0.0.0.ServiceProfile.{_hc.SERVICE_PROFILE_UID}.ServicePlayer.{handler.client_uid}.{resp_reqid}"
     handler.scnt += 1
     handler.send({
@@ -280,9 +283,9 @@ def handle_opencardpack_2127(handler, target, instance, data_type, reqid, comp, 
     b.field_str("ErrorMessage", error_msg)
 
     resp_inner = b.finish(5)
-    resp_body = _hc.compress_gzip(resp_inner) if comp else resp_inner
+    resp_body = compress_gzip(resp_inner) if comp else resp_inner
     resp_reqid = reqid | 1
-    dw_bytes = _hc.encode_datawrapper(resp_reqid, data_type, resp_body, comp, session_id)
+    dw_bytes = encode_datawrapper(resp_reqid, data_type, resp_body, comp, session_id)
     issuer_str = f"0.0.0.0.ServiceProfile.{_hc.SERVICE_PROFILE_UID}.ServicePlayer.{handler.client_uid}.{resp_reqid}"
     handler.scnt += 1
     handler.send({
@@ -347,10 +350,10 @@ def handle_reserved_for_chests_with_a_2129(handler, target, instance, data_type,
         error_val)
     b.field_str("ErrorMessage", error_message)
     resp_inner = b.finish(7)
-    resp_body = _hc.compress_gzip(resp_inner) if comp else resp_inner
+    resp_body = compress_gzip(resp_inner) if comp else resp_inner
     resp_reqid = reqid | 1
-    dw_bytes = _hc.encode_datawrapper(
-        resp_reqid, data_type, resp_body, comp, session_id)
+    dw_bytes = encode_datawrapper(
+    resp_reqid, data_type, resp_body, comp, session_id)
     issuer_str = (
         f"0.0.0.0.ServiceProfile.{_hc.SERVICE_PROFILE_UID}."
         f"ServicePlayer.{handler.client_uid}.{resp_reqid}")
