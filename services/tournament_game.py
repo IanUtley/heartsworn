@@ -88,6 +88,9 @@ from gamemodes.tournament_engine import (
 )
 from domain.constants import DEFAULT_MAX_HAND_SIZE
 
+# Session id -> ready count for tournament PvP setup, shared by ReadyForGameSetup.
+PVP_READY = {}
+
 
 _ECardCollections = _ge.ECardCollections
 _ECardTypes = _ge.ECardTypes

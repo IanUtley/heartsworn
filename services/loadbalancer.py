@@ -2,12 +2,16 @@
 
 import campaign
 import game_engine
-from application.commands import JoinSessionCommand, StartEncounterCommand, StartSessionCommand
+from application.commands import (JoinSessionCommand, SetSessionStateCommand,
+                                  StartEncounterCommand, StartSessionCommand)
 from domain.uids import UID_TYPE, make_uid
 from binascii import unhexlify
 import struct
 from encoder import compress_gzip, encode_datawrapper, encode_objfmt_response
+from domain.constants import SERVICE_AI_UID_TYPE
 from gamemodes.fra_arena import _fra_arena_session_state_data, _fra_arena_setup_values
+from gamemodes.tournament_engine import player_handlers
+from services.tournament_game import PVP_READY, handle_ready_for_game_setup
 
 
 def handle_start_session(handler, target, instance, reqid, comp, session_id,
@@ -331,3 +335,99 @@ def handle_join_session(handler, target, instance, reqid, comp, session_id,
         "reqid": resp_reqid, "c": comp, "conh": conh, "sid": handler.sid,
     }, dw_bytes)
     log_req(f"    Sent JoinSession response ({len(dw_bytes)}b)")
+
+
+def handle_ready_for_game_setup_request(handler, target, instance, reqid, comp, session_id,
+                                       conh, inner_obj, inner_bytes, *, SERVICE_MAIL_UID,
+                                       log_req, data_type):
+    """Answer ReadyForGameSetup, handing tournament PvP sessions to the tournament module."""
+    log_req(">>> ReadyForGameSetup (dt=22027)")
+    player_uid = make_uid(UID_TYPE["ServicePlayer"], int(handler.client_reck_id))
+    make_uid(SERVICE_AI_UID_TYPE, 1000)
+    session = handler._application.execute(SetSessionStateCommand(
+    player_uid=player_uid,
+    state="setup",
+)).value
+    if session:
+        fra_setup = _fra_arena_setup_values(session.encounter_data)
+        setup_encounter_data = (
+            _fra_arena_session_state_data(fra_setup)
+            if fra_setup is not None else
+            ("class", "Game.Shared.SessionStateEncounterData"))
+        resp_inner = encode_objfmt_response(
+        ["Game.Client.Network.LoadBalancer.ReadyForGameSetupResponse",
+         "Game.Shared.SessionState", "Game.Shared.UID",
+         "Game.Shared.ResourceId", "System.Guid",
+         "System.Collections.Generic.List`1#Game.Shared.PlayerState",
+         "System.Collections.Generic.List`1#Game.Shared.UID",
+         "System.UInt64", "System.Int32",
+         "Game.Shared.Network.LoadBalancer.EReadyForGameSetupError",
+         "System.String"],
+        [("SessionState", "struct", ("Game.Shared.SessionState", [
+             ("SessionId", "uid", session.session_id),
+             ("SessionName", "string", session.session_name),
+             ("MinimumPlayerCount", "int", 1),
+             ("MaximumPlayerCount", "int", 2),
+             ("EncounterData", setup_encounter_data[0], setup_encounter_data[1]),
+             ("JoinInsteadOfReconnect", "bool", False)])),
+         ("DeckId", "uid", player_uid),
+         ("DeckTemplateId", "struct", ("Game.Shared.ResourceId", [
+             ("guid", "guid", "00000000-0000-0000-0000-000000000000")])),
+         ("OpponentsInfo", "coll", ("System.Collections.Generic.List`1#Game.Shared.PlayerState", 0, [])),
+         ("TurnOrder", "coll", ("System.Collections.Generic.List`1#Game.Shared.UID", 0, [])),
+         ("seedZ", "ulong", 22222),
+         ("seedW", "ulong", 11111),
+         ("Error", "enum1", ("Game.Shared.Network.LoadBalancer.EReadyForGameSetupError", 0)),
+         ("ErrorMessage", "string", "")]
+    )
+    else:
+        resp_inner = encode_objfmt_response(
+        ["Game.Client.Network.LoadBalancer.ReadyForGameSetupResponse",
+         "Game.Shared.Network.LoadBalancer.EReadyForGameSetupError",
+         "System.Int32", "System.String"],
+        [("Error", "enum1", ("Game.Shared.Network.LoadBalancer.EReadyForGameSetupError", 2)),
+         ("ErrorMessage", "string", "No session")]
+    )
+    # Tournament PvP: OpponentsInfo + PvP ready → delegated to reloadable module
+    if session:
+        # GameClient uses this request's PlayerId as its LocalPlayer
+        # identity.  Preserve it on the connection so the tournament
+        # setup response and the subsequent GameStarted packet use
+        # the same wire ID, even if the authenticated reckoning ID
+        # was repaired after the client created its battle context.
+        try:
+            _wire_player = None
+            if isinstance(inner_bytes, (bytes, bytearray)):
+                _uid_at = inner_bytes.find(b"PlayerId;")
+                _uid_at = inner_bytes.find(b"m_UID64;", _uid_at)
+                if _uid_at >= 0:
+                    _uid_parts = inner_bytes[_uid_at + len(b"m_UID64"):].split(b";", 5)
+                    if len(_uid_parts) >= 5:
+                        _wire_player = struct.unpack(
+                            "<Q", unhexlify(_uid_parts[4].decode("ascii")))[0] >> 8
+            if _wire_player is None:
+                _wire_player = inner_obj.get("PlayerId") if isinstance(inner_obj, dict) else None
+            if isinstance(_wire_player, dict):
+                _wire_player = _wire_player.get("m_UID64")
+            if isinstance(_wire_player, str):
+                import re as _re
+                _m = _re.search(r"m_UID64[^0-9]*([0-9]+)", _wire_player)
+                _wire_player = _m.group(1) if _m else None
+            if _wire_player is not None:
+                handler._pvp_wire_player_id = int(_wire_player)
+                log_req(f"    PvP wire PlayerId={handler._pvp_wire_player_id}")
+        except Exception as _e:
+            log_req(f"    PvP wire PlayerId parse failed: {_e}")
+        new_resp, game_started = handle_ready_for_game_setup(handler, session, PVP_READY, player_handlers)
+        if new_resp is not None:
+            resp_inner = new_resp
+    resp_body = compress_gzip(resp_inner) if comp else resp_inner
+    resp_reqid = reqid | 1
+    dw_bytes = encode_datawrapper(resp_reqid, data_type, resp_body, comp, session_id)
+    issuer_str = f"0.0.0.0.ServiceLoadBalancer.{SERVICE_MAIL_UID}.ServicePlayer.{handler.client_uid}.{resp_reqid}"
+    handler.scnt += 1
+    handler.send({
+        "issuer": issuer_str, "target": target, "instance": instance,
+        "reqid": resp_reqid, "c": comp, "conh": conh, "sid": handler.sid,
+    }, dw_bytes)
+    log_req(f"    Sent ReadyForGameSetup response ({len(dw_bytes)}b)")
