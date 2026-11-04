@@ -9,6 +9,7 @@ import json
 import random
 import uuid
 
+from pvp_db import db_champion_template_health
 from pve_db import (db_buyout_fra_tier_one, db_clear_fra_challengers,
                 db_create_fra_challengers,
                 db_claim_arena_rewards,
@@ -16,7 +17,6 @@ from pve_db import (db_buyout_fra_tier_one, db_clear_fra_challengers,
                 db_get_active_fra_challenges, db_get_fra_challenge,
                 db_get_fra_challengers,
                 db_get_fra_public_base_encounter,
-                db_champion_template_health,
                 db_prepare_fra_fight_challenge,
                 db_roll_fra_start_challenge,
                 db_store_fra_challenge_resolution, db_update_arena_state,
