@@ -4440,3 +4440,189 @@ def pvp_skip_to_second_main(session, state):
         _resolve('pvp_save_state')(session, state)
         log_req(f'    PvP skip combat: phase {new_phase} to both')
         _resolve('_pvp_run_phase_start')(session, state, new_phase)
+
+
+def _pvp_declare_attackers(handler, session, inner_bytes, my_pid, declarations=None):
+    """Record the turn player's declared attackers and push the combat
+    listing to both players."""
+    pids = _resolve('db_game_session_pids')(session.session_id)
+    if len(pids) < 2:
+        return False
+    opp_pid = pids[0] if pids[1] == my_pid else pids[1]
+    state = _resolve('pvp_load_state')(session) or {}
+    if state.get('turn_pid') != my_pid:
+        return False
+    attacker_uids = []
+    if declarations is not None:
+        for _defender, declared in declarations:
+            for attacker in declared or ():
+                try:
+                    attacker_uids.append(int(attacker))
+                except (TypeError, ValueError):
+                    continue
+    elif isinstance(inner_bytes, bytes):
+        for m_du in re.finditer(b'm_UID64;[^;]*;[^;]*;[^;]*;([0-9A-Fa-f]{16});', inner_bytes):
+            try:
+                import struct as _st
+                uid64 = _st.unpack('<Q', bytes.fromhex(m_du.group(1).decode()))[0]
+                if uid64 & 255 == 1:
+                    attacker_uids.append(int(uid64))
+            except Exception:
+                continue
+    if declarations is None:
+        wz_rows = [(uid, card_state, attrs) for uid, card_state, _card_type, attrs in _resolve('db_warzone_attack_option_rows')(session.session_id, my_pid, conn=_resolve('_db'))]
+        from rules_port.static_rules import effective_attributes
+        wz = set()
+        for uid, cstate, attrs in wz_rows:
+            cstate = int(cstate or 0)
+            attrs = int(attrs or 0) | int(effective_attributes(_resolve('_db'), session.session_id, state, int(uid)) or 0)
+            if cstate & (_ge.ECardStates.Tapped | _ge.ECardStates.Attacking) or attrs & (_ge.ECardAttributes.CantAttack | _ge.ECardAttributes.Defensive) or (not (cstate & _ge.ECardStates.StartedATurnOnYourSide or attrs & _ge.ECardAttributes.Speed)):
+                continue
+            wz.add(int(uid))
+        attacker_uids = [u for u in attacker_uids if u in wz]
+    champ_map = state.get('champ_map') or {}
+    my_champ = int(champ_map.get(str(my_pid), 0))
+    opp_champ = int(champ_map.get(str(opp_pid), 0))
+    existing = {int(k): int(v) for k, v in (state.get('attackers') or {}).items()}
+    merged = dict(existing)
+    for u in attacker_uids:
+        merged[u] = opp_champ
+    attackers = list(merged.keys())
+    state['attackers'] = {str(u): str(v) for u, v in merged.items()}
+    _resolve('pvp_save_state')(session, state)
+    my_uid = _ge.UID.make(244, my_pid)
+    opp_uid = _ge.UID.make(244, opp_pid)
+    new_attackers = [u for u in attacker_uids if u not in existing]
+    from pvp_db import db_card_set_attacking_state
+    g = _ge.Game(int(session.session_id), my_uid, opp_uid)
+    g.player_health = int(state.get(f'hp_{my_pid}', 20))
+    g.ai_health = int(state.get(f'hp_{opp_pid}', 20))
+    combats = []
+    for i, u in enumerate(new_attackers):
+        cid = _ge.CombatId(my_uid, i + 1)
+        scid = _ge.SessionCardId(_ge.UID(u))
+        g.push_attack_declared(cid, my_uid, _ge.SessionCardId(_ge.UID(opp_champ)) if opp_champ else _ge.SessionCardId(opp_uid), scid)
+        trow = _resolve('db_card_template_attrs_joined')(session.session_id, int(u))
+        tpl_guid = trow[0] if trow else None
+        attrs = (trow[1] if trow and trow[1] else 0) | (trow[2] if trow and trow[2] else 0)
+        cstate = _ge.ECardStates.Attacking | _ge.ECardStates.HasAttacked
+        if not attrs & _ge.ECardAttributes.Steadfast:
+            cstate |= _ge.ECardStates.Tapped
+        db_card_set_attacking_state(session.session_id, int(u), cstate)
+        pushed_state = _resolve('db_card_state_value')(session.session_id, int(u))
+        if not pushed_state:
+            pushed_state = cstate
+        handler._card_full_data(g, scid, tpl_guid)
+        g.push_card_updated(scid, my_uid, _ge.ECardCollections.Warzone, _ge.ECardTypes.Troop, template_id=tpl_guid, state=pushed_state)
+        cs = _ge.CombatSessionEventArgs()
+        cs.player_id = my_uid
+        cs.id = cid
+        cs.attacker = scid
+        cs.blockers = []
+        combats.append(cs)
+        view = _resolve('_pvp_fra_view')(state, my_pid, opp_pid)
+        _resolve('_pvp_dispatch_triggers')(handler, g, session, view, my_uid, opp_uid, 'CardAttackedEvent', int(u), my_pid)
+        _resolve('_pvp_dispatch_triggers')(handler, g, session, view, my_uid, opp_uid, 'CardAttackedOrBlockedEvent', int(u), my_pid)
+        from rules_port.context import EffectContext
+        from rules_port.combat_effects import apply_rage
+        apply_rage(EffectContext.from_rules_port(g, session, _resolve('_db'), handler, my_uid, opp_uid, view, '', ability=None), int(u))
+        if view.get('player_health') is not None:
+            state[f'hp_{my_pid}'] = int(view['player_health'])
+        if view.get('ai_health') is not None:
+            state[f'hp_{opp_pid}'] = int(view['ai_health'])
+        _resolve('_pvp_sync_view_to_state')(state, view, my_pid, opp_pid)
+        _resolve('pvp_save_state')(session, state)
+    if attackers:
+        from rules_port.tac import _tac_attr_hash
+        _resolve('_pvp_dispatch_triggers')(handler, g, session, state, my_uid, opp_uid, 'CardsAttackedEvent', my_champ or int(my_uid.uid64), my_pid, event_tac={_tac_attr_hash('NumAttackers'): len(attackers)})
+    _resolve('_db').commit()
+    if combats:
+        g.push_combat_listing(my_uid, combats)
+    _resolve('_pvp_send_same_events')(session, g, my_uid, opp_uid)
+    log_req(f'    PvP attack: pid {my_pid} declared {len(attackers)} attacker(s)')
+    if not attackers:
+        pvp_skip_to_second_main(session, state)
+        return True
+    if declarations is None:
+        _resolve('pvp_advance_to_declare_defense')(session, state)
+    return True
+
+
+def _pvp_declare_blockers(handler, session, inner_bytes, my_pid, declarations=None):
+    """Record the defender's declared blockers and push BlockersAssigned to
+    both players."""
+    pids = _resolve('db_game_session_pids')(session.session_id)
+    if len(pids) < 2:
+        return False
+    opp_pid = pids[0] if pids[1] == my_pid else pids[1]
+    state = _resolve('pvp_load_state')(session) or {}
+    attackers = {int(k): int(v) for k, v in (state.get('attackers') or {}).items()}
+    if not attackers:
+        return False
+    my_wz = set((r[0] for r in _resolve('db_card_uids_in_zone')(session.session_id, my_pid, 'warzone', conn=_resolve('_db'))))
+    all_uids = []
+    blockers_map = {}
+    if declarations is not None:
+        for attacker, blockers in declarations:
+            try:
+                attacker_uid = int(getattr(attacker, 'uid64', attacker))
+            except (TypeError, ValueError):
+                continue
+            parsed = []
+            for blocker in blockers or ():
+                try:
+                    parsed.append(int(getattr(blocker, 'uid64', blocker)))
+                except (TypeError, ValueError):
+                    continue
+            blockers_map[attacker_uid] = parsed
+    elif isinstance(inner_bytes, bytes):
+        for m_du in re.finditer(b'm_UID64;[^;]*;[^;]*;[^;]*;([0-9A-Fa-f]{16});', inner_bytes):
+            try:
+                import struct as _st
+                uid64 = _st.unpack('<Q', bytes.fromhex(m_du.group(1).decode()))[0]
+                if uid64 & 255 == 1:
+                    all_uids.append(int(uid64))
+            except Exception:
+                continue
+    if declarations is None:
+        cur = None
+        for u in all_uids:
+            if u in attackers:
+                cur = u
+                blockers_map.setdefault(cur, [])
+            elif cur is not None and u in my_wz:
+                from rules_port.combat_rules import can_block
+                if can_block(_resolve('_db'), session.session_id, _resolve('_pvp_fra_view')(state, opp_pid, my_pid), cur, u):
+                    blockers_map[cur].append(u)
+    state['blockers'] = {str(k): [str(b) for b in v] for k, v in blockers_map.items()}
+    _resolve('db_bulk_blocker_state')(session.session_id, [int(b) for bs in blockers_map.values() for b in bs])
+    _resolve('pvp_save_state')(session, state)
+    champ_map = state.get('champ_map') or {}
+    opp_champ = int(champ_map.get(str(opp_pid), 0))
+    opp_uid = _ge.UID.make(244, opp_pid)
+    _ge.UID.make(244, my_pid)
+    for pid in pids:
+        h = _resolve('player_handlers').get(pid)
+        if not h:
+            continue
+        pl_uid = _ge.UID.make(244, pid)
+        g = _ge.Game(int(session.session_id), pl_uid, _ge.UID.make(244, pids[1] if pid == pids[0] else pids[0]))
+        player_champ = _ge.SessionCardId(_ge.UID(opp_champ)) if opp_champ else _ge.SessionCardId(opp_uid)
+        combats = []
+        for u in attackers:
+            cid = _ge.CombatId(opp_uid, u & 65535)
+            blockers = [_ge.SessionCardId(_ge.UID(int(b))) for b in blockers_map.get(u, [])]
+            g.push_blockers_assigned(cid, _ge.SessionCardId(_ge.UID(u)), player_champ, blockers)
+            cs = _ge.CombatSessionEventArgs()
+            cs.player_id = opp_uid
+            cs.id = cid
+            cs.attacker = _ge.SessionCardId(_ge.UID(u))
+            cs.blockers = blockers
+            combats.append(cs)
+        if combats:
+            g.push_combat_listing(opp_uid, combats)
+        _resolve('_send_pvp_packet')(h, session, g, pl_uid, 'defense')
+    log_req(f'    PvP defense: pid {my_pid} declared {sum((len(v) for v in blockers_map.values()))} blocker(s)')
+    if declarations is None:
+        _pvp_advance_past_declare_defense(session, state)
+    return True
