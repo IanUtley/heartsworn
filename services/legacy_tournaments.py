@@ -167,49 +167,6 @@ def handle_tryreconnection_25021(handler, target, instance, data_type, reqid, co
 
 
 # ServiceTournaments — LadderRecord (70023)
-def handle_ladderrecord_70023(handler, target, instance, data_type, reqid, comp, session_id,
-                              conh, inner_obj, inner_bytes, raw_data_wrapper_bytes):
-    import hconnect_server as _hc
-    log_req(">>> Respond LadderRecord — empty ladder")
-    resp_fields = [
-        ("constructedIronStars", "int", 0), ("constructedStars", "int", 0),
-        ("constructedMaxStars", "int", 0), ("constructedStreak", "int", 0),
-        ("CosmicRank", "int", 0), ("limitedStars", "int", 0),
-        ("limitedMaxStars", "int", 0), ("limitedStreak", "int", 0),
-        ("limitedCosmicRank", "int", 0),
-        ("limitedSleeves", "coll", ("System.Collections.Generic.List`1#Game.Shared.ResourceId", 0)),
-        ("constructedSleeves", "coll", ("System.Collections.Generic.List`1#Game.Shared.ResourceId", 0)),
-        ("includesDebugData", "bool", False), ("MMR", "int", 0), ("LimitedMMR", "int", 0)]
-    resp_inner = encode_objfmt_response(
-    ["Game.Shared.Tournaments.Messages.Tournament+LadderRecord+Response"], resp_fields)
-    resp_body = compress_gzip(resp_inner) if comp else resp_inner
-    dw_bytes = encode_datawrapper(reqid | 1, data_type, resp_body, comp, session_id)
-    handler.scnt += 1
-    handler.send({"issuer": f"0.0.0.0.ServiceTournaments.{SERVICE_MAIL_UID}.ServicePlayer.{handler.client_uid}.{reqid|1}",
-               "target": target, "instance": instance, "reqid": reqid | 1, "c": comp, "conh": conh, "sid": handler.sid}, dw_bytes)
-    log_req(f"    Sent LadderRecord response ({len(dw_bytes)}b)")
-
-
-def handle_request_25019(handler, target, instance, data_type, reqid, comp, session_id,
-                         conh, inner_obj, inner_bytes, raw_data_wrapper_bytes):
-    import hconnect_server as _hc
-    fmt = inner_obj.get("format", "constructed")
-    room_id = _hc._next_waiting_room_id()
-    with _hc._waiting_room_lock:
-        _hc._waiting_rooms[room_id] = {"id": room_id, "style": inner_obj.get("style", "se"),
-            "format": fmt, "playerCount": int(inner_obj.get("playerCount", 2)),
-            "players": {}, "status": "waiting"}
-    log_req(f">>> CreateWaitingRoom: id={room_id}")
-    resp_inner = encode_objfmt_response(
-    ["Game.Shared.Network.Tournaments.CreateWaitingRoomResponseArgs"], [])
-    resp_body = compress_gzip(resp_inner) if comp else resp_inner
-    dw_bytes = encode_datawrapper(reqid | 1, data_type, resp_body, comp, session_id)
-    handler.scnt += 1
-    handler.send({"issuer": f"0.0.0.0.ServiceTournaments.{SERVICE_MAIL_UID}.ServicePlayer.{handler.client_uid}.{reqid|1}",
-               "target": target, "instance": instance, "reqid": reqid | 1, "c": comp, "conh": conh, "sid": handler.sid}, dw_bytes)
-    log_req(f"    Sent CreateWaitingRoom response ({len(dw_bytes)}b)")
-
-
 # ServiceTournaments — TestTournamentEntry (25027)
 def handle_testtournamententry_25027(handler, target, instance, data_type, reqid, comp, session_id,
                                      conh, inner_obj, inner_bytes, raw_data_wrapper_bytes):
@@ -596,8 +553,6 @@ def handle_request_25031(handler, target, instance, data_type, reqid, comp, sess
 
 LEGACY_HANDLERS = {
     25021: handle_tryreconnection_25021,
-    70023: handle_ladderrecord_70023,
-    25019: handle_request_25019,
     25027: handle_testtournamententry_25027,
     25029: handle_entertournament_25029,
     25039: handle_request_25039,

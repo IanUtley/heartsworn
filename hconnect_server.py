@@ -381,16 +381,6 @@ def get_active_clients_snapshot():
         return {uid: list(entries) for uid, entries in _active_clients.items()}
 _pending_tournament_starts = set()
 _pending_tournament_starts_lock = threading.Lock()
-_waiting_rooms = {}
-_waiting_room_lock = threading.Lock()
-_waiting_room_next_id = 1
-
-
-def _next_waiting_room_id():
-    global _waiting_room_next_id
-    rid = _waiting_room_next_id
-    _waiting_room_next_id += 1
-    return rid
 SESSION_TIMEOUT = 900  # 15 minutes
 
 def cleanup_stale_sessions():

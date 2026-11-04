@@ -4,9 +4,25 @@ Served through the services registry. Each handler builds its response from
 the request's reqid and sends it on the connection.
 """
 
+import threading
+
 import gamemodes.tournament_server as tournament_server
 from encoder import compress_gzip, encode_datawrapper, encode_objfmt_response
 from db import log_req
+
+
+# Waiting rooms created by CreateWaitingRoom, keyed by room id, and the lock and
+# counter that guard them. Owned here, where the tournament handlers use them.
+_waiting_rooms = {}
+_waiting_room_lock = threading.Lock()
+_waiting_room_next_id = 1
+
+
+def _next_waiting_room_id():
+    global _waiting_room_next_id
+    rid = _waiting_room_next_id
+    _waiting_room_next_id += 1
+    return rid
 
 
 def _send(handler, target, instance, reqid, comp, session_id, conh, data_type,
@@ -103,3 +119,41 @@ def handle_ladder_ranking_list(handler, target, instance, reqid, comp, session_i
          ("LimitedLadderRanking", "coll", ("System.Collections.Generic.List`1#System.String", 0))])
     _send(handler, target, instance, reqid, comp, session_id, conh, data_type,
           resp_inner, "LadderRankingList", SERVICE_MAIL_UID)
+
+
+def handle_ladder_record(handler, target, instance, reqid, comp, session_id,
+                         conh, inner_obj, inner_bytes,
+                         *, SERVICE_MAIL_UID, log_req, data_type, **_kw):
+    """Answer LadderRecord with an empty ladder."""
+    log_req(">>> Respond LadderRecord — empty ladder")
+    resp_fields = [
+        ("constructedIronStars", "int", 0), ("constructedStars", "int", 0),
+        ("constructedMaxStars", "int", 0), ("constructedStreak", "int", 0),
+        ("CosmicRank", "int", 0), ("limitedStars", "int", 0),
+        ("limitedMaxStars", "int", 0), ("limitedStreak", "int", 0),
+        ("limitedCosmicRank", "int", 0),
+        ("limitedSleeves", "coll", ("System.Collections.Generic.List`1#Game.Shared.ResourceId", 0)),
+        ("constructedSleeves", "coll", ("System.Collections.Generic.List`1#Game.Shared.ResourceId", 0)),
+        ("includesDebugData", "bool", False), ("MMR", "int", 0), ("LimitedMMR", "int", 0)]
+    resp_inner = encode_objfmt_response(
+        ["Game.Shared.Tournaments.Messages.Tournament+LadderRecord+Response"], resp_fields)
+    _send(handler, target, instance, reqid, comp, session_id, conh, data_type,
+          resp_inner, "LadderRecord", SERVICE_MAIL_UID)
+
+
+def handle_create_waiting_room(handler, target, instance, reqid, comp, session_id,
+                               conh, inner_obj, inner_bytes,
+                               *, SERVICE_MAIL_UID, log_req, data_type, **_kw):
+    """Create a waiting room for the requested format and answer with an empty reply."""
+    fmt = inner_obj.get("format", "constructed")
+    room_id = _next_waiting_room_id()
+    with _waiting_room_lock:
+        _waiting_rooms[room_id] = {
+            "id": room_id, "style": inner_obj.get("style", "se"),
+            "format": fmt, "playerCount": int(inner_obj.get("playerCount", 2)),
+            "players": {}, "status": "waiting"}
+    log_req(f">>> CreateWaitingRoom: id={room_id}")
+    resp_inner = encode_objfmt_response(
+        ["Game.Shared.Network.Tournaments.CreateWaitingRoomResponseArgs"], [])
+    _send(handler, target, instance, reqid, comp, session_id, conh, data_type,
+          resp_inner, "CreateWaitingRoom", SERVICE_MAIL_UID)

@@ -28,6 +28,7 @@ EXPECTED = {
     70015: "5bb7e3cc459f6a8882e668d33f92bceb9635615f4fdc50df1770ef175a999518",
     70027: "8e86562adf94ec0aa1bd594fbc21f94697b329c7574f661696f3a692a8546c9c",
     70028: "09e078d2f0826c30b63343f1bad839a813e96b31962ea665c31b94a5f98cf28d",
+    70023: "e9c50b5108675b895bc35c538e5f0ba0a547178655751bee44958af1fb458ba5",
 }
 
 
@@ -96,6 +97,10 @@ def test_ladder_ranking_list_matches_the_snapshot():
     _check(70028)
 
 
+def test_ladder_record_matches_the_snapshot():
+    _check(70023)
+
+
 if __name__ == "__main__":
     test_unsubscribe_description_listener_matches_the_snapshot()
     test_get_tournament_info_matches_the_snapshot()
@@ -103,4 +108,5 @@ if __name__ == "__main__":
     test_pooled_messaging_flush_matches_the_snapshot()
     test_ladder_tier_rewards_list_matches_the_snapshot()
     test_ladder_ranking_list_matches_the_snapshot()
-    print("PASS tests_legacy_tournament_simple: 6 checks")
+    test_ladder_record_matches_the_snapshot()
+    print("PASS tests_legacy_tournament_simple: 7 checks")
