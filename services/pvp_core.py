@@ -2672,3 +2672,556 @@ def pvp_push_warzone_updates(session, state, game=None):
     if game is None and g.events:
         _resolve('_pvp_send_same_events')(session, g, _ge.UID.make(244, pids[0]), _ge.UID.make(244, pids[1]))
         log_req(f'    PvP warzone re-pushed: {len(rows)} troop(s)')
+
+
+class _PvpChainHost:
+    """Tournament PvP projection for one chain item.
+
+    ``rules_port.chain_items`` owns the lifecycle: resolve the authored
+    effects, hold the item while a client picker is open, consume the
+    picker-continuation marker, and present the chain item.  This adapter
+    supplies only what is specific to a two-human match — the side-oriented
+    effect view the trigger backend evaluates against, the persisted PvP
+    checkpoint round-trip, and the packet projection to both clients.
+    Practice/PvE uses the same lifecycle through the hooks on
+    ``hconnect_server.HCPHandler``.
+
+    The lifecycle state is the persisted checkpoint itself, not the effect
+    view: ``rules_port.persistence.load_state`` installs that checkpoint as
+    the ability resolver's battle state, so a lifecycle that tracked a copy
+    would miss the pause marker and pending-input keys the effects just wrote
+    (the PvP half of the Darkspire Priestess deck-search loop).
+    """
+
+    def __init__(self, handler, session, state, owner_id, opponent_id):
+        self.handler = handler
+        self.session = session
+        self.state = state if isinstance(state, dict) else {}
+        self.owner_id = int(owner_id)
+        self.opponent_id = int(opponent_id)
+
+    def _view(self, state):
+        return _resolve('_pvp_fra_view')(state, self.owner_id, self.opponent_id)
+
+    def _champion_targets(self):
+        """Both champions as (uid, participant id, name, health).
+
+        The trigger resolver receives this host as its handler; without the
+        champions, Champions-collection conditions ("you gained health three
+        or more times this turn") counted no cards in PvP.
+        """
+        champ_map = self.state.get('champ_map') or {}
+        out = []
+        for pid in self.state.get('pids') or (self.owner_id, self.opponent_id):
+            uid = int(champ_map.get(str(pid), 0) or 0)
+            if uid:
+                out.append((uid, int(pid), 'Champ', int(self.state.get(f'hp_{pid}', 20))))
+        return out
+
+    def chain_load(self, session):
+        return self.state
+
+    def chain_save(self, session, state):
+        _resolve('pvp_save_state')(self.session, self.state)
+
+    def chain_new_game(self, session, state, player_uid, ai_uid):
+        game = _ge.Game(int(session.session_id), player_uid, ai_uid)
+        _resolve('_pvp_populate_game_state')(game, self.state, self.owner_id, self.opponent_id)
+        return game
+
+    def chain_send(self, session, game, player_uid, ai_uid):
+        _resolve('_pvp_send_same_events')(session, game, player_uid, ai_uid)
+
+    def chain_resume_continuation(self, session, state, game, player_uid, ai_uid, continuation):
+        from rules_port.resolution import resume_ability_continuation_parents
+        view = self._view(state)
+        view['_rules_port_attached'] = True
+        previous = getattr(self.handler, '_current_bstate', None)
+        self.handler._current_bstate = view
+        try:
+            result = resume_ability_continuation_parents(self.handler, game, session, _resolve('_db'), player_uid, ai_uid, view, continuation)
+        finally:
+            if previous is None:
+                try:
+                    del self.handler._current_bstate
+                except AttributeError:
+                    pass
+            else:
+                self.handler._current_bstate = previous
+        _resolve('_pvp_sync_view_to_state')(state, view, self.owner_id, self.opponent_id)
+        for key in ('resolution_paused', 'paused_chain_instance_id', 'completed_chain_instance_id', 'rules_port_suspended_chain_continuation'):
+            if key in view:
+                state[key] = view[key]
+            else:
+                state.pop(key, None)
+        persisted = _resolve('pvp_load_state')(session) or {}
+        for key in ('pending_trigger', 'pending_deck_search', 'pending_choice', 'pending_conversation'):
+            if persisted.get(key):
+                state[key] = persisted[key]
+        _resolve('pvp_save_state')(session, state)
+        return result
+
+    def chain_card_data(self, game, scid, template_guid):
+        return self.handler._card_full_data(game, scid, template_guid)
+
+    def chain_mark_warzone_entry(self, session, source_uid):
+        """Keep PvP arrival state and continuous-effect order in sync."""
+        from pvp_db import db_card_set_warzone_arrival, db_set_card_resolved_at
+        db_card_set_warzone_arrival(session.session_id, source_uid, conn=_resolve('_db'))
+        counter = int(self.state.get('resolve_counter', 0) or 0) + 1
+        self.state['resolve_counter'] = counter
+        db_set_card_resolved_at(session.session_id, source_uid, counter, conn=_resolve('_db'))
+
+    def _card_full_data(self, game, scid, template_guid, instance_id=None):
+        """Expose the shared effect-context card projection hook."""
+        return self.handler._card_full_data(game, scid, template_guid, instance_id)
+
+    def chain_dispatch(self, session, game, state, player_uid, ai_uid, event_type, source_uid, owner_id, **event_data):
+        view = self._view(state)
+        result = _resolve('_pvp_dispatch_triggers')(self.handler, game, session, view, player_uid, ai_uid, event_type, source_uid, owner_id, **event_data)
+        _resolve('_pvp_sync_view_to_state')(state, view, self.owner_id, self.opponent_id)
+        return result
+
+    def chain_state_based(self, session, state, game, player_uid, ai_uid):
+        """Apply PvP state-based actions in the same chain packet."""
+        from rules_port.context import EffectContext
+        from rules_port.death_effects import state_based_deaths
+        view = self._view(state)
+        view['_rules_port_attached'] = True
+        previous = getattr(self.handler, '_current_bstate', None)
+        self.handler._current_bstate = view
+        try:
+            dead = state_based_deaths(EffectContext.from_rules_port(game, session, _resolve('_db'), self.handler, player_uid, ai_uid, view, 'state_based_death', ability=None))
+        finally:
+            if previous is None:
+                try:
+                    del self.handler._current_bstate
+                except AttributeError:
+                    pass
+            else:
+                self.handler._current_bstate = previous
+        _resolve('_pvp_sync_view_to_state')(state, view, self.owner_id, self.opponent_id)
+        _resolve('pvp_save_state')(session, state)
+        return bool(dead)
+
+    def chain_push_empty(self, port, state, item, pending):
+        return not pending and (not state.get('stack'))
+
+    def chain_finalize(self, session, state, game, item, pending, player_uid, ai_uid):
+        """Priority rides in the same packet as the item's own events."""
+        if pending:
+            return
+        state['stack_passed'] = []
+        state['stack_player_passed'] = False
+        state['stack_ai_passed'] = False
+        if not state.get('stack'):
+            turn_pid = int(state.get('turn_pid') or self.owner_id)
+            state['priority_pid'] = turn_pid
+            game.push_green_light(_ge.UID.make(244, turn_pid), _ge.EPriorityContext.Normal)
+        else:
+            state['priority_pid'] = self.opponent_id
+
+    def chain_after_item(self, session, state, game, item, player_uid, ai_uid):
+        _pvp_check_game_end(self.session, self.state)
+        if not self.state.get('stack') or not self.state.get('priority_pid'):
+            return
+        if any((self.state.get(key) for key in ('pending_choice', 'pending_deck_search', 'pending_trigger', 'pending_conversation', 'pending_discard_ability'))):
+            return
+        priority_pid = int(self.state['priority_pid'])
+        next_handler = _resolve('player_handlers').get(priority_pid)
+        if not next_handler:
+            return
+        next_uid = _ge.UID.make(244, priority_pid)
+        response = _ge.Game(int(self.session.session_id), next_uid, _ge.UID.make(244, self.owner_id))
+        response.push_green_light(next_uid, _ge.EPriorityContext.ResolveTopOfChain)
+        _resolve('_send_pvp_packet')(next_handler, self.session, response, next_uid, 'native-chain-next')
+
+
+def _pvp_offer_opponent_response(session, state, caster_pid):
+    """After the turn player (caster_pid) plays a card in a main phase, offer
+    the OPPONENT a priority window to respond with a quick action (e.g. Burn).
+    Hands ResolveTopOfChain + quick-action options to the opponent and marks
+    state so route_pvp_pass returns priority to the caster when the opponent
+    passes (or after the opponent's response chain resolves)."""
+    pids = _resolve('db_game_session_pids')(session.session_id)
+    if len(pids) < 2:
+        return
+    opp_pid = pids[0] if pids[1] == caster_pid else pids[1]
+    opp_h = _resolve('player_handlers').get(opp_pid)
+    caster_uid = _ge.UID.make(244, caster_pid)
+    opp_uid = _ge.UID.make(244, opp_pid)
+    state['response_waiting_pid'] = opp_pid
+    state['response_caster_pid'] = caster_pid
+    state['priority_pid'] = opp_pid
+    _resolve('pvp_save_state')(session, state)
+    if opp_h:
+        g = _ge.Game(int(session.session_id), opp_uid, caster_uid)
+        g.push_green_light(opp_uid, _ge.EPriorityContext.ResolveTopOfChain)
+        _resolve('_send_pvp_packet')(opp_h, session, g, opp_uid, 'response-window')
+        _resolve('pvp_push_phase_options')(session, state, pid=opp_pid)
+    log_req(f"    PvP response window: offering {opp_pid} priority to respond to {caster_pid}'s play")
+
+
+def _pvp_resolve_combat(session, state, first_strike=False):
+    """Resolve the declared PvP combat through the SAME shared resolver the
+    AI path uses (ai.resolve_combat), then push the identical event stream to
+    both players.  ``first_strike=True`` is the Swiftstrike damage step (only
+    FirstStrike/DualStrike combatants deal; casualties removed first)."""
+    pids = _resolve('db_game_session_pids')(session.session_id)
+    if len(pids) < 2:
+        return
+    attackers = {int(k): int(v) for k, v in (state.get('attackers') or {}).items()}
+    if not attackers:
+        state.pop('attackers', None)
+        state.pop('blockers', None)
+        return
+    attacker_pid = state.get('turn_pid')
+    defender_pid = pids[0] if pids[1] == attacker_pid else pids[1]
+    blockers = {int(k): [int(b) for b in v] for k, v in (state.get('blockers') or {}).items()}
+    view = _resolve('_pvp_fra_view')(state, attacker_pid, defender_pid)
+    handler = _resolve('player_handlers').get(attacker_pid)
+    if not handler:
+        return
+    pl_t = _ge.UID.make(244, attacker_pid)
+    ai_t = _ge.UID.make(244, defender_pid)
+    order_map = {int(k): [int(b) for b in v] for k, v in (state.get('damage_order') or {}).items()}
+    try:
+        view['player_attackers'] = attackers
+        view['ai_blockers'] = blockers
+        view['player_damage_order'] = order_map
+        from rules_port.context import EffectContext
+        from rules_port.combat_damage import resolve as resolve_native
+        native_game = _ge.Game(int(session.session_id), pl_t, ai_t)
+        view['_rules_port_attached'] = True
+        context = EffectContext.from_rules_port(native_game, session, _resolve('_db'), handler, pl_t, ai_t, view, '', ability=None)
+        view = resolve_native(context, first_strike=first_strike, attacker_key='player_attackers', blocker_key='ai_blockers')
+        if native_game.events:
+            _resolve('_pvp_send_same_events')(session, native_game, pl_t, ai_t)
+    except Exception as e:
+        log_req(f'    PvP combat resolve error: {e}')
+        import traceback
+        traceback.print_exc()
+        return
+    state[f'hp_{attacker_pid}'] = int(view.get('player_health', 20))
+    state[f'hp_{defender_pid}'] = int(view.get('ai_health', 20))
+    if first_strike:
+        state['attackers'] = dict(view.get('player_attackers') or {})
+        state['blockers'] = dict(view.get('ai_blockers') or {})
+        if view.get('blocked_attackers'):
+            state['blocked_attackers'] = dict(view['blocked_attackers'])
+    if not first_strike:
+        state.pop('attackers', None)
+        state.pop('blockers', None)
+        state.pop('blocked_attackers', None)
+        state.pop('damage_order', None)
+    _resolve('pvp_save_state')(session, state)
+    log_req(f"    PvP combat resolved: {attacker_pid} hp {state[f'hp_{attacker_pid}']} / {defender_pid} hp {state[f'hp_{defender_pid}']}")
+    try:
+        g2 = _ge.Game(int(session.session_id), pl_t, ai_t)
+        g2.player_health = int(state.get(f'hp_{attacker_pid}', 20))
+        g2.ai_health = int(state.get(f'hp_{defender_pid}', 20))
+        from rules_port.context import EffectContext
+        from rules_port.death_effects import state_based_deaths
+        view['_rules_port_attached'] = True
+        state_based_deaths(EffectContext.from_rules_port(g2, session, _resolve('_db'), handler, pl_t, ai_t, view, 'state_based_death', ability=None))
+        if g2.events:
+            _resolve('_pvp_send_same_events')(session, g2, pl_t, ai_t)
+    except Exception as e:
+        log_req(f'    PvP post-combat state-based deaths error: {e}')
+    if view.get('player_health') is not None:
+        state[f'hp_{attacker_pid}'] = int(view['player_health'])
+    if view.get('ai_health') is not None:
+        state[f'hp_{defender_pid}'] = int(view['ai_health'])
+    _resolve('_pvp_sync_view_to_state')(state, view, attacker_pid, defender_pid)
+    _resolve('pvp_save_state')(session, state)
+    _pvp_check_game_end(session, state)
+
+
+@_pvp_locked
+def handle_ready_for_game_events(handler, session, pvp_events_ready, log_req=log_req):
+    """Called from 22029 handler. When both players are ready for events, pushes game start."""
+    if not session or not (session.session_name or '').startswith('tourney-'):
+        return False
+    try:
+        pvp_events_ready.setdefault(session.session_id, {'handlers': {}})
+        pr = pvp_events_ready[session.session_id]
+        puid = handler.client_reck_id if hasattr(handler, 'client_reck_id') else 0
+        if puid not in pr['handlers']:
+            pr['handlers'][puid] = []
+        pr['handlers'][puid].append(handler)
+        log_req(f"    Events ready: {len(pr['handlers'])}/2 for tourney session {session.session_id}")
+        if len(pr['handlers']) >= 2:
+            all_handlers = [h for hl in pr['handlers'].values() for h in hl]
+            for h in all_handlers:
+                try:
+                    push_pvp_game_start(h, session)
+                except Exception as e:
+                    import traceback
+                    log_req(f'    push_pvp_game_start FAILED: {e}\n{traceback.format_exc()}')
+            del pvp_events_ready[session.session_id]
+            try:
+                state = _resolve('pvp_load_state')(session) or {}
+                _pvp_push_waiting_on(session, int(state.get('goes_first_pid') or 0) or None)
+            except Exception as e:
+                log_req(f'    PvP pick-goes-first wait push failed: {e}')
+            return True
+    except Exception as e:
+        import traceback
+        log_req(f'    handle_events_ready FAILED: {e}\n{traceback.format_exc()}')
+    return False
+
+
+def pvp_push_attack_options(session, state):
+    """Push a PlayerOptionList marking the turn player's READY warzone troops
+    as attackable (ECardUsage.Attack) during DeclareAttack, mirroring PvE
+    _push_attack_options: a troop may attack if it has StartedATurnOnYourSide
+    (survived to this turn, i.e. not summoning sick) OR Speed, is not tapped,
+    not already attacking, and lacks CantAttack."""
+    pids = _resolve('db_game_session_pids')(session.session_id)
+    if len(pids) < 2:
+        return
+    turn_pid = state.get('turn_pid')
+    h = _resolve('player_handlers').get(turn_pid)
+    if not h:
+        return
+    opp_pid = pids[0] if pids[1] == turn_pid else pids[1]
+    pl_t = _ge.UID.make(244, turn_pid)
+    opp_t = _ge.UID.make(244, opp_pid)
+    ready = []
+    rows = _resolve('db_warzone_attack_option_rows')(session.session_id, turn_pid, conn=_resolve('_db'))
+    from rules_port.static_rules import effective_attributes
+    for uid, cstate, _card_type, attrs in rows:
+        cstate = cstate or 0
+        attrs = int(attrs or 0) | int(effective_attributes(_resolve('_db'), session.session_id, state, int(uid)) or 0)
+        if (cstate & _ge.ECardStates.StartedATurnOnYourSide or attrs & _ge.ECardAttributes.Speed) and (not cstate & _ge.ECardStates.Tapped) and (not cstate & _ge.ECardStates.Attacking) and (not attrs & (_ge.ECardAttributes.CantAttack | _ge.ECardAttributes.Defensive)):
+            ready.append(_ge.SessionCardId(_ge.UID(int(uid))))
+    champ_map = state.get('champ_map') or {}
+    opp_champ = int(champ_map.get(str(opp_pid), 0))
+    attackers = {int(k): int(v) for k, v in (state.get('attackers') or {}).items()}
+    forced = []
+    for uid, cstate, _card_type, attrs in rows:
+        cstate = cstate or 0
+        attrs = int(attrs or 0) | int(effective_attributes(_resolve('_db'), session.session_id, state, int(uid)) or 0)
+        if not attrs & _ge.ECardAttributes.ForceAttack:
+            continue
+        if cstate & (_ge.ECardStates.Attacking | _ge.ECardStates.Tapped):
+            continue
+        if not cstate & _ge.ECardStates.StartedATurnOnYourSide and (not attrs & _ge.ECardAttributes.Speed):
+            continue
+        if attrs & (_ge.ECardAttributes.CantAttack | _ge.ECardAttributes.Defensive):
+            continue
+        u = int(uid)
+        if u in attackers:
+            continue
+        attackers[u] = opp_champ
+        state_bits = _ge.ECardStates.Attacking | _ge.ECardStates.HasAttacked
+        if not attrs & _ge.ECardAttributes.Steadfast:
+            state_bits |= _ge.ECardStates.Tapped
+        _resolve('db_card_set_attacking_state')(session.session_id, u, state_bits)
+        forced.append((u, state_bits))
+    _resolve('_db').commit()
+    if forced:
+        state['attackers'] = {str(k): str(v) for k, v in attackers.items()}
+        _resolve('pvp_save_state')(session, state)
+    native_port = _resolve('pvp_shared_port')(session)
+    if native_port is not None:
+        native_port.has_forced_attackers = bool(attackers)
+        for uid, _state_bits in forced:
+            attacker_card = native_port.get_card(int(uid))
+            if attacker_card is None:
+                continue
+            if native_port.combat_manager.combat_for_attacker(attacker_card) is None:
+                native_port.declare_attack(pl_t, opp_champ, attacker_card)
+    g = _ge.Game(int(session.session_id), pl_t, opp_t)
+    _pvp_apply_visibility(g, state)
+    _resolve('_pvp_populate_game_state')(g, state, turn_pid, opp_pid)
+    g.player_health = int(state.get(f'hp_{turn_pid}', 20))
+    g.ai_health = int(state.get(f'hp_{opp_pid}', 20))
+    from pickers import PickOption, present_options
+    present_options(g, pl_t, [PickOption(card_uid=int(scid.uid.uid64), state='Attack') for scid in ready])
+    combats = []
+    for i, (u, state_bits) in enumerate(forced):
+        scid = _ge.SessionCardId(_ge.UID(u))
+        cid = _ge.CombatId(pl_t, i + 1)
+        g.push_attack_declared(cid, pl_t, _ge.SessionCardId(_ge.UID(opp_champ)) if opp_champ else _ge.SessionCardId(opp_t), scid)
+        trow = db_card_basic(session.session_id, u, conn=_resolve('_db'))
+        tpl_guid = trow[0] if trow else None
+        h_card = h
+        if tpl_guid:
+            h_card._card_full_data(g, scid, tpl_guid)
+        pushed_state = _resolve('db_card_state_value')(session.session_id, u) or state_bits
+        g.push_card_updated(scid, pl_t, _ge.ECardCollections.Warzone, _ge.ECardTypes.Troop, template_id=tpl_guid, state=pushed_state)
+        cs = _ge.CombatSessionEventArgs()
+        cs.player_id = pl_t
+        cs.id = cid
+        cs.attacker = scid
+        cs.blockers = []
+        combats.append(cs)
+        view = _resolve('_pvp_fra_view')(state, turn_pid, opp_pid)
+        _resolve('_pvp_dispatch_triggers')(h_card, g, session, view, pl_t, opp_t, 'CardAttackedEvent', int(u), turn_pid)
+        _resolve('_pvp_dispatch_triggers')(h_card, g, session, view, pl_t, opp_t, 'CardAttackedOrBlockedEvent', int(u), turn_pid)
+        from rules_port.context import EffectContext
+        from rules_port.combat_effects import apply_rage
+        apply_rage(EffectContext.from_rules_port(g, session, _resolve('_db'), h_card, pl_t, opp_t, view, '', ability=None), int(u))
+        if view.get('player_health') is not None:
+            state[f'hp_{turn_pid}'] = int(view['player_health'])
+        if view.get('ai_health') is not None:
+            state[f'hp_{opp_pid}'] = int(view['ai_health'])
+        _resolve('_pvp_sync_view_to_state')(state, view, turn_pid, opp_pid)
+        _resolve('pvp_save_state')(session, state)
+    if combats:
+        g.push_combat_listing(pl_t, combats)
+    g.push_player_updated(pl_t, champ_id=_ge.SessionCardId(_ge.UID(int(state.get('champ_map', {}).get(str(turn_pid), 0)))))
+    g.push_player_updated(opp_t, champ_id=_ge.SessionCardId(_ge.UID(int(state.get('champ_map', {}).get(str(opp_pid), 0)))))
+    _resolve('pvp_push_warzone_updates')(session, state, game=g)
+    if forced:
+        _resolve('_pvp_send_same_events')(session, g, pl_t, opp_t)
+    else:
+        pkt = g.make_network_packet(pl_t)
+        dw = _resolve('encode_datawrapper')(0, 3055, _resolve('compress_gzip')(_resolve('encode_sync_event')(pkt)), 1, _resolve('client_session_guid')(h))
+        h.scnt += 1
+        h.send({'issuer': f'0.0.0.0.ServiceGameSession.246.{session.session_id}.{h.scnt}', 'target': 'ServiceGameSession', 'instance': str(session.server_id), 'reqid': 0, 'c': 0, 'conh': 0, 'sid': h.sid}, dw)
+    log_req(f'    PvP attack options pushed to {turn_pid}: {len(ready)} ready troop(s), {len(forced)} forced attacker(s)')
+
+
+def pvp_push_main_phase_options(session, state):
+    """Push the PlayerOptionList (golden playable-card outlines) for the turn
+    player at a main phase, so the client lets them click cards.  Affordability
+    is computed from the PvP state's resource count (res_<pid>) and each card's
+    template cost, plus THRESHOLD requirements (thresh_<pid>) — a card like
+    Emberspire Witch (2 Ruby) is not highlighted until the player has the
+    thresholds."""
+    if _pvp_chain_active(session, state):
+        if any(((state or {}).get(key) for key in ('pending_choice', 'pending_trigger', 'pending_deck_search', 'pending_conversation', 'pending_discard_ability', 'resolution_paused'))):
+            return
+        priority_pid = (state or {}).get('priority_pid')
+        if priority_pid:
+            _resolve('pvp_push_phase_options')(session, state, pid=priority_pid)
+        return
+    pids = _resolve('db_game_session_pids')(session.session_id)
+    if len(pids) < 2:
+        return
+    turn_pid = state.get('turn_pid')
+    h = _resolve('player_handlers').get(turn_pid)
+    if not h:
+        return
+    opp_pid = pids[0] if pids[1] == turn_pid else pids[1]
+    pl_t = _ge.UID.make(244, turn_pid)
+    opp_t = _ge.UID.make(244, opp_pid)
+    resources = int(state.get(f'res_{turn_pid}', 0))
+    threshold = dict(state.get(f'thresh_{turn_pid}') or {})
+    from rules_port.resources import can_play_resource, resource_play_limit
+    resource_limit = resource_play_limit(_resolve('_db'), session.session_id, state, int(turn_pid))
+    resource_played = not can_play_resource(state, 'player', limit=resource_limit, player_id=int(turn_pid))
+    from pvp_db import db_game_get_hand, db_game_card_type, db_card_template_thresholds, db_deck_top_card_details, db_card_play_info, db_template_ability_payload
+    playable = []
+    for cu, tg in db_game_get_hand(session.session_id, turn_pid):
+        scid = _ge.SessionCardId(_ge.UID(int(cu)))
+        ct_name = db_game_card_type(tg)
+        if str(ct_name or '').split('|', 1)[0] == 'Resource':
+            if not resource_played:
+                playable.append(scid)
+            continue
+        t = _resolve('db_template_by_guid')(tg)
+        cost = t[3] if t else 0
+        try:
+            from rules_port.static_rules import effective_cost as _ec
+            cost = _ec(_resolve('_db'), session.session_id, _resolve('_pvp_fra_view')(state, turn_pid, opp_pid), int(cu))
+        except Exception:
+            pass
+        if cost > resources:
+            continue
+        srow = db_card_template_thresholds(tg)
+        thresh_json = srow[0] if srow else None
+        if not _pvp_thresholds_met(thresh_json, threshold):
+            log_req(f'    PvP options: {ct_name} {cu} not playable (thresholds unmet: {thresh_json})')
+            continue
+        import json as _js
+        ab_json = None
+        ab_json = db_template_ability_payload(tg, conn=_resolve('_db'))
+        ability_guids = []
+        if ab_json:
+            try:
+                ability_guids = [x.lower() for x in _js.loads(ab_json)]
+            except Exception:
+                ability_guids = []
+        if not _resolve('_pvp_card_playable')(session, state, int(cu), tg, ct_name, cost, ability_guids, resources, threshold):
+            continue
+        playable.append(scid)
+    from rules_port.static_rules import player_int_attributes
+    player_attrs = player_int_attributes(_resolve('_db'), session.session_id, state, int(turn_pid))
+    if int(player_attrs.get('CanPlayTopOfDeck', 0) or 0) > 0:
+        top = db_deck_top_card_details(session.session_id, int(turn_pid), conn=_resolve('_db'))
+        if top:
+            top_uid = int(top[1])
+            info = db_card_play_info(session.session_id, top_uid, conn=_resolve('_db'))
+            if info:
+                _top_guid, top_type, _top_name = info[:3]
+                if str(top_type or '').split('|', 1)[0] == 'Resource':
+                    if not resource_played:
+                        playable.append(_ge.SessionCardId(_ge.UID(top_uid)))
+                else:
+                    top_template = _resolve('db_template_by_guid')(_top_guid)
+                    top_cost = top_template[3] if top_template else 0
+                    try:
+                        from rules_port.static_rules import effective_cost as _ec
+                        top_cost = _ec(_resolve('_db'), session.session_id, _resolve('_pvp_fra_view')(state, turn_pid, opp_pid), top_uid)
+                    except Exception:
+                        pass
+                    top_threshold = db_card_template_thresholds(_top_guid, conn=_resolve('_db'))
+                    top_ability_json = db_template_ability_payload(_top_guid, conn=_resolve('_db'))
+                    try:
+                        top_abilities = [str(value).lower() for value in json.loads(top_ability_json or '[]')]
+                    except (TypeError, ValueError, json.JSONDecodeError):
+                        top_abilities = []
+                    top_type_name = str(top_type or '')
+                    if top_cost <= resources and _pvp_thresholds_met(top_threshold[0] if top_threshold else None, threshold) and _resolve('_pvp_card_playable')(session, state, top_uid, _top_guid, top_type_name, top_cost, top_abilities, resources, threshold):
+                        playable.append(_ge.SessionCardId(_ge.UID(top_uid)))
+    g = _ge.Game(int(session.session_id), pl_t, opp_t)
+    _resolve('_pvp_populate_game_state')(g, state, turn_pid, opp_pid)
+    from rules_port.visibility import project_visible_top_decks
+    project_visible_top_decks(_resolve('_db'), session, h, g, pl_t, opp_t, state)
+    champ_map = state.get('champ_map') or {}
+    g.player_champion_card_id = _ge.SessionCardId(_ge.UID(int(champ_map.get(str(turn_pid), 0)))) if champ_map.get(str(turn_pid)) else None
+    g.ai_champion_card_id = _ge.SessionCardId(_ge.UID(int(champ_map.get(str(opp_pid), 0)))) if champ_map.get(str(opp_pid)) else None
+    h._current_bstate = state
+    _resolve('_pvp_add_hand_card_updates')(g, session, state, turn_pid, pl_t)
+    _resolve('pvp_push_warzone_updates')(session, state, game=g)
+    g.push_options(pl_t, playable)
+    _resolve('_pvp_add_play_target_options')(g, session, state, pl_t, opp_t, turn_pid)
+    affordable = _resolve('_pvp_affordable_troop_abilities')(session, state, pid=turn_pid)
+    if affordable:
+        _resolve('_pvp_add_troop_ability_options')(g, session, state, pl_t, opp_t, turn_pid, affordable)
+    _resolve('_pvp_add_champion_options')(g, session, state, turn_pid, pl_t)
+    for event in g.events:
+        if not isinstance(event, _ge.PlayerOptionListSessionEventArgs):
+            continue
+        option_parts = []
+        for option in event.options:
+            if not isinstance(option, _ge.PlayerOptionSessionEventArgs):
+                continue
+            card_uid = getattr(getattr(option.card, 'uid', None), 'uid64', option.card)
+            instance_parts = []
+            for instance in option.instances:
+                if not isinstance(instance, _ge.OptionInstanceSessionEventArgs):
+                    continue
+                targets = getattr(instance, 'target_instances', ()) or ()
+                target_count = len(targets)
+                cost_count = sum((1 for target in targets if isinstance(target, _ge.CostInstanceSessionEventArgs)))
+                instance_parts.append(f'{str(instance.opt_id.guid)[:8]}/targets={target_count}/costs={cost_count}')
+            option_parts.append(f"card={card_uid}/state={int(option.state)}/instances=[{','.join(instance_parts)}]")
+        log_req(f"    PvP final-options pid={event.player_id} options=[{' ; '.join(option_parts)}]")
+    pkt = g.make_network_packet(pl_t)
+    dw = _resolve('encode_datawrapper')(0, 3055, _resolve('compress_gzip')(_resolve('encode_sync_event')(pkt)), 1, _resolve('client_session_guid')(h))
+    h.scnt += 1
+    h.send({'issuer': f'0.0.0.0.ServiceGameSession.246.{session.session_id}.{h.scnt}', 'target': 'ServiceGameSession', 'instance': str(session.server_id), 'reqid': 0, 'c': 0, 'conh': 0, 'sid': h.sid}, dw)
+    try:
+        offered_uids = {int(getattr(card.uid, 'uid64', card.uid)) for card in playable}
+        offered_names = []
+        for _cu, _tg in db_game_get_hand(session.session_id, turn_pid):
+            if int(_cu) not in offered_uids:
+                continue
+            offered_names.append(_resolve('db_template_name')(_tg, conn=_resolve('_db')) or _tg)
+    except Exception:
+        offered_names = []
+    log_req(f'    PvP main-phase options pushed to {turn_pid} ({len(playable)} playable, {resources} resources; offered={offered_names})')
