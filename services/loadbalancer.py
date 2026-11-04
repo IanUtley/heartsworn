@@ -23,7 +23,7 @@ from rules_port.persistence import load_state, save_state
 
 def handle_start_session(handler, target, instance, reqid, comp, session_id,
                          conh, inner_obj, inner_bytes, *, SERVICE_MAIL_UID,
-                         log_req, data_type):
+                         log_req, data_type, **_kw):
     """Create a session for the player and answer with its StartSession packet."""
     log_req(f">>> StartSession (dt={data_type}) -> creating session")
     player_uid = make_uid(UID_TYPE["ServicePlayer"], int(handler.client_reck_id))
@@ -66,7 +66,7 @@ def handle_start_session(handler, target, instance, reqid, comp, session_id,
 
 def handle_start_encounter(handler, target, instance, reqid, comp, session_id,
                          conh, inner_obj, inner_bytes, *, SERVICE_MAIL_UID,
-                         log_req, data_type):
+                         log_req, data_type, **_kw):
     """Create an encounter session and answer with its StartEncounter packet."""
     log_req(">>> Respond StartEncounter -> creating session")
     player_uid = make_uid(UID_TYPE["ServicePlayer"], int(handler.client_reck_id))
@@ -200,7 +200,7 @@ def _campaign_resume_session(player_pid):
 
 def handle_find_session(handler, target, instance, reqid, comp, session_id,
                       conh, inner_obj, inner_bytes, *, SERVICE_MAIL_UID,
-                      log_req, data_type):
+                      log_req, data_type, **_kw):
     """Answer FindSession with the player's resumable campaign battle, or none."""
     player_uid = make_uid(UID_TYPE["ServicePlayer"], int(handler.client_reck_id))
     resume = _campaign_resume_session(int(handler.client_reck_id))
@@ -252,7 +252,7 @@ def handle_find_session(handler, target, instance, reqid, comp, session_id,
 
 def handle_join_session(handler, target, instance, reqid, comp, session_id,
                         conh, inner_obj, inner_bytes, *, SERVICE_MAIL_UID,
-                        log_req, data_type):
+                        log_req, data_type, **_kw):
     """Join the named session and answer with its JoinSession packet."""
     log_req(">>> JoinSession (dt=22021)")
     player_uid = make_uid(UID_TYPE["ServicePlayer"], int(handler.client_reck_id))
@@ -346,7 +346,7 @@ def handle_join_session(handler, target, instance, reqid, comp, session_id,
 
 def handle_ready_for_game_setup_request(handler, target, instance, reqid, comp, session_id,
                                        conh, inner_obj, inner_bytes, *, SERVICE_MAIL_UID,
-                                       log_req, data_type):
+                                       log_req, data_type, **_kw):
     """Answer ReadyForGameSetup, handing tournament PvP sessions to the tournament module."""
     log_req(">>> ReadyForGameSetup (dt=22027)")
     player_uid = make_uid(UID_TYPE["ServicePlayer"], int(handler.client_reck_id))
@@ -442,7 +442,7 @@ def handle_ready_for_game_setup_request(handler, target, instance, reqid, comp, 
 
 def handle_ready_for_game_events_request(handler, target, instance, reqid, comp, session_id,
                                               conh, inner_obj, inner_bytes, *, SERVICE_MAIL_UID,
-                                              log_req, data_type):
+                                              log_req, data_type, **_kw):
     """Hand a ready tournament session to the tournament module; regular sessions get no reply."""
     log_req(">>> ReadyForGameEvents (dt=22029)")
     player_uid = make_uid(UID_TYPE["ServicePlayer"], int(handler.client_reck_id))
@@ -454,7 +454,7 @@ def handle_ready_for_game_events_request(handler, target, instance, reqid, comp,
 
 def handle_quit_on_reconnect(handler, target, instance, reqid, comp, session_id,
                              conh, inner_obj, inner_bytes, *, SERVICE_MAIL_UID,
-                             log_req, data_type):
+                             log_req, data_type, **_kw):
     # The client sends this when the player declines the reconnect
     # dialog. Remember the choice in this game's checkpoint so the
     # same player is not prompted again, while another participant

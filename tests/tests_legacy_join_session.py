@@ -77,3 +77,8 @@ def test_join_session_found_branch_matches_the_snapshot():
 
 def test_join_session_not_found_branch_matches_the_snapshot():
     assert _packet(NOT_FOUND_INNER, None) == EXPECTED["not_found"]
+
+if __name__ == "__main__":
+    test_join_session_found_branch_matches_the_snapshot()
+    test_join_session_not_found_branch_matches_the_snapshot()
+    print("PASS tests_legacy_join_session: 2 checks")

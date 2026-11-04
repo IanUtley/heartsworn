@@ -64,3 +64,8 @@ def test_ready_for_game_setup_session_branch_matches_the_snapshot():
 
 def test_ready_for_game_setup_no_session_branch_matches_the_snapshot():
     assert _packet(None) == EXPECTED["no_session"]
+
+if __name__ == "__main__":
+    test_ready_for_game_setup_session_branch_matches_the_snapshot()
+    test_ready_for_game_setup_no_session_branch_matches_the_snapshot()
+    print("PASS tests_legacy_ready_for_game_setup: 2 checks")

@@ -76,3 +76,8 @@ def test_start_encounter_campaign_scene_branch_matches_the_snapshot():
 
 def test_start_encounter_default_branch_matches_the_snapshot():
     assert _packet("tutorial") == EXPECTED["default"]
+
+if __name__ == "__main__":
+    test_start_encounter_campaign_scene_branch_matches_the_snapshot()
+    test_start_encounter_default_branch_matches_the_snapshot()
+    print("PASS tests_legacy_start_encounter: 2 checks")

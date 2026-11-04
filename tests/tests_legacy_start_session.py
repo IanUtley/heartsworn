@@ -66,3 +66,8 @@ def test_start_session_sends_one_packet_with_the_expected_issuer():
 def test_start_session_body_matches_the_snapshot():
     _headers, body = _run_handler().sent[0]
     assert hashlib.sha256(body).hexdigest() == EXPECTED_BODY_SHA256
+
+if __name__ == "__main__":
+    test_start_session_sends_one_packet_with_the_expected_issuer()
+    test_start_session_body_matches_the_snapshot()
+    print("PASS tests_legacy_start_session: 2 checks")

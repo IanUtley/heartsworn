@@ -85,3 +85,10 @@ def test_non_reconnectable_session_is_ignored():
     assert logs == [f">>> QuitOnReconnectionGame: ignored non-reconnectable session "
                     f"for pid {PLAYER_ID}"]
     save.assert_not_called()
+
+if __name__ == "__main__":
+    test_no_session_is_logged_and_nothing_is_saved()
+    test_ended_session_is_ignored()
+    test_pvp_decline_is_recorded_and_saved()
+    test_non_reconnectable_session_is_ignored()
+    print("PASS tests_legacy_quit_on_reconnect: 4 checks")

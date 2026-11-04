@@ -66,3 +66,8 @@ def test_find_session_resume_branch_matches_the_snapshot():
 
 def test_find_session_no_session_branch_matches_the_snapshot():
     assert _packet(None) == EXPECTED["none"]
+
+if __name__ == "__main__":
+    test_find_session_resume_branch_matches_the_snapshot()
+    test_find_session_no_session_branch_matches_the_snapshot()
+    print("PASS tests_legacy_find_session: 2 checks")

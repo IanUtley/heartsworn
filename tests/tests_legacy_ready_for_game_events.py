@@ -66,3 +66,8 @@ def test_tournament_session_is_handed_off_with_the_hub_events_state():
     args = hand_off.call_args.args
     assert args[0] is handler and args[1] is session
     assert args[2] is tournament_game.PVP_EVENTS_READY
+
+if __name__ == "__main__":
+    test_regular_session_gets_no_reply_and_no_hand_off()
+    test_tournament_session_is_handed_off_with_the_hub_events_state()
+    print("PASS tests_legacy_ready_for_game_events: 2 checks")
