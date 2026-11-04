@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING
 import json
 import random
 from db import log_req
+import game_engine
 
 
 def discarding_player(bstate, ability_controller):
@@ -87,8 +88,8 @@ class CombatMixin(_HostBase):
             # The CardDef's defense is the champion's live health (which is
             # what the HUD reports through ChampionHealth).
             game.push_card_updated(
-                scid, owner, _hc.game_engine.ECardCollections.None_,
-                _hc.game_engine.ECardTypes.Champion, attack=0,
+                scid, owner, game_engine.ECardCollections.None_,
+                game_engine.ECardTypes.Champion, attack=0,
                 defense=int(getattr(
                     game, "ai_health" if is_ai else "player_health", 0) or 0),
                 template_id=champ_guid)
@@ -166,8 +167,8 @@ class CombatMixin(_HostBase):
             game.events = [ev for ev in game.events
                            if type(ev).__name__ != "TurnPhaseUpdatedSessionEventArgs"]
         if picker_packet or prompt_open:
-            chooser = (pl_t if isinstance(pl_t, _hc.game_engine.UID)
-                       else _hc.game_engine.UID(int(getattr(pl_t, "uid64", pl_t))))
+            chooser = (pl_t if isinstance(pl_t, game_engine.UID)
+                       else game_engine.UID(int(getattr(pl_t, "uid64", pl_t))))
             for ev in game.events:
                 if type(ev).__name__ == "TurnPhaseUpdatedSessionEventArgs":
                     ev.priority_player_id = chooser
@@ -179,14 +180,14 @@ class CombatMixin(_HostBase):
             port = getattr(session, "_rules_port_session", None)
             if port is not None:
                 phase_ev = game._make_event(
-                    _hc.game_engine.TurnPhaseUpdatedSessionEventArgs)
+                    game_engine.TurnPhaseUpdatedSessionEventArgs)
                 phase_ev.turn_phase = port.current_turn_phase
                 # The phase belongs to the port's active player. Naming the chooser as active made the
                 # client start its own AssignDamage flow on the AI's combat, which cleared the picker's options.
                 active = getattr(port, "active_player_id", None) or chooser
                 phase_ev.active_player_id = (
-                    active if isinstance(active, _hc.game_engine.UID)
-                    else _hc.game_engine.UID(int(getattr(active, "uid64", active))))
+                    active if isinstance(active, game_engine.UID)
+                    else game_engine.UID(int(getattr(active, "uid64", active))))
                 phase_ev.priority_player_id = chooser
                 picker_packet.insert(0, phase_ev)
             log_req("    [DEBUG-PACKET] picker sent as its own packet: " + ", ".join(
@@ -196,11 +197,11 @@ class CombatMixin(_HostBase):
         current_state = getattr(self, "_current_bstate", {}) or {}
         project_visible_hands(
             _hc._db, session, self, game, pl_t,
-            getattr(game, "ai_uid", _hc.game_engine.UID.make(_hc.game_engine.SERVICE_AI_UID_TYPE, 1000)),
+            getattr(game, "ai_uid", game_engine.UID.make(game_engine.SERVICE_AI_UID_TYPE, 1000)),
             current_state)
         project_visible_top_decks(
             _hc._db, session, self, game, pl_t,
-            getattr(game, "ai_uid", _hc.game_engine.UID.make(_hc.game_engine.SERVICE_AI_UID_TYPE, 1000)),
+            getattr(game, "ai_uid", game_engine.UID.make(game_engine.SERVICE_AI_UID_TYPE, 1000)),
             current_state)
         # Placing the champions on the client's board is a one-shot projection
         # at game start; re-announce it in the first packet the client receives
@@ -212,8 +213,8 @@ class CombatMixin(_HostBase):
         # RulesPort transactions are normalized with the decoded numeric UID,
         # whereas the ObjFmt encoder requires the typed UID object.  Keep the
         # ingress representation out of the packet boundary.
-        if not isinstance(pl_t, _hc.game_engine.UID):
-            pl_t = _hc.game_engine.UID(int(getattr(pl_t, "uid64", pl_t)))
+        if not isinstance(pl_t, game_engine.UID):
+            pl_t = game_engine.UID(int(getattr(pl_t, "uid64", pl_t)))
         if not getattr(game, "_visibility_by_uid", None):
             from rules_port.visibility import \
                 apply_player_visibility_to_game
@@ -233,8 +234,8 @@ class CombatMixin(_HostBase):
             for event in game.events:
                 collection = getattr(event, "collection", None)
                 if collection not in (
-                        _hc.game_engine.ECardCollections.Warzone,
-                        _hc.game_engine.ECardCollections.Underground):
+                        game_engine.ECardCollections.Warzone,
+                        game_engine.ECardCollections.Underground):
                     continue
                 sid = getattr(event, "session_card_id", None)
                 raw_sid = getattr(getattr(sid, "uid", sid), "uid64", sid)
@@ -318,7 +319,7 @@ class CombatMixin(_HostBase):
             except Exception:
                 effective_attrs = 0
             if ("QuickAction" not in (ct or "") and not
-                    (effective_attrs & _hc.game_engine.ECardAttributes.QuickAction)):
+                    (effective_attrs & game_engine.ECardAttributes.QuickAction)):
                 continue
             ab = []
             if abilities_json:
@@ -328,7 +329,7 @@ class CombatMixin(_HostBase):
                     pass
             if self._hand_card_playable(session, card_uid, ct, cost, thresh_json,
                                         ab, resources, threshold, True, fc, ec):
-                playable.append(_hc.game_engine.SessionCardId(_hc.game_engine.UID(card_uid)))
+                playable.append(game_engine.SessionCardId(game_engine.UID(card_uid)))
         game.push_options(pl_t, playable)
         # Attach targeting TargetInstances for played spells (target picker).
         self._add_play_target_options(game, session, pl_t, ai_t)
@@ -380,8 +381,8 @@ class CombatMixin(_HostBase):
         later Basic Action unplayable).
         """
         import hconnect_server as _hc
-        pl_t = _hc.game_engine.UID.make(244, int(self.client_reck_id))
-        ai_t = _hc.game_engine.UID.make(_hc.game_engine.SERVICE_AI_UID_TYPE, 1000)
+        pl_t = game_engine.UID.make(244, int(self.client_reck_id))
+        ai_t = game_engine.UID.make(game_engine.SERVICE_AI_UID_TYPE, 1000)
         priority = port.action_stack.priority_player_id
         if not _hc._same_uid(priority, pl_t):
             return False
@@ -393,7 +394,7 @@ class CombatMixin(_HostBase):
         # GreenLight first so a client that just lost priority to the AI does
         # not request a main-phase resync before this response window arrives.
         chain_game.push_green_light(
-            pl_t, _hc.game_engine.EPriorityContext.ResolveTopOfChain)
+            pl_t, game_engine.EPriorityContext.ResolveTopOfChain)
         chain_game.push_turn_phase(
             port.current_turn_phase,
             pl_t if _hc._same_uid(port.active_player_id, pl_t) else ai_t,
@@ -433,13 +434,13 @@ class CombatMixin(_HostBase):
             # A troop with Speed may attack the turn it comes into play (the
             # client's HasSummoningSickness() exempts Speed) — e.g. a Blaze
             # Elemental summoned by Poca's charge power.
-            if (((state & _hc.game_engine.ECardStates.StartedATurnOnYourSide)
-                 or ((attrs or 0) & _hc.game_engine.ECardAttributes.Speed))
-                    and not (state & _hc.game_engine.ECardStates.Tapped)
-                    and not (state & _hc.game_engine.ECardStates.Attacking)
+            if (((state & game_engine.ECardStates.StartedATurnOnYourSide)
+                 or ((attrs or 0) & game_engine.ECardAttributes.Speed))
+                    and not (state & game_engine.ECardStates.Tapped)
+                    and not (state & game_engine.ECardStates.Attacking)
                     and can_attack_card(
                         _hc._db, session.session_id, bstate, uid, attrs or 0)):
-                ready.append(_hc.game_engine.SessionCardId(_hc.game_engine.UID(uid)))
+                ready.append(game_engine.SessionCardId(game_engine.UID(uid)))
         from rules_port.runtime_adapter import defending_champion_immune
         if ready and defending_champion_immune(self, self.user_profile["id"]):
             # The champion is the only attack target and it can't be attacked; troops only block, so no attack is legal.
@@ -480,13 +481,13 @@ class CombatMixin(_HostBase):
             state = state or 0
             attrs = int(effective_attributes(
                 _hc._db, session.session_id, bstate, int(uid)) or 0)
-            if not (attrs & _hc.game_engine.ECardAttributes.ForceAttack):
+            if not (attrs & game_engine.ECardAttributes.ForceAttack):
                 continue
-            if (state & (_hc.game_engine.ECardStates.Attacking |
-                         _hc.game_engine.ECardStates.Tapped)):
+            if (state & (game_engine.ECardStates.Attacking |
+                         game_engine.ECardStates.Tapped)):
                 continue
-            if not (state & _hc.game_engine.ECardStates.StartedATurnOnYourSide) \
-                    and not (attrs & _hc.game_engine.ECardAttributes.Speed):
+            if not (state & game_engine.ECardStates.StartedATurnOnYourSide) \
+                    and not (attrs & game_engine.ECardAttributes.Speed):
                 continue
             if not can_attack_card(_hc._db, session.session_id, bstate, uid, attrs):
                 continue
@@ -494,8 +495,8 @@ class CombatMixin(_HostBase):
             if u in attackers:
                 continue
             attackers[u] = int(ai_champ_uid64)
-            scid = _hc.game_engine.SessionCardId(_hc.game_engine.UID(u))
-            combat_id = _hc.game_engine.CombatId(pl_t, u & 0xFFFF)
+            scid = game_engine.SessionCardId(game_engine.UID(u))
+            combat_id = game_engine.CombatId(pl_t, u & 0xFFFF)
             port = getattr(session, "_rules_port_session", None)
             if port is not None:
                 # ForceAttack declarations must exist in the same native
@@ -511,11 +512,11 @@ class CombatMixin(_HostBase):
                     session, pl_t, u, u & 0xFFFF)
             game.push_attack_declared(
                 combat_id, pl_t,
-                ai_champ_uid or _hc.game_engine.SessionCardId(ai_t), scid)
-            state_bits = (_hc.game_engine.ECardStates.Attacking |
-                          _hc.game_engine.ECardStates.HasAttacked)
-            if not (attrs & _hc.game_engine.ECardAttributes.Steadfast):
-                state_bits |= _hc.game_engine.ECardStates.Tapped
+                ai_champ_uid or game_engine.SessionCardId(ai_t), scid)
+            state_bits = (game_engine.ECardStates.Attacking |
+                          game_engine.ECardStates.HasAttacked)
+            if not (attrs & game_engine.ECardAttributes.Steadfast):
+                state_bits |= game_engine.ECardStates.Tapped
             _hc.db_card_set_attacking_state(session.session_id, u, state_bits)
             card_details = _hc.db_card_zone_details(
                 session.session_id, u, conn=_hc._db)
@@ -523,14 +524,14 @@ class CombatMixin(_HostBase):
             self._card_full_data(game, scid, tpl_guid)
             pushed_state = db_card_state_raw(session.session_id, u) or state_bits
             game.push_card_updated(
-                scid, pl_t, _hc.game_engine.ECardCollections.Warzone,
-                _hc.game_engine.ECardTypes.Troop, template_id=tpl_guid,
+                scid, pl_t, game_engine.ECardCollections.Warzone,
+                game_engine.ECardTypes.Troop, template_id=tpl_guid,
                 state=pushed_state)
-            if state_bits & _hc.game_engine.ECardStates.Tapped:
+            if state_bits & game_engine.ECardStates.Tapped:
                 self._dispatch_native_trigger(
                     game, session, pl_t, ai_t, bstate, "CardTappedEvent", u,
                     self.user_profile["id"])
-            cs = _hc.game_engine.CombatSessionEventArgs()
+            cs = game_engine.CombatSessionEventArgs()
             cs.player_id = pl_t
             cs.id = combat_id
             cs.attacker = scid
@@ -583,7 +584,7 @@ class CombatMixin(_HostBase):
         from rules_port.combat_rules import can_block
         rows = _hc.db_warzone_defender_rows(
             session.session_id, self.user_profile["id"],
-            _hc.game_engine.ECardStates.Tapped, conn=_hc._db)
+            game_engine.ECardStates.Tapped, conn=_hc._db)
         game = self._fresh_game(session, pl_t, ai_t, bstate)
         from pickers import BLOCK_DECLARATION_TEMPLATE as BLOCKING_TEMPLATE
         from pickers import PickOption, PickTarget, present_options
@@ -716,17 +717,17 @@ class CombatMixin(_HostBase):
         damage steps, otherwise just champion abilities + QuickActions."""
         import hconnect_server as _hc
         _be = self._checkpoint_engine(session)
-        if phase in (_hc.game_engine.ETurnPhases.FirstMainPhase,
-                     _hc.game_engine.ETurnPhases.SecondMainPhase):
+        if phase in (game_engine.ETurnPhases.FirstMainPhase,
+                     game_engine.ETurnPhases.SecondMainPhase):
             self._push_main_phase_options(session, pl_t, ai_t)
-        elif phase == _hc.game_engine.ETurnPhases.DeclareAttack:
+        elif phase == game_engine.ETurnPhases.DeclareAttack:
             self._push_attack_options(session, pl_t, ai_t)
-        elif phase in (_hc.game_engine.ETurnPhases.AssignDamage,
-                       _hc.game_engine.ETurnPhases.AssignFirstStrikeDamage):
+        elif phase in (game_engine.ETurnPhases.AssignDamage,
+                       game_engine.ETurnPhases.AssignFirstStrikeDamage):
             bstate = _be.load_state(session)
             self._current_bstate = bstate
             self._push_combat_listing_phase(session, pl_t, ai_t, bstate)
-        elif phase == _hc.game_engine.ETurnPhases.DeclareDefense:
+        elif phase == game_engine.ETurnPhases.DeclareDefense:
             self._push_blocker_options(session, pl_t, ai_t)
         else:
             self._push_phase_options_empty(session, pl_t, ai_t)
@@ -749,26 +750,26 @@ class CombatMixin(_HostBase):
                 combat = port.combat_manager.combat_for_attacker(attacker)
                 serial = int(combat.combat_id.serial_number) if combat else 0
                 if serial > 0:
-                    return _hc.game_engine.CombatId(player_uid, serial)
+                    return game_engine.CombatId(player_uid, serial)
             except (AttributeError, TypeError, ValueError):
                 pass
-        return _hc.game_engine.CombatId(player_uid, int(fallback_serial))
+        return game_engine.CombatId(player_uid, int(fallback_serial))
 
     def _push_combat_listing_phase(self, session, pl_t, ai_t, bstate):
         """Push the current combat listing (no blockers yet) at a damage step
         so the client's BattleStateAssignDamage can auto-commit and send
         AssignDamageOrderTransaction."""
         import hconnect_server as _hc
-        game = _hc.game_engine.Game(session.session_id, pl_t, ai_t)
+        game = game_engine.Game(session.session_id, pl_t, ai_t)
         self._maybe_attach_rules_port(session, game, bstate)
         attackers = bstate.get("player_attackers") or {}
         combats = []
         for i, u in enumerate(attackers):
             attacker_uid = int(u)
-            scid = _hc.game_engine.SessionCardId(_hc.game_engine.UID(attacker_uid))
+            scid = game_engine.SessionCardId(game_engine.UID(attacker_uid))
             combat_id = self._wire_combat_id_for_attacker(
                 session, pl_t, attacker_uid, i + 1)
-            cs = _hc.game_engine.CombatSessionEventArgs()
+            cs = game_engine.CombatSessionEventArgs()
             cs.player_id = pl_t
             cs.id = combat_id
             cs.attacker = scid
@@ -830,7 +831,7 @@ class CombatMixin(_HostBase):
             # The AI driver rebuilds its own plan when it reaches First Main.
             battle_state["player_has_ready_troop"] = ready
             return False
-        if active_phase != _hc.game_engine.ETurnPhases.FirstMainPhase:
+        if active_phase != game_engine.ETurnPhases.FirstMainPhase:
             # Only First Main may be rebuilt: from Second Main on, swapping the
             # base plan for the combat plan renumbers ``phase_idx`` (Second
             # Main becomes DeclareCombat) and strands the client's next pass.
@@ -991,7 +992,7 @@ class CombatMixin(_HostBase):
             row = db_card_zone_details(session.session_id, int(uid), conn=_hc._db)
             if not row:
                 return None
-            scid = _hc.game_engine.SessionCardId(_hc.game_engine.UID(int(uid)))
+            scid = game_engine.SessionCardId(game_engine.UID(int(uid)))
             return int(self._card_full_data(game, scid, row[0], None)[3] or 0)
 
         cost = card_cost(voided)
@@ -1048,7 +1049,7 @@ class CombatMixin(_HostBase):
         # Ability configuration path (same protocol used by Necrotic Mage's
         # PVE ability): class-23 opens BattleStateConfigureAbility and the
         # selected hand card is returned in SetAbilityActivationData.
-        hand = [_hc.game_engine.SessionCardId(_hc.game_engine.UID(int(uid))) for (uid,) in
+        hand = [game_engine.SessionCardId(game_engine.UID(int(uid))) for (uid,) in
                 _hc.db_hand_card_uids(
                     session.session_id,
                     self.user_profile["id"] if self.user_profile else 0,
@@ -1126,13 +1127,13 @@ class CombatMixin(_HostBase):
             _hc.db_move_card_to_location(
                 session.session_id, int(uid), "void", position=0, conn=_hc._db)
             _hc._db.commit()
-            scid = _hc.game_engine.SessionCardId(_hc.game_engine.UID(int(uid)))
+            scid = game_engine.SessionCardId(game_engine.UID(int(uid)))
             tpl_guid = row[2]
             _tpl, ct, _n, _c, atk, def_, _g = self._card_full_data(
                 game, scid, tpl_guid)
             owner = pl_t if (row[0] or 0) != 0 else ai_t
             game.push_card_updated(scid, owner,
-                                   _hc.game_engine.ECardCollections.Void, ct,
+                                   game_engine.ECardCollections.Void, ct,
                                    template_id=tpl_guid, attack=atk,
                                    defense=def_)
             voided += 1

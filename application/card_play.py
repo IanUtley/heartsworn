@@ -8,6 +8,7 @@ import json
 import sqlite3
 import struct
 from db import log_req
+import game_engine
 
 
 if TYPE_CHECKING:
@@ -238,7 +239,7 @@ class CardPlayMixin(_HostBase):
             _hc._db, session.session_id, self.user_profile["id"], tid, 0,
             both_players=True, champions=self._champion_targets(),
             battle_state=battle_state)
-        return [_hc.game_engine.SessionCardId(_hc.game_engine.UID(int(u)))
+        return [game_engine.SessionCardId(game_engine.UID(int(u)))
                 for u in candidates]
 
     def _play_ability_targets(self, session, play_plan, battle_state=None):
@@ -294,7 +295,7 @@ class CardPlayMixin(_HostBase):
         if not game.events:
             return
         last_ev = game.events[-1]
-        if not isinstance(last_ev, _hc.game_engine.PlayerOptionListSessionEventArgs):
+        if not isinstance(last_ev, game_engine.PlayerOptionListSessionEventArgs):
             return
         for opt in last_ev.options:
             card_uid = opt.card.uid.uid64
@@ -351,18 +352,18 @@ class CardPlayMixin(_HostBase):
                 # Troop abilities are NOT playable from hand.  Only the
                 # card itself may be played (cost/threshold gate).
                 # Manual abilities activate from the warzone, not hand.
-                inst = game._make_event(_hc.game_engine.OptionInstanceSessionEventArgs)
-                inst.opt_id = _hc.game_engine.ResourceId.from_str(ag)
+                inst = game._make_event(game_engine.OptionInstanceSessionEventArgs)
+                inst.opt_id = game_engine.ResourceId.from_str(ag)
                 entries = group["targets"]
                 for idx, tid, targets in entries:
                     min_count, max_count = self._play_target_bounds(
                         play_plan, ag, idx)
                     inst.min_target_counts.append(min_count)
                     inst.max_target_counts.append(max_count)
-                    inst.target_ids.append(_hc.game_engine.ResourceId.from_str(tid))
-                    tgt = game._make_event(_hc.game_engine.TargetInstanceSessionEventArgs)
+                    inst.target_ids.append(game_engine.ResourceId.from_str(tid))
+                    tgt = game._make_event(game_engine.TargetInstanceSessionEventArgs)
                     tgt.target_index = idx
-                    tgt.target_id = _hc.game_engine.ResourceId.from_str(tid)
+                    tgt.target_id = game_engine.ResourceId.from_str(tid)
                     tgt.targets = list(targets)
                     inst.target_instances.append(tgt)
                 for cost in group["costs"]:
@@ -372,14 +373,14 @@ class CardPlayMixin(_HostBase):
                     maximum = (len(cost.candidates) if cost.maximum < 0
                                else cost.maximum)
                     ci = game._make_event(
-                        _hc.game_engine.CostInstanceSessionEventArgs)
+                        game_engine.CostInstanceSessionEventArgs)
                     _hc.HCPHandler._set_cost_instance_bounds(
                         ci, minimum, maximum)
                     ci.cost_type = cost_type_for_kind(cost.kind)
-                    ci.target_template_id = _hc.game_engine.ResourceId.from_str(
+                    ci.target_template_id = game_engine.ResourceId.from_str(
                         cost.guid)
-                    ci.targets = [_hc.game_engine.SessionCardId(
-                        _hc.game_engine.UID(int(uid))) for uid in cost.candidates]
+                    ci.targets = [game_engine.SessionCardId(
+                        game_engine.UID(int(uid))) for uid in cost.candidates]
                     inst.target_instances.append(ci)
                 opt.instances.append(inst)
                 # Also attach the picker to the PlayCard option itself so the
@@ -387,19 +388,19 @@ class CardPlayMixin(_HostBase):
                 # card's ability or the built-in PlayCard ability (the play-card
                 # flow keys on BuiltInResources.PlayCardAbilityTemplateId).
                 for inst2 in opt.instances:
-                    if str(inst2.opt_id.guid) != _hc.game_engine.PLAY_CARD_ABILITY_TEMPLATE_ID:
+                    if str(inst2.opt_id.guid) != game_engine.PLAY_CARD_ABILITY_TEMPLATE_ID:
                         continue
                     for idx, tid, targets in entries:
                         min_count, max_count = self._play_target_bounds(
                             play_plan, ag, idx)
                         inst2.target_ids.append(
-                            _hc.game_engine.ResourceId.from_str(tid))
+                            game_engine.ResourceId.from_str(tid))
                         inst2.min_target_counts.append(min_count)
                         inst2.max_target_counts.append(max_count)
                         tgt2 = game._make_event(
-                            _hc.game_engine.TargetInstanceSessionEventArgs)
+                            game_engine.TargetInstanceSessionEventArgs)
                         tgt2.target_index = idx
-                        tgt2.target_id = _hc.game_engine.ResourceId.from_str(tid)
+                        tgt2.target_id = game_engine.ResourceId.from_str(tid)
                         tgt2.targets = list(targets)
                         inst2.target_instances.append(tgt2)
                     break
@@ -429,16 +430,16 @@ class CardPlayMixin(_HostBase):
                 # CostInstance.
                 for inst in opt.instances:
                     if (str(inst.opt_id.guid) ==
-                            _hc.game_engine.PLAY_CARD_ABILITY_TEMPLATE_ID):
+                            game_engine.PLAY_CARD_ABILITY_TEMPLATE_ID):
                         ci = game._make_event(
-                            _hc.game_engine.CostInstanceSessionEventArgs)
+                            game_engine.CostInstanceSessionEventArgs)
                         _hc.HCPHandler._set_cost_instance_bounds(
                             ci, minimum, maximum)
                         ci.cost_type = cost_type_for_kind(cost.kind)
-                        ci.target_template_id = _hc.game_engine.ResourceId.from_str(
+                        ci.target_template_id = game_engine.ResourceId.from_str(
                             cost_guid)
-                        ci.targets = [_hc.game_engine.SessionCardId(
-                            _hc.game_engine.UID(int(uid))) for uid in cost_uids]
+                        ci.targets = [game_engine.SessionCardId(
+                            game_engine.UID(int(uid))) for uid in cost_uids]
                         inst.target_instances.append(ci)
                         break
             # Variable X cost (e.g. Burn to the Ground "Deal X damage"): attach
@@ -449,12 +450,12 @@ class CardPlayMixin(_HostBase):
             has_x_cost = play_plan.cost.variable
             if has_x_cost:
                 for inst in opt.instances:
-                    if str(inst.opt_id.guid) == _hc.game_engine.PLAY_CARD_ABILITY_TEMPLATE_ID:
-                        ci = game._make_event(_hc.game_engine.CostInstanceSessionEventArgs)
+                    if str(inst.opt_id.guid) == game_engine.PLAY_CARD_ABILITY_TEMPLATE_ID:
+                        ci = game._make_event(game_engine.CostInstanceSessionEventArgs)
                         minimum = play_plan.cost.variable_minimum
                         _hc.HCPHandler._set_cost_instance_bounds(ci, minimum, 0)
                         ci.cost_type = 256  # EAbilityCostType.XCostAbilityCostType
-                        ci.target_template_id = _hc.game_engine.ResourceId.invalid()
+                        ci.target_template_id = game_engine.ResourceId.invalid()
                         ci.targets = []
                         inst.target_instances.append(ci)
                         break
@@ -689,20 +690,20 @@ class CardPlayMixin(_HostBase):
                 session.session_id, int(uid), conn=_hc._db)
             if not row:
                 return
-            scid = _hc.game_engine.SessionCardId(_hc.game_engine.UID(int(uid)))
+            scid = game_engine.SessionCardId(game_engine.UID(int(uid)))
             self._card_full_data(game, scid, row[0])
             from rules_port.runtime_helpers import owner_uid
             owner = owner_uid(owner_id, pl_t, ai_t, bstate)
             collection = {
-                "hand": _hc.game_engine.ECardCollections.Hand,
-                "deck": _hc.game_engine.ECardCollections.Deck,
-                "discard": _hc.game_engine.ECardCollections.Discard,
-                "void": _hc.game_engine.ECardCollections.Void,
-                "warzone": _hc.game_engine.ECardCollections.Warzone,
-            }.get(location, _hc.game_engine.ECardCollections.Warzone)
+                "hand": game_engine.ECardCollections.Hand,
+                "deck": game_engine.ECardCollections.Deck,
+                "discard": game_engine.ECardCollections.Discard,
+                "void": game_engine.ECardCollections.Void,
+                "warzone": game_engine.ECardCollections.Warzone,
+            }.get(location, game_engine.ECardCollections.Warzone)
             cdef = game.card_defs.get(scid)
             game.push_card_updated(
-                scid, owner, collection, _hc.game_engine.card_type_from_db(row[1]),
+                scid, owner, collection, game_engine.card_type_from_db(row[1]),
                 template_id=row[0], state=int(row[2] or 0),
                 cost=cdef.cost if cdef else 0,
                 attack=cdef.attack if cdef else 0,
@@ -763,7 +764,7 @@ class CardPlayMixin(_HostBase):
                 if kind == "exhaust":
                     _hc.db_update_card_state(
                         session.session_id, uid,
-                        set_bits=_hc.game_engine.ECardStates.Tapped, conn=_hc._db)
+                        set_bits=game_engine.ECardStates.Tapped, conn=_hc._db)
                     _hc._db.commit()
                     push_zone(uid, owner_id, row[1])
                     continue
@@ -777,11 +778,11 @@ class CardPlayMixin(_HostBase):
                 if destination is None:
                     if kind == "reveal":
                         event = game._make_event(
-                            _hc.game_engine.CardsRevealedSessionEventArgs)
+                            game_engine.CardsRevealedSessionEventArgs)
                         event.player_id = (pl_t if owner_id else ai_t)
                         event.session_card_ids = [
-                            _hc.game_engine.SessionCardId(_hc.game_engine.UID(uid))]
-                        event.collections = [_hc.game_engine.ECardCollections.Warzone]
+                            game_engine.SessionCardId(game_engine.UID(uid))]
+                        event.collections = [game_engine.ECardCollections.Warzone]
                         event.owning_players = [event.player_id]
                         event.positions = [0]
                         game._push(event)
@@ -1115,8 +1116,8 @@ class CardPlayMixin(_HostBase):
         if not can_play_resource(
                 bstate, "player", limit=resource_limit):
             return False
-        pl_t = _hc.game_engine.UID.make(244, int(self.client_reck_id))
-        ai_t = _hc.game_engine.UID.make(_hc.game_engine.SERVICE_AI_UID_TYPE, 1000)
+        pl_t = game_engine.UID.make(244, int(self.client_reck_id))
+        ai_t = game_engine.UID.make(game_engine.SERVICE_AI_UID_TYPE, 1000)
         from domain.constants import PLAYED_CARD_POSITION
         from rules_port.zone_effects import move_card_to_zone
         from pvp_db import db_card_owner_zone_state
@@ -1166,18 +1167,18 @@ class CardPlayMixin(_HostBase):
         # The printed parent ability below invokes the authored target and
         # threshold effect.  Keep the resource play to one activation; the
         # manual picker would replace that ability's continuation.
-        scid = _hc.game_engine.SessionCardId(_hc.game_engine.UID(card_uid))
+        scid = game_engine.SessionCardId(game_engine.UID(card_uid))
         game.push_card_updated(
-            scid, pl_t, _hc.game_engine.ECardCollections.PlayedResources,
-            _hc.game_engine.ECardTypes.Resource, template_id=row[0])
+            scid, pl_t, game_engine.ECardCollections.PlayedResources,
+            game_engine.ECardTypes.Resource, template_id=row[0])
         game.push_resource_card_played(scid, pl_t, free=False)
         if current_grant or max_grant:
-            current = _hc.game_engine.PlayerCurrentResourcePoolChangedSessionEventArgs()
+            current = game_engine.PlayerCurrentResourcePoolChangedSessionEventArgs()
             current.player_id = pl_t; current.operation = 1
             current.delta = current_grant
             current.new_value = bstate["player_resources"]
             game._push(current)
-            total = _hc.game_engine.PlayerTotalResourcePoolChangedSessionEventArgs()
+            total = game_engine.PlayerTotalResourcePoolChangedSessionEventArgs()
             total.player_id = pl_t; total.operation = 1
             total.delta = max_grant
             total.new_value = bstate["player_total_resources"]
@@ -1185,7 +1186,7 @@ class CardPlayMixin(_HostBase):
         if threshold_changes:
             from rules_port.triggers import dispatch_native_trigger
             for flag, amount, change in threshold_changes:
-                threshold = _hc.game_engine.PlayerResourceThresholdChangedSessionEventArgs()
+                threshold = game_engine.PlayerResourceThresholdChangedSessionEventArgs()
                 threshold.player_id = pl_t; threshold.color = flag
                 threshold.operation = 1; threshold.delta = amount
                 threshold.new_value = change.new_value
@@ -1206,7 +1207,7 @@ class CardPlayMixin(_HostBase):
                     else:
                         bstate["gain_threshold_color"] = old_threshold_color
         if charge_delta:
-            charge = _hc.game_engine.ChampionChargePointsChangedSessionEventArgs()
+            charge = game_engine.ChampionChargePointsChangedSessionEventArgs()
             charge.player_id = pl_t; charge.operation = 1
             charge.delta = charge_delta
             charge.new_value = bstate["player_charges"]
@@ -1266,7 +1267,7 @@ class CardPlayMixin(_HostBase):
             self._push_phase_options_empty(
                 session, pl_t, ai_t, game=game, send=False)
             game.push_green_light(
-                pl_t, _hc.game_engine.EPriorityContext.ResolveTopOfChain)
+                pl_t, game_engine.EPriorityContext.ResolveTopOfChain)
             self._send_battle_events(session, game, pl_t)
         log_req(f"    RulesPort resource applied uid={card_uid} "
             f"resources={bstate['player_resources']} "
@@ -1324,10 +1325,10 @@ class CardPlayMixin(_HostBase):
             return reject("resource-card")
         bstate = _be.load_state(session)
         self._current_bstate = bstate
-        pl_t = _hc.game_engine.UID.make(244, int(self.client_reck_id))
-        ai_t = _hc.game_engine.UID.make(_hc.game_engine.SERVICE_AI_UID_TYPE, 1000)
+        pl_t = game_engine.UID.make(244, int(self.client_reck_id))
+        ai_t = game_engine.UID.make(game_engine.SERVICE_AI_UID_TYPE, 1000)
         game = self._fresh_game(session, pl_t, ai_t, bstate)
-        scid = _hc.game_engine.SessionCardId(_hc.game_engine.UID(card_uid))
+        scid = game_engine.SessionCardId(game_engine.UID(card_uid))
         _tpl, _ct, _name, cost, attack, defense, gem = self._card_full_data(
             game, scid, row[0], None)
         from rules_port.static_rules import effective_cost
@@ -1485,7 +1486,7 @@ class CardPlayMixin(_HostBase):
             for uid in mobilized:
                 db_update_card_state(
                     session.session_id, int(uid),
-                    set_bits=_hc.game_engine.ECardStates.Tapped, conn=_hc._db)
+                    set_bits=game_engine.ECardStates.Tapped, conn=_hc._db)
             _hc._db.commit()
         from rules_port.card_transactions import apply_card_play
         from pvp_db import db_card_state_value
@@ -1510,28 +1511,28 @@ class CardPlayMixin(_HostBase):
             scrounge=any(getattr(ability, "is_scrounge", False)
                          for ability in play_plan.cast_abilities),
             defer_voided_cards=True)
-        card_type = _hc.game_engine.card_type_from_db(row[4])
+        card_type = game_engine.card_type_from_db(row[4])
         game.push_card_updated(
-            scid, pl_t, _hc.game_engine.ECardCollections.CastSpells, card_type,
+            scid, pl_t, game_engine.ECardCollections.CastSpells, card_type,
             template_id=row[0], cost=cost, attack=attack, defense=defense,
             gems=gem)
         game.push_troop_card_played(scid, pl_t)
         for uid in mobilized:
             from pvp_db import db_card_zone_details
             mugid = int(uid)
-            mscid = _hc.game_engine.SessionCardId(_hc.game_engine.UID(mugid))
+            mscid = game_engine.SessionCardId(game_engine.UID(mugid))
             details = db_card_zone_details(
                 session.session_id, mugid, conn=_hc._db)
             mtpl, mct, _mname, mcost, matk, mdef, mgem = \
                 self._card_full_data(
                     game, mscid, details[0] if details else None)
             game.push_card_updated(
-                mscid, pl_t, _hc.game_engine.ECardCollections.Warzone, mct,
+                mscid, pl_t, game_engine.ECardCollections.Warzone, mct,
                 template_id=mtpl, cost=mcost, attack=matk, defense=mdef,
-                gems=mgem, state=int(_hc.game_engine.ECardStates.Tapped))
-        perm = card_type & (_hc.game_engine.ECardTypes.Troop |
-                            _hc.game_engine.ECardTypes.Artifact |
-                            _hc.game_engine.ECardTypes.Constant)
+                gems=mgem, state=int(game_engine.ECardStates.Tapped))
+        perm = card_type & (game_engine.ECardTypes.Troop |
+                            game_engine.ECardTypes.Artifact |
+                            game_engine.ECardTypes.Constant)
         # The client keys its chain view by a unique ability instance id (C#
         # ``Session.m_NextAbilityInstanceId``).  A hardcoded id collides with a
         # still-pending projected chain item, and ``queue_projected_chain``
@@ -1591,10 +1592,10 @@ class CardPlayMixin(_HostBase):
                 chain_descriptor, owner_id,
                 first_player_id=pl_t)
         game.push_ability_on_chain(
-            scid, _hc.game_engine.ResourceId.from_str(
-                _hc.game_engine.PLAY_CARD_ABILITY_TEMPLATE_ID),
+            scid, game_engine.ResourceId.from_str(
+                game_engine.PLAY_CARD_ABILITY_TEMPLATE_ID),
             target_card_ids=(
-                [_hc.game_engine.SessionCardId(_hc.game_engine.UID(int(uid)))
+                [game_engine.SessionCardId(game_engine.UID(int(uid)))
                  for uid in effect_targets]
                 if perm else None),
             ability_instance_id=inst_id)
@@ -1626,9 +1627,9 @@ class CardPlayMixin(_HostBase):
         holder = getattr(top_item, "priority_player_id", None)
         game.push_green_light(
             pl_t if holder is None or _hc._same_uid(holder, pl_t) else ai_t,
-            _hc.game_engine.EPriorityContext.ResolveTopOfChain)
+            game_engine.EPriorityContext.ResolveTopOfChain)
         if payment:
-            event = _hc.game_engine.PlayerCurrentResourcePoolChangedSessionEventArgs()
+            event = game_engine.PlayerCurrentResourcePoolChangedSessionEventArgs()
             event.player_id = pl_t; event.operation = 2
             event.delta = payment
             event.new_value = resource_change.new_value
@@ -1643,7 +1644,7 @@ class CardPlayMixin(_HostBase):
         self._push_phase_options_empty(session, pl_t, ai_t)
         chain_game = self._fresh_game(session, pl_t, ai_t, bstate)
         chain_game.push_green_light(
-            pl_t, _hc.game_engine.EPriorityContext.ResolveTopOfChain)
+            pl_t, game_engine.EPriorityContext.ResolveTopOfChain)
         self._send_battle_events(session, chain_game, pl_t)
         log_req(f"    RulesPort card play queued {row[3]} uid={card_uid} "
             f"payment={payment} x={x_cost}")
@@ -1766,11 +1767,11 @@ class CardPlayMixin(_HostBase):
                     # summoning sick (entered this turn without Speed); an artifact
                     # can use its [ACT] ability as soon as it is played.
                     cstate = card_state or 0
-                    if cstate & _hc.game_engine.ECardStates.Tapped:
+                    if cstate & game_engine.ECardStates.Tapped:
                         continue
                     if ("Troop" in str(_card_type or "")
-                            and not (cstate & _hc.game_engine.ECardStates.StartedATurnOnYourSide)
-                            and not ((attrs or 0) & _hc.game_engine.ECardAttributes.Speed)):
+                            and not (cstate & game_engine.ECardStates.StartedATurnOnYourSide)
+                            and not ((attrs or 0) & game_engine.ECardAttributes.Speed)):
                         continue
                 casting = 64 if graph.casting_behavior == "QuickAction" else 8
                 if casting != 64:
@@ -1781,8 +1782,8 @@ class CardPlayMixin(_HostBase):
                     # the AI has handed back a stale priority window.
                     if bstate.get("turn_player") != _be.PLAYER:
                         continue
-                    if phase not in (_hc.game_engine.ETurnPhases.FirstMainPhase,
-                                     _hc.game_engine.ETurnPhases.SecondMainPhase):
+                    if phase not in (game_engine.ETurnPhases.FirstMainPhase,
+                                     game_engine.ETurnPhases.SecondMainPhase):
                         continue
                     if not _be.stack_empty(bstate):
                         continue
@@ -1845,12 +1846,12 @@ class CardPlayMixin(_HostBase):
         # silently drops manual hand activations such as Tunnel.
         option_list = next(
             (event for event in reversed(game.events)
-             if isinstance(event, _hc.game_engine.PlayerOptionListSessionEventArgs)),
+             if isinstance(event, game_engine.PlayerOptionListSessionEventArgs)),
             None)
         if option_list is None:
             return
         for (card_uid, tpl_guid), abilities in affordable.items():
-            scid = _hc.game_engine.SessionCardId(_hc.game_engine.UID(int(card_uid)))
+            scid = game_engine.SessionCardId(game_engine.UID(int(card_uid)))
             # Default candidate pool: the player's warzone troops.  Abilities
             # with explicit target templates get the pool filtered through the
             # gamedata card filter (e.g. Prairie Scout's IsAttacking+IsTroop).
@@ -1861,10 +1862,10 @@ class CardPlayMixin(_HostBase):
             # the existing Play option instead of appending a second option
             # that would overwrite Play.
             opt = game.get_or_add_card_option(
-                option_list, scid, _hc.game_engine.ECardUsage.Activate)
+                option_list, scid, game_engine.ECardUsage.Activate)
             for ag in abilities:
-                inst = game._make_event(_hc.game_engine.OptionInstanceSessionEventArgs)
-                inst.opt_id = _hc.game_engine.ResourceId.from_str(ag)
+                inst = game._make_event(game_engine.OptionInstanceSessionEventArgs)
+                inst.opt_id = game_engine.ResourceId.from_str(ag)
                 graph = _hc._records_ability_graph(self, ag)
                 cost_guids = {str(guid).lower() for _kind, guid in
                               (graph.additional_cost_targets or ())} \
@@ -1885,7 +1886,7 @@ class CardPlayMixin(_HostBase):
                         max_counts.append(max(0, target.maximum)
                                           if target.maximum > 0 else 0)
                         inst.target_ids.append(
-                            _hc.game_engine.ResourceId.from_str(tid))
+                            game_engine.ResourceId.from_str(tid))
                         others = legal_targets_for(
                             _hc._db, session.session_id, self.user_profile["id"],
                             target, int(card_uid),
@@ -1904,10 +1905,10 @@ class CardPlayMixin(_HostBase):
                                 others = [r[0] for r in _hc.db_card_uids_in_zone(
                                     session.session_id, self.user_profile["id"],
                                     "warzone", conn=_hc._db)]
-                        tgt = game._make_event(_hc.game_engine.TargetInstanceSessionEventArgs)
+                        tgt = game._make_event(game_engine.TargetInstanceSessionEventArgs)
                         tgt.target_index = i
-                        tgt.target_id = _hc.game_engine.ResourceId.from_str(tid)
-                        tgt.targets = [_hc.game_engine.SessionCardId(_hc.game_engine.UID(int(u))) for u in others]
+                        tgt.target_id = game_engine.ResourceId.from_str(tid)
+                        tgt.targets = [game_engine.SessionCardId(game_engine.UID(int(u))) for u in others]
                         inst.target_instances.append(tgt)
                     inst.min_target_counts = min_counts if built else []
                     inst.max_target_counts = max_counts if built else []
@@ -1923,7 +1924,7 @@ class CardPlayMixin(_HostBase):
                         if len(candidates) < cost.minimum:
                             continue
                         ci = game._make_event(
-                            _hc.game_engine.CostInstanceSessionEventArgs)
+                            game_engine.CostInstanceSessionEventArgs)
                         minimum = cost.minimum
                         maximum = cost.maximum
                         if maximum < 0:
@@ -1931,17 +1932,17 @@ class CardPlayMixin(_HostBase):
                         _hc.HCPHandler._set_cost_instance_bounds(
                             ci, minimum, maximum)
                         ci.cost_type = cost_type_for_kind(cost.kind)
-                        ci.target_template_id = _hc.game_engine.ResourceId.from_str(
+                        ci.target_template_id = game_engine.ResourceId.from_str(
                             cost.guid)
-                        ci.targets = [_hc.game_engine.SessionCardId(
-                            _hc.game_engine.UID(int(uid))) for uid in candidates]
+                        ci.targets = [game_engine.SessionCardId(
+                            game_engine.UID(int(uid))) for uid in candidates]
                         inst.target_instances.append(ci)
                 variable_x, variable_min = _hc.HCPHandler._ability_x_cost_metadata(ag)
                 if variable_x:
-                    ci = game._make_event(_hc.game_engine.CostInstanceSessionEventArgs)
+                    ci = game._make_event(game_engine.CostInstanceSessionEventArgs)
                     _hc.HCPHandler._set_cost_instance_bounds(ci, variable_min, 0)
                     ci.cost_type = 256  # EAbilityCostType.XCostAbilityCostType
-                    ci.target_template_id = _hc.game_engine.ResourceId.invalid()
+                    ci.target_template_id = game_engine.ResourceId.invalid()
                     ci.targets = []
                     inst.target_instances.append(ci)
                 opt.instances.append(inst)
@@ -1949,23 +1950,23 @@ class CardPlayMixin(_HostBase):
                 if discard_prompt:
                     child_ability, discard_target = discard_prompt
                     hand = [
-                        _hc.game_engine.SessionCardId(_hc.game_engine.UID(int(uid)))
+                        game_engine.SessionCardId(game_engine.UID(int(uid)))
                         for (uid,) in _hc.db_card_uids_in_zone(
                             session.session_id, self.user_profile["id"],
                             "hand", conn=_hc._db)]
                     if hand:
                         child = game._make_event(
-                            _hc.game_engine.OptionInstanceSessionEventArgs)
-                        child.opt_id = _hc.game_engine.ResourceId.from_str(
+                            game_engine.OptionInstanceSessionEventArgs)
+                        child.opt_id = game_engine.ResourceId.from_str(
                             child_ability)
                         child.target_ids.append(
-                            _hc.game_engine.ResourceId.from_str(discard_target))
+                            game_engine.ResourceId.from_str(discard_target))
                         child.min_target_counts = [1]
                         child.max_target_counts = [1]
                         child_target = game._make_event(
-                            _hc.game_engine.TargetInstanceSessionEventArgs)
+                            game_engine.TargetInstanceSessionEventArgs)
                         child_target.target_index = 0
-                        child_target.target_id = _hc.game_engine.ResourceId.from_str(
+                        child_target.target_id = game_engine.ResourceId.from_str(
                             discard_target)
                         child_target.targets = hand
                         child.target_instances.append(child_target)
@@ -2139,7 +2140,7 @@ class CardPlayMixin(_HostBase):
         if getattr(self, "_resolving_ai_champion", False):
             th = bstate.get("ai_threshold", {}) or {}
         for color, qty in reqs:
-            flag = _hc.game_engine.SHARD_TO_FLAG.get(str(color).lower(), 0)
+            flag = game_engine.SHARD_TO_FLAG.get(str(color).lower(), 0)
             if flag and int(th.get(flag, 0) or 0) < qty:
                 return False
         return True
@@ -2183,7 +2184,7 @@ class CardPlayMixin(_HostBase):
         if not ability_ids:
             return {}
         hand_uids = _hc.db_game_cards_at_location_scalar(session.session_id, "hand", self.user_profile["id"])
-        hand = [_hc.game_engine.SessionCardId(_hc.game_engine.UID(r)) for r in hand_uids]
+        hand = [game_engine.SessionCardId(game_engine.UID(r)) for r in hand_uids]
         if not hand:
             return {}
         out = {}

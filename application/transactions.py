@@ -5,6 +5,7 @@ from typing import Any
 import re
 import struct
 from db import log_req
+import game_engine
 
 
 if TYPE_CHECKING:
@@ -40,18 +41,18 @@ class TransactionsMixin(_HostBase):
             pvp_state = pvp_load_state(session)
             if pvp_state:
                 my_pid = int(self.client_reck_id)
-                my_uid = _hc.game_engine.UID.make(244, my_pid)
+                my_uid = game_engine.UID.make(244, my_pid)
                 pvp_pids = [int(k) for k in (pvp_state.get("pids") or [])
                             if int(k) != my_pid]
                 opp_pid = pvp_pids[0] if pvp_pids else my_pid
-                opp_uid = _hc.game_engine.UID.make(244, opp_pid)
-                game_ps = _hc.game_engine.Game(int(session.session_id), my_uid, opp_uid)
+                opp_uid = game_engine.UID.make(244, opp_pid)
+                game_ps = game_engine.Game(int(session.session_id), my_uid, opp_uid)
                 phase = pvp_state.get("phase", 3)
-                turn_uid = _hc.game_engine.UID.make(244, pvp_state["turn_pid"])
-                if phase == _hc.game_engine.ETurnPhases.Mulligan:
+                turn_uid = game_engine.UID.make(244, pvp_state["turn_pid"])
+                if phase == game_engine.ETurnPhases.Mulligan:
                     if pvp_state.get("mulligan_pid") == my_pid:
                         game_ps.push_green_light(
-                            my_uid, _hc.game_engine.EPriorityContext.Normal)
+                            my_uid, game_engine.EPriorityContext.Normal)
                         pkt_ps = game_ps.make_network_packet(my_uid)
                         dw_ps = _hc.encode_datawrapper(
                             0, 3055,
@@ -69,16 +70,16 @@ class TransactionsMixin(_HostBase):
                     else:
                         self._push_transaction_ack(session)
                         log_req(f"    RequestPrioritySync (PvP): Mulligan — {my_pid} not the actor, acked")
-                elif phase == _hc.game_engine.ETurnPhases.PickGoesFirst:
+                elif phase == game_engine.ETurnPhases.PickGoesFirst:
                     winner_pid = pvp_state.get(
                         "goes_first_pid", pvp_state["turn_pid"])
                     if my_pid == winner_pid:
-                        winner_uid = _hc.game_engine.UID.make(244, winner_pid)
+                        winner_uid = game_engine.UID.make(244, winner_pid)
                         game_ps.push_turn_phase(
-                            _hc.game_engine.ETurnPhases.PickGoesFirst,
+                            game_engine.ETurnPhases.PickGoesFirst,
                             winner_uid, winner_uid)
                         game_ps.push_green_light(
-                            my_uid, _hc.game_engine.EPriorityContext.Normal)
+                            my_uid, game_engine.EPriorityContext.Normal)
                         pkt_ps = game_ps.make_network_packet(my_uid)
                         dw_ps = _hc.encode_datawrapper(
                             0, 3055,
@@ -99,7 +100,7 @@ class TransactionsMixin(_HostBase):
                 else:
                     game_ps.push_turn_phase(phase, turn_uid, my_uid)
                     game_ps.push_green_light(
-                        my_uid, _hc.game_engine.EPriorityContext.Normal)
+                        my_uid, game_engine.EPriorityContext.Normal)
                     pkt_ps = game_ps.make_network_packet(my_uid)
                     dw_ps = _hc.encode_datawrapper(
                         0, 3055,
@@ -117,8 +118,8 @@ class TransactionsMixin(_HostBase):
             return True
 
         _be = self._checkpoint_engine(session)
-        pl_t = _hc.game_engine.UID.make(244, int(self.client_reck_id))
-        ai_t = _hc.game_engine.UID.make(_hc.game_engine.SERVICE_AI_UID_TYPE, 1000)
+        pl_t = game_engine.UID.make(244, int(self.client_reck_id))
+        ai_t = game_engine.UID.make(game_engine.SERVICE_AI_UID_TYPE, 1000)
         try:
             bstate = _be.load_state(session)
             self._current_bstate = bstate
@@ -137,10 +138,10 @@ class TransactionsMixin(_HostBase):
             game.push_player_updated(
                 ai_t, champ_id=getattr(self, "_ai_champ_scid", None))
             self._send_battle_events(session, game, pl_t)
-            if phase == _hc.game_engine.ETurnPhases.DeclareAttack:
+            if phase == game_engine.ETurnPhases.DeclareAttack:
                 self._push_attack_options(session, pl_t, ai_t)
-            elif phase in (_hc.game_engine.ETurnPhases.FirstMainPhase,
-                           _hc.game_engine.ETurnPhases.SecondMainPhase):
+            elif phase in (game_engine.ETurnPhases.FirstMainPhase,
+                           game_engine.ETurnPhases.SecondMainPhase):
                 self._push_main_phase_options(session, pl_t, ai_t)
             else:
                 self._push_phase_options_empty(session, pl_t, ai_t)
@@ -168,12 +169,12 @@ class TransactionsMixin(_HostBase):
                 phase = held_phase
             game = self._fresh_game(session, pl_t, ai_t, bstate)
             game.push_turn_phase(phase, ai_t, pl_t)
-            context = (_hc.game_engine.EPriorityContext.Normal
-                       if phase == _hc.game_engine.ETurnPhases.DeclareDefense
-                       else _hc.game_engine.EPriorityContext.ResolveTopOfChain)
+            context = (game_engine.EPriorityContext.Normal
+                       if phase == game_engine.ETurnPhases.DeclareDefense
+                       else game_engine.EPriorityContext.ResolveTopOfChain)
             game.push_green_light(pl_t, context)
             self._send_battle_events(session, game, pl_t)
-            if phase == _hc.game_engine.ETurnPhases.DeclareDefense:
+            if phase == game_engine.ETurnPhases.DeclareDefense:
                 self._push_blocker_options(session, pl_t, ai_t)
             else:
                 self._push_phase_options_empty(session, pl_t, ai_t)
@@ -281,11 +282,11 @@ class TransactionsMixin(_HostBase):
                     h = _hc.player_handlers.get(apid)
                     if not h: continue
                     aopp = pids[0] if pids[1] == apid else pids[1]
-                    pl = _hc.game_engine.UID.make(244, apid)
-                    op = _hc.game_engine.UID.make(244, aopp)
-                    g = _hc.game_engine.Game(int(session.session_id), pl, op)
+                    pl = game_engine.UID.make(244, apid)
+                    op = game_engine.UID.make(244, aopp)
+                    g = game_engine.Game(int(session.session_id), pl, op)
                     for idx, (cu, tg) in enumerate(hands[int(apid)]):
-                        scid = _hc.game_engine.SessionCardId(_hc.game_engine.UID(int(cu)))
+                        scid = game_engine.SessionCardId(game_engine.UID(int(cu)))
                         # Populate the CardDef (cost/atk/def/thresholds/
                         # abilities/gems) so the client renders the hand
                         # and the Mulligan keep/redraw dialog correctly.
@@ -293,15 +294,15 @@ class TransactionsMixin(_HostBase):
                             self._card_full_data(
                                 g, scid, tg,
                                 instance_projection=hand_projections.get(int(cu)))
-                        g.push_card_updated(scid, pl, _hc.game_engine.ECardCollections.Hand,
+                        g.push_card_updated(scid, pl, game_engine.ECardCollections.Hand,
                                             ct, template_id=tg, gems=gem_type)
                     for idx, (cu, tg) in enumerate(hands[int(aopp)]):
-                        scid = _hc.game_engine.SessionCardId(_hc.game_engine.UID(int(cu)))
+                        scid = game_engine.SessionCardId(game_engine.UID(int(cu)))
                         _tpl_g, ct, _nm, _c, _a, _d, gem_type = \
                             self._card_full_data(
                                 g, scid, tg,
                                 instance_projection=hand_projections.get(int(cu)))
-                        g.push_card_updated(scid, op, _hc.game_engine.ECardCollections.Hand, ct,
+                        g.push_card_updated(scid, op, game_engine.ECardCollections.Hand, ct,
                                             template_id=tg, nulling=True, gems=gem_type)
                     # Tell each client who draws first and who plays
                     # first.  Order matters: the Draw event first, then
@@ -312,19 +313,19 @@ class TransactionsMixin(_HostBase):
                     # Draw-then-Play the picker's own client shows no
                     # opponent message and the opponent's client shows
                     # the correct "chose to Play/Draw".
-                    g.push_player_wishes_to_draw_first(_hc.game_engine.UID.make(244, draw_first_pid))
-                    g.push_player_wishes_to_play_first(_hc.game_engine.UID.make(244, play_first_pid))
+                    g.push_player_wishes_to_draw_first(game_engine.UID.make(244, draw_first_pid))
+                    g.push_player_wishes_to_play_first(game_engine.UID.make(244, play_first_pid))
                     # MulliganState uses the same active-player contract as
                     # C#: only play_first_pid starts with the dialog and
                     # priority. Both clients receive the same global phase
                     # owner; the waiting player does not get a temporary
                     # local priority that would open a second dialog.
-                    mulligan_uid = _hc.game_engine.UID.make(
+                    mulligan_uid = game_engine.UID.make(
                         244, play_first_pid)
                     g.push_disable_interface(apid != play_first_pid)
                     g.push_green_light(
-                        mulligan_uid, _hc.game_engine.EPriorityContext.Normal)
-                    g.push_turn_phase(_hc.game_engine.ETurnPhases.Mulligan,
+                        mulligan_uid, game_engine.EPriorityContext.Normal)
+                    g.push_turn_phase(game_engine.ETurnPhases.Mulligan,
                                       mulligan_uid, mulligan_uid)
                     pkt = g.make_network_packet(pl)
                     dw = _hc.encode_datawrapper(0, 3055, _hc.compress_gzip(_hc.encode_sync_event(pkt)), 1,
@@ -336,8 +337,8 @@ class TransactionsMixin(_HostBase):
                     log_req(f"    PvP choose: hand to pid {apid}")
             else:
                 _push_to_both_players(session, self, lambda g, pt:
-                    [g.push_turn_phase(_hc.game_engine.ETurnPhases.Mulligan, pt, pt),
-                     g.push_green_light(pt, _hc.game_engine.EPriorityContext.Normal)], log_req)
+                    [g.push_turn_phase(game_engine.ETurnPhases.Mulligan, pt, pt),
+                     g.push_green_light(pt, game_engine.EPriorityContext.Normal)], log_req)
             return True
         else:
             # The coin-flip winner chose Play or Draw. FRA can resolve this
@@ -376,9 +377,9 @@ class TransactionsMixin(_HostBase):
                 encounter_data["_campaign_mulligan_redraws"] = 0
             session.encounter_data = encounter_data
             session._persist()
-            pl_t = _hc.game_engine.UID.make(244, int(self.client_reck_id))
-            ai_t = _hc.game_engine.UID.make(_hc.game_engine.SERVICE_AI_UID_TYPE, 1000)
-            game = _hc.game_engine.Game(session.session_id, pl_t, ai_t)
+            pl_t = game_engine.UID.make(244, int(self.client_reck_id))
+            ai_t = game_engine.UID.make(game_engine.SERVICE_AI_UID_TYPE, 1000)
+            game = game_engine.Game(session.session_id, pl_t, ai_t)
             # Draw the opening hands NOW — like PvP, PreGame and
             # PickGoesFirst show empty hands; each player draws after the
             # Play/Draw pick. Campaign uses the class/talent opening-hand
@@ -406,24 +407,24 @@ class TransactionsMixin(_HostBase):
                  for card_uid, _template_guid in hand],
                 conn=_hc._db)
             for idx, (cu, tg) in enumerate(player_hand):
-                scid = _hc.game_engine.SessionCardId(
-                    _hc.game_engine.UID(int(cu)))
+                scid = game_engine.SessionCardId(
+                    game_engine.UID(int(cu)))
                 _tpl_g, ct, _nm, _c, _a, _d, gem_type = \
                     self._card_full_data(
                         game, scid, tg,
                         instance_projection=opening_hand_projections.get(int(cu)))
                 game.push_card_updated(
-                    scid, pl_t, _hc.game_engine.ECardCollections.Hand,
+                    scid, pl_t, game_engine.ECardCollections.Hand,
                     ct, template_id=tg, gems=gem_type)
             for idx, (cu, tg) in enumerate(ai_hand):
-                scid = _hc.game_engine.SessionCardId(
-                    _hc.game_engine.UID(int(cu)))
+                scid = game_engine.SessionCardId(
+                    game_engine.UID(int(cu)))
                 _tpl_g, ct, _nm, _c, _a, _d, gem_type = \
                     self._card_full_data(
                         game, scid, tg,
                         instance_projection=opening_hand_projections.get(int(cu)))
                 game.push_card_updated(
-                    scid, ai_t, _hc.game_engine.ECardCollections.Hand,
+                    scid, ai_t, game_engine.ECardCollections.Hand,
                     ct, template_id=tg, nulling=True, gems=gem_type)
             if ai_choice:
                 if chose_draw:
@@ -441,7 +442,7 @@ class TransactionsMixin(_HostBase):
                 session.encounter_data = encounter_data
                 session._persist()
             self._sync_rules_port_setup_checkpoint(
-                session, _hc.game_engine.ETurnPhases.Mulligan, pl_t)
+                session, game_engine.ETurnPhases.Mulligan, pl_t)
             if game.events:
                 pkt = game.make_network_packet(pl_t)
                 dw = _hc.encode_datawrapper(0, 3055, _hc.compress_gzip(_hc.encode_sync_event(pkt)), 1,
@@ -495,15 +496,15 @@ class TransactionsMixin(_HostBase):
                         # Tell BOTH clients the keeper's hand is
                         # accepted. The opponent also needs the event
                         # to recompute the keeper's deck count.
-                        pl_t = _hc.game_engine.UID.make(244, my_pid)
+                        pl_t = game_engine.UID.make(244, my_pid)
                         pids = db_game_session_pids(session.session_id)
                         other_pid = pids[0] if pids[1] == my_pid else pids[1]
-                        other_uid = _hc.game_engine.UID.make(244, other_pid)
+                        other_uid = game_engine.UID.make(244, other_pid)
                         for _keep_pid in pids:
                             _keep_h = _hc.player_handlers.get(_keep_pid)
                             if not _keep_h:
                                 continue
-                            g = _hc.game_engine.Game(int(session.session_id), pl_t, other_uid)
+                            g = game_engine.Game(int(session.session_id), pl_t, other_uid)
                             # The keeper has finished their decision.  Disable
                             # both clients while the other player's mulligan
                             # decision is pending; the next prompt enables
@@ -526,8 +527,8 @@ class TransactionsMixin(_HostBase):
                         pvp_mulligan_next(session, state, my_pid)
             return True
         else:
-            pl_t = _hc.game_engine.UID.make(244, int(self.client_reck_id))
-            ai_t = _hc.game_engine.UID.make(_hc.game_engine.SERVICE_AI_UID_TYPE, 1000)
+            pl_t = game_engine.UID.make(244, int(self.client_reck_id))
+            ai_t = game_engine.UID.make(game_engine.SERVICE_AI_UID_TYPE, 1000)
             # The selected Fortune is consumed when the human finishes the
             # opening-hand decision.  ReadyToStartGame has its own local
             # campaign-id variable, so derive it again here rather than
@@ -539,7 +540,7 @@ class TransactionsMixin(_HostBase):
             except (TypeError, ValueError):
                 camp_id = 0
         if not handled:
-            game = _hc.game_engine.Game(session.session_id, pl_t, ai_t)
+            game = game_engine.Game(session.session_id, pl_t, ai_t)
             game.player_resources = 0
             game.player_total_resources = 0
             game.max_hand_size = self._max_hand_size(session)
@@ -558,7 +559,7 @@ class TransactionsMixin(_HostBase):
             rows = _hc.db_hand_cards_raw(session.session_id, self.user_profile["id"])
             hand_cards = []  # list of (scid, cost)
             for r in rows:
-                scid = _hc.game_engine.SessionCardId(_hc.game_engine.UID(r[0]))
+                scid = game_engine.SessionCardId(game_engine.UID(r[0]))
                 instance_id = r[1]
                 # Resolve template data via the stored template_guid — one
                 # path for both instance-based (FRA) and GUID (campaign/AI)
@@ -566,9 +567,9 @@ class TransactionsMixin(_HostBase):
                 t = self._template_by_guid(r[2])
                 if t:
                     tpl_guid, ct_name, _name, cost, atk, def_ = t
-                    ct = _hc.game_engine.card_type_from_db(ct_name)
+                    ct = game_engine.card_type_from_db(ct_name)
                 else:
-                    ct = _hc.game_engine.ECardTypes.Troop
+                    ct = game_engine.ECardTypes.Troop
                     cost = 0
                 hand_cards.append((scid, cost))
                 # Full card data from the template via _card_full_data so
@@ -578,7 +579,7 @@ class TransactionsMixin(_HostBase):
                 # keyword the client renders from the attributes bitmask.
                 _tpl_g, ct, _nm, _c, _a, _d, gem_type = self._card_full_data(
                     game, scid, r[2], instance_id)
-                game.push_card_updated(scid, pl_t, _hc.game_engine.ECardCollections.Hand, ct,
+                game.push_card_updated(scid, pl_t, game_engine.ECardCollections.Hand, ct,
                     template_id=r[2], gems=gem_type)
 
             # The human kept: push the starting-hand acceptance + the AI's
@@ -596,9 +597,9 @@ class TransactionsMixin(_HostBase):
             # completed its active-first mulligan during setup.
             if not ai_mulligan_done:
                 game.push_green_light(
-                    ai_t, _hc.game_engine.EPriorityContext.Normal)
+                    ai_t, game_engine.EPriorityContext.Normal)
                 game.push_turn_phase(
-                    _hc.game_engine.ETurnPhases.Mulligan, ai_t, ai_t)
+                    game_engine.ETurnPhases.Mulligan, ai_t, ai_t)
                 self._resolve_ai_mulligan(session, game, ai_t)
             setup_encounter = dict(session.encounter_data or {})
             for transient_key in (
@@ -610,7 +611,7 @@ class TransactionsMixin(_HostBase):
             session.encounter_data = setup_encounter
             session._persist()
             first_turn_uid = pl_t if play_first_is_player else ai_t
-            game.push_turn_phase(_hc.game_engine.ETurnPhases.StartGame,
+            game.push_turn_phase(game_engine.ETurnPhases.StartGame,
                                  first_turn_uid, first_turn_uid)
             # Initialise the DB-backed battle state with the player who won the
             # subsequent Play/Draw choice. (The choice can belong to the AI.)
@@ -847,10 +848,10 @@ class TransactionsMixin(_HostBase):
             if handled:
                 self._push_transaction_ack(session)
                 return True
-        pl_t = _hc.game_engine.UID.make(244, int(self.client_reck_id))
-        ai_t = _hc.game_engine.UID.make(_hc.game_engine.SERVICE_AI_UID_TYPE, 1000)
+        pl_t = game_engine.UID.make(244, int(self.client_reck_id))
+        ai_t = game_engine.UID.make(game_engine.SERVICE_AI_UID_TYPE, 1000)
         from rules_port import lifecycle as _be
-        gd = _hc.game_engine.Game(session.session_id, pl_t, ai_t)
+        gd = game_engine.Game(session.session_id, pl_t, ai_t)
         card_uids = []
         if card_uid is not None:
             try:
@@ -907,7 +908,7 @@ class TransactionsMixin(_HostBase):
         if (hand_count > self._max_hand_size(session) and
                 not self._hand_size_unlimited(session, bstate)):
             g2 = self._fresh_game(session, pl_t, ai_t, bstate)
-            g2.push_green_light(pl_t, _hc.game_engine.EPriorityContext.Normal)
+            g2.push_green_light(pl_t, game_engine.EPriorityContext.Normal)
             g2.push_player_updated(pl_t, champ_id=getattr(self, "_player_champ_scid", None))
             g2.push_player_updated(ai_t, champ_id=getattr(self, "_ai_champ_scid", None))
             self._send_battle_events(session, g2, pl_t)
@@ -935,10 +936,10 @@ class TransactionsMixin(_HostBase):
                 db_game_session_pids, pvp_load_state, pvp_save_state,
                 pvp_session_lock)
             my_pid = int(self.client_reck_id)
-            pl_t = _hc.game_engine.UID.make(244, my_pid)
+            pl_t = game_engine.UID.make(244, my_pid)
             pids = db_game_session_pids(session.session_id)
             opp_pid = pids[0] if pids[1] == my_pid else pids[1]
-            _hc.game_engine.UID.make(244, opp_pid)
+            game_engine.UID.make(244, opp_pid)
             from pvp_db import (db_rules_port_hand_rows,
                                 db_rules_port_redraw_hand)
             hand_rows = db_rules_port_hand_rows(session.session_id, my_pid)
@@ -946,7 +947,7 @@ class TransactionsMixin(_HostBase):
             draw_count = max(0, redraw_count - 1)
             log_req(f"    PvP mulligan redraw: {redraw_count} -> {draw_count} cards")
             # Save old card_uids so we can push them back to deck.
-            old_scids = [_hc.game_engine.UID(row[1]) for row in hand_rows]
+            old_scids = [game_engine.UID(row[1]) for row in hand_rows]
             _old_rows, new_rows = db_rules_port_redraw_hand(
                 session.session_id, my_pid, draw_count)
             with pvp_session_lock(session):
@@ -965,9 +966,9 @@ class TransactionsMixin(_HostBase):
                 h = _hc.player_handlers.get(pid)
                 if not h: continue
                 is_me = (pid == my_pid)
-                p_uid = _hc.game_engine.UID.make(244, pid)
-                o_uid = _hc.game_engine.UID.make(244, opp_pid if is_me else my_pid)
-                g = _hc.game_engine.Game(int(session.session_id), p_uid, o_uid)
+                p_uid = game_engine.UID.make(244, pid)
+                o_uid = game_engine.UID.make(244, opp_pid if is_me else my_pid)
+                g = game_engine.Game(int(session.session_id), p_uid, o_uid)
                 from rules_port.host_mutations import project_mulligan_cards
                 project_mulligan_cards(
                     self, g, pl_t, _old_rows, new_rows,
@@ -996,9 +997,9 @@ class TransactionsMixin(_HostBase):
             # Redrawing retains the active player's priority and Mulligan UI.
             handled = True
         if not handled:
-            pl_t = _hc.game_engine.UID.make(244, int(self.client_reck_id))
-            ai_t = _hc.game_engine.UID.make(_hc.game_engine.SERVICE_AI_UID_TYPE, 1000)
-            game2 = _hc.game_engine.Game(session.session_id, pl_t, ai_t)
+            pl_t = game_engine.UID.make(244, int(self.client_reck_id))
+            ai_t = game_engine.UID.make(game_engine.SERVICE_AI_UID_TYPE, 1000)
+            game2 = game_engine.Game(session.session_id, pl_t, ai_t)
 
             # Fetch deck's active_gems ONCE (not per card)
             arena_lookup = _hc.db_get_arena_state(self.user_profile["id"])
@@ -1102,8 +1103,8 @@ class TransactionsMixin(_HostBase):
         """Resolve target data supplied for a pending ability prompt."""
         import hconnect_server as _hc
         inner_bytes = transaction.inner_bytes
-        pl_t = _hc.game_engine.UID.make(244, int(self.client_reck_id))
-        ai_t = _hc.game_engine.UID.make(_hc.game_engine.SERVICE_AI_UID_TYPE, 1000)
+        pl_t = game_engine.UID.make(244, int(self.client_reck_id))
+        ai_t = game_engine.UID.make(game_engine.SERVICE_AI_UID_TYPE, 1000)
         _be = self._checkpoint_engine(session)
         bstate = _be.load_state(session)
         self._current_bstate = bstate
@@ -1141,10 +1142,10 @@ class TransactionsMixin(_HostBase):
             _be.save_state(session, bstate)
             g = self._fresh_game(session, pl_t, ai_t, bstate)
             g.push_ability_on_chain(
-                _hc.game_engine.SessionCardId(_hc.game_engine.UID(src)),
-                _hc.game_engine.ResourceId.from_str(ag),
+                game_engine.SessionCardId(game_engine.UID(src)),
+                game_engine.ResourceId.from_str(ag),
                 ability_instance_id=inst_id)
-            g.push_green_light(pl_t, _hc.game_engine.EPriorityContext.ResolveTopOfChain)
+            g.push_green_light(pl_t, game_engine.EPriorityContext.ResolveTopOfChain)
             self._send_battle_events(session, g, pl_t)
             self._push_transaction_ack(session)
             log_req(f"    Trigger target chosen: {ag[:8]} "
@@ -1180,12 +1181,12 @@ class TransactionsMixin(_HostBase):
                 # to the AI's graveyard; a player card to the player's).
                 gd_owner, owner_uid = self._discard_card_to_owner(
                     session, pl_t, ai_t, int(discard_card_uid))
-                gd = gd_owner if gd_owner else _hc.game_engine.Game(session.session_id, pl_t, ai_t)
+                gd = gd_owner if gd_owner else game_engine.Game(session.session_id, pl_t, ai_t)
                 tpl_d = "00000000-0000-0000-0000-000000000000"
                 # Generic post-ability rule: re-grant priority to the
                 # activating player after the discard resolves (the class-23
                 # prompt consumed the priority window).
-                gd.push_green_light(pl_t, _hc.game_engine.EPriorityContext.Normal)
+                gd.push_green_light(pl_t, game_engine.EPriorityContext.Normal)
                 self._send_battle_events(session, gd, pl_t)
                 self._push_main_phase_options(session, pl_t, ai_t)
                 log_req(f"    Discard (class-23 follow-up): {discard_card_uid} owner={owner_uid} ({tpl_d})")
@@ -1220,8 +1221,8 @@ class TransactionsMixin(_HostBase):
         inner_bytes = transaction.inner_bytes
         from rules_port.persistence import load_state as load_checkpoint
         from rules_port.persistence import save_state as save_checkpoint
-        pl_t = _hc.game_engine.UID.make(244, int(self.client_reck_id))
-        ai_t = _hc.game_engine.UID.make(_hc.game_engine.SERVICE_AI_UID_TYPE, 1000)
+        pl_t = game_engine.UID.make(244, int(self.client_reck_id))
+        ai_t = game_engine.UID.make(game_engine.SERVICE_AI_UID_TYPE, 1000)
         bstate = load_checkpoint(session)
         self._current_bstate = bstate
         attackers = {int(k): int(v) for k, v in (bstate.get("ai_attackers") or {}).items()}
@@ -1297,16 +1298,16 @@ class TransactionsMixin(_HostBase):
         if block_uids:
             _hc.db_bulk_blocker_state(session.session_id, list(block_uids))
         game = self._fresh_game(session, pl_t, ai_t, bstate)
-        player_champ_scid = getattr(self, "_player_champ_scid", None) or _hc.game_engine.SessionCardId(pl_t)
+        player_champ_scid = getattr(self, "_player_champ_scid", None) or game_engine.SessionCardId(pl_t)
         combats = []
         for u in attackers:
-            scid = _hc.game_engine.SessionCardId(_hc.game_engine.UID(u))
+            scid = game_engine.SessionCardId(game_engine.UID(u))
             combat_id = self._wire_combat_id_for_attacker(
                 session, ai_t, u, u & 0xFFFF)
-            blockers = [_hc.game_engine.SessionCardId(_hc.game_engine.UID(int(b)))
+            blockers = [game_engine.SessionCardId(game_engine.UID(int(b)))
                         for b in blockers_map.get(u, [])]
             game.push_blockers_assigned(combat_id, scid, player_champ_scid, blockers)
-            cs = _hc.game_engine.CombatSessionEventArgs()
+            cs = game_engine.CombatSessionEventArgs()
             cs.player_id = ai_t
             cs.id = combat_id
             cs.attacker = scid
@@ -1351,7 +1352,7 @@ class TransactionsMixin(_HostBase):
             # that window: pass the defender's priority so the port moves on to
             # DeclareDefensePriorityWindow, where the chain resolves.
             if (authoritative_port.current_turn_phase ==
-                    _hc.game_engine.ETurnPhases.DeclareDefense and
+                    game_engine.ETurnPhases.DeclareDefense and
                     authoritative_port.action_stack.priority_player_id is not None):
                 authoritative_port.pass_player_priority(
                     authoritative_port.action_stack.priority_player_id)
@@ -1385,8 +1386,8 @@ class TransactionsMixin(_HostBase):
         from rules_port.persistence import load_state as load_checkpoint
         from rules_port.persistence import save_state as save_checkpoint
         from rules_port.lifecycle import advance_phase as advance_checkpoint
-        pl_t = _hc.game_engine.UID.make(244, int(self.client_reck_id))
-        ai_t = _hc.game_engine.UID.make(_hc.game_engine.SERVICE_AI_UID_TYPE, 1000)
+        pl_t = game_engine.UID.make(244, int(self.client_reck_id))
+        ai_t = game_engine.UID.make(game_engine.SERVICE_AI_UID_TYPE, 1000)
         bstate = load_checkpoint(session)
         self._current_bstate = bstate
         # Extract the attacking card UIDs: every Card-type SessionCardId
@@ -1440,15 +1441,15 @@ class TransactionsMixin(_HostBase):
         # Also mark each attacker Attacking | HasAttacked | Tapped (the
         # client renders the tap + attack line from these states) and
         # persist in card_state for reconnect.
-        game = _hc.game_engine.Game(session.session_id, pl_t, ai_t)
-        ai_champ_scid = ai_champ_uid if ai_champ_uid else _hc.game_engine.SessionCardId(ai_t)
+        game = game_engine.Game(session.session_id, pl_t, ai_t)
+        ai_champ_scid = ai_champ_uid if ai_champ_uid else game_engine.SessionCardId(ai_t)
         combats = []
         # Only the newly committed attackers get events here — the
         # auto-declared ForceAttack troops already got their
         # AttackDeclared / CombatListing when the phase opened.
         new_attackers = [u for u in attackers if u not in existing]
         for i, u in enumerate(new_attackers):
-            cid = _hc.game_engine.SessionCardId(_hc.game_engine.UID(u))
+            cid = game_engine.SessionCardId(game_engine.UID(u))
             combat_id = self._wire_combat_id_for_attacker(
                 session, pl_t, u, u & 0xFFFF)
             game.push_attack_declared(combat_id, pl_t, ai_champ_scid, cid)
@@ -1460,10 +1461,10 @@ class TransactionsMixin(_HostBase):
             attrs = (trow[1] if trow and trow[1] else 0) | (trow[2] if trow and trow[2] else 0)
             # Mark the troop as attacking (and tapped UNLESS Steadfast —
             # Steadfast troops don't tap when attacking). Persist + push.
-            state = (_hc.game_engine.ECardStates.Attacking |
-                     _hc.game_engine.ECardStates.HasAttacked)
-            if not (attrs & _hc.game_engine.ECardAttributes.Steadfast):
-                state |= _hc.game_engine.ECardStates.Tapped
+            state = (game_engine.ECardStates.Attacking |
+                     game_engine.ECardStates.HasAttacked)
+            if not (attrs & game_engine.ECardAttributes.Steadfast):
+                state |= game_engine.ECardStates.Tapped
             from rules_port.host_mutations import apply_attacking_card_state
             apply_attacking_card_state(session, int(u), state)
             from pvp_db import db_card_state_value
@@ -1486,11 +1487,11 @@ class TransactionsMixin(_HostBase):
             # such as Spider Nest's granted "when this exhausts" ability fire
             # for player-declared attackers too.  Steadfast attackers do not
             # become tapped and therefore must not emit this event.
-            if state & _hc.game_engine.ECardStates.Tapped:
+            if state & game_engine.ECardStates.Tapped:
                 self._dispatch_native_trigger(
                     game, session, pl_t, ai_t, bstate, "CardTappedEvent",
                     int(u), self.user_profile["id"])
-            cs = _hc.game_engine.CombatSessionEventArgs()
+            cs = game_engine.CombatSessionEventArgs()
             cs.player_id = pl_t
             cs.id = combat_id
             cs.attacker = cid
@@ -1513,7 +1514,7 @@ class TransactionsMixin(_HostBase):
             # the complete attack declaration, carrying the total attacker
             # count for metadata conditions such as "three or more".
             player_champ = (getattr(self, "_player_champ_scid", None) or
-                            _hc.game_engine.SessionCardId(pl_t))
+                            game_engine.SessionCardId(pl_t))
             from rules_port.tac import _tac_attr_hash
             self._dispatch_native_trigger(
                 game, session, pl_t, ai_t, bstate, "CardsAttackedEvent",
@@ -1538,22 +1539,22 @@ class TransactionsMixin(_HostBase):
             advance_phase as advance_checkpoint,
             current_phase as current_checkpoint_phase,
             load_state as load_checkpoint, save_state as save_checkpoint)
-        pl_t = _hc.game_engine.UID.make(244, int(self.client_reck_id))
-        ai_t = _hc.game_engine.UID.make(_hc.game_engine.SERVICE_AI_UID_TYPE, 1000)
+        pl_t = game_engine.UID.make(244, int(self.client_reck_id))
+        ai_t = game_engine.UID.make(game_engine.SERVICE_AI_UID_TYPE, 1000)
         bstate = load_checkpoint(session)
         self._current_bstate = bstate
         cur_phase = current_checkpoint_phase(bstate)
         native_phase_advanced = False
         from rules_port.session import _same_player_uid
         port = getattr(session, "_rules_port_session", None)
-        if (cur_phase == _hc.game_engine.ETurnPhases.AssignDamage and port is not None and
+        if (cur_phase == game_engine.ETurnPhases.AssignDamage and port is not None and
                 _same_player_uid(port.active_player_id, ai_t)):
             # The AI attacks this turn, so the damage is already resolved and the damage order is not ours to give.
             # Re-resolving on a stale order from the client would deal the damage twice.
             log_req("    AssignDamageOrder ignored: the AI is the attacking player")
             self._push_transaction_ack(session)
             return True
-        if cur_phase == _hc.game_engine.ETurnPhases.AssignDamage:
+        if cur_phase == game_engine.ETurnPhases.AssignDamage:
             n_att = len(bstate.get("player_attackers") or {})
             # The AssignDamageOrderTransaction carries the player's
             # chosen blocker order (weakest-to-toughest) per combat:
@@ -1626,7 +1627,7 @@ class TransactionsMixin(_HostBase):
                     session, True, winners=[pl_t], losers=[ai_t])
                 self._push_transaction_ack(session)
                 return True
-        elif cur_phase == _hc.game_engine.ETurnPhases.AssignFirstStrikeDamage:
+        elif cur_phase == game_engine.ETurnPhases.AssignFirstStrikeDamage:
             # Swiftstrike step: FirstStrike/DualStrike combatants deal
             # damage now; casualties are removed before the normal step.
             log_req("    AssignDamageOrder (Swiftstrike step): "
@@ -1679,8 +1680,8 @@ class TransactionsMixin(_HostBase):
         from rules_port import lifecycle as _be
         import re
         handled = False
-        pl_t = _hc.game_engine.UID.make(244, int(self.client_reck_id))
-        ai_t = _hc.game_engine.UID.make(_hc.game_engine.SERVICE_AI_UID_TYPE, 1000)
+        pl_t = game_engine.UID.make(244, int(self.client_reck_id))
+        ai_t = game_engine.UID.make(game_engine.SERVICE_AI_UID_TYPE, 1000)
         # Tournament PvP has its own persisted two-player priority
         # state.  Do not feed its SetAutoPass through the PvE checkpoint:
         # that is the PvE/AI state machine and can advance a stale
@@ -1721,8 +1722,8 @@ class TransactionsMixin(_HostBase):
         import hconnect_server as _hc
         from rules_port import lifecycle as _be
         handled = False
-        _hc.game_engine.UID.make(244, int(self.client_reck_id))
-        _hc.game_engine.UID.make(_hc.game_engine.SERVICE_AI_UID_TYPE, 1000)
+        game_engine.UID.make(244, int(self.client_reck_id))
+        game_engine.UID.make(game_engine.SERVICE_AI_UID_TYPE, 1000)
         if (session.session_name or "").startswith("tourney-"):
             try:
                 from services.tournament_game import pvp_load_state, pvp_save_state
@@ -1776,8 +1777,8 @@ class TransactionsMixin(_HostBase):
                         bstate.pop("ai_turn_phase_idx", None)
                         _bse.save_state(session, bstate)
                         log_req(f"    Stops updated — phase {paused_phase} no longer a stop; resuming AI turn")
-                        pl_t = _hc.game_engine.UID.make(244, int(self.client_reck_id))
-                        ai_t = _hc.game_engine.UID.make(_hc.game_engine.SERVICE_AI_UID_TYPE, 1000)
+                        pl_t = game_engine.UID.make(244, int(self.client_reck_id))
+                        ai_t = game_engine.UID.make(game_engine.SERVICE_AI_UID_TYPE, 1000)
                         self._run_ai_turn(session, pl_t, ai_t, bstate, start_idx=start_idx)
             elif (session.session_name or "").startswith("tourney-"):
                 # PvP: persist each player's stops into the PvP state,
@@ -1813,8 +1814,8 @@ class TransactionsMixin(_HostBase):
         import hconnect_server as _hc
         pass_turn_phase = transaction.pass_turn_phase
         from rules_port import lifecycle as _be
-        pl_t = _hc.game_engine.UID.make(244, int(self.client_reck_id))
-        ai_t = _hc.game_engine.UID.make(_hc.game_engine.SERVICE_AI_UID_TYPE, 1000)
+        pl_t = game_engine.UID.make(244, int(self.client_reck_id))
+        ai_t = game_engine.UID.make(game_engine.SERVICE_AI_UID_TYPE, 1000)
         # A pass arriving during setup (PreGame/PickGoesFirst/Mulligan,
         # before the player has kept their opening hand) has no turn-cycle
         # battle state yet — session.turn_order is still the default [].
@@ -1888,8 +1889,8 @@ class TransactionsMixin(_HostBase):
                 _be.save_state(session, bstate)
                 log_req(f"    Human passed during AI turn — resuming AI at idx {start_idx}")
                 self._run_ai_turn(session, pl_t, ai_t, bstate, start_idx=start_idx)
-            elif _be.current_phase(bstate) in (_hc.game_engine.ETurnPhases.EndTurn,
-                                               _hc.game_engine.ETurnPhases.Discard):
+            elif _be.current_phase(bstate) in (game_engine.ETurnPhases.EndTurn,
+                                               game_engine.ETurnPhases.Discard):
                 # Hand the human's turn to the AI. The "end of your turn" triggers are not dispatched
                 # here: the turn flow fires them once, when it enters the EndTurn phase, and a pass at
                 # that stop only hands the turn over.
@@ -1901,12 +1902,12 @@ class TransactionsMixin(_HostBase):
                 from pvp_db import db_rules_port_warzone_projection
                 for cu, tpl, card_user_id, card_state in db_rules_port_warzone_projection(
                         session.session_id):
-                    scid = _hc.game_engine.SessionCardId(_hc.game_engine.UID(cu))
+                    scid = game_engine.SessionCardId(game_engine.UID(cu))
                     _tpl, ct, _n, _c, _a, _d, _g = self._card_full_data(
                         g_end2, scid, tpl)
                     g_end2.push_card_updated(
                         scid, pl_t if card_user_id else ai_t,
-                        _hc.game_engine.ECardCollections.Warzone, ct,
+                        game_engine.ECardCollections.Warzone, ct,
                         template_id=tpl,
                         state=int(card_state or 0))
                 self._send_battle_events(session, g_end2, pl_t)
@@ -1987,13 +1988,13 @@ class TransactionsMixin(_HostBase):
                             if (_be.stack_empty(bstate) and not pending_input and
                                     bstate.get("turn_player") == _be.PLAYER):
                                 if cur_phase in (
-                                        _hc.game_engine.ETurnPhases.FirstMainPhase,
-                                        _hc.game_engine.ETurnPhases.SecondMainPhase):
+                                        game_engine.ETurnPhases.FirstMainPhase,
+                                        game_engine.ETurnPhases.SecondMainPhase):
                                     # A troop may have entered during this chain
                                     # (notably a Speed troop). Recompute before
                                     # rebuilding the green light so the next
                                     # prompt immediately offers ProceedToCombat.
-                                    if cur_phase == _hc.game_engine.ETurnPhases.FirstMainPhase:
+                                    if cur_phase == game_engine.ETurnPhases.FirstMainPhase:
                                         bstate["player_has_ready_troop"] = self._player_can_attack_troops(session)
                                     bstate["turn_phases"] = _be.build_turn_phases(bstate)
                                     _be.save_state(session, bstate)
@@ -2027,7 +2028,7 @@ class TransactionsMixin(_HostBase):
                     # (haste) troop can attack the turn it enters, so the
                     # decision is made here, not just at Prep.
                     if (_be.current_phase(bstate) ==
-                            _hc.game_engine.ETurnPhases.FirstMainPhase and
+                            game_engine.ETurnPhases.FirstMainPhase and
                             bstate.get("turn_player") == _be.PLAYER):
                         bstate["player_has_ready_troop"] = self._player_can_attack_troops(session)
                         bstate["turn_phases"] = _be.build_turn_phases(bstate)
@@ -2039,10 +2040,10 @@ class TransactionsMixin(_HostBase):
                     # before moving on. AssignDamageOrderTransaction is the
                     # normal path; a plain pass here is the fallback.
                     if (_be.current_phase(bstate) in (
-                            _hc.game_engine.ETurnPhases.AssignDamage,
-                            _hc.game_engine.ETurnPhases.AssignFirstStrikeDamage)):
+                            game_engine.ETurnPhases.AssignDamage,
+                            game_engine.ETurnPhases.AssignFirstStrikeDamage)):
                         fs = (_be.current_phase(bstate) ==
-                              _hc.game_engine.ETurnPhases.AssignFirstStrikeDamage)
+                              game_engine.ETurnPhases.AssignFirstStrikeDamage)
                         bstate = self._resolve_combat_damage(
                             session, pl_t, ai_t, bstate, first_strike=fs)
                         _be.save_state(session, bstate)

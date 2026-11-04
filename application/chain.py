@@ -3,6 +3,7 @@
 
 from typing import TYPE_CHECKING
 from db import log_req
+import game_engine
 
 if TYPE_CHECKING:
     from application._host_surface import HostSurface as _HostBase
@@ -85,24 +86,24 @@ class ChainMixin(_HostBase):
         # (EPriorityContext.ResolveTopOfChain), mirroring the client's
         # BattleStateBase.RebuildPassButton.
         if bstate is not None and (bstate.get("stack") or []):
-            return _hc.game_engine.EPriorityContext.ResolveTopOfChain
-        if phase == _hc.game_engine.ETurnPhases.FirstMainPhase:
+            return game_engine.EPriorityContext.ResolveTopOfChain
+        if phase == game_engine.ETurnPhases.FirstMainPhase:
             if bstate is None or bstate.get("player_has_ready_troop"):
-                return _hc.game_engine.EPriorityContext.ProcedeToCombat
-            return _hc.game_engine.EPriorityContext.ProcedeToSecondMain
-        if phase == _hc.game_engine.ETurnPhases.SecondMainPhase:
-            return _hc.game_engine.EPriorityContext.ProceedToEndTurn
-        if phase == _hc.game_engine.ETurnPhases.DeclareCombatPriorityWindow:
-            return _hc.game_engine.EPriorityContext.ProcedeToCombat
-        if phase == _hc.game_engine.ETurnPhases.DeclareAttackPriorityWindow:
-            return _hc.game_engine.EPriorityContext.ProcedeToBlockers
-        if phase == _hc.game_engine.ETurnPhases.DeclareDefensePriorityWindow:
-            return _hc.game_engine.EPriorityContext.ResolveCombat
-        if phase == _hc.game_engine.ETurnPhases.Ready:
-            return _hc.game_engine.EPriorityContext.Ready
-        if phase == _hc.game_engine.ETurnPhases.EndPhase:
-            return _hc.game_engine.EPriorityContext.EndPhase
-        return _hc.game_engine.EPriorityContext.Normal
+                return game_engine.EPriorityContext.ProcedeToCombat
+            return game_engine.EPriorityContext.ProcedeToSecondMain
+        if phase == game_engine.ETurnPhases.SecondMainPhase:
+            return game_engine.EPriorityContext.ProceedToEndTurn
+        if phase == game_engine.ETurnPhases.DeclareCombatPriorityWindow:
+            return game_engine.EPriorityContext.ProcedeToCombat
+        if phase == game_engine.ETurnPhases.DeclareAttackPriorityWindow:
+            return game_engine.EPriorityContext.ProcedeToBlockers
+        if phase == game_engine.ETurnPhases.DeclareDefensePriorityWindow:
+            return game_engine.EPriorityContext.ResolveCombat
+        if phase == game_engine.ETurnPhases.Ready:
+            return game_engine.EPriorityContext.Ready
+        if phase == game_engine.ETurnPhases.EndPhase:
+            return game_engine.EPriorityContext.EndPhase
+        return game_engine.EPriorityContext.Normal
 
     def _push_transaction_ack(self, session):
         """Send an empty 3055 sync packet to the client.
@@ -120,8 +121,8 @@ class ChainMixin(_HostBase):
         """
         import hconnect_server as _hc
         try:
-            pl_t = _hc.game_engine.UID.make(244, int(self.client_reck_id))
-            game = _hc.game_engine.Game(session.session_id, pl_t, _hc.game_engine.UID.make(_hc.game_engine.SERVICE_AI_UID_TYPE, 1000))
+            pl_t = game_engine.UID.make(244, int(self.client_reck_id))
+            game = game_engine.Game(session.session_id, pl_t, game_engine.UID.make(game_engine.SERVICE_AI_UID_TYPE, 1000))
             pkt = game.make_network_packet(pl_t)  # no events -> empty packet
             dw = _hc.encode_datawrapper(0, 3055, _hc.compress_gzip(_hc.encode_sync_event(pkt)), 1,
                                     "00000000-0000-0000-0000-000000000000")
@@ -238,10 +239,10 @@ class ChainMixin(_HostBase):
         """
         import hconnect_server as _hc
         chain_event_types = (
-            _hc.game_engine.AbilityPushedOnChainSessionEventArgs,
-            _hc.game_engine.TopOfChainResolvedSessionEventArgs,
-            _hc.game_engine.RemovedTopOfChainSessionEventArgs,
-            _hc.game_engine.ChainEmptySessionEventArgs,
+            game_engine.AbilityPushedOnChainSessionEventArgs,
+            game_engine.TopOfChainResolvedSessionEventArgs,
+            game_engine.RemovedTopOfChainSessionEventArgs,
+            game_engine.ChainEmptySessionEventArgs,
         )
         prefix = game.events[:event_start]
         setup_events = game.events[event_start:]
@@ -340,7 +341,7 @@ class ChainMixin(_HostBase):
         if active_player is None or not _hc._same_uid(active_player, player_uid):
             return
         game.push_green_light(
-            player_uid, _hc.game_engine.EPriorityContext.Normal)
+            player_uid, game_engine.EPriorityContext.Normal)
 
     def chain_after_item(self, session, state, game, item, player_uid, ai_uid):
         """A resolved spell/ability/trigger can deal the last health."""
@@ -403,7 +404,7 @@ class ChainMixin(_HostBase):
                 if bstate.get("resolution_paused"):
                     _be.save_state(session, bstate)
                     return game
-                scid = _hc.game_engine.SessionCardId(_hc.game_engine.UID(uid))
+                scid = game_engine.SessionCardId(game_engine.UID(uid))
                 _hc.db_card_set_warzone_arrival(session.session_id, uid)
                 _hc.db_set_card_resolved_at(session.session_id, uid, self._next_resolve_counter(session))
                 crow2 = _hc.db_card_with_template(session.session_id, uid)
@@ -415,8 +416,8 @@ class ChainMixin(_HostBase):
                     # so the re-pushed CardUpdated renders the full card — without
                     # it a troop played mid-game (e.g. via a spell) shows zeros.
                     self._card_full_data(game, scid, crow2[0], None)
-                    game.push_card_updated(scid, owner_sid, _hc.game_engine.ECardCollections.Warzone,
-                                           _hc.game_engine.card_type_from_db(crow2[1]),
+                    game.push_card_updated(scid, owner_sid, game_engine.ECardCollections.Warzone,
+                                           game_engine.card_type_from_db(crow2[1]),
                                            template_id=crow2[0])
                     game.push_troop_card_played(scid, owner_sid)
                     # A troop resolving to the warzone from the stack fires its
@@ -502,7 +503,7 @@ class ChainMixin(_HostBase):
             bstate.pop("resolving_source_uid", None)
             bstate.pop("x_cost", None)
             if uid:
-                scid = _hc.game_engine.SessionCardId(_hc.game_engine.UID(uid))
+                scid = game_engine.SessionCardId(game_engine.UID(uid))
                 # Re-read the card's zone AFTER its BOM resolved: a leaf may
                 # have moved it into the deck (Eternal Youth / Chronic Madness
                 # "Put this into your deck") — only a spell still in CastSpells
@@ -530,8 +531,8 @@ class ChainMixin(_HostBase):
                         # full data (cost/atk/def/thresholds/abilities) — a bare
                         # push_card_updated leaves the grave card blank.
                         self._card_full_data(game, scid, crow2[0], None)
-                        game.push_card_updated(scid, owner_sid, _hc.game_engine.ECardCollections.Discard,
-                                               _hc.game_engine.card_type_from_db(crow2[1]),
+                        game.push_card_updated(scid, owner_sid, game_engine.ECardCollections.Discard,
+                                               game_engine.card_type_from_db(crow2[1]),
                                                template_id=crow2[0])
         elif kind == "ability":
             ag = item.get("ability_guid", "")
@@ -703,8 +704,8 @@ class ChainMixin(_HostBase):
         if pending_input:
             log_req("    RequestPrioritySync: held for pending client input: "
                     + ",".join(pending_input))
-            pl_t = _hc.game_engine.UID.make(244, int(self.client_reck_id))
-            ai_t = _hc.game_engine.UID.make(_hc.game_engine.SERVICE_AI_UID_TYPE, 1000)
+            pl_t = game_engine.UID.make(244, int(self.client_reck_id))
+            ai_t = game_engine.UID.make(game_engine.SERVICE_AI_UID_TYPE, 1000)
             if pending_checkpoint.get("pending_trigger"):
                 # The client only sends its next transaction after a reply, so
                 # re-open the trigger picker (its events are the reply).
@@ -734,25 +735,25 @@ class ChainMixin(_HostBase):
                 "    RequestPrioritySync: no PvP participants for native chain")
                 return False
             priority_pid = next((pid for pid in pids if _hc._same_uid(
-                priority, _hc.game_engine.UID.make(244, pid))), None)
+                priority, game_engine.UID.make(244, pid))), None)
             if priority_pid is None:
                 log_req(
                 "    RequestPrioritySync: unknown PvP native chain owner")
                 return False
 
             other_pid = next(pid for pid in pids if pid != my_pid)
-            target_uid = _hc.game_engine.UID.make(244, my_pid)
-            other_uid = _hc.game_engine.UID.make(244, other_pid)
-            priority_uid = _hc.game_engine.UID.make(244, priority_pid)
+            target_uid = game_engine.UID.make(244, my_pid)
+            other_uid = game_engine.UID.make(244, other_pid)
+            priority_uid = game_engine.UID.make(244, priority_pid)
             turn_pid = int(state.get("turn_pid") or priority_pid)
-            turn_uid = _hc.game_engine.UID.make(244, turn_pid)
+            turn_uid = game_engine.UID.make(244, turn_pid)
             phase = port.current_turn_phase
-            window = _hc.game_engine.Game(
+            window = game_engine.Game(
                 int(session.session_id), target_uid, other_uid)
             _pvp_populate_game_state(window, state, my_pid, other_pid)
             window.push_green_light(
                 priority_uid,
-                _hc.game_engine.EPriorityContext.ResolveTopOfChain)
+                game_engine.EPriorityContext.ResolveTopOfChain)
             window.push_turn_phase(phase, turn_uid, priority_uid)
             target_handler = player_handlers.get(my_pid) or self
             _send_pvp_packet(
@@ -763,9 +764,9 @@ class ChainMixin(_HostBase):
             f"priority={priority_pid} phase={phase}")
             return True
 
-        player_uid = _hc.game_engine.UID.make(244, int(self.client_reck_id))
-        ai_uid = _hc.game_engine.UID.make(
-            _hc.game_engine.SERVICE_AI_UID_TYPE, 1000)
+        player_uid = game_engine.UID.make(244, int(self.client_reck_id))
+        ai_uid = game_engine.UID.make(
+            game_engine.SERVICE_AI_UID_TYPE, 1000)
         sync_priority_uid = (player_uid if _hc._same_uid(priority, player_uid)
                              else ai_uid if _hc._same_uid(priority, ai_uid)
                              else None)
@@ -781,7 +782,7 @@ class ChainMixin(_HostBase):
                       else ai_uid if _hc._same_uid(active_owner, ai_uid)
                       else player_uid)
         game.push_green_light(
-            sync_priority_uid, _hc.game_engine.EPriorityContext.ResolveTopOfChain)
+            sync_priority_uid, game_engine.EPriorityContext.ResolveTopOfChain)
         game.push_turn_phase(port.current_turn_phase, active_uid, sync_priority_uid)
         if _hc._same_uid(sync_priority_uid, player_uid):
             # The human is the response player; restore the legal quick actions

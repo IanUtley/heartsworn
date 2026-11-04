@@ -2,6 +2,7 @@
 
 import json
 from db import log_req
+import game_engine
 
 
 class FraBattleMixin:
@@ -29,15 +30,15 @@ class FraBattleMixin:
         new_decks = {0: False, 2: False}
         template_cache = {}
         collection_values = {
-            "deck": _hc.game_engine.ECardCollections.Deck,
-            "hand": _hc.game_engine.ECardCollections.Hand,
-            "warzone": _hc.game_engine.ECardCollections.Warzone,
-            "castspells": _hc.game_engine.ECardCollections.CastSpells,
-            "playedresources": _hc.game_engine.ECardCollections.PlayedResources,
-            "underground": _hc.game_engine.ECardCollections.Underground,
-            "discard": _hc.game_engine.ECardCollections.Discard,
-            "crypt": _hc.game_engine.ECardCollections.Discard,
-            "void": _hc.game_engine.ECardCollections.Void,
+            "deck": game_engine.ECardCollections.Deck,
+            "hand": game_engine.ECardCollections.Hand,
+            "warzone": game_engine.ECardCollections.Warzone,
+            "castspells": game_engine.ECardCollections.CastSpells,
+            "playedresources": game_engine.ECardCollections.PlayedResources,
+            "underground": game_engine.ECardCollections.Underground,
+            "discard": game_engine.ECardCollections.Discard,
+            "crypt": game_engine.ECardCollections.Discard,
+            "void": game_engine.ECardCollections.Void,
         }
 
         def _owner_targets(target):
@@ -51,7 +52,7 @@ class FraBattleMixin:
                 bstate.get("player_total_resources", 0) or 0)
             game.player_charges = int(bstate.get("player_charges", 0) or 0)
             game.player_threshold = {
-                _hc.game_engine.ECardShards(int(color)): int(value or 0)
+                game_engine.ECardShards(int(color)): int(value or 0)
                 for color, value in (bstate.get("player_threshold") or {}).items()
                 if int(value or 0) > 0
             }
@@ -60,7 +61,7 @@ class FraBattleMixin:
                 bstate.get("ai_total_resources", 0) or 0)
             game.ai_charges = int(bstate.get("ai_charges", 0) or 0)
             game.ai_threshold = {
-                _hc.game_engine.ECardShards(int(color)): int(value or 0)
+                game_engine.ECardShards(int(color)): int(value or 0)
                 for color, value in (bstate.get("ai_threshold") or {}).items()
                 if int(value or 0) > 0
             }
@@ -220,7 +221,7 @@ class FraBattleMixin:
                 log_req("    FRA shared all-player grant projected once: "
                     f"card={template_guid[:8]} copies={len(target_owners)}")
             card_type_name = str(row[0] or "Unknown")
-            card_type = _hc.game_engine.card_type_from_db(card_type_name)
+            card_type = game_engine.card_type_from_db(card_type_name)
 
             for owner_key in card_target_owners:
                 _side, owner_id, owner_uid, deck_cards = owners[owner_key]
@@ -260,9 +261,9 @@ class FraBattleMixin:
                              "ability_guids": ability_guids}, pl_t, ai_t)
                         drain_setup_stack(bstate)
                     elif location == "warzone":
-                        if card_type & _hc.game_engine.ECardTypes.Artifact:
+                        if card_type & game_engine.ECardTypes.Artifact:
                             game.push_artifact_card_played(scid, owner_uid)
-                        elif card_type & _hc.game_engine.ECardTypes.Troop:
+                        elif card_type & game_engine.ECardTypes.Troop:
                             game.push_troop_card_played(scid, owner_uid)
                         self._dispatch_native_trigger(
                             game, session, pl_t, ai_t, bstate,
@@ -272,7 +273,7 @@ class FraBattleMixin:
                         drain_setup_stack(bstate)
                     elif location == "deck":
                         game.push_card_updated(
-                            scid, owner_uid, _hc.game_engine.ECardCollections.Deck,
+                            scid, owner_uid, game_engine.ECardCollections.Deck,
                             card_type, nulling=True)
                         deck_cards.append(scid)
                         new_decks[owner_key] = True
@@ -319,8 +320,8 @@ class FraBattleMixin:
                 card_def.defense = health
             owner_uid = pl_t if key == "player_health" else ai_t
             game.push_card_updated(
-                uid, owner_uid, _hc.game_engine.ECardCollections.None_,
-                _hc.game_engine.ECardTypes.Champion, defense=health,
+                uid, owner_uid, game_engine.ECardCollections.None_,
+                game_engine.ECardTypes.Champion, defense=health,
                 template_id=template_guid)
         game.push_player_updated(
             pl_t, champ_id=getattr(self, "_player_champ_scid", None))
@@ -424,12 +425,12 @@ class FraBattleMixin:
             log_req("    FRA reconnect snapshot aborted: invalid champion UID")
             return False
 
-        player_uid = _hc.game_engine.UID.make(244, player_pid)
-        ai_uid = _hc.game_engine.UID.make(_hc.game_engine.SERVICE_AI_UID_TYPE, 1000)
-        player_champ_scid = _hc.game_engine.SessionCardId(
-            _hc.game_engine.UID(player_champ_uid))
-        ai_champ_scid = _hc.game_engine.SessionCardId(
-            _hc.game_engine.UID(ai_champ_uid))
+        player_uid = game_engine.UID.make(244, player_pid)
+        ai_uid = game_engine.UID.make(game_engine.SERVICE_AI_UID_TYPE, 1000)
+        player_champ_scid = game_engine.SessionCardId(
+            game_engine.UID(player_champ_uid))
+        ai_champ_scid = game_engine.SessionCardId(
+            game_engine.UID(ai_champ_uid))
         player_name = str(profile.get("name") or "Player")
         player_champ_name = _hc.db_template_name(
             player_champ_guid, conn=_hc._db) or player_name
@@ -498,7 +499,7 @@ class FraBattleMixin:
             player_first = (active_is_player if turn_number % 2 else
                             not active_is_player)
         first_uid = player_uid if player_first else ai_uid
-        started = _hc.game_engine.Game(session.session_id, player_uid, ai_uid)
+        started = game_engine.Game(session.session_id, player_uid, ai_uid)
         started.push_game_started(
             champion_names=[player_name, ai_name],
             champion_template_ids=[player_champ_guid, ai_champ_guid],
@@ -537,12 +538,12 @@ class FraBattleMixin:
                 session.session_id, "deck", user_id=owner, conn=_hc._db)
             deck_ids = []
             for card_uid, template_guid, _owner, card_type, card_state, _ags, _attrs in deck_rows:
-                scid = _hc.game_engine.SessionCardId(
-                    _hc.game_engine.UID(int(card_uid)))
+                scid = game_engine.SessionCardId(
+                    game_engine.UID(int(card_uid)))
                 self._card_full_data(game, scid, template_guid)
                 game.push_card_updated(
-                    scid, owner_uid, _hc.game_engine.ECardCollections.Deck,
-                    _hc.game_engine.card_type_from_db(card_type),
+                    scid, owner_uid, game_engine.ECardCollections.Deck,
+                    game_engine.card_type_from_db(card_type),
                     template_id=template_guid, state=int(card_state or 0),
                     nulling=True)
                 deck_ids.append(scid)
@@ -552,12 +553,12 @@ class FraBattleMixin:
             hand_rows = _hc.db_game_cards_at_location(
                 session.session_id, "hand", user_id=owner, conn=_hc._db)
             for card_uid, template_guid, _owner, card_type, card_state, _ags, _attrs in hand_rows:
-                scid = _hc.game_engine.SessionCardId(
-                    _hc.game_engine.UID(int(card_uid)))
+                scid = game_engine.SessionCardId(
+                    game_engine.UID(int(card_uid)))
                 self._card_full_data(game, scid, template_guid)
                 game.push_card_updated(
-                    scid, owner_uid, _hc.game_engine.ECardCollections.Hand,
-                    _hc.game_engine.card_type_from_db(card_type),
+                    scid, owner_uid, game_engine.ECardCollections.Hand,
+                    game_engine.card_type_from_db(card_type),
                     template_id=template_guid, state=int(card_state or 0),
                     nulling=owner != owner_id)
 
@@ -566,21 +567,21 @@ class FraBattleMixin:
         # their current card rows, including an unresolved spell on CastSpells.
         self._push_warzone_card_updates(game, session, player_uid, ai_uid)
         for zone, collection in (
-                ("discard", _hc.game_engine.ECardCollections.Discard),
-                ("void", _hc.game_engine.ECardCollections.Void),
-                ("CastSpells", _hc.game_engine.ECardCollections.CastSpells),
-                ("PlayedResources", _hc.game_engine.ECardCollections.PlayedResources),
-                ("underground", _hc.game_engine.ECardCollections.Underground)):
+                ("discard", game_engine.ECardCollections.Discard),
+                ("void", game_engine.ECardCollections.Void),
+                ("CastSpells", game_engine.ECardCollections.CastSpells),
+                ("PlayedResources", game_engine.ECardCollections.PlayedResources),
+                ("underground", game_engine.ECardCollections.Underground)):
             for card_uid, template_guid, owner, card_type, card_state, _ags, _attrs in \
                     _hc.db_game_cards_at_location(
                         session.session_id, zone, conn=_hc._db):
-                scid = _hc.game_engine.SessionCardId(
-                    _hc.game_engine.UID(int(card_uid)))
+                scid = game_engine.SessionCardId(
+                    game_engine.UID(int(card_uid)))
                 self._card_full_data(game, scid, template_guid)
                 controller = (player_uid if int(owner) == owner_id else ai_uid)
                 game.push_card_updated(
                     scid, controller, collection,
-                    _hc.game_engine.card_type_from_db(card_type),
+                    game_engine.card_type_from_db(card_type),
                     template_id=template_guid, state=int(card_state or 0),
                     nulling=(zone == "underground" and
                              int(owner) != owner_id))
@@ -603,7 +604,7 @@ class FraBattleMixin:
             kind = str(descriptor.get("kind") or "").lower()
             ability_guid = descriptor.get("ability_guid")
             if kind in ("troop", "spell"):
-                ability_guid = _hc.game_engine.PLAY_CARD_ABILITY_TEMPLATE_ID
+                ability_guid = game_engine.PLAY_CARD_ABILITY_TEMPLATE_ID
             if not ability_guid:
                 guids = descriptor.get("ability_guids") or ()
                 ability_guid = guids[0] if guids else None
@@ -637,11 +638,11 @@ class FraBattleMixin:
             except (TypeError, ValueError):
                 instance_id = 1
             game.push_ability_on_chain(
-                _hc.game_engine.SessionCardId(_hc.game_engine.UID(source_uid)),
-                _hc.game_engine.ResourceId.from_str(str(ability_guid)),
+                game_engine.SessionCardId(game_engine.UID(source_uid)),
+                game_engine.ResourceId.from_str(str(ability_guid)),
                 ability_instance_id=instance_id,
-                target_card_ids=[_hc.game_engine.SessionCardId(
-                    _hc.game_engine.UID(uid)) for uid in targets],
+                target_card_ids=[game_engine.SessionCardId(
+                    game_engine.UID(uid)) for uid in targets],
                 ignores_chain=bool(descriptor.get("ignores_chain", False)))
 
         port = getattr(session, "_rules_port_session", None)
@@ -680,9 +681,9 @@ class FraBattleMixin:
         try:
             phase = int(phase)
         except (TypeError, ValueError):
-            phase = int(_hc.game_engine.ETurnPhases.FirstMainPhase)
+            phase = int(game_engine.ETurnPhases.FirstMainPhase)
 
-        game.push_green_light(priority_uid, _hc.game_engine.EPriorityContext.Normal)
+        game.push_green_light(priority_uid, game_engine.EPriorityContext.Normal)
         game.push_turn_phase(phase, active_uid, priority_uid)
         game.push_reconnect_done()
         # _send_battle_events re-announces the valid champion SessionCardIds

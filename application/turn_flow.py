@@ -8,6 +8,7 @@ import json
 import re
 import struct
 from db import log_req
+import game_engine
 
 
 if TYPE_CHECKING:
@@ -102,17 +103,17 @@ class TurnFlowMixin(_HostBase):
         setup_phase = None
         if (getattr(command, "is_mulligan_keep", False) or
                 getattr(command, "is_mulligan_redraw", False)):
-            setup_phase = _hc.game_engine.ETurnPhases.Mulligan
+            setup_phase = game_engine.ETurnPhases.Mulligan
         elif getattr(command, "is_choose_pick", False):
-            setup_phase = _hc.game_engine.ETurnPhases.PickGoesFirst
+            setup_phase = game_engine.ETurnPhases.PickGoesFirst
         # Older in-flight PVE sessions could already have shown Mulligan while
         # their native checkpoint still said NotPlaying. Repair only that
         # pre-turn checkpoint when native history confirms the preceding
         # Play/Draw choice and the same player still owns active and priority.
         # New setup packets save phases before transmission, so this only
         # bridges sessions created before that fix.
-        if (setup_phase == _hc.game_engine.ETurnPhases.Mulligan and
-                port.current_turn_phase == _hc.game_engine.ETurnPhases.NotPlaying):
+        if (setup_phase == game_engine.ETurnPhases.Mulligan and
+                port.current_turn_phase == game_engine.ETurnPhases.NotPlaying):
             try:
                 from rules_port.persistence import load_state as _load_setup_state
                 setup_state = _load_setup_state(session)
@@ -575,9 +576,9 @@ class TurnFlowMixin(_HostBase):
                                     continue
                                 other_pid = next(pid for pid in pids
                                                  if pid != target_pid)
-                                target_uid = _hc.game_engine.UID.make(244, target_pid)
-                                other_uid = _hc.game_engine.UID.make(244, other_pid)
-                                window = _hc.game_engine.Game(
+                                target_uid = game_engine.UID.make(244, target_pid)
+                                other_uid = game_engine.UID.make(244, other_pid)
+                                window = game_engine.Game(
                                     int(session.session_id), target_uid,
                                     other_uid)
                                 _pvp_populate_game_state(
@@ -587,12 +588,12 @@ class TurnFlowMixin(_HostBase):
                                 # matching GreenLight first so a phase update
                                 # cannot trigger a stale priority resync.
                                 window.push_green_light(
-                                    _hc.game_engine.UID.make(244, priority_pid),
-                                    _hc.game_engine.EPriorityContext.ResolveTopOfChain)
+                                    game_engine.UID.make(244, priority_pid),
+                                    game_engine.EPriorityContext.ResolveTopOfChain)
                                 window.push_turn_phase(
                                     phase,
-                                    _hc.game_engine.UID.make(244, turn_pid),
-                                    _hc.game_engine.UID.make(244, priority_pid))
+                                    game_engine.UID.make(244, turn_pid),
+                                    game_engine.UID.make(244, priority_pid))
                                 _send_pvp_packet(
                                     target_h, session, window, target_uid,
                                     "rules-port-ability-priority")
@@ -635,8 +636,8 @@ class TurnFlowMixin(_HostBase):
                     from rules_port.persistence import load_state
                     settled_state = load_state(session)
                     main_phase = port.current_turn_phase in (
-                        _hc.game_engine.ETurnPhases.FirstMainPhase,
-                        _hc.game_engine.ETurnPhases.SecondMainPhase)
+                        game_engine.ETurnPhases.FirstMainPhase,
+                        game_engine.ETurnPhases.SecondMainPhase)
                     settled = (
                         main_phase and
                         not getattr(port, "pending_activation", None) and
@@ -708,8 +709,8 @@ class TurnFlowMixin(_HostBase):
             intent_player = (coerce_player(request_player)
                              if callable(coerce_player) else request_player)
             main_phase = port.current_turn_phase in (
-                _hc.game_engine.ETurnPhases.FirstMainPhase,
-                _hc.game_engine.ETurnPhases.SecondMainPhase)
+                game_engine.ETurnPhases.FirstMainPhase,
+                game_engine.ETurnPhases.SecondMainPhase)
             action = port.action_stack.peek()
             player_has_priority = (
                 _hc._same_uid(intent_player, port.action_stack.priority_player_id)
@@ -846,8 +847,8 @@ class TurnFlowMixin(_HostBase):
                 getattr(port, "action_stack", None) is not None and
                 port.action_stack.count == 0 and
                 port.current_turn_phase in (
-                    _hc.game_engine.ETurnPhases.FirstMainPhase,
-                    _hc.game_engine.ETurnPhases.SecondMainPhase)):
+                    game_engine.ETurnPhases.FirstMainPhase,
+                    game_engine.ETurnPhases.SecondMainPhase)):
             from collections import deque
             from rules_port.kernel import PriorityWindowAction, TurnPhasePlayers
             priority = PriorityWindowAction(TurnPhasePlayers.ACTIVE)
@@ -901,7 +902,7 @@ class TurnFlowMixin(_HostBase):
         if {"cant_play_cards", "cant_play_cards_from_hand"} & hand_flags:
             rows = []
         for card_uid, cost, ct, thresh_json, abilities_json in rows:
-            scid = _hc.game_engine.SessionCardId(_hc.game_engine.UID(card_uid))
+            scid = game_engine.SessionCardId(game_engine.UID(card_uid))
             # Use the card's EFFECTIVE cost (base + permanent/triggered cost
             # modifiers, e.g. Fury of the Mountain God's "-1 per damage dealt"
             # while in hand) — the raw template cost would wrongly hide a
@@ -969,7 +970,7 @@ class TurnFlowMixin(_HostBase):
         # choice continuation. Repeat the authoritative priority event in the
         # same packet so the client's one-request UI state cannot remain
         # stranded on the finished choice dialog.
-        game2.push_green_light(pl_t, _hc.game_engine.EPriorityContext.Normal)
+        game2.push_green_light(pl_t, game_engine.EPriorityContext.Normal)
         sent = self._send_battle_events(session, game2, pl_t)
         if sent:
             log_req(f"    Pushed main-phase options ({len(playable)} playable, champ_ab={len(abilities) if player_champ_cid and abilities else 0}, troop_ab={sum(len(v) for v in affordable.values())})")
@@ -1110,7 +1111,7 @@ class TurnFlowMixin(_HostBase):
         any phase/priority path that pushes PlayerUpdated.
         """
         import hconnect_server as _hc
-        game = _hc.game_engine.Game(session.session_id, pl_t, ai_t)
+        game = game_engine.Game(session.session_id, pl_t, ai_t)
         game.spellshield_champion_uids = self._spellshield_champion_uids()
         game.max_hand_size = self._max_hand_size(session)
         game.player_resources = bstate.get("player_resources", 0)
@@ -1195,16 +1196,16 @@ class TurnFlowMixin(_HostBase):
         for card_uid, tpl_guid, user_id, cstate, _card_type in rows:
             if int(card_uid) in chain_sources:
                 continue
-            scid = _hc.game_engine.SessionCardId(_hc.game_engine.UID(int(card_uid)))
+            scid = game_engine.SessionCardId(game_engine.UID(int(card_uid)))
             _tpl, ct, _n, _c, _a, _d, _g = self._card_full_data(
                 game, scid, tpl_guid,
                 instance_projection=projections.get(int(card_uid)))
             cdef = game.card_defs.get(scid)
             attrs = cdef.attributes if cdef else 0
             owner = owner_uid(user_id, pl_t, ai_t, bstate)
-            related = [_hc.game_engine.SessionCardId(_hc.game_engine.UID(int(v)))
+            related = [game_engine.SessionCardId(game_engine.UID(int(v)))
                        for v in (voided_by.get(str(int(card_uid))) or [])]
-            game.push_card_updated(scid, owner, _hc.game_engine.ECardCollections.Warzone, ct,
+            game.push_card_updated(scid, owner, game_engine.ECardCollections.Warzone, ct,
                                    template_id=tpl_guid, attributes=attrs,
                                    state=int(cstate or 0), related_cards=related)
         self._push_hand_cost_updates(game, session, pl_t, bstate)
@@ -1243,11 +1244,11 @@ class TurnFlowMixin(_HostBase):
             if not basic or not basic[0]:
                 continue
             tpl_guid = basic[0]
-            scid = _hc.game_engine.SessionCardId(_hc.game_engine.UID(card_uid))
+            scid = game_engine.SessionCardId(game_engine.UID(card_uid))
             _tpl, ctype, _n, _c, attack, defense, gems = self._card_full_data(
                 game, scid, tpl_guid)
             game.push_card_updated(
-                scid, pl_t, _hc.game_engine.ECardCollections.Hand, ctype,
+                scid, pl_t, game_engine.ECardCollections.Hand, ctype,
                 template_id=tpl_guid, cost=cost, attack=attack,
                 defense=defense, gems=gems)
             sent[card_uid] = cost
@@ -1272,11 +1273,11 @@ class TurnFlowMixin(_HostBase):
             return None
         recipient = game.player_uid if side == "player" else game.ai_uid
         for uid, template_guid, _card_owner, _previous, new_state in changes:
-            scid = _hc.game_engine.SessionCardId(_hc.game_engine.UID(int(uid)))
+            scid = game_engine.SessionCardId(game_engine.UID(int(uid)))
             _tpl, card_type, _name, _cost, _atk, _def, _gem = \
                 self._card_full_data(game, scid, template_guid)
             game.push_card_updated(
-                scid, recipient, _hc.game_engine.ECardCollections.Warzone,
+                scid, recipient, game_engine.ECardCollections.Warzone,
                 card_type, template_id=template_guid, state=int(new_state))
         return changes
 
@@ -1284,7 +1285,7 @@ class TurnFlowMixin(_HostBase):
                                       changes):
         """Fire CardReadiedEvent for each card the ready step untapped."""
         import hconnect_server as _hc
-        tapped = _hc.game_engine.ECardStates.Tapped
+        tapped = game_engine.ECardStates.Tapped
         for uid, _tpl, _owner, previous_state, new_state in changes or ():
             if int(previous_state) & tapped and not int(new_state) & tapped:
                 from rules_port.triggers import dispatch_native_trigger
@@ -1427,13 +1428,13 @@ class TurnFlowMixin(_HostBase):
         _previous_phase = bstate.get("phase")
         if resolve_phase_triggers:
             from rules_port.triggers import dispatch_native_trigger
-            bstate["phase"] = _hc.game_engine.ETurnPhases.StartTurn
+            bstate["phase"] = game_engine.ETurnPhases.StartTurn
             dispatch_native_trigger(
                 db=_hc._db, handler=self, game=game, session=session,
                 player_uid=pl_t, ai_uid=ai_t, battle_state=bstate,
                 event_type="TurnPhaseEvent", source_card_id=None,
                 source_player_id=active_owner,
-                data={"phase": int(_hc.game_engine.ETurnPhases.StartTurn)})
+                data={"phase": int(game_engine.ETurnPhases.StartTurn)})
             dispatch_native_trigger(
                 db=_hc._db, handler=self, game=game, session=session,
                 player_uid=pl_t, ai_uid=ai_t, battle_state=bstate,
@@ -1502,7 +1503,7 @@ class TurnFlowMixin(_HostBase):
                 from rules_port.persistence import save_state
                 from rules_port.runtime_helpers import owner_uid
                 save_state(session, bstate)
-                event = _hc.game_engine.PlayerCurrentResourcePoolChangedSessionEventArgs()
+                event = game_engine.PlayerCurrentResourcePoolChangedSessionEventArgs()
                 event.player_id = owner_uid(owner, pl_t, ai_t, bstate)
                 event.operation = 1
                 event.delta = total - old
@@ -1542,13 +1543,13 @@ class TurnFlowMixin(_HostBase):
             changed = prime_cards_for_turn(
                 _hc._db, session.session_id, active_owner_id)
             for card_uid, tpl_guid, owner_id, new_state, _card_type in changed:
-                scid = _hc.game_engine.SessionCardId(_hc.game_engine.UID(card_uid))
+                scid = game_engine.SessionCardId(game_engine.UID(card_uid))
                 _tpl, ct, _name, _cost, _atk, _def, _gem = \
                     self._card_full_data(game, scid, tpl_guid)
                 cdef = game.card_defs.get(scid)
                 game.push_card_updated(
                     scid, owner_uid(owner_id, pl_t, ai_t, bstate),
-                    _hc.game_engine.ECardCollections.Warzone, ct,
+                    game_engine.ECardCollections.Warzone, ct,
                     template_id=tpl_guid,
                     attributes=(cdef.attributes if cdef else 0),
                     state=int(new_state))
@@ -1565,40 +1566,40 @@ class TurnFlowMixin(_HostBase):
         # alone here; readiness (including CantReadyAutomatically) belongs to
         # the subsequent Prep checkpoint.
         prime_mask = (
-            _hc.game_engine.ECardStates.Blocking |
-            _hc.game_engine.ECardStates.Attacking |
-            _hc.game_engine.ECardStates.Damaged |
-            _hc.game_engine.ECardStates.Healed |
-            _hc.game_engine.ECardStates.HasAttacked |
-            _hc.game_engine.ECardStates.HasBlocked |
-            _hc.game_engine.ECardStates.ZoneChangeReplacement |
-            _hc.game_engine.ECardStates.Activated |
-            _hc.game_engine.ECardStates.VoidsIfDestroyed |
-            _hc.game_engine.ECardStates.CameOutThisTurn |
-            _hc.game_engine.ECardStates.StartedATurnOnYourSide)
+            game_engine.ECardStates.Blocking |
+            game_engine.ECardStates.Attacking |
+            game_engine.ECardStates.Damaged |
+            game_engine.ECardStates.Healed |
+            game_engine.ECardStates.HasAttacked |
+            game_engine.ECardStates.HasBlocked |
+            game_engine.ECardStates.ZoneChangeReplacement |
+            game_engine.ECardStates.Activated |
+            game_engine.ECardStates.VoidsIfDestroyed |
+            game_engine.ECardStates.CameOutThisTurn |
+            game_engine.ECardStates.StartedATurnOnYourSide)
         rows = _hc.db_warzone_display_rows(session.session_id, conn=_hc._db)
         changed = 0
         for card_uid, tpl_guid, owner_id, old_state, _card_type in rows:
             old_state = int(old_state or 0)
             # ResetCameOutThisTurn applies to both sides.  PrimeCard and
             # SetStartedATurnOnOwnersSide apply only to the active side.
-            new_state = old_state & ~_hc.game_engine.ECardStates.CameOutThisTurn
+            new_state = old_state & ~game_engine.ECardStates.CameOutThisTurn
             if int(owner_id or 0) == int(active_owner_id or 0):
                 new_state = ((new_state & ~prime_mask) |
-                             _hc.game_engine.ECardStates.StartedATurnOnYourSide)
+                             game_engine.ECardStates.StartedATurnOnYourSide)
             if new_state == old_state:
                 continue
             _hc.db_set_card_state_exact(
                 session.session_id, int(card_uid), new_state, conn=_hc._db)
             changed += 1
-            scid = _hc.game_engine.SessionCardId(_hc.game_engine.UID(int(card_uid)))
+            scid = game_engine.SessionCardId(game_engine.UID(int(card_uid)))
             _tpl, ct, _name, _cost, _atk, _def, _gem = \
                 self._card_full_data(game, scid, tpl_guid)
             cdef = game.card_defs.get(scid)
             game.push_card_updated(
                 scid,
                 owner_uid(owner_id, pl_t, ai_t, bstate),
-                _hc.game_engine.ECardCollections.Warzone,
+                game_engine.ECardCollections.Warzone,
                 ct,
                 template_id=tpl_guid,
                 attributes=(cdef.attributes if cdef else 0),
@@ -1645,10 +1646,10 @@ class TurnFlowMixin(_HostBase):
             return {str(k): int(v) for k, v in attrs.items() if v}
         ai_champ = getattr(self, "_ai_champ_scid", None)
         if ai_champ:
-            ai_cdef = _hc.game_engine.CardDef(
-                "AI", _hc.game_engine.ECardTypes.Champion, 0,
+            ai_cdef = game_engine.CardDef(
+                "AI", game_engine.ECardTypes.Champion, 0,
                 bstate.get("ai_health", 10), bstate.get("ai_health", 10),
-                [], [_hc.game_engine.ResourceId.from_str(g) for g in getattr(self, "_ai_champ_ability_guids", [])])
+                [], [game_engine.ResourceId.from_str(g) for g in getattr(self, "_ai_champ_ability_guids", [])])
             ai_cdef.counters = dict(champion_counters.get(
                 str(int(ai_champ.uid.uid64)), {}) or {})
             ai_cdef.int_attrs = _champion_int_attrs(ai_champ, 0)
@@ -1656,8 +1657,8 @@ class TurnFlowMixin(_HostBase):
         pl_champ = getattr(self, "_player_champ_scid", None)
         if pl_champ:
             pl_abilities = getattr(self, "_player_champ_abilities", [])
-            cdef = _hc.game_engine.CardDef(
-                "Player", _hc.game_engine.ECardTypes.Champion, 0,
+            cdef = game_engine.CardDef(
+                "Player", game_engine.ECardTypes.Champion, 0,
                 bstate.get("player_health", 17), bstate.get("player_health", 17),
                 [], list(pl_abilities))
             cdef.counters = dict(champion_counters.get(
@@ -1670,7 +1671,7 @@ class TurnFlowMixin(_HostBase):
             # champion without these mods wipes the escalation display.
             for ag, uses in (bstate.get("player_sp_uses", {}) or {}).items():
                 if int(uses) > 0:
-                    cdef.spell_point_cost_mods[_hc.game_engine.ResourceId.from_str(ag)] = int(uses)
+                    cdef.spell_point_cost_mods[game_engine.ResourceId.from_str(ag)] = int(uses)
             game.card_defs[pl_champ] = cdef
 
     def _advance_to_priority(self, session, pl_t, ai_t, bstate):
@@ -1749,7 +1750,7 @@ class TurnFlowMixin(_HostBase):
             # During a human attack the human remains the native active
             # player, but DeclareDefense belongs to the defending AI.  This
             # is a real server-owned input window, not stale AI priority.
-            if phase == _hc.game_engine.ETurnPhases.DeclareDefense:
+            if phase == game_engine.ETurnPhases.DeclareDefense:
                 import ai
                 from rules_port.persistence import save_state
 
@@ -1817,7 +1818,7 @@ class TurnFlowMixin(_HostBase):
         # is a chain window, not a declaration: sending DeclareAttack here makes
         # the client show the attacker picker mid-chain.
         in_chain_declare = (chain_open and
-                            phase == _hc.game_engine.ETurnPhases.DeclareAttack)
+                            phase == game_engine.ETurnPhases.DeclareAttack)
         if not in_chain_declare:
             game.push_turn_phase(
                 phase,
@@ -1825,7 +1826,7 @@ class TurnFlowMixin(_HostBase):
                 pl_t)
         priority_context = self._priority_context_for(phase, bstate)
         if chain_open:
-            priority_context = _hc.game_engine.EPriorityContext.ResolveTopOfChain
+            priority_context = game_engine.EPriorityContext.ResolveTopOfChain
         game.push_green_light(pl_t, priority_context)
         game.push_player_updated(
             pl_t, champ_id=getattr(self, "_player_champ_scid", None))
@@ -1834,19 +1835,19 @@ class TurnFlowMixin(_HostBase):
         # The attack options packet applies force attackers and their triggers,
         # then includes the authoritative board refresh. Avoid projecting the
         # pre-declaration board here; it would immediately be rebuilt.
-        if phase != _hc.game_engine.ETurnPhases.DeclareAttack:
+        if phase != game_engine.ETurnPhases.DeclareAttack:
             self._push_warzone_card_updates(game, session, pl_t, ai_t)
         self._send_battle_events(session, game, pl_t)
         _hc.trace_rules_port(log_req, "project-human", port, bstate)
-        if phase in (_hc.game_engine.ETurnPhases.FirstMainPhase,
-                     _hc.game_engine.ETurnPhases.SecondMainPhase):
+        if phase in (game_engine.ETurnPhases.FirstMainPhase,
+                     game_engine.ETurnPhases.SecondMainPhase):
             self._push_main_phase_options(
                 session, pl_t, ai_t, refresh_warzone=False)
-        elif (phase == _hc.game_engine.ETurnPhases.DeclareAttack and
+        elif (phase == game_engine.ETurnPhases.DeclareAttack and
               not in_chain_declare):
             self._push_attack_options(session, pl_t, ai_t)
-        elif phase in (_hc.game_engine.ETurnPhases.AssignDamage,
-                       _hc.game_engine.ETurnPhases.AssignFirstStrikeDamage):
+        elif phase in (game_engine.ETurnPhases.AssignDamage,
+                       game_engine.ETurnPhases.AssignFirstStrikeDamage):
             self._push_combat_listing_phase(session, pl_t, ai_t, bstate)
         else:
             self._push_phase_options_empty(
@@ -1860,7 +1861,7 @@ class TurnFlowMixin(_HostBase):
         if port is None:
             return False
         _hc.trace_rules_port(log_req, "drive-before", port, bstate)
-        if (port.current_turn_phase == _hc.game_engine.ETurnPhases.StartTurn and
+        if (port.current_turn_phase == game_engine.ETurnPhases.StartTurn and
                 port.action_stack.count == 0 and
                 int(getattr(port, "total_turns_taken", 0) or 0) == 0):
             # A newly-created checkpoint names StartTurn before its native

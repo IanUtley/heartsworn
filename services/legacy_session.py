@@ -7,6 +7,7 @@ import hashlib
 import json
 import os
 from db import log_req
+import game_engine
 
 
 # ServiceGameSession ReplayFetch (160000)
@@ -290,7 +291,7 @@ def handle_playertransaction_3029(handler, target, instance, data_type, reqid, c
                 # every RulesPort closure derived from it reported the
                 # human as the AI, projecting opponent cards onto the
                 # local side.
-                _rules_ai = _hc.game_engine.UID.make(_hc.game_engine.SERVICE_AI_UID_TYPE, 1000)
+                _rules_ai = game_engine.UID.make(game_engine.SERVICE_AI_UID_TYPE, 1000)
             handler._fresh_game(session, player_uid, _rules_ai,
                              _rules_state)
         handled = handler._dispatch_rules_port_transaction(

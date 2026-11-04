@@ -10,6 +10,7 @@ import json
 import random
 import struct
 from db import log_req
+import game_engine
 
 
 # ServiceLoadBalancer — QuitOnReconnectionGame (22011)
@@ -410,8 +411,8 @@ def handle_startencounter_22017(handler, target, instance, data_type, reqid, com
                             ("m_Guid", "guid", str(scene_guid))])),
                     ("SessionFlags", "enum1", (
                         "Game.Shared.ESessionFlags",
-                        _hc.game_engine.ESessionFlags.IsEncounter |
-                        _hc.game_engine.ESessionFlags.IsPvE)),
+                        game_engine.ESessionFlags.IsEncounter |
+                        game_engine.ESessionFlags.IsPvE)),
                 ]))
     elif fra_setup is not None:
         # The client replaces its arena battle context with this
@@ -1015,7 +1016,7 @@ def handle_readytostartgame_22031(handler, target, instance, data_type, reqid, c
     # battle scene to stall after joining the encounter.
     gs_inner = _hc.encoder.encode_game_started_response(
         int(player_uid),
-        [int(player_uid), _hc.game_engine.UID.make(_hc.game_engine.SERVICE_AI_UID_TYPE, 1000).uid64],
+        [int(player_uid), game_engine.UID.make(game_engine.SERVICE_AI_UID_TYPE, 1000).uid64],
         seed_w=0xABCDEF0102030405,
         seed_z=0x1234567890ABCDEF,
         success=True)
@@ -1030,11 +1031,11 @@ def handle_readytostartgame_22031(handler, target, instance, data_type, reqid, c
     log_req(f"    Pushed GameStarted (3053, {len(gs_dw)}b)")
 
     # Push 3055 game events AFTER 22027
-    pl_uid_t = _hc.game_engine.UID.make(244, int(handler.client_reck_id))
-    ai_uid_t = _hc.game_engine.UID.make(_hc.game_engine.SERVICE_AI_UID_TYPE, 1000)
+    pl_uid_t = game_engine.UID.make(244, int(handler.client_reck_id))
+    ai_uid_t = game_engine.UID.make(game_engine.SERVICE_AI_UID_TYPE, 1000)
     pl_uid_val = (int(handler.client_reck_id) << 8) | 244
     ai_uid_val = (1000 << 8) | _hc.SERVICE_AI_UID_TYPE
-    sess_tutorial = _hc.game_engine.UID(session.session_id)
+    sess_tutorial = game_engine.UID(session.session_id)
     player_name = handler.user_profile["name"] if handler.user_profile else "TestPlayer"
     log_req(f"    SESS: raw={session.session_id:#x}, tut={sess_tutorial.uid64:#x}")
 
@@ -1042,7 +1043,7 @@ def handle_readytostartgame_22031(handler, target, instance, data_type, reqid, c
     # Campaign sessions are named "camp_<CampID>" by the campaign
     # 'start' handler, so we can distinguish them thread-safely from
     # the DB-backed session row.
-    game = _hc.game_engine.Game(sess_tutorial.uid64, pl_uid_t, ai_uid_t)
+    game = game_engine.Game(sess_tutorial.uid64, pl_uid_t, ai_uid_t)
     handler._scene_global_ability_guids = []
     handler._scene_targeted_ability_guids = []
     handler._scene_targeted_ability_owners = {}
@@ -1207,7 +1208,7 @@ def handle_readytostartgame_22031(handler, target, instance, data_type, reqid, c
             # All abilities granted by this talent (one-to-many).
             ab_rows = _hc.db_talent_ability_rows(tg, conn=_hc._db)
             if ab_rows:
-                pl_abilities.extend(_hc.game_engine.ResourceId.from_str(r[0]) for r in ab_rows)
+                pl_abilities.extend(game_engine.ResourceId.from_str(r[0]) for r in ab_rows)
             else:
                 # Passive talent with no ability (e.g. Efficient) — skip.
                 pass
@@ -1221,7 +1222,7 @@ def handle_readytostartgame_22031(handler, target, instance, data_type, reqid, c
     # isn't granted via a talent.
     from pvp_db import db_get_champion_ability_guids as _db_champ_ab
     for ag in _db_champ_ab(player_champ_guid):
-        rid = _hc.game_engine.ResourceId.from_str(ag)
+        rid = game_engine.ResourceId.from_str(ag)
         if rid not in pl_abilities:
             pl_abilities.append(rid)
 
@@ -1247,14 +1248,14 @@ def handle_readytostartgame_22031(handler, target, instance, data_type, reqid, c
         f"maximum: {handler._campaign_max_hand_size}, "
         f"hand effects: {handler._campaign_starting_hand_effects}")
 
-    game.card_defs[player_champ_id] = _hc.game_engine.CardDef("Player",
-        _hc.game_engine.ECardTypes.Champion, 0, player_starting_health, player_starting_health, [], pl_abilities)
+    game.card_defs[player_champ_id] = game_engine.CardDef("Player",
+        game_engine.ECardTypes.Champion, 0, player_starting_health, player_starting_health, [], pl_abilities)
     ai_starting_health = handler._champion_health_by_guid(ai_champ_guid)
     from pvp_db import db_get_champion_ability_guids as _db_champ_ab_ai
-    ai_abilities = [_hc.game_engine.ResourceId.from_str(g)
+    ai_abilities = [game_engine.ResourceId.from_str(g)
                     for g in _db_champ_ab_ai(ai_champ_guid)]
-    game.card_defs[ai_champ_id] = _hc.game_engine.CardDef(ai_name,
-        _hc.game_engine.ECardTypes.Champion, 0, ai_starting_health, ai_starting_health, [], ai_abilities)
+    game.card_defs[ai_champ_id] = game_engine.CardDef(ai_name,
+        game_engine.ECardTypes.Champion, 0, ai_starting_health, ai_starting_health, [], ai_abilities)
     game.player_champion_card_id = player_champ_id
     handler._player_champ_scid = player_champ_id
     handler._ai_champ_scid = ai_champ_id
@@ -1357,12 +1358,12 @@ def handle_readytostartgame_22031(handler, target, instance, data_type, reqid, c
     player_static = champion_static_intattrs(
         _hc._db, session.session_id, start_state, player_owner)
     ai_static = champion_static_intattrs(_hc._db, session.session_id, start_state, 0)
-    game.push_card_updated(player_champ_id, pl_uid_t, _hc.game_engine.ECardCollections.None_,
-                           _hc.game_engine.ECardTypes.Champion, attack=0, defense=player_starting_health,
+    game.push_card_updated(player_champ_id, pl_uid_t, game_engine.ECardCollections.None_,
+                           game_engine.ECardTypes.Champion, attack=0, defense=player_starting_health,
                            template_id=player_champ_guid,
                            **({"int_attrs": player_static} if player_static else {}))
-    game.push_card_updated(ai_champ_id, ai_uid_t, _hc.game_engine.ECardCollections.None_,
-                           _hc.game_engine.ECardTypes.Champion, attack=0, defense=ai_starting_health,
+    game.push_card_updated(ai_champ_id, ai_uid_t, game_engine.ECardCollections.None_,
+                           game_engine.ECardTypes.Champion, attack=0, defense=ai_starting_health,
                            template_id=ai_champ_guid,
                            **({"int_attrs": ai_static} if ai_static else {}))
 
@@ -1496,13 +1497,13 @@ def handle_readytostartgame_22031(handler, target, instance, data_type, reqid, c
         # through PreGame/PickGoesFirst; each player draws 7 only after
         # the Play/Draw pick (see the 3029 ChoosePlay/ChooseDraw
         # handler).
-        col = _hc.game_engine.ECardCollections.Deck
+        col = game_engine.ECardCollections.Deck
         instance_id = player_card_tpl_ids[i]
         # Look up card template GUID and type. The campaign starter
         # deck stores template GUIDs directly; FRA decks store
         # instance ids (resolve via card_instances).
         tpl_guid = "00000000-0000-0000-0000-000000000000"
-        ct = _hc.game_engine.ECardTypes.Troop
+        ct = game_engine.ECardTypes.Troop
         ctype_name = "Troop"
         cost, atk, def_ = 0, 0, 0
         shards = []
@@ -1512,7 +1513,7 @@ def handle_readytostartgame_22031(handler, target, instance, data_type, reqid, c
         if row:
             tpl_guid = row[0]
             ctype_name = row[1]
-            ct = _hc.game_engine.card_type_from_db(ctype_name)
+            ct = game_engine.card_type_from_db(ctype_name)
             cost, atk, def_ = row[3] or 0, row[4] or 0, row[5] or 0
             # Fetch threshold data
             import json as _json2
@@ -1532,7 +1533,7 @@ def handle_readytostartgame_22031(handler, target, instance, data_type, reqid, c
             for _gem_ag in (deck_gem_abilities.get(str(instance_id)) or []):
                 if str(_gem_ag).lower() not in [str(g).lower() for g in ab_guids]:
                     ab_guids.append(str(_gem_ag).lower())
-            abilities = [_hc.game_engine.ResourceId.from_str(g) for g in ab_guids]
+            abilities = [game_engine.ResourceId.from_str(g) for g in ab_guids]
             # Fetch static/effective attributes from the setup cache.
             attributes = int(_base_attrs or 0)
             if len(ab_guids) != len(_base_ags):
@@ -1550,15 +1551,15 @@ def handle_readytostartgame_22031(handler, target, instance, data_type, reqid, c
         # Effective attributes = static template attributes + any
         # granted by the card's own abilities (passives), so attribute
         # icons show in hand from the first CardUpdated.
-        cdef_attrs = _hc.game_engine.ECardAttributes.Unknown
+        cdef_attrs = game_engine.ECardAttributes.Unknown
         if row:
             cdef_attrs = attributes
-        game.card_defs[cid] = _hc.game_engine.CardDef(row[2] if row else "Card", ct, cost, atk, def_, shards, abilities, cdef_attrs)
+        game.card_defs[cid] = game_engine.CardDef(row[2] if row else "Card", ct, cost, atk, def_, shards, abilities, cdef_attrs)
         # Deck cards: minimal update so the client knows they exist.
         # Both players' decks stay face-down (nulling=True) — you
         # cannot inspect your own deck mid-game. The client shows the
         # deck sleeve and skips the examiner for Null cards.
-        game.push_card_updated(cid, pl_uid_t, _hc.game_engine.ECardCollections.Deck, ct,
+        game.push_card_updated(cid, pl_uid_t, game_engine.ECardCollections.Deck, ct,
                               nulling=True)
     if player_ability_updates:
         _hc.db_update_game_card_abilities(player_ability_updates, conn=_hc._db)
@@ -1581,8 +1582,8 @@ def handle_readytostartgame_22031(handler, target, instance, data_type, reqid, c
                 # make_network_packet during PreGame.
                 c_scid = cid
                 game.push_card_moved(
-                    c_scid, pl_uid_t, _hc.game_engine.ECardCollections.Deck,
-                    _hc.game_engine.ECardLocations.Top, 0)
+                    c_scid, pl_uid_t, game_engine.ECardCollections.Deck,
+                    game_engine.ECardLocations.Top, 0)
     
     # AI deck (shuffled). For campaign battles use the encounter's
     # real AI deck from encounter_deck_cards; otherwise a simple deck.
@@ -1856,17 +1857,17 @@ def handle_readytostartgame_22031(handler, target, instance, data_type, reqid, c
                         cg, conn=_hc._db)
                 r = ai_template_rows[cg_key]
                 if r:
-                    ct2 = _hc.game_engine.card_type_from_db(r[0])
-                    game.card_defs[cid] = _hc.game_engine.CardDef(
+                    ct2 = game_engine.card_type_from_db(r[0])
+                    game.card_defs[cid] = game_engine.CardDef(
                         r[1], ct2, r[2] or 0, r[3] or 0, r[4] or 0, [], [])
                 else:
-                    game.card_defs[cid] = _hc.game_engine.CardDef(
-                        "Card", _hc.game_engine.ECardTypes.Troop, 2, 2, 2, [], [])
+                    game.card_defs[cid] = game_engine.CardDef(
+                        "Card", game_engine.ECardTypes.Troop, 2, 2, 2, [], [])
                 # Encounter-mod cards are placed directly in the AI
                 # warzone so their GameStarted abilities resolve;
                 # normal encounter cards remain in the deck.
-                col = (_hc.game_engine.ECardCollections.Warzone
-                       if _is_scene_mod else _hc.game_engine.ECardCollections.Deck)
+                col = (game_engine.ECardCollections.Warzone
+                       if _is_scene_mod else game_engine.ECardCollections.Deck)
                 _ai_ct = r[0] if r else "Troop"
                 setup_data = handler._battle_setup_template_data(
                     cg, ai_setup_cache)
@@ -2095,12 +2096,12 @@ def handle_readytostartgame_22031(handler, target, instance, data_type, reqid, c
     handler._player_starting_health = game.player_health
     handler._ai_starting_health = game.ai_health
     log_req(f"    PreGame: player health {game.player_health}, AI health {game.ai_health}")
-    game.push_turn_phase(_hc.game_engine.ETurnPhases.PreGame)
+    game.push_turn_phase(game_engine.ETurnPhases.PreGame)
     if campaign_encounter_conversation_guid:
         event = game._make_event(
-            _hc.game_engine.EncounterModDialogSessionEventArgs)
+            game_engine.EncounterModDialogSessionEventArgs)
         event.player_id = pl_uid_t
-        event.conversation_template_id = _hc.game_engine.ResourceId.from_str(
+        event.conversation_template_id = game_engine.ResourceId.from_str(
             campaign_encounter_conversation_guid)
         game._push(event)
         log_req("    Campaign encounter conversation queued internally: "
@@ -2127,10 +2128,10 @@ def handle_readytostartgame_22031(handler, target, instance, data_type, reqid, c
             if value))
         for conversation_id in conversation_ids:
             event = game._make_event(
-                _hc.game_engine.EncounterModDialogSessionEventArgs)
+                game_engine.EncounterModDialogSessionEventArgs)
             event.player_id = pl_uid_t
             event.conversation_template_id = (
-                _hc.game_engine.ResourceId.from_str(conversation_id))
+                game_engine.ResourceId.from_str(conversation_id))
             game._push(event)
         if conversation_ids:
             log_req("    FRA challenge conversation queued internally: "
@@ -2160,11 +2161,11 @@ def handle_readytostartgame_22031(handler, target, instance, data_type, reqid, c
         else:
             # The human won the toss: show the normal Play/Draw dialog
             # and wait for its ChoosePlay/ChooseDraw transaction.
-            game2 = _hc.game_engine.Game(session.session_id, pl_uid_t, ai_uid_t)
-            game2.push_turn_phase(_hc.game_engine.ETurnPhases.PickGoesFirst, pl_uid_t, pl_uid_t)
-            game2.push_green_light(pl_uid_t, _hc.game_engine.EPriorityContext.Normal)
+            game2 = game_engine.Game(session.session_id, pl_uid_t, ai_uid_t)
+            game2.push_turn_phase(game_engine.ETurnPhases.PickGoesFirst, pl_uid_t, pl_uid_t)
+            game2.push_green_light(pl_uid_t, game_engine.EPriorityContext.Normal)
             handler._sync_rules_port_setup_checkpoint(
-                session, _hc.game_engine.ETurnPhases.PickGoesFirst, pl_uid_t)
+                session, game_engine.ETurnPhases.PickGoesFirst, pl_uid_t)
             pkt2 = game2.make_network_packet(pl_uid_t)
             evt_bytes2 = _hc.compress_gzip(_hc.encode_sync_event(pkt2))
             evt_dw2 = _hc.encode_datawrapper(0, 3055, evt_bytes2, 1, "00000000-0000-0000-0000-000000000000")

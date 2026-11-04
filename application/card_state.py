@@ -112,7 +112,7 @@ class CardStateMixin(_HostBase):
             t = self._template_by_guid(template_guid)
         if t:
             tpl_guid, ct_name, name, cost, atk, def_ = t
-            ct = _hc.game_engine.card_type_from_db(ct_name)
+            ct = game_engine.card_type_from_db(ct_name)
         else:
             # Champion templates — PvP champs in champion_templates_extended,
             # PvE champs (and some PvP) in champion_templates.  Try both.
@@ -120,13 +120,13 @@ class CardStateMixin(_HostBase):
             if _hc.db_is_champion_template(template_guid):
                 tpl_guid, ct_name, name, cost, atk, def_ = (
                     template_guid, "Champion", "Champion", 0, 0, 20)
-                ct = _hc.game_engine.ECardTypes.Champion
+                ct = game_engine.ECardTypes.Champion
             else:
                 tpl_guid = "00000000-0000-0000-0000-000000000000"
                 ct_name = "Troop"
-                ct, name, cost, atk, def_ = _hc.game_engine.ECardTypes.Troop, "Card", 0, 0, 0
+                ct, name, cost, atk, def_ = game_engine.ECardTypes.Troop, "Card", 0, 0, 0
         shards = []
-        attributes = _hc.game_engine.ECardAttributes.Unknown
+        attributes = game_engine.ECardAttributes.Unknown
         lethal = False
         srow = None
         # Instance-persisted abilities + power/toughness buffs (Shift /
@@ -220,7 +220,7 @@ class CardStateMixin(_HostBase):
                         attributes = int(srow[2])
                     except Exception:
                         pass
-            elif ct == _hc.game_engine.ECardTypes.Champion:
+            elif ct == game_engine.ECardTypes.Champion:
                 # Champion abilities live in champion_abilities, not card_templates.
                 from pvp_db import db_champion_ability_guids
                 carow = db_champion_ability_guids(tpl_guid)
@@ -246,14 +246,14 @@ class CardStateMixin(_HostBase):
         ab_src = inst_abilities_json
         if (not ab_src or str(ab_src).strip() in ("null", "{}")
                 or (str(ab_src).strip() == "[]"
-                    and ct == _hc.game_engine.ECardTypes.Champion)):
+                    and ct == game_engine.ECardTypes.Champion)):
             ab_src = srow[1] if srow else None
         ability_guids = []
         abilities = []
         if ab_src:
             try:
                 parsed = json.loads(ab_src)
-                abilities = [_hc.game_engine.ResourceId.from_str(g) for g in parsed]
+                abilities = [game_engine.ResourceId.from_str(g) for g in parsed]
                 ability_guids = [g.lower() for g in parsed]
             except Exception:
                 pass
@@ -281,7 +281,7 @@ class CardStateMixin(_HostBase):
                 gem_guid = str(gem_guid).lower()
                 if gem_guid not in ability_guids:
                     ability_guids.append(gem_guid)
-                    abilities.append(_hc.game_engine.ResourceId.from_str(gem_guid))
+                    abilities.append(game_engine.ResourceId.from_str(gem_guid))
             # Persist the merged list for the active game instance so combat
             # statics and subsequent pushes see the same gem ability.
             if scid is not None and gem_guids:
@@ -375,7 +375,7 @@ class CardStateMixin(_HostBase):
                         break
                 if qualifies and scene_ag not in ability_guids:
                     ability_guids.append(scene_ag)
-                    abilities.append(_hc.game_engine.ResourceId.from_str(scene_ag))
+                    abilities.append(game_engine.ResourceId.from_str(scene_ag))
                     scene_added.append(scene_ag)
             if scene_added:
                 _hc.db_set_card_abilities(
@@ -439,7 +439,7 @@ class CardStateMixin(_HostBase):
         # "heals" when card_damage is cleared at its controller's Prep.
         def_ = max(0, def_ - dmg)
         shards = [int(shard) for shard in shards if shard is not None]
-        game.card_defs[scid] = _hc.game_engine.CardDef(
+        game.card_defs[scid] = game_engine.CardDef(
             name, ct, cost, atk, def_, shards, abilities, attributes, lethal,
             subtype=subtype)
         if scid is not None:
@@ -447,9 +447,9 @@ class CardStateMixin(_HostBase):
             ability_uses = remaining_uses_per_game(
                 _hc._db, game.session_id.uid64, scid.uid.uid64, ability_guids,
                 getattr(self, "_current_bstate", None) or {},
-                champion=ct == _hc.game_engine.ECardTypes.Champion)
+                champion=ct == game_engine.ECardTypes.Champion)
             game.card_defs[scid].uses_per_game_counts = {
-                _hc.game_engine.ResourceId.from_str(guid): int(value)
+                game_engine.ResourceId.from_str(guid): int(value)
                 for guid, value in ability_uses.items()
             }
         cooldowns = {}
@@ -472,7 +472,7 @@ class CardStateMixin(_HostBase):
                     if remaining > 0:
                         cooldowns[guid] = remaining
         game.card_defs[scid].cooldown_counts = {
-            _hc.game_engine.ResourceId.from_str(guid): int(value)
+            game_engine.ResourceId.from_str(guid): int(value)
             for guid, value in cooldowns.items() if int(value or 0) > 0
         }
         # Tunneling is a card IntAttr in the template TAC, not an
@@ -541,7 +541,7 @@ class CardStateMixin(_HostBase):
             linked = [int(u) for u in vby.get(str(scid.uid.uid64), [])]
             if linked:
                 game.card_defs[scid].related_cards = [
-                    _hc.game_engine.SessionCardId(_hc.game_engine.UID(u))
+                    game_engine.SessionCardId(game_engine.UID(u))
                     for u in linked]
         except Exception:
             pass
@@ -665,7 +665,7 @@ class CardStateMixin(_HostBase):
         guid = str(ability_guid or "").lower()
         if source_uid is None:
             champion = getattr(self, "_player_champ_scid", None)
-            if isinstance(champion, _hc.game_engine.SessionCardId):
+            if isinstance(champion, game_engine.SessionCardId):
                 source_uid = int(champion.uid.uid64)
         from rules_port.cooldowns import champion_cooldown_key, champion_cooldown
         cooldown_key = champion_cooldown_key(source_uid, guid)
@@ -717,11 +717,11 @@ class CardStateMixin(_HostBase):
             attributes, conn=_hc._db)
         _hc._db.commit()
         if game is not None:
-            scid = _hc.game_engine.SessionCardId(_hc.game_engine.UID(int(card_uid)))
+            scid = game_engine.SessionCardId(game_engine.UID(int(card_uid)))
             _tpl, ct, _name, cost, atk, defense, gems = self._card_full_data(
                 game, scid, row[0])
             if (bstate or {}).get("pvp"):
-                owner = _hc.game_engine.UID.make(244, int(row[1]))
+                owner = game_engine.UID.make(244, int(row[1]))
             else:
                 owner = pl_t if int(row[1] or 0) != 0 else ai_t
             from rules_port.runtime_helpers import card_collection_for_location
@@ -755,11 +755,11 @@ class CardStateMixin(_HostBase):
         _hc.db_move_card_to_location(
             session.session_id, int(card_uid), "hand", position=100, conn=_hc._db)
         _hc._db.commit()
-        scid = _hc.game_engine.SessionCardId(_hc.game_engine.UID(int(card_uid)))
+        scid = game_engine.SessionCardId(game_engine.UID(int(card_uid)))
         tpl_guid, ct, name, cost, atk, def_, gem_type = self._card_full_data(
             game, scid, tpl_guid, instance_id)
         game.push_card_drawn(scid, pl_t, 1)
-        game.push_card_updated(scid, pl_t, _hc.game_engine.ECardCollections.Hand, ct,
+        game.push_card_updated(scid, pl_t, game_engine.ECardCollections.Hand, ct,
                                attack=atk, defense=def_, cost=cost,
                                template_id=tpl_guid, gems=gem_type)
         log_req(f"    Added card {card_uid} ({name}) from deck to hand")
@@ -790,11 +790,11 @@ class CardStateMixin(_HostBase):
         if bstate.get("pvp"):
             pids = [int(p) for p in (bstate.get("pids") or [])]
             opponent_id = next((p for p in pids if p != owner_id), None)
-            ai_t = (_hc.game_engine.UID.make(244, opponent_id)
-                    if opponent_id is not None else _hc.game_engine.UID.make(244, owner_id))
-            draw_pl_t = _hc.game_engine.UID.make(244, owner_id)
+            ai_t = (game_engine.UID.make(244, opponent_id)
+                    if opponent_id is not None else game_engine.UID.make(244, owner_id))
+            draw_pl_t = game_engine.UID.make(244, owner_id)
         else:
-            ai_t = _hc.game_engine.UID.make(_hc.game_engine.SERVICE_AI_UID_TYPE, 1000)
+            ai_t = game_engine.UID.make(game_engine.SERVICE_AI_UID_TYPE, 1000)
             draw_pl_t = pl_t
         if bstate.get("_rules_port_attached"):
             from rules_port.context import EffectContext
@@ -842,12 +842,12 @@ class CardStateMixin(_HostBase):
                 _be.save_state(session, bstate)
             log_req(f"    Player draw replaced (would-draw/would-enter trigger)")
             return
-        scid = _hc.game_engine.SessionCardId(_hc.game_engine.UID(row[1]))
+        scid = game_engine.SessionCardId(game_engine.UID(row[1]))
         _hc.db_move_card_row_to_hand(session.session_id, row[0], conn=_hc._db)
         _hc._db.commit()
         tpl_guid, ct, name, cost, atk, def_, gem_type = self._card_full_data(game, scid, row[3], row[2])
         game.push_card_drawn(scid, draw_pl_t, 1)
-        game.push_card_updated(scid, draw_pl_t, _hc.game_engine.ECardCollections.Hand, ct,
+        game.push_card_updated(scid, draw_pl_t, game_engine.ECardCollections.Hand, ct,
                                attack=atk, defense=def_, cost=cost,
                                template_id=tpl_guid, gems=gem_type)
         # Entering a hand is its own authoritative zone event.  This is

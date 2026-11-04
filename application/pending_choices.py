@@ -9,6 +9,7 @@ import random
 import re
 import struct
 from db import log_req
+import game_engine
 
 
 if TYPE_CHECKING:
@@ -51,7 +52,7 @@ class PendingChoicesMixin(_HostBase):
         provided = card_template_threshold_flags(
             _hc._db, session.session_id, int(chosen))
         threshold_colors = sorted({
-            int(flag) for flag in _hc.game_engine.SHARD_TO_FLAG.values()
+            int(flag) for flag in game_engine.SHARD_TO_FLAG.values()
             if provided & int(flag)})
         if threshold_colors:
             th = bstate.setdefault("ai_threshold", {})
@@ -62,7 +63,7 @@ class PendingChoicesMixin(_HostBase):
             _be.save_state(session, bstate)
             game.ai_threshold = dict(th)
             for flag, change in zip(threshold_colors, changes):
-                ev_th = _hc.game_engine.PlayerResourceThresholdChangedSessionEventArgs()
+                ev_th = game_engine.PlayerResourceThresholdChangedSessionEventArgs()
                 ev_th.player_id = ai_t
                 ev_th.color = flag
                 ev_th.operation = 1
@@ -215,9 +216,9 @@ class PendingChoicesMixin(_HostBase):
                 chooser_pid = pids[0] if pids else 0
             opp_pid = [p for p in pids if p != chooser_pid][0] \
                 if len(pids) > 1 else 0
-            chooser = _hc.game_engine.UID.make(244, chooser_pid)
-            g2 = _hc.game_engine.Game(int(session.session_id), chooser,
-                                  _hc.game_engine.UID.make(244, opp_pid))
+            chooser = game_engine.UID.make(244, chooser_pid)
+            g2 = game_engine.Game(int(session.session_id), chooser,
+                                  game_engine.UID.make(244, opp_pid))
             g2.events = [ev for ev in game.events]
             # The prompt must NOT ride the shared event stream sent to both
             # players by _pvp_play_troop — strip it here so only the chooser
@@ -352,16 +353,16 @@ class PendingChoicesMixin(_HostBase):
             state["conversation_resume_priority_pid"] = int(
                 state.get("priority_pid", answer_owner_id) or answer_owner_id)
             pvp_save_state(session, state)
-            event_player = _hc.game_engine.UID.make(244, owner_id)
+            event_player = game_engine.UID.make(244, owner_id)
         else:
             bstate["pending_conversation"] = pending
             bstate["resolution_paused"] = True
             _be.save_state(session, bstate)
 
         event = game._make_event(
-            _hc.game_engine.EncounterModDialogSessionEventArgs)
+            game_engine.EncounterModDialogSessionEventArgs)
         event.player_id = event_player
-        event.conversation_template_id = _hc.game_engine.ResourceId.from_str(
+        event.conversation_template_id = game_engine.ResourceId.from_str(
             str(conversation_id))
         # Conversation UI is controller-private in PvP.  PvE has one human
         # controller, so leaving this unset preserves the normal event path.
@@ -452,8 +453,8 @@ class PendingChoicesMixin(_HostBase):
             self._push_transaction_ack(session)
             return True
 
-        pl_t = _hc.game_engine.UID.make(244, int(self.client_reck_id))
-        ai_t = _hc.game_engine.UID.make(_hc.game_engine.SERVICE_AI_UID_TYPE, 1000)
+        pl_t = game_engine.UID.make(244, int(self.client_reck_id))
+        ai_t = game_engine.UID.make(game_engine.SERVICE_AI_UID_TYPE, 1000)
         interpreted = pending.get("interpreter")
         if isinstance(interpreted, dict):
             return self._resume_interpreted_conversation(
@@ -494,12 +495,12 @@ class PendingChoicesMixin(_HostBase):
             game.push_green_light(
                 pl_t, self._priority_context_for(phase, pending_state))
             self._send_battle_events(session, game, pl_t)
-            if phase in (_hc.game_engine.ETurnPhases.FirstMainPhase,
-                         _hc.game_engine.ETurnPhases.SecondMainPhase):
+            if phase in (game_engine.ETurnPhases.FirstMainPhase,
+                         game_engine.ETurnPhases.SecondMainPhase):
                 self._push_main_phase_options(session, pl_t, ai_t)
         else:
             game.push_green_light(
-                pl_t, _hc.game_engine.EPriorityContext.ResolveTopOfChain)
+                pl_t, game_engine.EPriorityContext.ResolveTopOfChain)
             self._send_battle_events(session, game, pl_t)
         self._push_transaction_ack(session)
         log_req(f"    Conversation resolved: "
@@ -577,7 +578,7 @@ class PendingChoicesMixin(_HostBase):
             # what makes this a selectable deck-search prompt rather than a
             # generic hand-card click.
             for cu in pend["candidates"]:
-                c_scid = _hc.game_engine.SessionCardId(_hc.game_engine.UID(int(cu)))
+                c_scid = game_engine.SessionCardId(game_engine.UID(int(cu)))
                 c_row = _hc.db_card_zone_details(
                     session.session_id, int(cu), conn=_hc._db)
                 if not c_row:
@@ -590,9 +591,9 @@ class PendingChoicesMixin(_HostBase):
                 card_owner = pl_t if (c_row[2] or 0) != 0 else ai_t
                 from_discard = kind == "matching_target" and pend["zone"] == "Discard"
                 g.push_card_updated(c_scid, card_owner,
-                                    (_hc.game_engine.ECardCollections.Discard if from_discard
-                                     else _hc.game_engine.ECardCollections.Deck if kind == "matching_target"
-                                     else _hc.game_engine.ECardCollections.Choosing), ct2,
+                                    (game_engine.ECardCollections.Discard if from_discard
+                                     else game_engine.ECardCollections.Deck if kind == "matching_target"
+                                     else game_engine.ECardCollections.Choosing), ct2,
                                     template_id=c_tpl, cost=cost2, attack=atk2,
                                     defense=def2,
                                     # A deck pick shows the cards face-down (nulled), as the hidden deck does, so
@@ -623,9 +624,9 @@ class PendingChoicesMixin(_HostBase):
             h = player_handlers.get(int(owner_id))
             pids = db_game_session_pids(session.session_id)
             opp_pid = [p for p in pids if p != int(owner_id)][0]
-            chooser = _hc.game_engine.UID.make(244, int(owner_id))
-            g2 = _hc.game_engine.Game(int(session.session_id), chooser,
-                                  _hc.game_engine.UID.make(244, opp_pid))
+            chooser = game_engine.UID.make(244, int(owner_id))
+            g2 = game_engine.Game(int(session.session_id), chooser,
+                                  game_engine.UID.make(244, opp_pid))
             build_prompt(g2, chooser)
             if h is not None:
                 _send_pvp_packet(h, session, g2, chooser, "deck-search")
@@ -717,10 +718,10 @@ class PendingChoicesMixin(_HostBase):
             chooser_id = int(pending["owner_id"])
             pids = db_game_session_pids(session.session_id)
             opponent_id = next((pid for pid in pids if int(pid) != chooser_id), 0)
-            chooser = _hc.game_engine.UID.make(244, chooser_id)
-            private = _hc.game_engine.Game(
+            chooser = game_engine.UID.make(244, chooser_id)
+            private = game_engine.Game(
                 int(session.session_id), chooser,
-                _hc.game_engine.UID.make(244, opponent_id))
+                game_engine.UID.make(244, opponent_id))
             choice_ids = ({int(uid) for uid in pending["choice_uids"]} |
                           {int(uid) for uid in
                            (bstate.pop("private_choice_uids", []) or [])})
@@ -913,12 +914,12 @@ class PendingChoicesMixin(_HostBase):
                     # RemovedTopOfChain events in the shared chain resolver.
                     g.push_chain_empty()
                     g.push_green_light(
-                        pl_t, _hc.game_engine.EPriorityContext.Normal)
+                        pl_t, game_engine.EPriorityContext.Normal)
                     self._send_battle_events(session, g, pl_t)
                 if not projected:
                     if _be.current_phase(bstate) in (
-                            _hc.game_engine.ETurnPhases.FirstMainPhase,
-                            _hc.game_engine.ETurnPhases.SecondMainPhase):
+                            game_engine.ETurnPhases.FirstMainPhase,
+                            game_engine.ETurnPhases.SecondMainPhase):
                         self._push_main_phase_options(session, pl_t, ai_t)
             if not projected:
                 self._push_transaction_ack(session)
@@ -930,7 +931,7 @@ class PendingChoicesMixin(_HostBase):
         # Mark the lifecycle phase while TurnStarted triggers resolve so
         # temporary current-resource gains can survive the later Prep refill.
         bstate.get("phase")
-        bstate["phase"] = _hc.game_engine.ETurnPhases.StartTurn
+        bstate["phase"] = game_engine.ETurnPhases.StartTurn
         choice_context = EffectContext.from_rules_port(
             g, session, _hc._db, self, pl_t, ai_t, bstate,
             "", ability=None)
@@ -956,11 +957,11 @@ class PendingChoicesMixin(_HostBase):
             self._send_battle_events(session, g, pl_t)
         else:
             g.push_chain_empty()
-            g.push_green_light(pl_t, _hc.game_engine.EPriorityContext.Normal)
+            g.push_green_light(pl_t, game_engine.EPriorityContext.Normal)
             self._send_battle_events(session, g, pl_t)
             if _be.current_phase(bstate) in (
-                    _hc.game_engine.ETurnPhases.FirstMainPhase,
-                    _hc.game_engine.ETurnPhases.SecondMainPhase):
+                    game_engine.ETurnPhases.FirstMainPhase,
+                    game_engine.ETurnPhases.SecondMainPhase):
                 self._push_main_phase_options(session, pl_t, ai_t)
         self._push_transaction_ack(session)
         log_req(f"    Choice selected: {hex(int(chosen_uid))} "
@@ -1000,26 +1001,26 @@ class PendingChoicesMixin(_HostBase):
             return False
         other_pid = opponent_pid if viewer_pid == chooser_pid else chooser_pid
         # ``chooser`` stays the card owner; ``viewer`` is the recipient.
-        chooser = _hc.game_engine.UID.make(244, chooser_pid)
-        viewer = _hc.game_engine.UID.make(244, viewer_pid)
-        opponent = _hc.game_engine.UID.make(244, other_pid)
-        private = _hc.game_engine.Game(int(session.session_id), viewer, opponent)
+        chooser = game_engine.UID.make(244, chooser_pid)
+        viewer = game_engine.UID.make(244, viewer_pid)
+        opponent = game_engine.UID.make(244, other_pid)
+        private = game_engine.Game(int(session.session_id), viewer, opponent)
         ids = []
         positions = []
         for card_uid, position, template_guid, _user_id, card_state in rows:
-            scid = _hc.game_engine.SessionCardId(_hc.game_engine.UID(int(card_uid)))
+            scid = game_engine.SessionCardId(game_engine.UID(int(card_uid)))
             _tpl, ctype, _name, cost, attack, defense, _gem = \
                 self._card_full_data(private, scid, template_guid)
             private.push_card_updated(
-                scid, chooser, _hc.game_engine.ECardCollections.Deck, ctype,
+                scid, chooser, game_engine.ECardCollections.Deck, ctype,
                 state=int(card_state or 0), template_id=template_guid,
                 cost=cost, attack=attack, defense=defense, nulling=False)
             ids.append(scid)
             positions.append(int(position or 0))
-        ev = private._make_event(_hc.game_engine.CardsRevealedSessionEventArgs)
+        ev = private._make_event(game_engine.CardsRevealedSessionEventArgs)
         ev.player_id = chooser
         ev.session_card_ids = ids
-        ev.collections = [_hc.game_engine.ECardCollections.Deck] * len(ids)
+        ev.collections = [game_engine.ECardCollections.Deck] * len(ids)
         ev.owning_players = [chooser] * len(ids)
         ev.positions = positions
         private._push(ev)
@@ -1117,10 +1118,10 @@ class PendingChoicesMixin(_HostBase):
             chooser_pid = int(owner_id)
             opp_pid = [p for p in pids if p != chooser_pid][0] \
                 if len(pids) > 1 else 0
-            chooser = _hc.game_engine.UID.make(244, chooser_pid)
-            private = _hc.game_engine.Game(
+            chooser = game_engine.UID.make(244, chooser_pid)
+            private = game_engine.Game(
                 int(session.session_id), chooser,
-                _hc.game_engine.UID.make(244, opp_pid))
+                game_engine.UID.make(244, opp_pid))
             build_prompt(private, chooser)
             # The reveal was initially appended to the shared resolution
             # game. Remove it before the caller broadcasts that game.
@@ -1273,11 +1274,11 @@ class PendingChoicesMixin(_HostBase):
             g = self._fresh_game(session, pl_t, ai_t, bstate)
             from gamedata import DEFAULT_RECORD_STORE, ability_graph
             graph = ability_graph(DEFAULT_RECORD_STORE, str(ag).lower())
-            target_cards = [_hc.game_engine.SessionCardId(
-                _hc.game_engine.UID(int(uid))) for uid in selected_uids]
+            target_cards = [game_engine.SessionCardId(
+                game_engine.UID(int(uid))) for uid in selected_uids]
             g.push_ability_on_chain(
-                _hc.game_engine.SessionCardId(_hc.game_engine.UID(src)),
-                _hc.game_engine.ResourceId.from_str(ag),
+                game_engine.SessionCardId(game_engine.UID(src)),
+                game_engine.ResourceId.from_str(ag),
                 ability_instance_id=inst_id,
                 target_card_ids=target_cards,
                 ignores_chain=bool(graph and graph.ignores_chain))
@@ -1292,7 +1293,7 @@ class PendingChoicesMixin(_HostBase):
                     session, pl_t, ai_t, bstate)
             else:
                 g.push_green_light(
-                    pl_t, _hc.game_engine.EPriorityContext.ResolveTopOfChain)
+                    pl_t, game_engine.EPriorityContext.ResolveTopOfChain)
                 self._send_battle_events(session, g, pl_t)
             self._push_transaction_ack(session)
             log_req(f"    RulesPort trigger target chosen: {ag[:8]} "
@@ -1308,10 +1309,10 @@ class PendingChoicesMixin(_HostBase):
         _be.save_state(session, bstate)
         g = self._fresh_game(session, pl_t, ai_t, bstate)
         g.push_ability_on_chain(
-            _hc.game_engine.SessionCardId(_hc.game_engine.UID(src)),
-            _hc.game_engine.ResourceId.from_str(ag),
+            game_engine.SessionCardId(game_engine.UID(src)),
+            game_engine.ResourceId.from_str(ag),
             ability_instance_id=inst_id)
-        g.push_green_light(pl_t, _hc.game_engine.EPriorityContext.ResolveTopOfChain)
+        g.push_green_light(pl_t, game_engine.EPriorityContext.ResolveTopOfChain)
         self._send_battle_events(session, g, pl_t)
         self._push_transaction_ack(session)
         log_req(f"    Trigger target chosen: {ag[:8]} "
@@ -1334,8 +1335,8 @@ class PendingChoicesMixin(_HostBase):
                     session, "_rules_port_dispatch_command", None)
                 inner_bytes = (getattr(original, "inner_bytes", b"")
                                if original is not None else b"")
-                pl_t = _hc.game_engine.UID.make(244, int(self.client_reck_id))
-                ai_t = _hc.game_engine.UID.make(_hc.game_engine.SERVICE_AI_UID_TYPE, 1000)
+                pl_t = game_engine.UID.make(244, int(self.client_reck_id))
+                ai_t = game_engine.UID.make(game_engine.SERVICE_AI_UID_TYPE, 1000)
                 handled = bool(self._resolve_pending_deck_search(
                     session, pl_t, ai_t, inner_bytes))
                 if handled:
@@ -1387,8 +1388,8 @@ class PendingChoicesMixin(_HostBase):
                 instance_id = int(pending.get("instance_id", 1) or 1)
                 state.pop("pending_trigger", None)
                 _be.save_state(session, state)
-                pl_t = _hc.game_engine.UID.make(244, int(self.client_reck_id))
-                ai_t = _hc.game_engine.UID.make(_hc.game_engine.SERVICE_AI_UID_TYPE, 1000)
+                pl_t = game_engine.UID.make(244, int(self.client_reck_id))
+                ai_t = game_engine.UID.make(game_engine.SERVICE_AI_UID_TYPE, 1000)
                 game = self._fresh_game(session, pl_t, ai_t, state)
                 # This RulesPort bridge handles Practice/PvE prompts, where
                 # pending.owner_id is the raw game_cards.user_id, not the
@@ -1415,13 +1416,13 @@ class PendingChoicesMixin(_HostBase):
                             pl_t, self._priority_context_for(phase, state))
                     else:
                         game.push_green_light(
-                            pl_t, _hc.game_engine.EPriorityContext.ResolveTopOfChain)
+                            pl_t, game_engine.EPriorityContext.ResolveTopOfChain)
                     self._send_battle_events(session, game, pl_t)
                 self._push_transaction_ack(session)
                 if (not native_scheduler and _be.stack_empty(state) and
                         _be.current_phase(state) in (
-                            _hc.game_engine.ETurnPhases.FirstMainPhase,
-                            _hc.game_engine.ETurnPhases.SecondMainPhase)):
+                            game_engine.ETurnPhases.FirstMainPhase,
+                            game_engine.ETurnPhases.SecondMainPhase)):
                     self._push_main_phase_options(session, pl_t, ai_t)
                 log_req(f"    Optional trigger declined: "
                     f"{pending.get('ability_guid', '')[:8]}")
@@ -1471,8 +1472,8 @@ class PendingChoicesMixin(_HostBase):
         if found:
             pending["selected_uid"] = found[-1]
             _be.save_state(session, state)
-        pl_t = _hc.game_engine.UID.make(244, int(self.client_reck_id))
-        ai_t = _hc.game_engine.UID.make(_hc.game_engine.SERVICE_AI_UID_TYPE, 1000)
+        pl_t = game_engine.UID.make(244, int(self.client_reck_id))
+        ai_t = game_engine.UID.make(game_engine.SERVICE_AI_UID_TYPE, 1000)
         handled = self._resolve_pending_trigger_target(
             session, pl_t, ai_t, b"",
             ability_guid=pending.get("ability_guid"))
@@ -1590,8 +1591,8 @@ class PendingChoicesMixin(_HostBase):
             state["rules_port_resume_effect_order"] = int(
                 parent.get("resume_effect_order", 0) or 0)
             _be.save_state(session, state)
-            pl_t = _hc.game_engine.UID.make(244, int(self.client_reck_id))
-            ai_t = _hc.game_engine.UID.make(_hc.game_engine.SERVICE_AI_UID_TYPE, 1000)
+            pl_t = game_engine.UID.make(244, int(self.client_reck_id))
+            ai_t = game_engine.UID.make(game_engine.SERVICE_AI_UID_TYPE, 1000)
             game = self._fresh_game(session, pl_t, ai_t, state)
             result = resolve_port_ability(
                 self, game, session, _hc._db, pl_t, ai_t, state, guid,
@@ -1610,7 +1611,7 @@ class PendingChoicesMixin(_HostBase):
             completed_chain = self._completed_rules_port_chain(session, state)
             if completed_chain is None and not state.get("resolution_paused"):
                 game.push_green_light(
-                    pl_t, _hc.game_engine.EPriorityContext.Normal)
+                    pl_t, game_engine.EPriorityContext.Normal)
             self._send_battle_events(session, game, pl_t)
             finished_chain = False
             if completed_chain is not None:
@@ -1825,14 +1826,14 @@ class PendingChoicesMixin(_HostBase):
                 log_req(f"    Deck-search answered — resuming AI turn at idx {ai_idx}")
                 self._run_ai_turn(session, pl_t, ai_t, bstate, start_idx=ai_idx)
             elif _be.current_phase(bstate) in (
-                    _hc.game_engine.ETurnPhases.AssignDamage,
-                    _hc.game_engine.ETurnPhases.AssignFirstStrikeDamage):
+                    game_engine.ETurnPhases.AssignDamage,
+                    game_engine.ETurnPhases.AssignFirstStrikeDamage):
                 _be.advance_phase(bstate)
                 _be.save_state(session, bstate)
                 self._advance_to_priority(session, pl_t, ai_t, bstate)
             else:
                 g2 = self._fresh_game(session, pl_t, ai_t, bstate)
-                g2.push_green_light(pl_t, _hc.game_engine.EPriorityContext.Normal)
+                g2.push_green_light(pl_t, game_engine.EPriorityContext.Normal)
                 self._send_battle_events(session, g2, pl_t)
                 self._push_main_phase_options(session, pl_t, ai_t)
         else:
@@ -1948,8 +1949,8 @@ class PendingChoicesMixin(_HostBase):
             if _be.stack_empty(bstate):
                 g.push_chain_empty()
                 if bstate.get("turn_player") == _be.PLAYER:
-                    if phase in (_hc.game_engine.ETurnPhases.FirstMainPhase,
-                                 _hc.game_engine.ETurnPhases.SecondMainPhase):
+                    if phase in (game_engine.ETurnPhases.FirstMainPhase,
+                                 game_engine.ETurnPhases.SecondMainPhase):
                         bstate["turn_phases"] = _be.build_turn_phases(bstate)
                         _be.save_state(session, bstate)
                     if phase is not None:
@@ -1959,7 +1960,7 @@ class PendingChoicesMixin(_HostBase):
                     pl_t, self._priority_context_for(phase, bstate))
             else:
                 g.push_green_light(
-                    pl_t, _hc.game_engine.EPriorityContext.ResolveTopOfChain)
+                    pl_t, game_engine.EPriorityContext.ResolveTopOfChain)
             self._send_battle_events(session, g, pl_t)
         self._push_transaction_ack(session)
         log_req(f"    Matching deck target chosen: {hex(int(chosen_uid))}; "
@@ -2071,12 +2072,12 @@ class PendingChoicesMixin(_HostBase):
                 row = _hc.db_card_zone_details(
                     session.session_id, chosen, conn=_hc._db)
                 if row:
-                    scid = _hc.game_engine.SessionCardId(_hc.game_engine.UID(chosen))
+                    scid = game_engine.SessionCardId(game_engine.UID(chosen))
                     owner = pl_t if (row[2] or 0) != 0 else ai_t
                     _tpl, ct, _name, cost, atk, defense, _guid = \
                         self._card_full_data(g, scid, row[0], row[1])
                     g.push_card_updated(
-                        scid, owner, _hc.game_engine.ECardCollections.Deck, ct,
+                        scid, owner, game_engine.ECardCollections.Deck, ct,
                         template_id=row[0], cost=cost, attack=atk,
                         defense=defense, state=0, nulling=True)
                 log_req(f"    Revealed choice: {hex(chosen)} -> deck top "
@@ -2126,7 +2127,7 @@ class PendingChoicesMixin(_HostBase):
                 f"candidates={candidates}")
         _be.save_state(session, bstate)
         g2 = self._fresh_game(session, pl_t, ai_t, bstate)
-        g2.push_green_light(pl_t, _hc.game_engine.EPriorityContext.Normal)
+        g2.push_green_light(pl_t, game_engine.EPriorityContext.Normal)
         self._send_battle_events(session, g2, pl_t)
         self._push_main_phase_options(session, pl_t, ai_t)
         self._push_transaction_ack(session)
@@ -2145,7 +2146,7 @@ class PendingChoicesMixin(_HostBase):
             provided = card_template_threshold_flags(
                 _hc._db, session.session_id, int(chosen_uid))
             threshold_colors = sorted({
-                int(flag) for flag in _hc.game_engine.SHARD_TO_FLAG.values()
+                int(flag) for flag in game_engine.SHARD_TO_FLAG.values()
                 if provided & int(flag)})
             from pvp_db import db_randomly_insert_deck_cards
             db_randomly_insert_deck_cards(
@@ -2157,7 +2158,7 @@ class PendingChoicesMixin(_HostBase):
                 _be.save_state(session, bstate)
                 g.player_threshold = dict(th)
                 for flag in threshold_colors:
-                    ev_th = _hc.game_engine.PlayerResourceThresholdChangedSessionEventArgs()
+                    ev_th = game_engine.PlayerResourceThresholdChangedSessionEventArgs()
                     ev_th.player_id = pl_t
                     ev_th.color = flag
                     ev_th.operation = 1
@@ -2194,7 +2195,7 @@ class PendingChoicesMixin(_HostBase):
         # Re-grant the player priority + fresh main-phase options (the resource
         # play consumed the window; the pick resumes the turn).
         g2 = self._fresh_game(session, pl_t, ai_t, bstate)
-        g2.push_green_light(pl_t, _hc.game_engine.EPriorityContext.Normal)
+        g2.push_green_light(pl_t, game_engine.EPriorityContext.Normal)
         self._send_battle_events(session, g2, pl_t)
         self._push_main_phase_options(session, pl_t, ai_t)
         self._push_transaction_ack(session)
@@ -2208,7 +2209,7 @@ class PendingChoicesMixin(_HostBase):
         import hconnect_server as _hc
         from rules_port.zone_effects import state_after_zone_exit
         for cu in uids:
-            c_scid = _hc.game_engine.SessionCardId(_hc.game_engine.UID(int(cu)))
+            c_scid = game_engine.SessionCardId(game_engine.UID(int(cu)))
             c_row = _hc.db_card_zone_details(
                 session.session_id, int(cu), conn=_hc._db)
             if not c_row:
@@ -2218,7 +2219,7 @@ class PendingChoicesMixin(_HostBase):
                 owner = pl_t if (c_row[2] or 0) != 0 else ai_t
                 _tpl2, ct2, _n2, _c2, _a2, _d2, _g2 = self._card_full_data(
                     game, c_scid, c_row[0], c_row[1])
-                game.push_card_updated(c_scid, owner, _hc.game_engine.ECardCollections.Discard, ct2,
+                game.push_card_updated(c_scid, owner, game_engine.ECardCollections.Discard, ct2,
                                        template_id=c_row[0], cost=_c2, attack=_a2, defense=_d2)
                 continue
             if str(c_row[3] or "").lower() not in ("deck", "choosing"):
@@ -2234,6 +2235,6 @@ class PendingChoicesMixin(_HostBase):
             _tpl2, ct2, _n2, _c2, _a2, _d2, _g2 = self._card_full_data(
                 game, c_scid, c_row[0], c_row[1])
             game.push_card_updated(c_scid, owner,
-                                   _hc.game_engine.ECardCollections.Deck, ct2,
+                                   game_engine.ECardCollections.Deck, ct2,
                                    template_id=c_row[0], cost=_c2, attack=_a2,
                                    defense=_d2, state=0, nulling=True)

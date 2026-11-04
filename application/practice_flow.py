@@ -1,3 +1,4 @@
+import game_engine
 """Practice/PvE mulligan and game-start pushes, and chain/UID helpers for the session path."""
 
 
@@ -12,14 +13,14 @@ def _push_pve_mulligan_start(game, player_uid, ai_uid,
     """
     import hconnect_server as _hc
     first_uid = player_uid if play_first_is_player else ai_uid
-    game.push_green_light(first_uid, _hc.game_engine.EPriorityContext.Normal)
-    game.push_turn_phase(_hc.game_engine.ETurnPhases.Mulligan,
+    game.push_green_light(first_uid, game_engine.EPriorityContext.Normal)
+    game.push_turn_phase(game_engine.ETurnPhases.Mulligan,
                          first_uid, first_uid)
     if play_first_is_player:
         return False
     resolve_ai_mulligan()
-    game.push_green_light(player_uid, _hc.game_engine.EPriorityContext.Normal)
-    game.push_turn_phase(_hc.game_engine.ETurnPhases.Mulligan,
+    game.push_green_light(player_uid, game_engine.EPriorityContext.Normal)
+    game.push_turn_phase(game_engine.ETurnPhases.Mulligan,
                          player_uid, player_uid)
     return True
 
