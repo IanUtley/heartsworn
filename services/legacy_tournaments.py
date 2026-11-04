@@ -426,63 +426,8 @@ def handle_request_25039(handler, target, instance, data_type, reqid, comp, sess
         f"tourney-{tournament_id}", 0, room)
 
 
-def handle_request_25011(handler, target, instance, data_type, reqid, comp, session_id,
-                         conh, inner_obj, inner_bytes, raw_data_wrapper_bytes):
-    import hconnect_server as _hc
-    # SaveTournamentDeck: the client sends the complete deck_bits
-    # snapshot.  Corinth owns its physical pool in tournament_pool;
-    # this request is the authoritative main/sideboard transition.
-    player_uid = int(handler.client_reck_id) if handler.client_reck_id else 0
-    tournament_id = int(inner_obj.get("TournamentID", 0) or 0)
-    deck = inner_obj.get("TournamentDeck")
-    if not isinstance(deck, dict):
-        deck = inner_obj
-    main_cards = _hc._tournament_deck_card_ids(deck, "CardsInDeck")
-    side_cards = _hc._tournament_deck_card_ids(deck, "CardsInSideboard")
-    room = db_tournament_room_for_game(tournament_id, conn=db._db)
-    pool = db_tournament_pool(tournament_id, player_uid, conn=db._db)
-    pool_by_id = {card_uid: template for card_uid, template, _loc in pool}
-    submitted = main_cards + side_cards
-    submitted_ids = [card_uid for card_uid, _guid in submitted]
-    valid = bool(room and (int(room.get("format") or 0) &
-                           int(ETournamentFormats.Iconoclast)))
-    valid = valid and len(main_cards) == 20
-    valid = valid and len(submitted_ids) == len(set(submitted_ids))
-    valid = valid and set(submitted_ids) == set(pool_by_id)
-    valid = valid and all(
-        pool_by_id[card_uid] == guid
-        for card_uid, guid in submitted if card_uid in pool_by_id)
-    if valid:
-        db_tournament_pool_replace(
-        tournament_id, player_uid,
-        [(card_uid, guid, 0) for card_uid, guid in main_cards] +
-        [(card_uid, guid, 1) for card_uid, guid in side_cards],
-        conn=db._db)
-        if _is_corinth_room(room or {}):
-            db_tournament_signup_set_async_state(
-            tournament_id, player_uid,
-            deck_ready=True, searching=False, conn=db._db)
-    log_req(f">>> SaveTournamentDeck (dt=25011) tid={tournament_id} "
-        f"player={player_uid} main={len(main_cards)} "
-        f"side={len(side_cards)} valid={valid}")
-    resp_inner = encode_objfmt_response(
-    ["Game.Shared.Network.Tournaments.SaveTournamentDeckResponseArgs",
-     "System.Boolean"],
-    [("Success", "bool", bool(valid))])
-    resp_body = compress_gzip(resp_inner) if comp else resp_inner
-    dw_bytes = encode_datawrapper(reqid | 1, data_type, resp_body,
-                              comp, session_id)
-    handler.scnt += 1
-    handler.send({
-        "issuer": f"0.0.0.0.ServiceTournaments.{SERVICE_MAIL_UID}.ServicePlayer.{handler.client_uid}.{reqid | 1}",
-        "target": target, "instance": instance, "reqid": reqid | 1,
-        "c": comp, "conh": conh, "sid": handler.sid,
-    }, dw_bytes)
-
-
 LEGACY_HANDLERS = {
     25021: handle_tryreconnection_25021,
     25029: handle_entertournament_25029,
     25039: handle_request_25039,
-    25011: handle_request_25011,
 }

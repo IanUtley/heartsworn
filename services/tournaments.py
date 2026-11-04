@@ -12,8 +12,14 @@ from db import log_req
 import db
 from gamemodes.tournament_engine import record_tournament_forfeit
 from pvp_db import db_delete_game_session
+from application.protocol_wire import tournament_deck_card_ids
+from domain.enums import ETournamentFormats
+from gamemodes.tournament_engine import _is_corinth_room
 from tournament_db import (db_tournament_by_id, db_tournament_match_session,
-                           db_tournament_retire_player_run, db_tournament_status)
+                           db_tournament_pool, db_tournament_pool_replace,
+                           db_tournament_retire_player_run,
+                           db_tournament_room_for_game,
+                           db_tournament_signup_set_async_state, db_tournament_status)
 
 
 # Waiting rooms created by CreateWaitingRoom, keyed by room id, and the lock and
@@ -226,3 +232,51 @@ def handle_leave_tournament(handler, target, instance, reqid, comp, session_id,
          ("TournamentID", "ulong", tournament_id)])
     _send(handler, target, instance, reqid, comp, session_id, conh, data_type,
           resp_inner, "LeaveTournament", SERVICE_MAIL_UID)
+
+
+def handle_save_tournament_deck(handler, target, instance, reqid, comp, session_id,
+                                conh, inner_obj, inner_bytes,
+                                *, SERVICE_MAIL_UID, log_req, data_type, **_kw):
+    """Accept a complete deck for an Iconoclast tournament if it matches the pool exactly."""
+    # SaveTournamentDeck: the client sends the complete deck_bits
+    # snapshot.  Corinth owns its physical pool in tournament_pool;
+    # this request is the authoritative main/sideboard transition.
+    player_uid = int(handler.client_reck_id) if handler.client_reck_id else 0
+    tournament_id = int(inner_obj.get("TournamentID", 0) or 0)
+    deck = inner_obj.get("TournamentDeck")
+    if not isinstance(deck, dict):
+        deck = inner_obj
+    main_cards = tournament_deck_card_ids(deck, "CardsInDeck")
+    side_cards = tournament_deck_card_ids(deck, "CardsInSideboard")
+    room = db_tournament_room_for_game(tournament_id, conn=db._db)
+    pool = db_tournament_pool(tournament_id, player_uid, conn=db._db)
+    pool_by_id = {card_uid: template for card_uid, template, _loc in pool}
+    submitted = main_cards + side_cards
+    submitted_ids = [card_uid for card_uid, _guid in submitted]
+    valid = bool(room and (int(room.get("format") or 0) &
+                           int(ETournamentFormats.Iconoclast)))
+    valid = valid and len(main_cards) == 20
+    valid = valid and len(submitted_ids) == len(set(submitted_ids))
+    valid = valid and set(submitted_ids) == set(pool_by_id)
+    valid = valid and all(
+        pool_by_id[card_uid] == guid
+        for card_uid, guid in submitted if card_uid in pool_by_id)
+    if valid:
+        db_tournament_pool_replace(
+            tournament_id, player_uid,
+            [(card_uid, guid, 0) for card_uid, guid in main_cards] +
+            [(card_uid, guid, 1) for card_uid, guid in side_cards],
+            conn=db._db)
+        if _is_corinth_room(room or {}):
+            db_tournament_signup_set_async_state(
+                tournament_id, player_uid,
+                deck_ready=True, searching=False, conn=db._db)
+    log_req(f">>> SaveTournamentDeck (dt=25011) tid={tournament_id} "
+            f"player={player_uid} main={len(main_cards)} "
+            f"side={len(side_cards)} valid={valid}")
+    resp_inner = encode_objfmt_response(
+        ["Game.Shared.Network.Tournaments.SaveTournamentDeckResponseArgs",
+         "System.Boolean"],
+        [("Success", "bool", bool(valid))])
+    _send(handler, target, instance, reqid, comp, session_id, conh, data_type,
+          resp_inner, "SaveTournamentDeck", SERVICE_MAIL_UID)
