@@ -14,16 +14,19 @@ from gamemodes.tournament_engine import record_tournament_forfeit
 from pvp_db import db_delete_game_session
 from application.protocol_wire import tournament_deck_card_ids
 from domain.enums import ETournamentFormats
-from gamemodes.tournament_engine import (CORINTH_SHARD_GUIDS, _is_corinth_room,
-                                         _push_corinth_deck_construction, player_handler_lock,
-                                         player_handlers)
+from gamemodes.tournament_engine import (CORINTH_SHARD_GUIDS, _encode_enter_tournament_error,
+                                         _is_corinth_room, _make_deck_data,
+                                         _push_corinth_deck_construction, player_decks,
+                                         player_handler_lock, player_handlers,
+                                         start_waiting_room_game, uid_instance)
 from tournament_db import (db_seed_tournament_pool, db_tournament_by_id,
                            db_tournament_match_session, db_tournament_player_run_live,
                            db_tournament_pool, db_tournament_pool_replace,
                            db_tournament_retire_player_run, db_tournament_room_for_game,
                            db_tournament_signup_by_player,
                            db_tournament_signup_set_async_state,
-                           db_tournament_signup_set_status, db_tournament_status)
+                           db_tournament_signup_set_status, db_tournament_status,
+                           db_tournament_signups_by_tournament)
 
 
 # Waiting rooms created by CreateWaitingRoom, keyed by room id, and the lock and
@@ -380,3 +383,95 @@ def handle_try_reconnection_tournament(handler, target, instance, reqid, comp, s
          ("ErrorMessage", "string", "" if reconnect_ok else "No active tournament")])
     _send(handler, target, instance, reqid, comp, session_id, conh, data_type,
           resp_inner, "Tournament reconnect", SERVICE_MAIL_UID)
+
+
+def handle_enter_tournament(handler, target, instance, reqid, comp, session_id,
+                            conh, inner_obj, inner_bytes,
+                            *, SERVICE_MAIL_UID, log_req, data_type, **_kw):
+    """Enter a tournament: join the room, then reply; Corinth starts deck construction."""
+    tournament_id = int(inner_obj.get("TournamentID", 0) or 0)
+    log_req(f">>> EnterTournament: tid={tournament_id}")
+    player_uid = int(handler.client_reck_id) if handler.client_reck_id else 0
+    player_name = (handler.user_profile.get("name", "Unknown") if handler.user_profile else "Unknown")
+    deck_id = uid_instance(inner_bytes, "DeckId")
+    entry_group = int(inner_obj.get("EntryGroup", 0) or 0)
+    entry_room = db_tournament_room_for_game(tournament_id, conn=db._db)
+    if not _is_corinth_room(entry_room or {}):
+        tournament_server.leave_all(player_uid)
+    ok, count, target_p, type_id = tournament_server.join_tournament(
+        tournament_id, player_uid, player_name, deck_id=deck_id, entry_group=entry_group)
+    if not ok:
+        signup = db_tournament_signup_by_player(tournament_id, player_uid)
+        if signup:
+            log_req("    Player already signed up")
+            is_waiting_room = False
+        else:
+            dw_bytes = _encode_enter_tournament_error(comp, session_id, tournament_id,
+                                                      "InvalidTouranmentError")
+            handler.scnt += 1
+            handler.send({"issuer": f"0.0.0.0.ServiceTournaments.{SERVICE_MAIL_UID}.ServicePlayer.{handler.client_uid}.{reqid | 1}",
+                          "target": target, "instance": instance, "reqid": reqid | 1,
+                          "c": comp, "conh": conh, "sid": handler.sid}, dw_bytes)
+            return
+    else:
+        is_waiting_room = target_p > 1
+        log_req(f"    Player {player_name} joined room {tournament_id} ({count}/{target_p}) type={type_id}")
+    with player_handler_lock:
+        player_handlers[player_uid] = handler
+    if deck_id:
+        player_decks[player_uid] = deck_id
+        log_req(f"    Deck selected: {deck_id}")
+    log_req(f"    EntryGroup: {entry_group}")
+    for stype_id in (2, 3):
+        if type_id == stype_id:
+            row = db_tournament_room_for_game(tournament_id, conn=db._db)
+            if row:
+                set_id = row.get("set_id") or "set01"
+                if stype_id == 2:
+                    tournament_server.generate_sealed_deck(tournament_id, player_uid, set_id)
+                else:
+                    tournament_server.generate_draft_deck(tournament_id, player_uid, set_id)
+    resp_inner = encode_objfmt_response(
+        ["Game.Shared.Network.Tournaments.EnterTournamentResponseArgs",
+         "Game.Shared.Domain.deck_bits", "System.UInt64", "System.String",
+         "Game.Shared.ResourceId", "System.Guid",
+         "System.Collections.Generic.List`1#Game.Shared.Domain.card_instance_bits",
+         "Game.Shared.Mechanics.EDeckLock", "Game.Shared.Mechanics.EDeckPersonality", "System.Int32"],
+        [("isWaitingRoom", "bool", is_waiting_room),
+         ("TournamentID", "ulong", tournament_id),
+         ("TournamentDeckInfo", "deckbits", _make_deck_data(deck_id if deck_id else 0)),
+         ("Error", "enum1", ("Game.Shared.Network.Tournaments.EEnterTournamentError", 0))])
+    _send(handler, target, instance, reqid, comp, session_id, conh, data_type,
+          resp_inner, "EnterTournament", SERVICE_MAIL_UID)
+    for s in db_tournament_signups_by_tournament(tournament_id):
+        # Legacy quirk kept: this rebinds `handler`, which the Corinth and room-full
+        # branches below act on. The per-player TournamentInfo push that followed in
+        # the legacy code was unreachable (its guard compared `handler` with itself),
+        # so it is not carried over.
+        handler = player_handlers.get(s["player_uid"])
+    corinth_entry = _is_corinth_room(entry_room or {})
+    if ((corinth_entry and count >= 1) or
+            (target_p > 0 and count >= target_p)):
+        if corinth_entry:
+            # Corinth is a persistent async event: entry itself
+            # starts deck construction, while a later matchmaking
+            # pass creates the two-player battle session.
+            pool = db_tournament_pool(tournament_id, player_uid, conn=db._db)
+            if len(pool) != len(CORINTH_SHARD_GUIDS) * 4:
+                db_seed_tournament_pool(tournament_id, player_uid,
+                                        CORINTH_SHARD_GUIDS * 4, conn=db._db)
+                pool = db_tournament_pool(tournament_id, player_uid, conn=db._db)
+            _push_corinth_deck_construction(handler, tournament_id, pool)
+            log_req(f"    >>> Corinth entry: deck construction started for player {player_uid}")
+            return
+        log_req(f"    >>> Room {tournament_id} full — starting game")
+        # Preserve the handlers found during this join.  The start
+        # path sends several unsolicited events after the Enter
+        # request; a shared-registry lookup can otherwise lose one
+        # of the two recipients during a reconnect/concurrent join.
+        room_handlers = {player_uid: handler}
+        with player_handler_lock:
+            for signup in db_tournament_signups_by_tournament(tournament_id):
+                signup_pid = int(signup["player_uid"])
+                room_handlers.setdefault(signup_pid, player_handlers.get(signup_pid))
+        start_waiting_room_game(tournament_id, handler_overrides=room_handlers)
