@@ -22,6 +22,7 @@ from replay_db import db_rules_port_state_snapshot
 from application.player_transactions import typed_payload_from_decoded
 from replay_db import db_record_session_transaction
 from replay_db import db_complete_session_transaction
+import game_session
 
 
 # ServiceGameSession ReplayFetch (160000)
@@ -67,7 +68,7 @@ def handle_playertransaction_3029(handler, target, instance, data_type, reqid, c
                                   conh, inner_obj, inner_bytes, raw_data_wrapper_bytes):
     import hconnect_server as _hc
     player_uid = make_uid(UID_TYPE["ServicePlayer"], int(handler.client_reck_id))
-    session = _hc.game_session.find_session_by_player(player_uid)
+    session = game_session.find_session_by_player(player_uid)
     sync_packets_before = int(getattr(
         handler, "_game_sync_send_count", 0))
     handler._ai_turn_depth = 0  # reset turn-advance recursion guard

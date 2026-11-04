@@ -22,6 +22,7 @@ from pvp_db import db_ability_is_triggered
 from application.practice_flow import _uid_in
 from pvp_db import db_set_card_state_exact
 from application.practice_flow import _is_practice_chain_follow_up
+import game_session
 
 
 if TYPE_CHECKING:
@@ -85,7 +86,7 @@ class TurnFlowMixin(_HostBase):
         import hconnect_server as _hc
         if session is None:
             return False
-        session = cast(_hc.game_session.GameSession, session)
+        session = cast(game_session.GameSession, session)
         port = getattr(session, "_rules_port_session", None)
         payload = getattr(command, "typed_payload", None)
         # Setup, mulligan, pass-priority, and priority-sync commands now enter

@@ -53,6 +53,8 @@ from pvp_db import db_gem_templates
 from pvp_db import db_encounter_deck_cards
 from pvp_db import db_scene_mods
 from pvp_db import db_ability_has_effect
+import game_session
+import encoder
 
 
 # Armies of Myth (AZ1 Node 66): the AI starts with the campaign's army level,
@@ -84,7 +86,7 @@ def handle_readytostartgame_22031(handler, target, instance, data_type, reqid, c
     import hconnect_server as _hc
     player_uid = make_uid(UID_TYPE["ServicePlayer"], int(handler.client_reck_id))
     log_req(f"    Player UID: reck={handler.client_reck_id}, uid={player_uid:#x}")
-    session = _hc.game_session.find_session_by_player(player_uid)
+    session = game_session.find_session_by_player(player_uid)
     if not session:
         log_req("    No session found for tutorial game!")
         return
@@ -397,7 +399,7 @@ def handle_readytostartgame_22031(handler, target, instance, data_type, reqid, c
     # its session/player/card state from 22027 before accepting the
     # 3053 event; sending these in the opposite order causes the
     # battle scene to stall after joining the encounter.
-    gs_inner = _hc.encoder.encode_game_started_response(
+    gs_inner = encoder.encode_game_started_response(
         int(player_uid),
         [int(player_uid), game_engine.UID.make(game_engine.SERVICE_AI_UID_TYPE, 1000).uid64],
         seed_w=0xABCDEF0102030405,

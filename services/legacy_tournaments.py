@@ -94,7 +94,7 @@ def handle_tryreconnection_25021(handler, target, instance, data_type, reqid, co
             str(reconnect_room.get("status", "")).lower() != "closed"):
         reconnect_name = (handler.user_profile.get("name", "Unknown")
                           if handler.user_profile else "Unknown")
-        join_ok, _count, _target, _type_id = _hc.tournament_server.join_tournament(
+        join_ok, _count, _target, _type_id = tournament_server.join_tournament(
             reconnect_tid, reconnect_uid, reconnect_name, deck_id=0,
             entry_group=0)
         if join_ok:
@@ -298,8 +298,8 @@ def handle_entertournament_25029(handler, target, instance, data_type, reqid, co
     entry_room = db_tournament_room_for_game(
     tournament_id, conn=db._db)
     if not _is_corinth_room(entry_room or {}):
-        _hc.tournament_server.leave_all(player_uid)
-    ok, count, target_p, type_id = _hc.tournament_server.join_tournament(
+        tournament_server.leave_all(player_uid)
+    ok, count, target_p, type_id = tournament_server.join_tournament(
         tournament_id, player_uid, player_name, deck_id=deck_id, entry_group=entry_group)
     if not ok:
         signup = db_tournament_signup_by_player(tournament_id, player_uid)
@@ -327,9 +327,9 @@ def handle_entertournament_25029(handler, target, instance, data_type, reqid, co
             if row:
                 set_id = row.get("set_id") or "set01"
                 if stype_id == 2:
-                    _hc.tournament_server.generate_sealed_deck(tournament_id, player_uid, set_id)
+                    tournament_server.generate_sealed_deck(tournament_id, player_uid, set_id)
                 else:
-                    _hc.tournament_server.generate_draft_deck(tournament_id, player_uid, set_id)
+                    tournament_server.generate_draft_deck(tournament_id, player_uid, set_id)
     resp_inner = encode_objfmt_response(
     ["Game.Shared.Network.Tournaments.EnterTournamentResponseArgs",
      "Game.Shared.Domain.deck_bits", "System.UInt64", "System.String",
@@ -639,7 +639,7 @@ def handle_request_25035(handler, target, instance, data_type, reqid, comp, sess
     import hconnect_server as _hc
     log_req(">>> LeaveWaitingRoom")
     player_uid = int(handler.client_reck_id) if handler.client_reck_id else 0
-    _hc.tournament_server.leave_all(player_uid)
+    tournament_server.leave_all(player_uid)
     resp_inner = encode_objfmt_response(["Game.Shared.Network.Tournaments.LeaveWaitingRoomResponseArgs"], [])
     resp_body = compress_gzip(resp_inner) if comp else resp_inner
     dw_bytes = encode_datawrapper(reqid | 1, data_type, resp_body, comp, session_id)
@@ -676,7 +676,7 @@ def handle_request_25031(handler, target, instance, data_type, reqid, comp, sess
     if tournament_id and not forfeit_recorded:
         db_tournament_retire_player_run(
         tournament_id, player_uid, conn=db._db)
-    _hc.tournament_server.leave_all(player_uid)
+    tournament_server.leave_all(player_uid)
     resp_inner = encode_objfmt_response(
     ["Game.Shared.Network.Tournaments.LeaveTournamentResponseArgs",
      "System.UInt64"],
