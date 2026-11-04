@@ -22,6 +22,7 @@ from domain.uids import SERVICE_GAME_SESSION_UID
 from domain.uids import make_uid
 from pvp_db import db_ability_effect_rows
 from gamemodes.fra_arena import _fra_arena_setup_values
+from services.deck_editing import _STARTER_DECKS
 from pvp_db import db_deck_active_gems
 from profile_db import db_insert_card_instance
 from domain.constants import SERVICE_AI_UID_TYPE
@@ -55,6 +56,7 @@ from pvp_db import db_scene_mods
 from pvp_db import db_ability_has_effect
 import game_session
 import encoder
+from pve_db import db_campaign_owner_user_id
 
 
 # Armies of Myth (AZ1 Node 66): the AI starts with the campaign's army level,
@@ -100,7 +102,7 @@ def handle_readytostartgame_22031(handler, target, instance, data_type, reqid, c
         except (TypeError, ValueError, IndexError):
             camp_id = 0
         if camp_id:
-            profile_user_id = _hc.db_campaign_owner_user_id(camp_id, conn=db._db)
+            profile_user_id = db_campaign_owner_user_id(camp_id, conn=db._db)
             if profile_user_id:
                 restored_profile = db_get_user(profile_user_id)
                 if restored_profile is not None:
@@ -1003,7 +1005,7 @@ def handle_readytostartgame_22031(handler, target, instance, data_type, reqid, c
         # can also be inspected by !zones. The Human list is a
         # neutral fallback; encounter-specific decks still take
         # precedence below.
-        fallback_deck = _hc._STARTER_DECKS.get("Human") or {}
+        fallback_deck = _STARTER_DECKS.get("Human") or {}
         for card_guid, quantity in fallback_deck.get("cards", []):
             for _ in range(max(0, int(quantity or 0))):
                 if db_template_exists(card_guid, conn=db._db):

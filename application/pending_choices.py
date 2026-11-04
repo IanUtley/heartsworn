@@ -19,6 +19,7 @@ from application.player_transactions import extract_resource_guid
 from pvp_db import db_card_positions
 from pvp_db import db_move_card_to_deck_top
 from pvp_db import db_move_card_to_deck
+from application.protocol_wire import numeric_target_map
 
 
 if TYPE_CHECKING:
@@ -865,7 +866,7 @@ class PendingChoicesMixin(_HostBase):
                 "source_uid", pending.get("source_uid", 0)) or 0)
             child_owner = int(continuation.get(
                 "owner_id", owner_id) or owner_id)
-            child_targets = _hc._numeric_target_map(
+            child_targets = numeric_target_map(
                 continuation.get("target_map"))
             child_targets[int(continuation.get("target_index", 0))] = \
                 int(chosen_uid)
@@ -883,7 +884,7 @@ class PendingChoicesMixin(_HostBase):
                     self, g, session, db._db, pl_t, ai_t, bstate,
                     parent_guid, parent.get("source_uid"),
                     int(parent.get("owner_id", owner_id) or owner_id),
-                    target_map=_hc._numeric_target_map(parent.get("target_map")),
+                    target_map=numeric_target_map(parent.get("target_map")),
                     variables=parent.get("variables") or {},
                     resume_from_order=int(
                         parent.get("resume_effect_order", 0) or 0))
@@ -953,7 +954,7 @@ class PendingChoicesMixin(_HostBase):
             return True
         resolve_choice_card_abilities(
             choice_context, chosen_uid, pending.get("source_uid"), owner_id)
-        target_map = _hc._numeric_target_map(pending.get("target_map"))
+        target_map = numeric_target_map(pending.get("target_map"))
         resolve_port_ability(
             self, g, session, db._db, pl_t, ai_t, bstate,
             pending["ability_guid"], pending.get("source_uid"), owner_id,
@@ -1918,7 +1919,7 @@ class PendingChoicesMixin(_HostBase):
         child_guid = str(continuation.get("ability_guid") or "").lower()
         child_source = int(continuation.get("source_uid") or 0)
         child_owner = int(continuation.get("owner_id", pend.get("owner_id", 0)) or 0)
-        child_targets = _hc._numeric_target_map(continuation.get("target_map"))
+        child_targets = numeric_target_map(continuation.get("target_map"))
         child_targets[int(continuation.get("target_index", 0))] = \
             int(chosen_uid)
         resolve_port_ability(
@@ -2027,7 +2028,7 @@ class PendingChoicesMixin(_HostBase):
                 # target and continue the same RulesPort ability instance.
                 self._hide_candidates_to_deck(
                     g, session, pl_t, ai_t, revealed)
-                target_map = _hc._numeric_target_map(
+                target_map = numeric_target_map(
                     native_continuation.get("target_map"))
                 target_map[int(native_continuation.get("target_index", 0))] = \
                     int(chosen_uid)

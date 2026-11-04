@@ -842,13 +842,6 @@ def db_campaign_set_zone(campaign_id, campaign_type, template_name,
          campaign_id))
 
 
-def db_campaign_owner_user_id(campaign_id, conn=None):
-    """Return the profile id owning one campaign, or None."""
-    row = _connection(conn).execute(
-        "SELECT ch.user_id FROM campaigns c JOIN champions ch "
-        "ON ch.id=c.champion_id WHERE c.id=?",
-        (int(campaign_id),)).fetchone()
-    return int(row[0]) if row and row[0] is not None else None
 
 
 def db_latest_campaign_any(champion_id, conn=None):

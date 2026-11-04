@@ -8,8 +8,9 @@ from binascii import hexlify
 from binascii import unhexlify
 import io
 import json
+import os
 import struct
-from db import log_req
+from db import log, log_req
 import db
 from encoder import encode_datawrapper
 from encoder import compress_gzip
@@ -40,12 +41,35 @@ from profile_db import db_get_user_by_client_auth_id
 from profile_db import db_update_champion_talents
 from profile_db import db_champion_profile
 from profile_db import db_set_card_instance_extended_art
+from application.champion_defaults import _RACE_DECK_MAP
 
 
 # CreateNewDeckFromTemplate (2091)
+# Starter deck cards loaded from gamedata; read by the deck and legacy handlers.
+_STARTER_DECKS = {}
+_starter_decks_path = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    "generated", "starter_decks.json")
+if os.path.exists(_starter_decks_path):
+    with open(_starter_decks_path, "r") as f:
+        _STARTER_DECKS = json.load(f)
+    log(f"Loaded {len(_STARTER_DECKS)} starter decks from {_starter_decks_path}")
+
+# PvE champion template per race, used when the deck handlers build a PvE deck.
+_PVE_CHAMPION_GUIDS = {
+    "Human":    "752ef2e4-8eb3-4e24-93f2-6bf707c0aaff",
+    "Elf":      "15eb25d9-359e-4dc2-ba54-a76462303723",
+    "Coyotle":  "3c1a8175-d137-40f4-86ee-3d39e0b1158d",
+    "Orc":      "04a4dd5b-453f-468f-84ff-c9207c637525",
+    "Dwarf":    "a0484173-ad18-42d2-a4b8-08cc21088c69",
+    "ShinHare": "cdfaf80e-4564-4690-9bfe-9486e0a9dbc1",
+    "Vennen":   "9672371b-00aa-49b0-b16a-aaa8aab45c73",
+    "Necrotic": "1351fed5-a0d5-44be-892c-78f4b40f7eb1",
+}
+
+
 def handle_createnewdeckfromtemplate_2091(handler, target, instance, data_type, reqid, comp, session_id,
                                           conh, inner_obj, inner_bytes, raw_data_wrapper_bytes):
-    import hconnect_server as _hc
     log_req(f">>> CreateNewDeckFromTemplate (dt=2091)")
     resp_inner = encode_objfmt_response(
     ["Game.Client.Network.Profile.CreateNewDeckFromTemplateResponse",
@@ -78,7 +102,6 @@ def handle_createnewdeckfromtemplate_2091(handler, target, instance, data_type, 
 # AddNewDeck (2089)
 def handle_addnewdeck_2089(handler, target, instance, data_type, reqid, comp, session_id,
                            conh, inner_obj, inner_bytes, raw_data_wrapper_bytes):
-    import hconnect_server as _hc
     log_req(f">>> AddNewDeck (dt=2089)")
     # Extract deck name from raw bytes (parser fails on ResourceId)
     deck_name = "FirstDeck"
@@ -371,7 +394,6 @@ def handle_addnewdeck_2089(handler, target, instance, data_type, reqid, comp, se
 # UpdateDeck (2095)
 def handle_updatedeck_2095(handler, target, instance, data_type, reqid, comp, session_id,
                            conh, inner_obj, inner_bytes, raw_data_wrapper_bytes):
-    import hconnect_server as _hc
     log_req(">>> UpdateDeck (dt=2095)")
     deck_id = 0
     deck_name = None
@@ -532,7 +554,6 @@ def handle_updatedeck_2095(handler, target, instance, data_type, reqid, comp, se
 # GetPlayerCardIDList (2043)
 def handle_getplayercardidlist_2043(handler, target, instance, data_type, reqid, comp, session_id,
                                     conh, inner_obj, inner_bytes, raw_data_wrapper_bytes):
-    import hconnect_server as _hc
     log_req(f">>> GetPlayerCardIDList (dt=2043)")
     p = handler.user_profile
     db_cards = []
@@ -620,7 +641,6 @@ def handle_getplayercardidlist_2043(handler, target, instance, data_type, reqid,
 # DeleteChampion (2035)
 def handle_deletechampion_2035(handler, target, instance, data_type, reqid, comp, session_id,
                                conh, inner_obj, inner_bytes, raw_data_wrapper_bytes):
-    import hconnect_server as _hc
     champ_id = int(inner_obj.get("ChampionId", 0))
     log_req(f">>> DeleteChampion: id={champ_id}")
     if handler.user_profile and champ_id > 0:
@@ -684,7 +704,6 @@ def handle_deletechampion_2035(handler, target, instance, data_type, reqid, comp
 # AddChampion (2033)
 def handle_addchampion_2033(handler, target, instance, data_type, reqid, comp, session_id,
                             conh, inner_obj, inner_bytes, raw_data_wrapper_bytes):
-    import hconnect_server as _hc
     champ_name = inner_obj.get("ChampionName", "Unknown")
     pet_name = str(inner_obj.get("PetName", "") or "")
     owner_champ_id = 0
@@ -723,11 +742,11 @@ def handle_addchampion_2033(handler, target, instance, data_type, reqid, comp, s
         db._db.commit()
 
         # Grant starter deck cards for this race (once only per race)
-        race_name = _hc._RACE_DECK_MAP.get(race_val)
-        if race_name and race_name in _hc._STARTER_DECKS:
-            deck = _hc._STARTER_DECKS[race_name]
+        race_name = _RACE_DECK_MAP.get(race_val)
+        if race_name and race_name in _STARTER_DECKS:
+            deck = _STARTER_DECKS[race_name]
             # Check if this PvE starter deck was already granted
-            pve_template_guid = _hc._PVE_CHAMPION_GUIDS.get(race_name, "")
+            pve_template_guid = _PVE_CHAMPION_GUIDS.get(race_name, "")
             already_granted = False
             if pve_template_guid:
                 if db_purchase_exists(
@@ -925,7 +944,6 @@ def handle_addchampion_2033(handler, target, instance, data_type, reqid, comp, s
 # UpdateChampionDeckID (2187)
 def handle_updatechampiondeckid_2187(handler, target, instance, data_type, reqid, comp, session_id,
                                      conh, inner_obj, inner_bytes, raw_data_wrapper_bytes):
-    import hconnect_server as _hc
     log_req(">>> UpdateChampionDeckID (dt=2187)")
     champ_uid = 0; deck_id = 0; auth_id = 0
     if isinstance(inner_obj, dict):
@@ -981,7 +999,6 @@ def handle_updatechampiondeckid_2187(handler, target, instance, data_type, reqid
 # UpdateChampionTalents (2037)
 def handle_updatechampiontalents_2037(handler, target, instance, data_type, reqid, comp, session_id,
                                       conh, inner_obj, inner_bytes, raw_data_wrapper_bytes):
-    import hconnect_server as _hc
     log_req(">>> UpdateChampionTalents (dt=2037)")
     # Parse ChampionId (ulong) + Talents (List<ResourceId> GUIDs) from the
     # request. The client always sends the champion's full talent list, so
@@ -1157,7 +1174,6 @@ def _spend_extended_art_stardust(handler, user_id, card_rarity):
     Mirrors HasStardustToUpgradeCard on the client: Epic and Promo cards use
     promo stardust, the others the stardust of their own rarity.
     """
-    import hconnect_server as _hc
     key = _EXTENDED_ART_STARDUST_KEY.get(str(card_rarity or ""))
     if key is None:
         return None
@@ -1175,7 +1191,6 @@ def _spend_extended_art_stardust(handler, user_id, card_rarity):
 
 def handle_upgradeextendedartoncard_2185(handler, target, instance, data_type, reqid, comp, session_id,
                                          conh, inner_obj, inner_bytes, raw_data_wrapper_bytes):
-    import hconnect_server as _hc
     log_req(">>> UpgradeExtendedArtOnCard (dt=2185)")
     card_instance_id = int(inner_obj.get("CardInstanceId", 0))
     user_id = handler.user_profile["id"] if handler.user_profile else 0

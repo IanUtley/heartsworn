@@ -26,7 +26,6 @@ from application.protocol_wire import (
 )
 
 
-_numeric_target_map = numeric_target_map
 _nested_field = nested_field
 _tournament_deck_card_ids = tournament_deck_card_ids
 
@@ -97,7 +96,7 @@ from application.profile_flags import _profile_feature_flags
 from services.reconnect import _reconnect_declined_for_pid, _record_reconnect_decline
 from gamemodes.fra_arena import _fra_arena_setup_values, _fra_arena_session_state_data
 
-from application.champion_defaults import _RACE_DECK_MAP, _default_talents_for_champion
+from application.champion_defaults import _default_talents_for_champion
 from services.chests import (
     CLIENT_CHEST_UID_BASE,
     ClientChest,
@@ -406,28 +405,6 @@ def touch_session(handler):
                 if h is handler:
                     entries[i] = (h, time.time())
                     return
-
-
-# Starter deck cards loaded from gamedata
-_STARTER_DECKS = {}
-_starter_decks_path = os.path.join(
-    os.path.dirname(__file__), "generated", "starter_decks.json")
-if os.path.exists(_starter_decks_path):
-    with open(_starter_decks_path, "r") as f:
-        _STARTER_DECKS = json.load(f)
-    log(f"Loaded {len(_STARTER_DECKS)} starter decks from {_starter_decks_path}")
-
-
-_PVE_CHAMPION_GUIDS = {
-    "Human":    "752ef2e4-8eb3-4e24-93f2-6bf707c0aaff",
-    "Elf":      "15eb25d9-359e-4dc2-ba54-a76462303723",
-    "Coyotle":  "3c1a8175-d137-40f4-86ee-3d39e0b1158d",
-    "Orc":      "04a4dd5b-453f-468f-84ff-c9207c637525",
-    "Dwarf":    "a0484173-ad18-42d2-a4b8-08cc21088c69",
-    "ShinHare": "cdfaf80e-4564-4690-9bfe-9486e0a9dbc1",
-    "Vennen":   "9672371b-00aa-49b0-b16a-aaa8aab45c73",
-    "Necrotic": "1351fed5-a0d5-44be-892c-78f4b40f7eb1",
-}
 
 
 def _dispatch_service(handler, data_type, target, instance, reqid, comp,
