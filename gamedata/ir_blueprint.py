@@ -328,7 +328,7 @@ def lower(card: Card) -> Lowered:
                                    effect_instance_id=len(clauses), effect_group_id=len(clauses) + 1))
             next_index += 1
         elif item.action == "Reveal":
-            target = item.args[0].split(".", 1)[0]
+            item.args[0].split(".", 1)[0]  # validates the argument shape, as before
             effect = S.shared(REVEAL_EFFECT)
             # The hand is its own target (the Records give it a separate target template), after the champion's.
             targets[item.out] = next_index

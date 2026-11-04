@@ -908,8 +908,8 @@ def handle_command(handler, cmd: str, room: str, username: str) -> str:
     # use the same owner key as the active game or they can create a phantom
     # tournament participant when a card is generated.
     is_tourney = session and (session.session_name or "").startswith("tourney-")
-    command_owner_id = (int(handler.client_reck_id) if is_tourney
-                        else handler.user_profile["id"])
+    # Evaluated for its validation side effects (client id and profile lookup).
+    (int(handler.client_reck_id) if is_tourney else handler.user_profile["id"])
 
     try:
         result = _dispatch(handler, action, args, session, pl_t, ai_t, room, username)

@@ -964,7 +964,7 @@ class TransactionsMixin(_HostBase):
             draw_count = max(0, redraw_count - 1)
             log_req(f"    PvP mulligan redraw: {redraw_count} -> {draw_count} cards")
             # Save old card_uids so we can push them back to deck.
-            old_scids = [game_engine.UID(row[1]) for row in hand_rows]
+            [game_engine.UID(row[1]) for row in hand_rows]  # validates each row id, as before
             _old_rows, new_rows = db_rules_port_redraw_hand(
                 session.session_id, my_pid, draw_count)
             with pvp_session_lock(session):

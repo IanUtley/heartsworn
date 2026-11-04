@@ -1145,10 +1145,9 @@ def handle_readytostartgame_22031(handler, target, instance, data_type, reqid, c
         ai_deck_personality = cfg.get("ai_deck_personality")
         deck_db_id = cfg["deck_db_id"]
         player_champ_name = cfg["player_champ_name"]
-        race_num, cls_num, gnd_num = (cfg["race_num"], cfg["cls_num"],
-                                       cfg["gnd_num"])
-        race_name, cls_name, gnd_name = (cfg["race_name"], cfg["cls_name"],
-                                         cfg["gnd_name"])
+        cfg["race_num"], cfg["cls_num"], cfg["gnd_num"]  # required keys, as before
+        race_name, cls_name = cfg["race_name"], cfg["cls_name"]
+        cfg["gnd_name"]  # required key, as before
         player_talents_json = cfg["player_talents_json"]
         player_starting_health = cfg["player_starting_health"]
         player_champ_guid = cfg["player_champ_guid"]
