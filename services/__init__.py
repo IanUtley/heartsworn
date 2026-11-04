@@ -52,6 +52,14 @@ _SERVICE_TABLE = {
     22027: ("services.loadbalancer", "handle_ready_for_game_setup_request", {"data_type": 22027}),
     22029: ("services.loadbalancer", "handle_ready_for_game_events_request", {"data_type": 22029}),
     22011: ("services.loadbalancer", "handle_quit_on_reconnect", {"data_type": 22011}),
+
+    # Tournament requests with fixed response shapes
+    25005: ("services.tournaments", "handle_unsubscribe_description_listener", {"data_type": 25005}),
+    25007: ("services.tournaments", "handle_get_tournament_info", {"data_type": 25007}),
+    25035: ("services.tournaments", "handle_leave_waiting_room", {"data_type": 25035}),
+    70015: ("services.tournaments", "handle_pooled_messaging_flush", {"data_type": 70015}),
+    70027: ("services.tournaments", "handle_ladder_tier_rewards_list", {"data_type": 70027}),
+    70028: ("services.tournaments", "handle_ladder_ranking_list", {"data_type": 70028}),
     22013: ("services.loadbalancer", "handle_try_reconnection", {"data_type": 22013}),
 
     # Matchmaking and direct challenges
