@@ -68,6 +68,12 @@ from services.pvp_core import (
 )
 import services.pvp_core as _pvp_core
 from services.pvp_core import (
+    _pvp_advance_from_damage_step,
+    _pvp_advance_past_declare_defense,
+    pvp_advance_to_declare_defense,
+    pvp_skip_to_second_main,
+)
+from services.pvp_core import (
     _pvp_resolve_optional_trigger,
     _pvp_run_phase_start,
     handle_ready_to_continue_game,
@@ -4402,94 +4408,10 @@ def _pvp_declare_attackers(handler, session, inner_bytes, my_pid,
     return True
 
 
-def pvp_advance_to_declare_defense(session, state):
-    """Advance the PvP phase from DeclareAttack (12) through
-    DeclareAttackPriorityWindow (13) to DeclareDefense (14), handing priority
-    to the DEFENDER at 14 (mirrors PvE: after attackers are declared the
-    defender is the one who must act/block).  Returns True if it reached
-    DeclareDefense."""
-    from rules_port import lifecycle as _be
-    pids = db_game_session_pids(session.session_id)
-    if len(pids) < 2:
-        return False
-    turn_pid = state.get("turn_pid")
-    opp_pid = pids[0] if pids[1] == turn_pid else pids[1]
-    phase_list = _be.COMBAT_TURN_PHASES
-    try:
-        cur = phase_list.index(int(state.get("phase", 12)))
-    except ValueError:
-        cur = phase_list.index(12)
-    while True:
-        cur += 1
-        if cur >= len(phase_list):
-            return False
-        new_phase = phase_list[cur]
-        port_enter_phase(state, new_phase)
-        pvp_save_state(session, state)
-        log_req(f"    PvP post-attack: phase {new_phase} to both")
-        _pvp_run_phase_start(session, state, new_phase)
-        if new_phase == _ge.ETurnPhases.DeclareDefense:
-            # The defender holds priority and sees the blocker options.
-            state["priority_pid"] = opp_pid
-            pvp_save_state(session, state)
-            # If the defender has NO eligible blockers (or nothing blocks any
-            # attacker), they have nothing to do at DeclareDefense — auto-pass
-            # them (emit an empty BlockersAssigned) and advance to the
-            # responder window, mirroring PvE ai_pass_declare_defense.
-            blockable = _pvp_defender_blockable_count(session, state)
-            if blockable <= 0:
-                log_req(f"    PvP post-attack: defender {opp_pid} has "
-                        f"{blockable} blocker(s) — auto-passing DeclareDefense")
-                try:
-                    pvp_push_empty_blockers(session, state)
-                except Exception as e:
-                    log_req(f"    PvP empty-blockers error: {e}")
-                continue
-            log_req(f"    PvP post-attack: at DeclareDefense, priority to "
-                    f"defender {opp_pid} ({blockable} blocker(s) available)")
-            return True
-        if new_phase == _ge.ETurnPhases.DeclareDefensePriorityWindow:
-            # The defender auto-passed (no blockers); enter the responder
-            # window and hand priority to the TURN player so combat can
-            # proceed to AssignFirstStrikeDamage.  Stop here and let the
-            # normal pass cycle carry it forward.
-            state["priority_pid"] = turn_pid
-            pvp_save_state(session, state)
-            log_req(f"    PvP post-attack: at DeclareDefensePriorityWindow, "
-                    f"priority to turn player {turn_pid} (defender had no "
-                    f"blockers)")
-            return True
-    return False
 
 
 
 
-def pvp_skip_to_second_main(session, state):
-    """Advance an empty attack through the client-safe path to SecondMain.
-
-    DeclareAttackPriorityWindow is the only intermediate phase needed here:
-    the client permits that priority window to transition directly to
-    SecondMainPhase when CombatManager has no combats.  Do not push blocker or
-    damage phases for an empty attack; those states can make the client emit
-    spurious damage transactions for a combat that does not exist.
-    """
-    pids = db_game_session_pids(session.session_id)
-    if len(pids) < 2:
-        return
-    attack_priority = _ge.ETurnPhases.DeclareAttackPriorityWindow
-    second_main = _ge.ETurnPhases.SecondMainPhase
-    # From DeclareAttack the client's state machine requires the attack
-    # priority window before it accepts SecondMain.  If this helper is called
-    # after that point, the direct destination is already valid.
-    phases_to_push = []
-    if int(state.get("phase", 12)) < attack_priority:
-        phases_to_push.append(attack_priority)
-    phases_to_push.append(second_main)
-    for new_phase in phases_to_push:
-        port_enter_phase(state, new_phase)
-        pvp_save_state(session, state)
-        log_req(f"    PvP skip combat: phase {new_phase} to both")
-        _pvp_run_phase_start(session, state, new_phase)
 
 
 
@@ -4597,50 +4519,8 @@ def _pvp_declare_blockers(handler, session, inner_bytes, my_pid,
     return True
 
 
-def _pvp_advance_past_declare_defense(session, state):
-    """Advance the PvP phase from DeclareDefense (14) to
-    DeclareDefensePriorityWindow (15), pushing the phase to both players and
-    handing priority to the turn (attacker) player.  Returns True on success."""
-    pids = db_game_session_pids(session.session_id)
-    if len(pids) < 2:
-        return False
-    turn_pid = state.get("turn_pid")
-    try:
-        new_phase = _ge.ETurnPhases.DeclareDefensePriorityWindow
-    except Exception:
-        new_phase = 15
-    port_enter_phase(state, new_phase)
-    state["priority_pid"] = turn_pid
-    pvp_save_state(session, state)
-    log_req(f"    PvP post-blockers: phase {new_phase} to both "
-            f"(priority to turn player {turn_pid})")
-    _pvp_run_phase_start(session, state, new_phase)
-    return True
 
 
-def _pvp_advance_from_damage_step(session, state, just_resolved):
-    """After resolving a damage step (AssignFirstStrikeDamage=16 or
-    AssignDamage=18), advance to the next phase and push it to both players.
-    16 -> AssignDamage (18); 18 -> SecondMainPhase (19).  Resolves combat so
-    the opponent doesn't get stuck in a dead BattleStateAssignDamage."""
-    pids = db_game_session_pids(session.session_id)
-    if len(pids) < 2:
-        return
-    turn_pid = state.get("turn_pid")
-    if just_resolved == _ge.ETurnPhases.AssignFirstStrikeDamage:
-        new_phase = _ge.ETurnPhases.AssignDamage
-    elif just_resolved == _ge.ETurnPhases.AssignDamage:
-        new_phase = _ge.ETurnPhases.SecondMainPhase
-    else:
-        return
-    port_enter_phase(state, new_phase)
-    state["priority_pid"] = turn_pid
-    pvp_save_state(session, state)
-    log_req(f"    PvP post-damage: phase {new_phase} to both "
-            f"(priority to turn player {turn_pid})")
-    _pvp_run_phase_start(session, state, new_phase)
-    # A champion may have died from the resolved damage.
-    _pvp_check_game_end(session, state)
 
 
 
