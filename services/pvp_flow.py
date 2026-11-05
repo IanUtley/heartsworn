@@ -58,7 +58,7 @@ def pvp_phase_after_blockers(session, state):
     cache the Swiftstrike result when attackers are declared or blockers are
     assigned: a temporary keyword grant may arrive during that window.
     """
-    return _resolve('port_phase_after_blockers')(bool(state.get('attackers') or {}), pvp_combat_has_swiftstrike(session, state))
+    return _resolve('port_phase_after_blockers')(bool(state.get('attackers') or {}), _resolve("pvp_combat_has_swiftstrike")(session, state))
 
 
 def _pvp_push_mulligan_prompt(session, state, ask_pid):
@@ -90,7 +90,7 @@ def _pvp_push_mulligan_prompt(session, state, ask_pid):
     state['priority_pid'] = ask_pid
     _resolve('pvp_save_state')(session, state)
     log_req(f'    PvP mulligan: active/priority to pid {ask_pid} (opponent {opp_pid} waiting)')
-    _pvp_push_waiting_on(session, ask_pid)
+    _resolve("_pvp_push_waiting_on")(session, ask_pid)
 
 
 def _pvp_resolve_deck_search(handler, session, inner_bytes, my_pid, typed_payload=None):
@@ -112,7 +112,7 @@ def _pvp_resolve_deck_search(handler, session, inner_bytes, my_pid, typed_payloa
                     chosen_uid = int(uid64)
             except Exception:
                 continue
-    typed_uid = _pvp_typed_picker_uid(typed_payload)
+    typed_uid = _resolve("_pvp_typed_picker_uid")(typed_payload)
     if typed_uid is not None:
         chosen_uid = typed_uid
     if not chosen_uid or chosen_uid not in pend['candidates']:
@@ -284,7 +284,7 @@ class _PvpChainHost:
             state['priority_pid'] = self.opponent_id
 
     def chain_after_item(self, session, state, game, item, player_uid, ai_uid):
-        _pvp_check_game_end(self.session, self.state)
+        _resolve("_pvp_check_game_end")(self.session, self.state)
         if not self.state.get('stack') or not self.state.get('priority_pid'):
             return
         if any((self.state.get(key) for key in ('pending_choice', 'pending_deck_search', 'pending_trigger', 'pending_conversation', 'pending_discard_ability'))):
@@ -371,7 +371,7 @@ def _pvp_resolve_combat(session, state, first_strike=False):
         state[f'hp_{defender_pid}'] = int(view['ai_health'])
     _resolve('_pvp_sync_view_to_state')(state, view, attacker_pid, defender_pid)
     _resolve('pvp_save_state')(session, state)
-    _pvp_check_game_end(session, state)
+    _resolve("_pvp_check_game_end")(session, state)
 
 
 @_pvp_locked
@@ -391,14 +391,14 @@ def handle_ready_for_game_events(handler, session, pvp_events_ready, log_req=log
             all_handlers = [h for hl in pr['handlers'].values() for h in hl]
             for h in all_handlers:
                 try:
-                    push_pvp_game_start(h, session)
+                    _resolve("push_pvp_game_start")(h, session)
                 except Exception as e:
                     import traceback
                     log_req(f'    push_pvp_game_start FAILED: {e}\n{traceback.format_exc()}')
             del pvp_events_ready[session.session_id]
             try:
                 state = _resolve('pvp_load_state')(session) or {}
-                _pvp_push_waiting_on(session, int(state.get('goes_first_pid') or 0) or None)
+                _resolve("_pvp_push_waiting_on")(session, int(state.get('goes_first_pid') or 0) or None)
             except Exception as e:
                 log_req(f'    PvP pick-goes-first wait push failed: {e}')
             return True
@@ -515,7 +515,7 @@ def _pvp_push_reconnect_snapshot(handler, session, pid):
     turn_uid = _ge.UID.make(244, turn_pid)
     priority_elapsed_seconds = _resolve('priority_elapsed_ticks')(state, priority_pid) // 10000000
     g.push_green_light(priority_uid, _ge.EPriorityContext.Normal)
-    _pvp_push_turn_phase_with_elapsed(g, phase, turn_uid, priority_uid, priority_elapsed_seconds)
+    _resolve("_pvp_push_turn_phase_with_elapsed")(g, phase, turn_uid, priority_uid, priority_elapsed_seconds)
     g.push_reconnect_done()
     _resolve('_send_pvp_packet')(handler, session, g, pl_uid, 'reconnect-snapshot')
     if priority_pid == pid:
@@ -524,7 +524,7 @@ def _pvp_push_reconnect_snapshot(handler, session, pid):
         elif phase == _ge.ETurnPhases.DeclareAttack:
             _resolve('pvp_push_attack_options')(session, state)
         elif phase == _ge.ETurnPhases.DeclareDefense:
-            pvp_push_blocker_options(session, state)
+            _resolve("pvp_push_blocker_options")(session, state)
         elif phase not in (3, 4, 5, 6, 7, 8, 9):
             _resolve('pvp_push_phase_options')(session, state, pid=pid)
     log_req(f'    PvP reconnect snapshot restored for pid {pid} (phase={phase}, priority={priority_pid})')
@@ -575,18 +575,18 @@ def _pvp_reassign_priority_after_disconnect(session, disconnected_pid, survivor_
     opp_uid = _ge.UID.make(244, opponent_pid)
     game = _ge.Game(int(session.session_id), pl_uid, opp_uid)
     _resolve('_pvp_populate_game_state')(game, state, survivor_pid, opponent_pid)
-    _pvp_apply_visibility(game, state)
+    _resolve("_pvp_apply_visibility")(game, state)
     priority_uid = _ge.UID.make(244, survivor_pid)
     turn_uid = _ge.UID.make(244, int(state.get('turn_pid') or survivor_pid))
     game.push_green_light(priority_uid, _ge.EPriorityContext.Normal)
-    _pvp_push_turn_phase_with_elapsed(game, phase, turn_uid, priority_uid, _resolve('priority_elapsed_ticks')(state, survivor_pid) // 10000000)
+    _resolve("_pvp_push_turn_phase_with_elapsed")(game, phase, turn_uid, priority_uid, _resolve('priority_elapsed_ticks')(state, survivor_pid) // 10000000)
     _resolve('_send_pvp_packet')(survivor_handler, session, game, pl_uid, 'disconnect-priority')
     if phase in (_ge.ETurnPhases.FirstMainPhase, _ge.ETurnPhases.SecondMainPhase):
         _resolve('pvp_push_main_phase_options')(session, state)
     elif phase == _ge.ETurnPhases.DeclareAttack:
         _resolve('pvp_push_attack_options')(session, state)
     elif phase == _ge.ETurnPhases.DeclareDefense:
-        pvp_push_blocker_options(session, state)
+        _resolve("pvp_push_blocker_options")(session, state)
     elif phase not in (3, 4, 5, 6, 7, 8, 9):
         _resolve('pvp_push_phase_options')(session, state, pid=survivor_pid)
     return True
@@ -683,7 +683,7 @@ def _pvp_resolve_trigger_target(handler, session, inner_bytes, my_pid, typed_pay
     _resolve('_pvp_sync_view_to_state')(state, view, owner_id, opp_pid)
     _resolve('pvp_save_state')(session, state)
     _resolve('_pvp_send_same_events')(session, g, pl_t, ai_t)
-    if _pvp_check_game_end(session, state):
+    if _resolve("_pvp_check_game_end")(session, state):
         return True
     turn_pid = int(state.get('turn_pid') or owner_id)
     state['priority_pid'] = turn_pid
@@ -699,7 +699,7 @@ def _pvp_resolve_trigger_target(handler, session, inner_bytes, my_pid, typed_pay
         _resolve('_pvp_populate_game_state')(resume, state, turn_pid, other_pid)
         resume.push_chain_empty()
         resume.push_green_light(turn_uid, _ge.EPriorityContext.Normal)
-        _pvp_push_turn_phase_with_elapsed(resume, int(state.get('phase', 0)), turn_uid, turn_uid, _resolve('priority_elapsed_ticks')(state, turn_pid) // 10000000)
+        _resolve("_pvp_push_turn_phase_with_elapsed")(resume, int(state.get('phase', 0)), turn_uid, turn_uid, _resolve('priority_elapsed_ticks')(state, turn_pid) // 10000000)
         _resolve('_send_pvp_packet')(turn_h, session, resume, turn_uid, 'trigger-target-chain-empty')
     phase = int(state.get('phase', 0))
     if phase in (_ge.ETurnPhases.FirstMainPhase, _ge.ETurnPhases.SecondMainPhase):
@@ -707,7 +707,7 @@ def _pvp_resolve_trigger_target(handler, session, inner_bytes, my_pid, typed_pay
     elif phase == _ge.ETurnPhases.DeclareAttack:
         _resolve('pvp_push_attack_options')(session, state)
     elif phase == _ge.ETurnPhases.DeclareDefense:
-        pvp_push_blocker_options(session, state)
+        _resolve("pvp_push_blocker_options")(session, state)
     log_req(f"    PvP trigger resolved: {ag[:8]} -> {(hex(chosen_uid) if chosen_uid else 'none')}; priority -> {turn_pid}")
     return True
 
@@ -729,7 +729,7 @@ def pvp_push_current_phase_options(session, state, pid=None):
     any priority window.  A live chain item outranks all of them: the holder
     responds to the chain instead of declaring combat.
     """
-    if _pvp_chain_active(session, state):
+    if _resolve("_pvp_chain_active")(session, state):
         _resolve('pvp_push_phase_options')(session, state, pid=pid)
         return
     phase = int(state.get('phase', 0) or 0)
@@ -738,7 +738,7 @@ def pvp_push_current_phase_options(session, state, pid=None):
     elif phase == _ge.ETurnPhases.DeclareAttack:
         _resolve('pvp_push_attack_options')(session, state)
     elif phase == _ge.ETurnPhases.DeclareDefense:
-        pvp_push_blocker_options(session, state)
+        _resolve("pvp_push_blocker_options")(session, state)
     elif phase not in (3, 4, 5, 6, 7, 8, 9):
         _resolve('pvp_push_phase_options')(session, state, pid=pid)
 
@@ -814,7 +814,7 @@ def _pvp_resolve_optional_trigger(handler, session, inner_bytes, my_pid, typed_p
         else:
             resume.push_chain_empty()
             resume.push_green_light(turn_uid, _ge.EPriorityContext.Normal)
-        _pvp_push_turn_phase_with_elapsed(resume, int(state.get('phase', 0)), turn_uid, turn_uid, _resolve('priority_elapsed_ticks')(state, turn_pid) // 10000000)
+        _resolve("_pvp_push_turn_phase_with_elapsed")(resume, int(state.get('phase', 0)), turn_uid, turn_uid, _resolve('priority_elapsed_ticks')(state, turn_pid) // 10000000)
         _resolve('_send_pvp_packet')(turn_h, session, resume, turn_uid, 'optional-trigger-declined')
     phase = int(state.get('phase', 0))
     if not state.get('stack'):
@@ -823,7 +823,7 @@ def _pvp_resolve_optional_trigger(handler, session, inner_bytes, my_pid, typed_p
         elif phase == _ge.ETurnPhases.DeclareAttack:
             _resolve('pvp_push_attack_options')(session, state)
         elif phase == _ge.ETurnPhases.DeclareDefense:
-            pvp_push_blocker_options(session, state)
+            _resolve("pvp_push_blocker_options")(session, state)
     log_req(f'    PvP optional trigger declined: {ag[:8]}')
     return True
 
@@ -853,7 +853,7 @@ def _pvp_run_phase_start(session, state, phase):
                 warm = _ge.Game(int(session.session_id), turn_uid_p, opp_uid_st)
                 warm.player_health = int(state.get(f'hp_{turn_uid}', 20))
                 warm.ai_health = int(state.get(f'hp_{(pids[1] if turn_uid == pids[0] else pids[0])}', 20))
-                _pvp_ready_step(session, state, turn_uid, warm, turn_uid_p, handler=turn_h)
+                _resolve("_pvp_ready_step")(session, state, turn_uid, warm, turn_uid_p, handler=turn_h)
                 st_view = _resolve('_pvp_fra_view')(state, turn_uid, pids[1] if turn_uid == pids[0] else pids[0])
                 st_view['phase'] = phase
                 st_view['_last_turn_phase_event'] = state.get('_last_turn_phase_event')
@@ -892,7 +892,7 @@ def _pvp_run_phase_start(session, state, phase):
                 import traceback
                 log_req(f'    PvP StartTurn trigger error: {e}')
                 traceback.print_exc()
-        if _pvp_check_game_end(session, state):
+        if _resolve("_pvp_check_game_end")(session, state):
             return
     prep_wz = []
     prep_cooldown_uids = []
@@ -901,7 +901,7 @@ def _pvp_run_phase_start(session, state, phase):
         from rules_port.resources import begin_turn_resources_for_player
         resource_refill = begin_turn_resources_for_player(state, turn_uid)
         from rules_port.lifecycle import clear_expired_temporary_attributes
-        ready_changes = _pvp_ready_step(session, state, turn_uid, handler=_resolve('player_handlers').get(turn_uid))
+        ready_changes = _resolve("_pvp_ready_step")(session, state, turn_uid, handler=_resolve('player_handlers').get(turn_uid))
         wz_rows = _resolve('db_warzone_troops_with_state')(session.session_id, turn_uid, conn=_resolve('_db'))
         troop_uids = set()
         for wzr in wz_rows:
@@ -928,18 +928,18 @@ def _pvp_run_phase_start(session, state, phase):
         log_req(f'    PvP Prep: refilled {turn_uid} to {resource_refill.new_value}, readied {len(prep_wz)} warzone troop(s)')
     pvp_draw_cache = {}
     if phase == 9:
-        _pvp_defer_trigger_event(state, event_type='TurnPhaseEvent', source_card_id=None, source_player_id=turn_uid, phase=int(phase), data={'phase': int(phase)})
+        _resolve("_pvp_defer_trigger_event")(state, event_type='TurnPhaseEvent', source_card_id=None, source_player_id=turn_uid, phase=int(phase), data={'phase': int(phase)})
         dr = _resolve('_pvp_run_draw')(session, state)
         if dr is not None:
             for _pid in pids:
                 pvp_draw_cache[_pid] = dr
-            if _pvp_check_game_end(session, state):
+            if _resolve("_pvp_check_game_end")(session, state):
                 return
     if phase != _ge.ETurnPhases.StartTurn:
         phase_h = _resolve('player_handlers').get(turn_uid)
         if phase_h:
             phase_game = _ge.Game(int(session.session_id), _ge.UID.make(244, turn_uid), _ge.UID.make(244, defender_pid))
-            _pvp_apply_visibility(phase_game, state)
+            _resolve("_pvp_apply_visibility")(phase_game, state)
             phase_view = _resolve('_pvp_fra_view')(state, turn_uid, defender_pid)
             phase_view['phase'] = phase
             phase_view['_last_turn_phase_event'] = state.get('_last_turn_phase_event')
@@ -972,7 +972,7 @@ def _pvp_run_phase_start(session, state, phase):
             _resolve('pvp_save_state')(session, state)
             if phase_game.events:
                 _resolve('_pvp_send_same_events')(session, phase_game, _ge.UID.make(244, turn_uid), _ge.UID.make(244, defender_pid))
-    chain_from_phase_start = _pvp_chain_active(session, state)
+    chain_from_phase_start = _resolve("_pvp_chain_active")(session, state)
     phase_priority_pid = defender_pid if phase == _ge.ETurnPhases.DeclareDefense else turn_uid
     if chain_from_phase_start:
         native_port = getattr(session, '_rules_port_session', None)
@@ -1005,7 +1005,7 @@ def _pvp_run_phase_start(session, state, phase):
         pl_t = _ge.UID.make(244, pid)
         opp_t = _ge.UID.make(244, pids[1] if pid == pids[0] else pids[0])
         g = _ge.Game(int(session.session_id), pl_t, opp_t)
-        _pvp_apply_visibility(g, state)
+        _resolve("_pvp_apply_visibility")(g, state)
         g.player_health = int(state.get(f'hp_{pid}', 20))
         g.ai_health = int(state.get(f'hp_{(pids[1] if pid == pids[0] else pids[0])}', 20))
         g.player_resources = int(state.get(f'res_{pid}', 0))
@@ -1068,7 +1068,7 @@ def _pvp_run_phase_start(session, state, phase):
         if emits_priority:
             g.push_green_light(prio_uid, _ge.EPriorityContext.ResolveTopOfChain if chain_from_phase_start else _ge.EPriorityContext.Normal)
         priority_elapsed_seconds = _resolve('priority_elapsed_ticks')(state, priority_pid) // 10000000 if phase not in (3, 4) else 0
-        _pvp_push_turn_phase_with_elapsed(g, phase, turn_uid_p, prio_uid, priority_elapsed_seconds)
+        _resolve("_pvp_push_turn_phase_with_elapsed")(g, phase, turn_uid_p, prio_uid, priority_elapsed_seconds)
         _resolve('pvp_push_warzone_updates')(session, state, game=g)
         if phase == 8:
             g.push_player_updated(pl_t, champ_id=my_champ)
@@ -1121,7 +1121,7 @@ def _pvp_advance_from_damage_step(session, state, just_resolved):
     _resolve('pvp_save_state')(session, state)
     log_req(f'    PvP post-damage: phase {new_phase} to both (priority to turn player {turn_pid})')
     _resolve('_pvp_run_phase_start')(session, state, new_phase)
-    _pvp_check_game_end(session, state)
+    _resolve("_pvp_check_game_end")(session, state)
 
 
 def pvp_advance_to_declare_defense(session, state):
@@ -1153,11 +1153,11 @@ def pvp_advance_to_declare_defense(session, state):
         if new_phase == _ge.ETurnPhases.DeclareDefense:
             state['priority_pid'] = opp_pid
             _resolve('pvp_save_state')(session, state)
-            blockable = _pvp_defender_blockable_count(session, state)
+            blockable = _resolve("_pvp_defender_blockable_count")(session, state)
             if blockable <= 0:
                 log_req(f'    PvP post-attack: defender {opp_pid} has {blockable} blocker(s) — auto-passing DeclareDefense')
                 try:
-                    pvp_push_empty_blockers(session, state)
+                    _resolve("pvp_push_empty_blockers")(session, state)
                 except Exception as e:
                     log_req(f'    PvP empty-blockers error: {e}')
                 continue
@@ -1270,7 +1270,7 @@ def _pvp_declare_attackers(handler, session, inner_bytes, my_pid, declarations=N
     _resolve('_pvp_send_same_events')(session, g, my_uid, opp_uid)
     log_req(f'    PvP attack: pid {my_pid} declared {len(attackers)} attacker(s)')
     if not attackers:
-        pvp_skip_to_second_main(session, state)
+        _resolve("pvp_skip_to_second_main")(session, state)
         return True
     if declarations is None:
         _resolve('pvp_advance_to_declare_defense')(session, state)
@@ -1353,13 +1353,13 @@ def _pvp_declare_blockers(handler, session, inner_bytes, my_pid, declarations=No
         _resolve('_send_pvp_packet')(h, session, g, pl_uid, 'defense')
     log_req(f'    PvP defense: pid {my_pid} declared {sum((len(v) for v in blockers_map.values()))} blocker(s)')
     if declarations is None:
-        _pvp_advance_past_declare_defense(session, state)
+        _resolve("_pvp_advance_past_declare_defense")(session, state)
     return True
 
 
 def _pvp_offer_trigger_response(session, state, caster_pid):
     """Offer the opponent priority for a newly-created trigger chain."""
-    _pvp_offer_opponent_response(session, state, caster_pid)
+    _resolve("_pvp_offer_opponent_response")(session, state, caster_pid)
     pids = _resolve('db_game_session_pids')(session.session_id)
     if len(pids) < 2:
         return
@@ -1397,12 +1397,12 @@ def _pvp_play_spell(handler, session, played_card_uid, my_pid, inner_bytes, type
     my_uid = _ge.UID.make(244, my_pid)
     opp_uid = _ge.UID.make(244, opp_pid)
     state = _resolve('pvp_load_state')(session) or {}
-    source_location = _pvp_card_source_location(session, state, my_pid, int(played_card_uid))
+    source_location = _resolve("_pvp_card_source_location")(session, state, my_pid, int(played_card_uid))
     if source_location is None:
         log_req(f'    PvP REJECTED spell {card_name}: card is not in a playable zone')
         return True
     prior_card_zone = _resolve('db_card_owner_zone_state')(session.session_id, int(played_card_uid), conn=_resolve('_db'))
-    targets = _pvp_typed_card_targets(typed_payload, played_card_uid)
+    targets = _resolve("_pvp_typed_card_targets")(typed_payload, played_card_uid)
     if typed_payload is None:
         try:
             targets = handler._extract_transaction_targets(inner_bytes, int(played_card_uid))
@@ -1414,7 +1414,7 @@ def _pvp_play_spell(handler, session, played_card_uid, my_pid, inner_bytes, type
         cuid = int(champ_map.get(str(cpid), 0))
         if cuid:
             champ_targets.append((cuid, int(cpid), 'Champion', int(state.get(f'hp_{cpid}', 20))))
-    cost_selection = _pvp_select_card_play_costs(handler, session, state, play_plan, int(played_card_uid), my_pid, targets, champ_targets)
+    cost_selection = _resolve("_pvp_select_card_play_costs")(handler, session, state, play_plan, int(played_card_uid), my_pid, targets, champ_targets)
     if cost_selection is None:
         log_req(f'    PvP REJECTED spell {card_name}: incomplete/illegal card cost target')
         return True
@@ -1477,7 +1477,7 @@ def _pvp_play_spell(handler, session, played_card_uid, my_pid, inner_bytes, type
     view['resolving_source_uid'] = int(played_card_uid)
     g = _ge.Game(int(session.session_id), my_uid, opp_uid)
     _resolve('_pvp_populate_game_state')(g, state, my_pid, opp_pid)
-    _pvp_apply_card_play_costs(handler, g, session, state, my_uid, opp_uid, cost_selections, int(played_card_uid), scrounge=any((getattr(ability, 'is_scrounge', False) for ability in play_plan.cast_abilities)))
+    _resolve("_pvp_apply_card_play_costs")(handler, g, session, state, my_uid, opp_uid, cost_selections, int(played_card_uid), scrounge=any((getattr(ability, 'is_scrounge', False) for ability in play_plan.cast_abilities)))
     _tpl, ct, _n, cost2, atk, def_, gems = handler._card_full_data(g, scid, tpl_guid)
     g.push_card_updated(scid, my_uid, _ge.ECardCollections.CastSpells, ct, template_id=tpl_guid, cost=cost2, attack=atk, defense=def_, gems=gems)
     g.push_spell_card_cast(scid, my_uid, free=False)
@@ -1536,7 +1536,7 @@ def _pvp_play_spell(handler, session, played_card_uid, my_pid, inner_bytes, type
     _resolve('_pvp_log_stack')(state, f'spell-cast {card_name}')
     try:
         opp_h = _resolve('player_handlers').get(opp_pid)
-        if opp_h and (not pvp_player_auto_passes(state, opp_pid)):
+        if opp_h and (not _resolve("pvp_player_auto_passes")(state, opp_pid)):
             gg = _ge.Game(int(session.session_id), opp_uid, my_uid)
             gg.push_green_light(opp_uid, _ge.EPriorityContext.ResolveTopOfChain)
             _resolve('_send_pvp_packet')(opp_h, session, gg, opp_uid, 'chain-priority-opp')
@@ -1578,7 +1578,7 @@ def _pvp_play_troop(handler, session, played_card_uid, my_pid, inner_bytes, type
     my_uid = _ge.UID.make(244, my_pid)
     opp_uid = _ge.UID.make(244, opp_pid)
     state = _resolve('pvp_load_state')(session) or {}
-    source_location = _pvp_card_source_location(session, state, my_pid, int(played_card_uid))
+    source_location = _resolve("_pvp_card_source_location")(session, state, my_pid, int(played_card_uid))
     if source_location is None:
         log_req(f'    PvP REJECTED permanent {card_name}: card is not in a playable zone')
         return True
@@ -1588,7 +1588,7 @@ def _pvp_play_troop(handler, session, played_card_uid, my_pid, inner_bytes, type
     except KeyError as exc:
         log_req(f'    PvP REJECTED permanent {card_name}: {exc}')
         return True
-    targets = _pvp_typed_card_targets(typed_payload, played_card_uid)
+    targets = _resolve("_pvp_typed_card_targets")(typed_payload, played_card_uid)
     if typed_payload is None:
         try:
             targets = handler._extract_transaction_targets(inner_bytes, int(played_card_uid))
@@ -1600,7 +1600,7 @@ def _pvp_play_troop(handler, session, played_card_uid, my_pid, inner_bytes, type
         cuid = int(champ_map.get(str(cpid), 0))
         if cuid:
             champ_targets.append((cuid, int(cpid), 'Champion', int(state.get(f'hp_{cpid}', 20))))
-    cost_selection = _pvp_select_card_play_costs(handler, session, state, play_plan, int(played_card_uid), my_pid, targets, champ_targets)
+    cost_selection = _resolve("_pvp_select_card_play_costs")(handler, session, state, play_plan, int(played_card_uid), my_pid, targets, champ_targets)
     if cost_selection is None:
         log_req(f'    PvP REJECTED spell {card_name}: incomplete/illegal card cost target')
         return True
@@ -1645,7 +1645,7 @@ def _pvp_play_troop(handler, session, played_card_uid, my_pid, inner_bytes, type
     view = _resolve('_pvp_fra_view')(state, my_pid, opp_pid)
     g = _ge.Game(int(session.session_id), my_uid, opp_uid)
     _resolve('_pvp_populate_game_state')(g, state, my_pid, opp_pid)
-    _pvp_apply_card_play_costs(handler, g, session, state, my_uid, opp_uid, cost_selections, int(played_card_uid), scrounge=any((getattr(ability, 'is_scrounge', False) for ability in play_plan.cast_abilities)))
+    _resolve("_pvp_apply_card_play_costs")(handler, g, session, state, my_uid, opp_uid, cost_selections, int(played_card_uid), scrounge=any((getattr(ability, 'is_scrounge', False) for ability in play_plan.cast_abilities)))
     _tpl, ct, _n, cost2, atk, def_, gems = handler._card_full_data(g, scid, tpl_guid)
     g.push_card_updated(scid, my_uid, _ge.ECardCollections.CastSpells, ctype_num, template_id=tpl_guid, cost=cost2, attack=atk, defense=def_, gems=gems)
     inst_id = _resolve('port_queue_stack_item')(state, {'kind': 'troop', 'source_uid': int(played_card_uid), 'ability_guids': [], 'target_uid': None, 'x_cost': 0})
@@ -1704,7 +1704,7 @@ def _pvp_play_troop(handler, session, played_card_uid, my_pid, inner_bytes, type
     log_req(f"    PvP troop play: {card_name} by pid {my_pid} (paid {cost}, stack={len(state.get('stack') or [])} item(s))")
     _resolve('_pvp_log_stack')(state, f'troop-play {card_name}')
     opp_h = _resolve('player_handlers').get(opp_pid)
-    if opp_h and (not pvp_player_auto_passes(state, opp_pid)):
+    if opp_h and (not _resolve("pvp_player_auto_passes")(state, opp_pid)):
         gg = _ge.Game(int(session.session_id), opp_uid, my_uid)
         gg.push_green_light(opp_uid, _ge.EPriorityContext.ResolveTopOfChain)
         _resolve('_send_pvp_packet')(opp_h, session, gg, opp_uid, 'troop-on-stack-opp')
@@ -1735,7 +1735,7 @@ def _pvp_project_resource_play(handler, session, inner_bytes, my_pid, played_car
     if not can_play_resource(state, 'player', limit=resource_limit, player_id=int(my_pid)):
         log_req(f'    PvP REJECTED resource {card_name}: per-turn allowance used')
         return False
-    source_location = _pvp_card_source_location(session, state, my_pid, int(played_card_uid))
+    source_location = _resolve("_pvp_card_source_location")(session, state, my_pid, int(played_card_uid))
     if source_location is None:
         log_req(f'    PvP REJECTED resource {card_name}: card is not in a playable zone')
         return False
@@ -1770,7 +1770,7 @@ def _pvp_project_resource_play(handler, session, inner_bytes, my_pid, played_car
             resource_choice_ability = printed_resource_choice_ability(ability_guids)
     is_shards_of_fate = bool(shard_tpl)
     log_req(f"    PvP resource metadata: {card_name} abilities={[str(g)[:8] for g in ability_guids]} choice={str(resource_choice_ability or '')[:8] or 'none'} shards_of_fate={is_shards_of_fate}")
-    charge_grant = _pvp_resource_charge_points(session, played_card_uid)
+    charge_grant = _resolve("_pvp_resource_charge_points")(session, played_card_uid)
     from rules_port.resources import play_resource_for_player, resource_threshold_grants
     threshold_grants = []
     if not is_shards_of_fate and (not resource_choice_ability):
@@ -1787,16 +1787,16 @@ def _pvp_project_resource_play(handler, session, inner_bytes, my_pid, played_car
     for flag, amount in threshold_grants:
         thresholds[flag] = int(thresholds.get(flag, 0) or 0) + int(amount)
     _resolve('pvp_save_state')(session, state)
-    thresh = _pvp_state_thresholds(state, my_pid)
+    thresh = _resolve("_pvp_state_thresholds")(state, my_pid)
     threshold_trigger_games = []
     for flag, _amount in threshold_grants:
-        trigger = _pvp_gain_threshold_trigger_game(handler, session, state, my_pid, flag)
+        trigger = _resolve("_pvp_gain_threshold_trigger_game")(handler, session, state, my_pid, flag)
         if trigger is not None:
             threshold_trigger_games.append(trigger)
     printed_skip = None
     if not is_shards_of_fate:
         printed_skip = {str(resource_choice_ability).lower()} if resource_choice_ability else set()
-    resource_ability_events = _pvp_resolve_granted_resource_abilities(handler, session, state, int(played_card_uid), my_pid, printed_skip=printed_skip)
+    resource_ability_events = _resolve("_pvp_resolve_granted_resource_abilities")(handler, session, state, int(played_card_uid), my_pid, printed_skip=printed_skip)
     if not is_shards_of_fate and (not resource_choice_ability) and (state.get('phase') in (_ge.ETurnPhases.FirstMainPhase, _ge.ETurnPhases.SecondMainPhase)):
         _resolve('pvp_push_main_phase_options')(session, state)
     champ_map = state.get('champ_map', {})
@@ -1916,7 +1916,7 @@ def _pvp_project_resource_play(handler, session, inner_bytes, my_pid, played_car
         if state.get('pending_choice'):
             log_req(f'    PvP resource choice: awaiting picker for pid {my_pid}')
             return True
-        pending_charge_amount = _take_pending_gain_charge_amount(state, my_pid)
+        pending_charge_amount = _resolve("_take_pending_gain_charge_amount")(state, my_pid)
         if pending_charge_amount:
             charge_trigger_game = _resolve('_pvp_gain_charge_trigger_game')(owner_handler, session, state, my_pid, amount=pending_charge_amount)
             if charge_trigger_game and charge_trigger_game.events:
@@ -1949,7 +1949,7 @@ def _pvp_project_resource_play(handler, session, inner_bytes, my_pid, played_car
         if state.get('pending_deck_search'):
             log_req(f'    PvP Shards of Fate: awaiting threshold choice for pid {my_pid}')
             return True
-        pending_charge_amount = _take_pending_gain_charge_amount(state, my_pid)
+        pending_charge_amount = _resolve("_take_pending_gain_charge_amount")(state, my_pid)
         if pending_charge_amount:
             charge_trigger_game = _resolve('_pvp_gain_charge_trigger_game')(handler, session, state, my_pid, amount=pending_charge_amount)
             if charge_trigger_game and charge_trigger_game.events:
@@ -2027,7 +2027,7 @@ def _pvp_resolve_ability_item(session, state, handler, my_pid, item):
                 view['resolving_owner_id'] = owner_id
                 cost_game = _ge.Game(int(session.session_id), pl_t, ai_t)
                 _resolve('_pvp_populate_game_state')(cost_game, state, owner_id, opp_pid)
-                _pvp_emit_paid_cost_events(cost_game, state, handler=handler, session=session, db=_resolve('_db'), player_uid=pl_t, ai_uid=ai_t)
+                _resolve("_pvp_emit_paid_cost_events")(cost_game, state, handler=handler, session=session, db=_resolve('_db'), player_uid=pl_t, ai_uid=ai_t)
                 if cost_game.events:
                     _resolve('_pvp_send_same_events')(session, cost_game, pl_t, ai_t)
                 ability_event_start = len(g.events)
@@ -2081,10 +2081,10 @@ def _pvp_resolve_ability_item(session, state, handler, my_pid, item):
     pending_discard = False
     discard_pid = int(owner_id)
     if ag:
-        discard_prompt = _pvp_discard_prompt_data(ag)
+        discard_prompt = _resolve("_pvp_discard_prompt_data")(ag)
         if discard_prompt:
             item_activation = item.get('activation_data') or {}
-            discard_pid = _pvp_discard_prompt_pid(session, state, ag, owner_id, opp_pid, src_uid, target_uid=item.get('target_uid'), target_map=item_activation.get('target_map') if isinstance(item_activation, dict) else None)
+            discard_pid = _resolve("_pvp_discard_prompt_pid")(session, state, ag, owner_id, opp_pid, src_uid, target_uid=item.get('target_uid'), target_map=item_activation.get('target_map') if isinstance(item_activation, dict) else None)
         hand_exists = _resolve('db_hand_exists')(session.session_id, discard_pid, conn=_resolve('_db'))
         if discard_prompt and hand_exists:
             state['pending_discard_ability'] = discard_prompt[0]
@@ -2142,11 +2142,11 @@ def _pvp_resolve_ability_item(session, state, handler, my_pid, item):
     if not ignores_chain and (not any((state.get(key) for key in ('pending_choice', 'pending_trigger', 'pending_deck_search', 'pending_conversation', 'pending_discard_ability', 'resolution_paused')))):
         g.push_top_of_chain_resolved(instance_id)
         g.push_removed_top_of_chain(instance_id)
-    _pvp_emit_paid_cost_events(g, state, handler=handler, session=session, db=_resolve('_db'), player_uid=pl_t, ai_uid=ai_t)
+    _resolve("_pvp_emit_paid_cost_events")(g, state, handler=handler, session=session, db=_resolve('_db'), player_uid=pl_t, ai_uid=ai_t)
     _resolve('_pvp_send_same_events')(session, g, pl_t, ai_t)
     if chain_empty and pending_discard:
         discard_other = int(opp_pid) if discard_pid == int(owner_id) else int(owner_id)
-        _pvp_push_discard_prompt(session, state, discard_pid, discard_other, int(src_uid))
+        _resolve("_pvp_push_discard_prompt")(session, state, discard_pid, discard_other, int(src_uid))
         _resolve('pvp_save_state')(session, state)
         log_req(f'    PvP chain paused for discard choice: {ag[:8]} source={hex(int(src_uid))}')
         return True
@@ -2170,7 +2170,7 @@ def _pvp_resolve_ability_item(session, state, handler, my_pid, item):
         _resolve('pvp_save_state')(session, state)
         log_req('    PvP chain paused for encounter conversation')
         return True
-    if _pvp_check_game_end(session, state):
+    if _resolve("_pvp_check_game_end")(session, state):
         return True
     if chain_empty:
         turn_pid = state.get('turn_pid')
@@ -2182,7 +2182,7 @@ def _pvp_resolve_ability_item(session, state, handler, my_pid, item):
             turn_opp = _ge.UID.make(244, pids[1] if turn_pid == pids[0] else pids[0])
             gg = _ge.Game(int(session.session_id), turn_pt, turn_opp)
             gg.push_green_light(turn_pt, _ge.EPriorityContext.Normal)
-            _pvp_push_turn_phase_with_elapsed(gg, int(state.get('phase', 0)), turn_pt, turn_pt, _resolve('priority_elapsed_ticks')(state, turn_pid) // 10000000)
+            _resolve("_pvp_push_turn_phase_with_elapsed")(gg, int(state.get('phase', 0)), turn_pt, turn_pt, _resolve('priority_elapsed_ticks')(state, turn_pid) // 10000000)
             _resolve('_send_pvp_packet')(turn_h, session, gg, turn_pt, 'chain-empty')
         _cur_phase = int(state.get('phase', 0))
         if _cur_phase in (_ge.ETurnPhases.FirstMainPhase, _ge.ETurnPhases.SecondMainPhase):
@@ -2190,7 +2190,7 @@ def _pvp_resolve_ability_item(session, state, handler, my_pid, item):
         elif _cur_phase == _ge.ETurnPhases.DeclareAttack:
             _resolve('pvp_push_attack_options')(session, state)
         elif _cur_phase == _ge.ETurnPhases.DeclareDefense:
-            pvp_push_blocker_options(session, state)
+            _resolve("pvp_push_blocker_options")(session, state)
         elif _cur_phase not in (3, 4, 5, 6, 7, 8, 9):
             _resolve('pvp_push_phase_options')(session, state, pid=turn_pid)
         log_req(f'    PvP chain resolved ({kind}) — empty, priority to turn player {turn_pid}, phase {_cur_phase} options re-pushed')
@@ -2300,7 +2300,7 @@ def _pvp_resolve_choice(handler, session, inner_bytes, my_pid, typed_payload=Non
     state['stack_ai_passed'] = False
     _resolve('_pvp_sync_view_to_state')(state, view, owner_id, opponent_id)
     charge_trigger_game = None
-    pending_charge_amount = _take_pending_gain_charge_amount(state, owner_id) if not view.get('pending_choice') else 0
+    pending_charge_amount = _resolve("_take_pending_gain_charge_amount")(state, owner_id) if not view.get('pending_choice') else 0
     if pending_charge_amount:
         charge_trigger_game = _resolve('_pvp_gain_charge_trigger_game')(handler, session, state, owner_id, amount=pending_charge_amount)
         if charge_trigger_game:
@@ -2311,7 +2311,7 @@ def _pvp_resolve_choice(handler, session, inner_bytes, my_pid, typed_payload=Non
     if state.get('pending_choice'):
         log_req(f'    PvP choice selected: {hex(int(chosen_uid))}; second choice pending')
         return True
-    _pvp_push_waiting_on(session, None)
+    _resolve("_pvp_push_waiting_on")(session, None)
     if charge_trigger_game and state.get('stack'):
         _resolve('_pvp_offer_trigger_response')(session, state, owner_id)
         return True
@@ -2359,7 +2359,7 @@ def _pvp_resolve_matching_target(handler, session, inner_bytes, my_pid, typed_pa
             except Exception:
                 continue
     continuation = pend.get('continuation') or {}
-    typed_uid = _pvp_typed_picker_uid(typed_payload, continuation.get('target_index', 0))
+    typed_uid = _resolve("_pvp_typed_picker_uid")(typed_payload, continuation.get('target_index', 0))
     if typed_uid is not None:
         chosen_uid = typed_uid
     candidates = [int(uid) for uid in pend.get('candidates') or []]
@@ -2400,7 +2400,7 @@ def _pvp_resolve_matching_target(handler, session, inner_bytes, my_pid, typed_pa
     for key in ('pending_trigger', 'pending_deck_search', 'pending_choice', 'pending_conversation'):
         if persisted.get(key):
             state[key] = persisted[key]
-    pending_charge_amount = _take_pending_gain_charge_amount(state, owner_id)
+    pending_charge_amount = _resolve("_take_pending_gain_charge_amount")(state, owner_id)
     if pending_charge_amount:
         charge_trigger_game = _resolve('_pvp_gain_charge_trigger_game')(handler, session, state, owner_id, amount=pending_charge_amount)
         if charge_trigger_game:
@@ -2463,7 +2463,7 @@ def _pvp_resolve_revealed_choice(handler, session, inner_bytes, my_pid, typed_pa
             except Exception:
                 continue
     continuation = pend.get('continuation') or {}
-    typed_uid = _pvp_typed_picker_uid(typed_payload, continuation.get('target_index', 0))
+    typed_uid = _resolve("_pvp_typed_picker_uid")(typed_payload, continuation.get('target_index', 0))
     if typed_uid is not None:
         chosen_uid = typed_uid
     candidates = [int(c) for c in pend.get('candidates') or []]
@@ -2524,7 +2524,7 @@ def _pvp_resolve_shard_choice(handler, session, inner_bytes, my_pid, typed_paylo
                     chosen_uid = int(uid64)
             except Exception:
                 continue
-    typed_uid = _pvp_typed_picker_uid(typed_payload)
+    typed_uid = _resolve("_pvp_typed_picker_uid")(typed_payload)
     if typed_uid is not None:
         chosen_uid = typed_uid
     candidates = [int(c) for c in pend.get('candidates') or []]
@@ -2563,7 +2563,7 @@ def _pvp_resolve_shard_choice(handler, session, inner_bytes, my_pid, typed_paylo
         ev_th.delta = 1
         ev_th.new_value = int(thresh[flag])
         g._push(ev_th)
-        threshold_trigger_game = _pvp_gain_threshold_trigger_game(handler, session, state, owner_id, flag)
+        threshold_trigger_game = _resolve("_pvp_gain_threshold_trigger_game")(handler, session, state, owner_id, flag)
         if threshold_trigger_game:
             for trigger_event in threshold_trigger_game.events:
                 g._push(trigger_event)
@@ -2577,7 +2577,7 @@ def _pvp_resolve_shard_choice(handler, session, inner_bytes, my_pid, typed_paylo
         cu = int(champ_map.get(str(target_pid), 0))
         champ_scid = _ge.SessionCardId(_ge.UID(cu)) if cu else None
         g.push_player_updated(target_uid, champ_id=champ_scid)
-    pending_charge_amount = _take_pending_gain_charge_amount(state, owner_id)
+    pending_charge_amount = _resolve("_take_pending_gain_charge_amount")(state, owner_id)
     if pending_charge_amount:
         charge_trigger_game = _resolve('_pvp_gain_charge_trigger_game')(handler, session, state, owner_id, amount=pending_charge_amount)
         if charge_trigger_game:
@@ -2633,7 +2633,7 @@ def attach_pvp_rules_port(handler, session, game, state):
         sink = getattr(cached, 'event_sink', None)
         if sink is not None:
             sink.game = game
-        _wire_pvp_state_based_handler(cached, handler, session, game)
+        _resolve("_wire_pvp_state_based_handler")(cached, handler, session, game)
         facts = getattr(cached, 'runtime_facts', None)
         if facts is not None:
             facts.battle_state = live_state
@@ -2697,7 +2697,7 @@ def attach_pvp_rules_port(handler, session, game, state):
         _resolve('_pvp_populate_game_state')(game, live, owner_id, other_id)
         cost_selections = live.pop('_rules_port_pvp_cost_selections', ())
         if cost_selections:
-            _pvp_apply_card_play_costs(current_handler(), game, session, live, player_uid, opponent_uid, cost_selections, int(ability.source_uid))
+            _resolve("_pvp_apply_card_play_costs")(current_handler(), game, session, live, player_uid, opponent_uid, cost_selections, int(ability.source_uid))
         exhausted = live.pop('_rules_port_pvp_exhausted', ())
         if exhausted:
             source_uid = int(ability.source_uid)
@@ -2844,7 +2844,7 @@ def attach_pvp_rules_port(handler, session, game, state):
             other_uid = _ge.UID.make(244, other_id)
             cost_game = _ge.Game(int(session.session_id), payer_uid, other_uid)
             _resolve('_pvp_populate_game_state')(cost_game, state, owner_id, other_id)
-            _pvp_apply_card_play_costs(current_handler(), cost_game, session, state, payer_uid, other_uid, cost_selections, int(getattr(metadata, 'source_uid', 0) or 0))
+            _resolve("_pvp_apply_card_play_costs")(current_handler(), cost_game, session, state, payer_uid, other_uid, cost_selections, int(getattr(metadata, 'source_uid', 0) or 0))
             _resolve('pvp_save_state')(session, state)
             if cost_game.events:
                 _resolve('_pvp_send_same_events')(session, cost_game, payer_uid, other_uid)
@@ -2900,10 +2900,10 @@ def attach_pvp_rules_port(handler, session, game, state):
             player_id = getattr(_transaction, 'player_id', None)
             live_phase = int(live.get('phase', 0) or 0)
             if live_phase == int(_ge.ETurnPhases.FirstMainPhase):
-                has_attackers = pvp_turn_has_attackers(session, int(live.get('turn_pid', 0) or 0))
+                has_attackers = _resolve("pvp_turn_has_attackers")(session, int(live.get('turn_pid', 0) or 0))
                 port.has_legal_attackers = bool(has_attackers)
                 port.active_player_skips_attack = not bool(has_attackers)
-            raw_player = _uid_int(player_id)
+            raw_player = _resolve("_uid_int")(player_id)
             pass_pid = raw_player >> 8 if raw_player & 255 == 244 else raw_player
             responding_to_chain = getattr(native_priority_action, 'ability_responding_to', None) is not None
             pass_key = 'stack_passed' if responding_to_chain else 'passes'
@@ -2936,7 +2936,7 @@ def attach_pvp_rules_port(handler, session, game, state):
                     handoff = _ge.Game(int(session.session_id), target_uid, other_uid)
                     _resolve('_pvp_populate_game_state')(handoff, live, int(target_pid), other_pid)
                     handoff.push_green_light(_ge.UID.make(244, next_priority), _ge.EPriorityContext.Normal)
-                    _pvp_push_turn_phase_with_elapsed(handoff, current_phase, _ge.UID.make(244, int(live.get('turn_pid') or next_priority)), _ge.UID.make(244, next_priority), _resolve('priority_elapsed_ticks')(live, next_priority) // 10000000)
+                    _resolve("_pvp_push_turn_phase_with_elapsed")(handoff, current_phase, _ge.UID.make(244, int(live.get('turn_pid') or next_priority)), _ge.UID.make(244, next_priority), _resolve('priority_elapsed_ticks')(live, next_priority) // 10000000)
                     _resolve('_send_pvp_packet')(target_h, session, handoff, target_uid, 'rules-port-priority-handoff')
                 _resolve('pvp_push_phase_options')(session, live, pid=next_priority)
                 log_req(f'    PvP RulesPort priority handoff: {previous_priority} -> {next_priority} phase={current_phase}')
@@ -2966,8 +2966,8 @@ def attach_pvp_rules_port(handler, session, game, state):
             live.pop('priority_pid', None)
         else:
             live['priority_pid'] = defender if phase == _ge.ETurnPhases.DeclareDefense else turn_pid
-        if phase == _ge.ETurnPhases.DeclareDefensePriorityWindow and live.get('attackers') and (not live.get('blockers')) and (_pvp_defender_blockable_count(session, live) <= 0):
-            pvp_push_empty_blockers(session, live)
+        if phase == _ge.ETurnPhases.DeclareDefensePriorityWindow and live.get('attackers') and (not live.get('blockers')) and (_resolve("_pvp_defender_blockable_count")(session, live) <= 0):
+            _resolve("pvp_push_empty_blockers")(session, live)
             live['blockers'] = {str(attacker): [] for attacker in live.get('attackers') or {}}
         if phase == _ge.ETurnPhases.Discard:
             try:
@@ -2978,7 +2978,7 @@ def attach_pvp_rules_port(handler, session, game, state):
             live.pop('discard_required', None)
         live['_rules_port_attached'] = True
         try:
-            port.active_player_skips_attack = not pvp_turn_has_attackers(session, turn_pid)
+            port.active_player_skips_attack = not _resolve("pvp_turn_has_attackers")(session, turn_pid)
         except Exception:
             port.active_player_skips_attack = False
         port.active_player_skips_draw = _resolve('port_skips_draw_phase')(live)
@@ -3051,7 +3051,7 @@ def attach_pvp_rules_port(handler, session, game, state):
             handled = bool(current_handler()._handle_choose_pick_transaction(session, original))
             if handled:
                 session._rules_port_mutation_emitted = True
-                _pvp_push_waiting_on(session, None)
+                _resolve("_pvp_push_waiting_on")(session, None)
             return handled
         except Exception as exc:
             log_req(f'    PvP setup mutation failed: {exc}')
@@ -3118,7 +3118,7 @@ def attach_pvp_rules_port(handler, session, game, state):
     setattr(port, '_pvp_current_handler', handler)
     setattr(port, '_pvp_current_session', session)
     setattr(port, '_pvp_state', state)
-    _wire_pvp_state_based_handler(port, handler, session, game)
+    _resolve("_wire_pvp_state_based_handler")(port, handler, session, game)
     session._rules_port_session = port
     _resolve('set_pvp_shared_port')(session, port)
     port.persist()
@@ -3158,7 +3158,7 @@ def project_accepted_pvp_transaction(handler, session, kind, transaction, *, por
         if live.get('pending_discard_ability'):
             return bool(_resolve('_pvp_resolve_discard_prompt')(current, session, raw, my_pid, typed_payload=payload))
         try:
-            card_uid = _uid_int(payload.get('card_id'))
+            card_uid = _resolve("_uid_int")(payload.get('card_id'))
         except (TypeError, ValueError):
             return False
         pids = tuple((int(pid) for pid in _resolve('db_game_session_pids')(session.session_id)))
@@ -3208,7 +3208,7 @@ def project_accepted_pvp_transaction(handler, session, kind, transaction, *, por
         if search_kind == 'matching_target':
             return bool(_resolve('_pvp_resolve_matching_target')(current, session, raw, my_pid, typed_payload=payload))
         if search:
-            return bool(_pvp_resolve_deck_search(current, session, raw, my_pid, typed_payload=payload))
+            return bool(_resolve("_pvp_resolve_deck_search")(current, session, raw, my_pid, typed_payload=payload))
         return True
     if kind == 'attack':
         return bool(_resolve('_pvp_declare_attackers')(current, session, raw, my_pid, declarations=payload.get('declarations')))
@@ -3235,7 +3235,7 @@ def project_accepted_pvp_transaction(handler, session, kind, transaction, *, por
                 live['damage_order'] = {str(key): [str(value) for value in values] for key, values in order_map.items()}
             phase = int(live.get('phase', 0) or 0)
             if phase in (_ge.ETurnPhases.AssignFirstStrikeDamage, _ge.ETurnPhases.AssignDamage):
-                _pvp_resolve_combat(session, live, first_strike=phase == _ge.ETurnPhases.AssignFirstStrikeDamage)
+                _resolve("_pvp_resolve_combat")(session, live, first_strike=phase == _ge.ETurnPhases.AssignFirstStrikeDamage)
                 if str(getattr(session, 'state', '') or '').lower() != 'ended':
                     if port is not None:
                         player_id = getattr(transaction, 'player_id', None)
@@ -3250,7 +3250,7 @@ def project_accepted_pvp_transaction(handler, session, kind, transaction, *, por
                         except Exception as exc:
                             log_req(f'    PvP RulesPort post-damage persistence failed: {exc}')
                     else:
-                        _pvp_advance_from_damage_step(session, live, phase)
+                        _resolve("_pvp_advance_from_damage_step")(session, live, phase)
             _resolve('pvp_save_state')(session, live)
             return True
         except (TypeError, ValueError, struct.error) as exc:
@@ -3258,7 +3258,7 @@ def project_accepted_pvp_transaction(handler, session, kind, transaction, *, por
             return False
     if kind == 'play_resource':
         try:
-            card_uid = _uid_int(payload.get('card_id'))
+            card_uid = _resolve("_uid_int")(payload.get('card_id'))
         except (TypeError, ValueError):
             return False
         pids = _resolve('db_game_session_pids')(session.session_id)
@@ -3304,10 +3304,10 @@ def pvp_advance_past_non_stops(session, state):
     opp_pid = pids[0] if pids[1] == turn_pid else pids[1]
     if _resolve('_pvp_auto_pass_opponent_stop')(session, state, turn_pid, opp_pid):
         return True
-    if pvp_phase_is_stop(state, int(state.get('phase', 6)), turn_pid, opp_pid):
+    if _resolve("pvp_phase_is_stop")(state, int(state.get('phase', 6)), turn_pid, opp_pid):
         log_req(f"    PvP auto-advance: phase {state.get('phase')} is a player stop — not auto-passing")
         return False
-    has_ready = pvp_turn_has_attackers(session, turn_pid)
+    has_ready = _resolve("pvp_turn_has_attackers")(session, turn_pid)
     phase_list = _resolve('_pvp_turn_phase_list')(state, turn_pid, has_ready)
     try:
         cur = phase_list.index(int(state.get('phase', 6)))
@@ -3327,7 +3327,7 @@ def pvp_advance_past_non_stops(session, state):
         advanced = True
         if _resolve('_pvp_auto_pass_opponent_stop')(session, state, turn_pid, opp_pid):
             return advanced
-        if pvp_phase_is_stop(state, new_phase, turn_pid, opp_pid):
+        if _resolve("pvp_phase_is_stop")(state, new_phase, turn_pid, opp_pid):
             log_req(f'    PvP auto-advance: stopped at phase {new_phase} (player stop)')
             return advanced
         if new_phase == _ge.ETurnPhases.Discard:
@@ -3381,7 +3381,7 @@ def pvp_mulligan_next(session, state, just_acted_pid):
         live = _resolve('pvp_load_state')(session) or state
         log_req(f"    PvP mulligan complete — native scheduler reached phase {live.get('phase')} for turn player {live.get('turn_pid')}")
         _resolve('pvp_start_priority_watchdog')(session)
-        _pvp_push_waiting_on(session, None)
+        _resolve("_pvp_push_waiting_on")(session, None)
         for pid in pids:
             h = _resolve('player_handlers').get(int(pid))
             if not h:
@@ -3445,7 +3445,7 @@ def route_pvp_pass(handler, session):
                     log_req(f'    PvP RulesPort auto-completed priority for {waiting_pid} on phase {phase} (no opponent stop or quick action)')
         native_port.sync_to_pvp_state(live_native)
         _resolve('pvp_save_state')(session, live_native)
-        _pvp_drive_f10_priority(session, live_native)
+        _resolve("_pvp_drive_f10_priority")(session, live_native)
         return True
     my_pid = int(handler.client_reck_id) if hasattr(handler, 'client_reck_id') else 0
     pids = _resolve('db_game_session_pids')(session.session_id)
@@ -3453,7 +3453,7 @@ def route_pvp_pass(handler, session):
         return False
     state = _resolve('pvp_load_state')(session)
     if state is None:
-        state = pvp_default_state(my_pid, my_pid)
+        state = _resolve("pvp_default_state")(my_pid, my_pid)
         _resolve('port_enter_phase')(state, 10)
         _resolve('pvp_save_state')(session, state)
     if state['phase'] in (3, 4):
@@ -3537,7 +3537,7 @@ def route_pvp_pass(handler, session):
                 g.push_green_light(waiting_uid, _ge.EPriorityContext.Normal)
                 _resolve('port_set_priority')(state, waiting_pid)
                 _resolve('pvp_save_state')(session, state)
-                _pvp_push_turn_phase_with_elapsed(g, int(state['phase']), _ge.UID.make(244, int(state.get('turn_pid') or waiting_pid)), waiting_uid, _resolve('priority_elapsed_ticks')(state, waiting_pid) // 10000000)
+                _resolve("_pvp_push_turn_phase_with_elapsed")(g, int(state['phase']), _ge.UID.make(244, int(state.get('turn_pid') or waiting_pid)), waiting_uid, _resolve('priority_elapsed_ticks')(state, waiting_pid) // 10000000)
                 g.push_options(waiting_uid, [])
                 affordable_wait = _resolve('_pvp_affordable_troop_abilities')(session, state, pid=waiting_pid)
                 if affordable_wait:
@@ -3549,7 +3549,7 @@ def route_pvp_pass(handler, session):
                     passed_uid = _ge.UID.make(244, my_pid)
                     passed_game = _ge.Game(int(session.session_id), passed_uid, waiting_uid)
                     passed_game.push_green_light(waiting_uid, _ge.EPriorityContext.Normal)
-                    _pvp_push_turn_phase_with_elapsed(passed_game, int(state['phase']), _ge.UID.make(244, int(state.get('turn_pid') or waiting_pid)), waiting_uid, _resolve('priority_elapsed_ticks')(state, waiting_pid) // 10000000)
+                    _resolve("_pvp_push_turn_phase_with_elapsed")(passed_game, int(state['phase']), _ge.UID.make(244, int(state.get('turn_pid') or waiting_pid)), waiting_uid, _resolve('priority_elapsed_ticks')(state, waiting_pid) // 10000000)
                     _resolve('_send_pvp_packet')(passed_h, session, passed_game, passed_uid, 'pass-handoff-lost')
                 log_req(f"    PvP pass: {len(passes)}/2 — priority handed to {waiting_pid} ({('quick action' if quick_action_wait else 'opponent stop')} on phase {state['phase']})")
             else:
@@ -3567,7 +3567,7 @@ def route_pvp_pass(handler, session):
     if old_phase >= _ge.ETurnPhases.DeclareAttack and old_phase != _ge.ETurnPhases.SecondMainPhase:
         has_ready = True
     else:
-        has_ready = pvp_turn_has_attackers(session, turn_pid)
+        has_ready = _resolve("pvp_turn_has_attackers")(session, turn_pid)
     phase_list = _resolve('_pvp_turn_phase_list')(state, turn_pid, has_ready)
     if old_phase == _ge.ETurnPhases.DeclareDefensePriorityWindow:
         new_phase = _resolve('pvp_phase_after_blockers')(session, state)
@@ -3631,10 +3631,10 @@ def route_pvp_pass(handler, session):
     _resolve('pvp_save_state')(session, state)
     log_req(f"    PvP: both passed phase {old_phase} → {new_phase} (idx {cur_idx}->{next_idx} of {len(phase_list)}, list={('C' if has_ready else 'B')}, turn={state.get('turn_pid')})")
     if old_phase == _ge.ETurnPhases.AssignFirstStrikeDamage:
-        _pvp_resolve_combat(session, state, first_strike=True)
+        _resolve("_pvp_resolve_combat")(session, state, first_strike=True)
     elif old_phase == _ge.ETurnPhases.AssignDamage:
-        _pvp_resolve_combat(session, state, first_strike=False)
-    if _pvp_check_game_end(session, state):
+        _resolve("_pvp_resolve_combat")(session, state, first_strike=False)
+    if _resolve("_pvp_check_game_end")(session, state):
         return True
     _resolve('_pvp_run_phase_start')(session, state, new_phase)
     _resolve('pvp_advance_past_non_stops')(session, state)
@@ -3658,6 +3658,6 @@ def set_pvp_auto_pass(handler, session, passing_state=2):
     _resolve('pvp_save_state')(session, state)
     current_priority = state.get('priority_pid')
     _resolve('route_pvp_pass')(handler, session)
-    _pvp_drive_f10_priority(session, state)
+    _resolve("_pvp_drive_f10_priority")(session, state)
     log_req(f'    PvP SetAutoPass: pid={pid} state={passing_state} priority_was={current_priority}')
     return True

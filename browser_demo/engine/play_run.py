@@ -1,5 +1,6 @@
 import sys
 sys.path[:0] = ["/repo", "/browser_demo/engine"]
+import shim  # noqa: F401
 import fra_from_gamedata
 fra_from_gamedata.populate("/data/gamedata", "/data/hex.db")
 import web_client.match as wm

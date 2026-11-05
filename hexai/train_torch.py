@@ -29,6 +29,7 @@ import numpy as np
 
 def _require_torch():
     try:
+        import torch  # noqa: F401
     except ImportError as exc:  # pragma: no cover - depends on the venv
         raise SystemExit(
             "torch is not installed; install it in a training venv or use "

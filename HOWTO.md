@@ -180,6 +180,7 @@ or display text.
 | `game_session.py` | session lifecycle and DB-backed session state |
 | `ai.py` | AI turn, card-choice, and combat decisions |
 | `hexai/` | offline self-play capture, training (numpy or optional PyTorch/CUDA), and the opt-in runtime policy/value agent; see `hexai/README.md` |
+| `abilities/` | helpers (targeting, statics, conditions, counters, damage, death) that the RulesPort runtime and protocol host call; ability resolution itself lives in `rules_port/` |
 | `campaign.py` | campaign protocol and authored campaign state; campaign SQL migration into `pve_db` remains work in progress |
 | `campaign/campaign_runtime/` | runs zones whose `campaign/campaign_rules/<zone>.json` says `"runtime": "rules"` from the campaign editor's rules (shared rules loader, projection, progress in `campaign_progress`); see `docs/CAMPAIGN.md` "Rules runtime" |
 | `campaign_source.py` | adds the `campaign/` source root to Python's import path for server modules |

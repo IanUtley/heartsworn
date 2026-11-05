@@ -749,7 +749,7 @@ def test_multi_target_play_card_keeps_all_target_instances(db):
         assert list(inst.min_target_counts) == [1, 1]
         assert list(inst.max_target_counts) == [1, 1]
     finally:
-        dbmod._db, dbmod._db = old_db, old_hcs
+        dbmod._db, hcs._db = old_db, old_hcs
 
 
 def test_bunjitsu_void_cost_is_a_cost_instance(db):

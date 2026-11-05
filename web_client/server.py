@@ -235,6 +235,8 @@ def main(argv=None):
         print(f"[web-client] database snapshot: {use_snapshot_database()}",
               flush=True)
     # Importing the engine opens the database named by HEX_DB_PATH.
+    import web_client.match  # noqa: F401
+    # Importing the engine opens the database named by HEX_DB_PATH.
     httpd = ThreadingHTTPServer((args.host, args.port), Handler)
     httpd.daemon_threads = True
     print(f"[web-client] http://{args.host}:{args.port}/", flush=True)

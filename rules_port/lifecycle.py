@@ -18,7 +18,7 @@ from .chain import (  # noqa: F401
     empty as stack_empty, clear as stack_clear, set_pass as stack_set_pass,
     both_passed as stack_both_passed, reset_passes as stack_reset_passes)
 from . import persistence
-from .persistence import save_state
+from .persistence import persistence_state, save_state  # noqa: F401 (re-export)
 
 
 PLAYER = "player"
