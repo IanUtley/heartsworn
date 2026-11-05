@@ -991,6 +991,9 @@ def test_practice_mulligan_keep_accepts_the_hand_and_replies_to_the_client():
     handler.user_profile = {"id": 5}
     handler.client_reck_id = 5
     handler._maybe_attach_rules_port = lambda *args, **kwargs: None
+    # The battle setup stores the player's champion; the mulligan reads it when the player goes first.
+    import game_engine
+    handler._player_champ_scid = game_engine.SessionCardId(game_engine.UID.make(1, 9001))
     sent = []
     handler.send = lambda header, body: sent.append(body)
     session = SessionStub()
@@ -2302,6 +2305,11 @@ def _rulesport_duel(db, attacker_state, monkeypatch):
     monkeypatch.setattr(shared, "_db", db)
     monkeypatch.setattr(hconnect_server, "_db", db)
     monkeypatch.setattr(tournament_game, "_db", db)
+    # The 3029 handler reloads sessions through game_session._db(), which opens the file database unless the
+    # shared in-memory connection is used. Bind the duel's database there, as production's :memory: path does.
+    import db as connection_db
+    monkeypatch.setattr(gs, "_DB_PATH", ":memory:")
+    monkeypatch.setattr(connection_db, "_db", db)
     # Every duel uses session 1, and the tournament keeps one host per session id.
     from services import pvp_state
     monkeypatch.setattr(pvp_state, "_pvp_ports", dict(pvp_state._pvp_ports))

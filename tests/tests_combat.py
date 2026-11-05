@@ -40,6 +40,9 @@ def make_db():
     """A disposable copy of the metadata baseline (production schema)."""
     src = sqlite3.connect(SRC)
     db = sqlite3.connect(":memory:")
+    # Production connections read rows by column name too (db.py's named row factory).
+    from db import _named_row_factory
+    db.row_factory = _named_row_factory
     src.backup(db)
     src.close()
     db.execute("DELETE FROM game_cards")
