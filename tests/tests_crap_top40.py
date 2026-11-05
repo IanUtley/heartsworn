@@ -1958,6 +1958,7 @@ def test_resolving_a_tap_ability_taps_its_chosen_target():
     import game_engine
     import hconnect_server
     from rules_port.resolution import resolve_port_ability
+    from rules_port.actions import AbilityResolutionState
     from tests.tests_combat import SessionStub, add_card
     db = make_db()
     previous = shared._db
@@ -1985,7 +1986,8 @@ def test_resolving_a_tap_ability_taps_its_chosen_target():
             handler, game, session, db, player, ai, state,
             "1c6d0fdf-9be0-27b3-186e-e139d1f71544", 300, 5,
             target_map={0: [257]})
-        assert result.startswith("tapped"), result
+        # resolve_port_ability returns the AbilityResolutionState; the tap itself is the card-state change.
+        assert result == AbilityResolutionState.COMPLETED, result
         state_row = db.execute("SELECT card_state FROM game_cards WHERE card_uid=257").fetchone()[0]
         assert state_row & int(game_engine.ECardStates.Tapped), state_row
     finally:
@@ -2266,6 +2268,21 @@ def test_practice_session_attaches_an_authoritative_rules_host():
         shared._db = previous
 
 
+def _labelled_attack_bytes(defender, attackers):
+    """A CommitTroopsToAttack body in the client's labelled layout: the declarations are named, so the recovery reads them."""
+    import struct
+
+    def uid(value):
+        return struct.pack("<Q", value).hex().encode()
+
+    raw = (b";0;0;3;m_Attacks;4;4;0;1;0;5;5;2;"
+           b"DefendingCardId;6;6;1;value;7;1;1;m_UID64;8;2;0;" + uid(defender) + b";"
+           b"AttackingCardIds;9;7;0;" + str(len(attackers)).encode() + b";0;10;6;1;")
+    for attacker in attackers:
+        raw += b"value;11;1;1;m_UID64;12;2;0;" + uid(attacker) + b";"
+    return raw + b"CommitTroopsToAttackTransaction"
+
+
 def _rulesport_duel(db, attacker_state, monkeypatch):
     """A tournament game between players 5 and 6 with a real RulesPort host.
 
@@ -2339,7 +2356,7 @@ def test_unblocked_attack_damages_the_defending_champion_end_to_end(monkeypatch)
     pvp, session, port = duel["pvp"], duel["session"], duel["port"]
     handlers, troop = duel["handlers"], duel["troop"]
     pvp._transaction(handlers[5], session,
-                     pvp._attack_bytes([troop], duel["opponent_champion"]),
+                     _labelled_attack_bytes(duel["opponent_champion"], [troop]),
                      typed_payload={"m_Attacks": [{"DefendingCardId": duel["opponent_champion"],
                                                    "AttackingCardIds": [troop]}]})
     assert len(port.combat_manager.combats) == 1, port.combat_manager.combats
@@ -2365,7 +2382,7 @@ def test_accepted_attack_projection_marks_the_attacker_attacking_and_tapped(monk
     pvp, session, port = duel["pvp"], duel["session"], duel["port"]
     handlers, troop = duel["handlers"], duel["troop"]
     pvp._transaction(handlers[5], session,
-                     pvp._attack_bytes([troop], duel["opponent_champion"]),
+                     _labelled_attack_bytes(duel["opponent_champion"], [troop]),
                      typed_payload={"m_Attacks": [{"DefendingCardId": duel["opponent_champion"],
                                                    "AttackingCardIds": [troop]}]})
     assert len(port.combat_manager.combats) == 1
@@ -2386,7 +2403,7 @@ def test_a_troop_that_just_came_out_cannot_attack(monkeypatch):
     pvp, session, port = duel["pvp"], duel["session"], duel["port"]
     handlers, troop = duel["handlers"], duel["troop"]
     pvp._transaction(handlers[5], session,
-                     pvp._attack_bytes([troop], duel["opponent_champion"]),
+                     _labelled_attack_bytes(duel["opponent_champion"], [troop]),
                      typed_payload={"m_Attacks": [{"DefendingCardId": duel["opponent_champion"],
                                                    "AttackingCardIds": [troop]}]})
     assert port.combat_manager.combats == [], port.combat_manager.combats
@@ -2400,7 +2417,7 @@ def test_assign_damage_handler_applies_the_unblocked_damage_at_the_damage_step(m
     pvp, session, port = duel["pvp"], duel["session"], duel["port"]
     handlers, troop = duel["handlers"], duel["troop"]
     pvp._transaction(handlers[5], session,
-                     pvp._attack_bytes([troop], duel["opponent_champion"]),
+                     _labelled_attack_bytes(duel["opponent_champion"], [troop]),
                      typed_payload={"m_Attacks": [{"DefendingCardId": duel["opponent_champion"],
                                                    "AttackingCardIds": [troop]}]})
     names = {int(value): key for key, value in vars(ge.ETurnPhases).items() if isinstance(value, int)}
@@ -2426,7 +2443,7 @@ def test_defense_projection_accepts_the_defenders_declaration_and_advances(monke
     pvp, session, port = duel["pvp"], duel["session"], duel["port"]
     handlers, troop = duel["handlers"], duel["troop"]
     pvp._transaction(handlers[5], session,
-                     pvp._attack_bytes([troop], duel["opponent_champion"]),
+                     _labelled_attack_bytes(duel["opponent_champion"], [troop]),
                      typed_payload={"m_Attacks": [{"DefendingCardId": duel["opponent_champion"],
                                                    "AttackingCardIds": [troop]}]})
     # The defender declares no blockers against the staged attack.
