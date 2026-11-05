@@ -14,6 +14,7 @@ import json
 import os
 import re
 import sqlite3
+from pathlib import Path
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 STATIC = os.path.join(ROOT, "static.py")
@@ -59,7 +60,7 @@ def main():
     lines.append("]")
     block = "\n".join(lines)
 
-    static_src = open(STATIC).read()
+    static_src = Path(STATIC).read_text()
     if BEGIN_MARKER not in static_src:
         anchor = "CARD_COUNTER_TEMPLATES = ["
         m = re.search(rf"^{re.escape(anchor)}$", static_src, re.M)
@@ -77,7 +78,7 @@ def main():
         static_src = (static_src[:begin]
                       + f"{BEGIN_MARKER}\n{block}\n{END_MARKER}"
                       + static_src[end_of_block:])
-    open(STATIC, "w").write(static_src)
+    Path(STATIC).write_text(static_src)
 
     db = sqlite3.connect(DB)
     db.execute("""CREATE TABLE IF NOT EXISTS ability_effect_conditions (

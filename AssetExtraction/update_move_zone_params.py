@@ -15,6 +15,7 @@ import json
 import os
 import re
 import sqlite3
+from pathlib import Path
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 STATIC = os.path.join(ROOT, "static.py")
@@ -73,7 +74,7 @@ def update_db(meta):
 
 
 def update_static(meta):
-    src = open(STATIC).read()
+    src = Path(STATIC).read_text()
     pattern = re.compile(
         r"(?m)^(\s*)\('([0-9a-fA-F-]+)', '([0-9a-fA-F-]+)', "
         r"(\d+), 'MoveCardToZoneEffectTemplate', ''\),?$")
@@ -88,7 +89,7 @@ def update_static(meta):
 
     new_src, count = pattern.subn(repl, src)
     if count:
-        open(STATIC, "w").write(new_src)
+        Path(STATIC).write_text(new_src)
     return count
 
 

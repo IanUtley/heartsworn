@@ -41,6 +41,7 @@ import json
 import os
 import re
 import struct
+from pathlib import Path
 
 GAMEDATA = os.environ.get(
     "GAMEDATA",
@@ -758,7 +759,7 @@ def main():
     lines.append("]")
     block = "\n".join(lines)
 
-    static_src = open(STATIC_PY).read()
+    static_src = Path(STATIC_PY).read_text()
     begin = static_src.find(f"{BEGIN_MARKER}\n")
     end = static_src.find(f"{END_MARKER}")
     if begin < 0 or end < 0:
@@ -769,7 +770,7 @@ def main():
         + f"{BEGIN_MARKER}\n{block}\n{END_MARKER}"
         + static_src[end_of_block:]
     )
-    open(STATIC_PY, "w").write(new_static)
+    Path(STATIC_PY).write_text(new_static)
 
     print(f"Wrote {STATIC_PY}: {len(card_rows)} cards, {len(bom_rows)} card-ability BOM links, "
           f"{len(target_rows)} target templates")

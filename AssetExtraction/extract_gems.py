@@ -17,6 +17,7 @@ Usage:
 import json
 import os
 import sqlite3
+from pathlib import Path
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 STATIC = os.path.join(ROOT, "static.py")
@@ -213,13 +214,13 @@ def main():
         lines.append("    " + repr(row) + ",")
     lines.append("]")
     block = "\n".join(lines)
-    src = open(STATIC).read()
+    src = Path(STATIC).read_text()
     begin = src.find(f"{BEGIN_MARKER}\n")
     end = src.find(f"{END_MARKER}")
     if begin < 0 or end < 0:
         raise SystemExit("static.py missing GEM SEED markers")
     end_of_block = src.find("\n", end)
-    open(STATIC, "w").write(
+    Path(STATIC).write_text(
         src[:begin] + f"{BEGIN_MARKER}\n{block}\n{END_MARKER}"
         + src[end_of_block:])
     print(f"Wrote {len(gem_rows)} gems, {len(ability_rows)} abilities, "

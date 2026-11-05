@@ -16,6 +16,7 @@ import json
 import os
 import re
 import sqlite3
+from pathlib import Path
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 STATIC = os.path.join(ROOT, "static.py")
@@ -61,7 +62,7 @@ def main():
     lines.append("]")
     block = "\n".join(lines)
 
-    static_src = open(STATIC).read()
+    static_src = Path(STATIC).read_text()
     if BEGIN_MARKER not in static_src:
         # Insert right before the ability_effects list header (match the exact
         # line so "CHAMPION_ABILITY_EFFECTS = [" is never substring-matched).
@@ -79,7 +80,7 @@ def main():
         static_src = (static_src[:begin]
                       + f"{block}\n{END_MARKER}"
                       + static_src[end_of_block:])
-    open(STATIC, "w").write(static_src)
+    Path(STATIC).write_text(static_src)
 
     db = sqlite3.connect(DB)
     db.execute("""CREATE TABLE IF NOT EXISTS card_counter_templates (

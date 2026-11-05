@@ -17,6 +17,7 @@ import json
 import os
 import re
 import sqlite3
+from pathlib import Path
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 STATIC = os.path.join(ROOT, "static.py")
@@ -238,7 +239,7 @@ def main():
     meta_lines.append("]")
     meta_block = "\n".join(meta_lines)
 
-    static_src = open(STATIC).read()
+    static_src = Path(STATIC).read_text()
     if BEGIN_MARKER not in static_src:
         anchor = "ABILITY_EFFECTS = ["
         idx = static_src.index(anchor)
@@ -266,7 +267,7 @@ def main():
             static_src = (static_src[:marker_end]
                           + f"\n\n{META_BEGIN_MARKER}\n{meta_block}\n{META_END_MARKER}"
                           + static_src[marker_end:])
-    open(STATIC, "w").write(static_src)
+    Path(STATIC).write_text(static_src)
 
     # Upsert the DB.
     db = sqlite3.connect(DB)

@@ -16,6 +16,7 @@ import json
 import os
 import re
 import sqlite3
+from pathlib import Path
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 STATIC = os.path.join(ROOT, "static.py")
@@ -71,7 +72,7 @@ def main():
     # Patch the static CARD_TEMPLATES block: 16-tuples (…, sacrifice_target,
     # subtype) become 18-tuples with variable_cost / variable_cost_minimum
     # inserted before subtype, matching extract_cards.py's canonical order.
-    src = open(STATIC).read()
+    src = Path(STATIC).read_text()
     start = src.index(BEGIN_MARKER)
     lines = src[start:].splitlines()
     end_rel = 1
@@ -94,7 +95,7 @@ def main():
         else:
             out.append(line)
     end = start + sum(len(l) + 1 for l in block_lines)
-    open(STATIC, "w").write(src[:start] + "\n".join(out) + "\n]\n" + src[end:])
+    Path(STATIC).write_text(src[:start] + "\n".join(out) + "\n]\n" + src[end:])
     print(f"DB rows updated: {n}; static rows updated: {updated}")
 
 

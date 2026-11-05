@@ -23,6 +23,7 @@ import gzip
 import json
 import os
 import re
+from pathlib import Path
 
 GAMEDATA = os.environ.get(
     "GAMEDATA",
@@ -358,7 +359,7 @@ def main():
     block = "\n".join(lines)
 
     # Splice into static.py between the markers.
-    static_src = open(STATIC_PY).read()
+    static_src = Path(STATIC_PY).read_text()
     begin = static_src.find(f"{BEGIN_MARKER}\n")
     end = static_src.find(f"{END_MARKER}")
     if begin < 0 or end < 0:
@@ -369,7 +370,7 @@ def main():
         + f"{BEGIN_MARKER}\n{block}\n{END_MARKER}"
         + static_src[end_of_block:]
     )
-    open(STATIC_PY, "w").write(new_static)
+    Path(STATIC_PY).write_text(new_static)
 
     print(f"Wrote {STATIC_PY}: {len(talent_data)} talents, {len(talent_abilities)} granted "
           f"abilities, {len(ability_effects)} BOM links")
