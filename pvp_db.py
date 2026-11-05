@@ -91,33 +91,6 @@ def _cached_static_value(connection, key, loader):
     return value
 
 
-def _cached_static_row(connection, key, sql, params):
-    return _cached_static_value(
-        connection, key,
-        lambda: connection.execute(sql, params).fetchone())
-
-
-def _cached_static_rows(connection, key, sql, params):
-    value = _cached_static_value(
-        connection, key,
-        lambda: tuple(connection.execute(sql, params).fetchall()))
-    shared_connection = _shared_db_connection()
-    return (value if shared_connection is not None and
-            connection is shared_connection else list(value))
-
-
-def db_next_session_instance(conn=None):
-    """Atomically allocate the next persisted game-session instance."""
-    connection = conn or _db_layer._db
-    row = connection.execute(
-        "SELECT value FROM meta WHERE key='next_session_inst'").fetchone()
-    nxt = (row[0] + 1) if row else 1
-    connection.execute(
-        "INSERT OR REPLACE INTO meta (key, value) VALUES ('next_session_inst', ?)",
-        (nxt,))
-    return nxt
-
-
 _SESSION_UPSERT_SQL = (
     "INSERT OR REPLACE INTO game_sessions "
     "(session_id, server_id, session_name, owner_uid, state, "
@@ -132,96 +105,6 @@ _SESSION_UPSERT_SQL = (
 _session_save_queue = threading.local()
 
 
-def _session_row_params(session):
-    return (str(session.session_id), str(session.server_id), session.session_name,
-            str(session.owner_uid), session.state, json.dumps(session.encounter_data),
-            json.dumps(session.players), json.dumps(session.turn_order), session.seed_z,
-            session.seed_w, session.deck_template_id, str(session.session_id))
-
-
-def db_save_session(session, conn=None):
-    """Persist a game-session object in the caller's transaction."""
-    connection = conn or _db_layer._db
-    connection.execute(_SESSION_UPSERT_SQL, _session_row_params(session))
-
-
-@contextmanager
-def session_save_batch():
-    """Defer this thread's game-session saves until the block exits.
-
-    Each transaction would otherwise write the session row after every phase
-    step.  Queued rows are written, in one commit, when the block exits, and
-    before any read of ``game_sessions`` on this thread, so readers still see
-    their own writes.  Nested batches join the outermost one.
-    """
-    if getattr(_session_save_queue, "pending", None) is not None:
-        yield
-        return
-    _session_save_queue.pending = {}
-    try:
-        yield
-    finally:
-        try:
-            flush_pending_session_saves(commit=True)
-        finally:
-            _session_save_queue.pending = None
-
-
-def queue_session_save(session):
-    """Queue ``session``'s row if a batch is open on this thread."""
-    pending = getattr(_session_save_queue, "pending", None)
-    if pending is None:
-        return False
-    params = _session_row_params(session)
-    pending[params[0]] = params
-    return True
-
-
-def flush_pending_session_saves(commit=False):
-    """Write this thread's queued session rows on the shared connection."""
-    pending = getattr(_session_save_queue, "pending", None)
-    if not pending:
-        return
-    rows = list(pending.values())
-    pending.clear()
-    for params in rows:
-        _db_layer._db.execute(_SESSION_UPSERT_SQL, params)
-    if commit:
-        _db_layer._db.commit()
-
-
-def db_get_session(session_id, conn=None):
-    """Return one persisted game session by protocol UID."""
-    flush_pending_session_saves()
-    return (conn or _db_layer._db).execute(
-        "SELECT * FROM game_sessions WHERE session_id=?", (str(session_id),)
-    ).fetchone()
-
-
-def db_get_session_by_name(session_name, conn=None):
-    """Return one persisted game session by client-visible name."""
-    flush_pending_session_saves()
-    return (conn or _db_layer._db).execute(
-        "SELECT * FROM game_sessions WHERE session_name=?", (session_name,)
-    ).fetchone()
-
-
-def db_get_sessions(conn=None):
-    """Return persisted sessions newest first."""
-    flush_pending_session_saves()
-    return (conn or _db_layer._db).execute(
-        "SELECT * FROM game_sessions ORDER BY created_at DESC").fetchall()
-
-
-def db_remove_session(session_name, conn=None):
-    """Remove a game session in the caller's transaction."""
-    # A queued session save must land before this statement, or it would
-    # re-insert the row after the delete.
-    flush_pending_session_saves()
-    (conn or _db_layer._db).execute(
-        "DELETE FROM game_sessions WHERE session_name=?", (session_name,))
-
-
 _STALE_SESSION_ZERO = {
     "sessions_removed": 0,
     "cards_removed": 0,
@@ -230,4155 +113,665 @@ _STALE_SESSION_ZERO = {
 }
 
 
-def db_cleanup_stale_sessions(age_days=7):
-    """Remove abandoned non-tournament game sessions and their card rows.
-
-    Practice/FRA/PvE sessions are not owned by the tournament replay pipeline,
-    so nothing else removes them once their client is gone: the
-    ``game_sessions`` row and a full deck copy of ``game_cards`` would live
-    forever.  A session is eligible only when it is older than ``age_days``,
-    is not referenced by ``tournaments`` or ``tournament_matches``, and has no
-    replay awaiting indexing (a ready replay is retained and lets the session
-    go).  Tournament state keeps its own replay gate in
-    ``db.db_tournament_cleanup_old``.
-
-    Runs in its own short-lived write transaction, like the tournament
-    cleanup, so a handler's open transaction cannot be inherited or blocked.
-    """
-    # A queued session save must land before this statement, or it would
-    # re-insert the row after the delete.
-    flush_pending_session_saves()
-    try:
-        days = max(1, int(age_days))
-    except (TypeError, ValueError):
-        days = 7
-    cutoff = f"-{days} days"
-    owns_connection = True
-    # Keep an in-memory/shared test connection usable; production always uses
-    # a short-lived connection instead of the process-wide RetryingConnection.
-    if isinstance(_db_layer._db, sqlite3.Connection) and not isinstance(
-            _db_layer._db, _db_layer.RetryingConnection):
-        connection = _db_layer._db
-        owns_connection = False
-    else:
-        connection = sqlite3.connect(_db_layer.DB_PATH, timeout=0.5)
-    try:
-        connection.execute("PRAGMA busy_timeout=500")
-        connection.execute("BEGIN IMMEDIATE")
-
-        def _has(table):
-            return bool(connection.execute(
-                "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
-                (table,)).fetchone())
-
-        optional = {
-            name for name in ("tournaments", "tournament_matches",
-                              "session_events", "session_packets",
-                              "session_transactions",
-                              "game_replays")
-            if _has(name)
-        }
-        clauses = []
-        if "tournaments" in optional:
-            clauses.append(
-                "NOT EXISTS (SELECT 1 FROM tournaments t WHERE "
-                "CAST(t.session_id AS TEXT)=CAST(gs.session_id AS TEXT))")
-        if "tournament_matches" in optional:
-            clauses.append(
-                "NOT EXISTS (SELECT 1 FROM tournament_matches tm WHERE "
-                "CAST(tm.session_id AS TEXT)=CAST(gs.session_id AS TEXT))")
-        if "game_replays" in optional:
-            clauses.append(
-                "(NOT EXISTS (SELECT 1 FROM game_replays gr WHERE "
-                "CAST(gr.session_id AS TEXT)=CAST(gs.session_id AS TEXT)) "
-                "OR EXISTS (SELECT 1 FROM game_replays gr WHERE "
-                "CAST(gr.session_id AS TEXT)=CAST(gs.session_id AS TEXT) "
-                "AND gr.status='ready'))")
-
-        query = ("SELECT gs.session_id FROM game_sessions gs "
-                 "WHERE gs.created_at IS NOT NULL "
-                 "AND datetime(gs.created_at) <= datetime('now', ?)")
-        if clauses:
-            query += " AND " + " AND ".join(clauses)
-        stale = [str(row[0]) for row in connection.execute(
-            query, (cutoff,)).fetchall() if row[0] is not None]
-
-        result = dict(_STALE_SESSION_ZERO)
-        for session_id in stale:
-            if "session_events" in optional:
-                result["events_removed"] += int(connection.execute(
-                    "DELETE FROM session_events "
-                    "WHERE CAST(session_id AS TEXT)=?",
-                    (session_id,)).rowcount or 0)
-            if "session_packets" in optional:
-                connection.execute(
-                    "DELETE FROM session_packets "
-                    "WHERE CAST(session_id AS TEXT)=?", (session_id,))
-            if "session_transactions" in optional:
-                result["transactions_removed"] += int(connection.execute(
-                    "DELETE FROM session_transactions "
-                    "WHERE CAST(session_id AS TEXT)=?",
-                    (session_id,)).rowcount or 0)
-            result["cards_removed"] += int(connection.execute(
-                "DELETE FROM game_cards WHERE CAST(session_id AS TEXT)=?",
-                (session_id,)).rowcount or 0)
-            result["sessions_removed"] += int(connection.execute(
-                "DELETE FROM game_sessions WHERE CAST(session_id AS TEXT)=?",
-                (session_id,)).rowcount or 0)
-        # Source rows whose session and replay are both gone can never be read
-        # again (the replay worker expires rows that still have a game_replays
-        # record).  Reclaim them in the same pass.
-        def _orphan_sql(table):
-            guard = ""
-            if "game_replays" in optional:
-                guard = (" AND NOT EXISTS (SELECT 1 FROM game_replays gr "
-                         f"WHERE CAST(gr.session_id AS TEXT)="
-                         f"CAST({table}.session_id AS TEXT))")
-            return ("DELETE FROM " + table + " WHERE NOT EXISTS ("
-                    "SELECT 1 FROM game_sessions gs WHERE "
-                    f"CAST(gs.session_id AS TEXT)="
-                    f"CAST({table}.session_id AS TEXT))" + guard)
-
-        if "session_events" in optional:
-            result["events_removed"] += int(connection.execute(
-                _orphan_sql("session_events")).rowcount or 0)
-        if "session_transactions" in optional:
-            result["transactions_removed"] += int(connection.execute(
-                _orphan_sql("session_transactions")).rowcount or 0)
-        connection.commit()
-        return result
-    except sqlite3.OperationalError as exc:
-        try:
-            connection.rollback()
-        except sqlite3.Error:
-            pass
-        # A busy database is a normal scheduler condition; leave this pass for
-        # the next interval instead of killing the scheduler thread.
-        if _db_layer._is_sqlite_lock_error(exc):
-            return dict(_STALE_SESSION_ZERO)
-        raise
-    finally:
-        if owns_connection:
-            connection.close()
-
-
-def db_insert_game_card(session_id, user_id, card_uid, template_guid, location,
-                        card_type="Troop", position=0, abilities_json=None,
-                        attributes=0, is_champion=0, resolved_at=0, conn=None):
-    """Insert a materialized game card and preserve its original owner."""
-    connection = conn or _db_layer._db
-    cursor = connection.execute(
-        "INSERT INTO game_cards (session_id, user_id, card_uid, template_guid, "
-        "card_template_id, location, position, card_type, card_abilities, "
-        "card_attributes, owner_user_id, is_champion, resolved_at) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        (session_id, user_id, card_uid, template_guid, template_guid,
-         location, position, card_type, abilities_json or "[]",
-         attributes or 0, user_id or 0, is_champion, resolved_at))
-    if conn is None:
-        connection.commit()
-    return cursor.lastrowid
-
-
-def db_discard_card(session_id, card_uid, owner_user_id=None,
-                    extra_set=None, extra_params=None, connection=None,
-                    conn=None):
-    """Move a card to its owner's discard pile.
-
-    This keeps the legacy return value and trusted extra-update contract, but
-    leaves explicit transactions for the caller to commit.
-    """
-    explicit = connection is not None or conn is not None
-    connection = connection or conn or _db_layer._db
-    row = connection.execute(
-        "SELECT user_id FROM game_cards WHERE session_id=? AND card_uid=?",
-        (session_id, int(card_uid))).fetchone()
-    if not row:
-        return None
-    owner = int(row[0] if owner_user_id is None else owner_user_id)
-    position = connection.execute(
-        "SELECT COALESCE(MAX(position) + 1, 1) FROM game_cards "
-        "WHERE session_id=? AND user_id=? AND location='discard'",
-        (session_id, owner)).fetchone()[0]
-    sql = "UPDATE game_cards SET user_id=?, location='discard', position=?"
-    params = [owner, int(position or 1)]
-    if extra_set:
-        sql += ", " + extra_set
-        params.extend(extra_params or [])
-    sql += " WHERE session_id=? AND card_uid=?"
-    params.extend([session_id, int(card_uid)])
-    connection.execute(sql, params)
-    if not explicit:
-        connection.commit()
-    return owner
-
-
-def db_card_template_field(template_guid, field, conn=None):
-    """Return one approved printed template field by name."""
-    valid = {"abilities_json", "attributes", "card_type", "sacrifice_target",
-             "cost", "attack", "defense", "name", "threshold_json", "lethal"}
-    if field not in valid:
-        return None
-    row = (conn or _db_layer._db).execute(
-        "SELECT " + field + " FROM card_templates WHERE guid=?",
-        (template_guid,)).fetchone()
-    return row[0] if row else None
-
-
-def db_game_card_effective_cost(session_id, card_uid, battle_state=None,
-                                conn=None):
-    """Return the payable cost including instance/static cost modifiers."""
-    connection = conn or _db_layer._db
-    try:
-        from rules_port.static_rules import effective_cost
-        return max(0, int(effective_cost(
-            connection, session_id, battle_state or {}, int(card_uid))))
-    except Exception:
-        if (battle_state or {}).get("_rules_port_attached"):
-            raise
-        try:
-            row = connection.execute(
-                "SELECT ct.cost, gc.card_cost_mod "
-                "FROM game_cards gc JOIN card_templates ct "
-                "ON ct.guid=gc.template_guid "
-                "WHERE gc.session_id=? AND gc.card_uid=?",
-                (session_id, int(card_uid))).fetchone()
-        except Exception:
-            row = connection.execute(
-                "SELECT ct.cost FROM game_cards gc "
-                "JOIN card_templates ct ON ct.guid=gc.template_guid "
-                "WHERE gc.session_id=? AND gc.card_uid=?",
-                (session_id, int(card_uid))).fetchone()
-        if not row:
-            return 0
-        return max(0, int(row[0] or 0) +
-                   (int(row[1] or 0) if len(row) > 1 else 0))
-
-
-def db_game_card_effective_attributes(session_id, card_uid, battle_state=None,
-                                      conn=None):
-    """Return the attribute bits that gate a card's combat legality.
-
-    ``game_cards.card_attributes`` holds only the attributes written directly
-    on the instance.  Template attributes, temporary grants (a troop that
-    surfaced this turn carries Speed here) and static modifiers project on top
-    of it, so a legality predicate that reads the instance column alone
-    rejects an attack the option list already offered the client.
-    """
-    connection = conn or _db_layer._db
-    from rules_port.static_rules import effective_attributes
-    return int(effective_attributes(
-        connection, session_id, battle_state or {}, int(card_uid)) or 0)
-
-
-def db_game_champion(session_id, user_id, conn=None):
-    """Return ``(card_uid, template_guid)`` for a session champion."""
-    return (conn or _db_layer._db).execute(
-        "SELECT card_uid, template_guid FROM game_cards "
-        "WHERE session_id=? AND user_id=? AND is_champion=1 LIMIT 1",
-        (session_id, user_id)).fetchone()
-
-
-def db_clear_session_cards(session_id, conn=None):
-    """Delete all mutable game-card rows for a session."""
-    connection = conn or _db_layer._db
-    connection.execute("DELETE FROM game_cards WHERE session_id=?", (session_id,))
-    if conn is None:
-        connection.commit()
-
-
-def db_delete_game_session(session_id, conn=None):
-    """Delete all database-owned rows for a completed game session."""
-    # A queued session save must land before this statement, or it would
-    # re-insert the row after the delete.
-    flush_pending_session_saves()
-    connection = conn or _db_layer._db
-    sid = str(session_id)
-    for table in ("game_cards", "session_events", "session_transactions",
-                  "game_sessions"):
-        connection.execute(f"DELETE FROM {table} WHERE session_id=?", (sid,))
-    if conn is None:
-        connection.commit()
-
-
-def db_champion_template_health(guid, conn=None):
-    """Return a champion template's starting health."""
-    row = (conn or _db_layer._db).execute(
-        "SELECT starting_health FROM champion_template_data WHERE guid=?",
-        (guid,)).fetchone()
-    return row[0] if row else DEFAULT_STARTING_HEALTH
-
-
-def db_get_charge_power(champion_guid, conn=None):
-    """Return a champion template's charge-power ability GUID."""
-    row = (conn or _db_layer._db).execute(
-        "SELECT charge_power FROM champion_templates WHERE guid=?",
-        (champion_guid,)).fetchone()
-    return row[0] if row and row[0] else None
-
-
-def db_get_champion_ability_guids(champion_guid, conn=None):
-    """Return all ability GUIDs attached to a champion template."""
-    return [row[0] for row in (conn or _db_layer._db).execute(
-        "SELECT ability_guid FROM champion_abilities WHERE champion_guid=?",
-        (champion_guid,)).fetchall()]
-
-
-def db_champion_template_health_by_class(race_name, cls_name, conn=None):
-    """Return starting health from champion class data."""
-    row = (conn or _db_layer._db).execute(
-        "SELECT starting_health FROM champion_class_data "
-        "WHERE race=? AND champion_class=?", (race_name, cls_name)).fetchone()
-    return row[0] if row else DEFAULT_STARTING_HEALTH
-
-
-def db_warzone_troop_count(session_id, user_id, conn=None):
-    """Count a player's warzone troops, with zero representing the AI."""
-    row = (conn or _db_layer._db).execute(
-        "SELECT COUNT(*) FROM game_cards WHERE session_id=? AND user_id=? "
-        "AND location='warzone' AND card_type LIKE '%Troop%'",
-        (session_id, user_id)).fetchone()
-    return int(row[0]) if row else 0
-
-
-def db_card_save_player_stops(user_id, self_stops_json, opp_stops_json,
-                              conn=None):
-    """Persist phase-stop preferences in the caller's transaction."""
-    connection = conn or _db_layer._db
-    connection.execute(
-        "INSERT INTO user_prefs (user_id, self_stops, opp_stops) VALUES (?,?,?) "
-        "ON CONFLICT(user_id) DO UPDATE SET self_stops=excluded.self_stops, "
-        "opp_stops=excluded.opp_stops",
-        (user_id, self_stops_json, opp_stops_json))
-    if conn is None:
-        connection.commit()
-
-
-def db_card_load_player_stops(user_id, conn=None):
-    """Return persisted phase-stop preferences."""
-    row = (conn or _db_layer._db).execute(
-        "SELECT self_stops, opp_stops FROM user_prefs WHERE user_id=?",
-        (user_id,)).fetchone()
-    if not row or not row[0]:
-        return None, None
-    return row[0], row[1] if row[1] else None
-
-
-def db_apply_replica_mods(session_id, card_uid, card_type, buffs_json,
-                          conn=None):
-    """Persist the client's ``HandleReplicaMods`` projection on a card.
-
-    The Replica modification adds Artifact to the card type, adds the Replica
-    subtype (and Robot for troops), clears thresholds, deletes Unique and sets
-    the permanent-data IsReplica markers.  Type/subtype/threshold views read
-    the columns and permanent-buffs payload this writes.
-    """
-    return (conn or _db_layer._db).execute(
-        "UPDATE game_cards SET card_type=?, "
-        "card_attributes=(COALESCE(card_attributes,0) & ~?), "
-        "permanent_buffs=? WHERE session_id=? AND card_uid=?",
-        (card_type, 256, buffs_json, session_id, int(card_uid)))
-
-
-def db_set_card_state_or(session_id, card_uid, state_bits, conn=None):
-    """OR state bits onto a card without committing explicit transactions."""
-    connection = conn or _db_layer._db
-    connection.execute(
-        "UPDATE game_cards SET card_state = (card_state | ?) "
-        "WHERE session_id=? AND card_uid=?",
-        (int(state_bits), session_id, int(card_uid)))
-    if conn is None:
-        connection.commit()
-
-
-def db_set_card_location(session_id, card_uid, location, extra_set=None,
-                         extra_params=None, conn=None):
-    """Move a card to a zone and leave explicit transactions uncommitted."""
-    connection = conn or _db_layer._db
-    sql = "UPDATE game_cards SET location=?"
-    params = [location]
-    if extra_set:
-        sql += ", " + extra_set
-        params.extend(extra_params or [])
-    params.extend([session_id, int(card_uid)])
-    connection.execute(sql + " WHERE session_id=? AND card_uid=?", params)
-    if conn is None:
-        connection.commit()
-
-
-def db_card_sync_abilities(session_id, card_uid, abilities_json, attributes,
-                           template_guid, commit=True, conn=None):
-    """Synchronize an instance's authored abilities and reset usage state."""
-    connection = conn or _db_layer._db
-    connection.execute(
-        "UPDATE game_cards SET card_abilities=?, card_attributes=?, "
-        "card_uses='{}', original_template_guid = CASE "
-        "WHEN original_template_guid IS NULL OR original_template_guid='' "
-        "THEN ? ELSE original_template_guid END "
-        "WHERE session_id=? AND card_uid=?",
-        (abilities_json, attributes, template_guid, session_id, int(card_uid)),
-    )
-    if commit:
-        connection.commit()
-
-
-def db_game_session_pids(session_id, conn=None):
-    """Return the actual player IDs participating in a game session."""
-    connection = conn or _db_layer._db
-    tournament_rows = connection.execute(
-        "SELECT DISTINCT ts.player_uid FROM tournaments t "
-        "JOIN tournament_signups ts ON ts.tournament_id=t.id "
-        "WHERE t.session_id=? ORDER BY ts.player_uid", (session_id,)
-    ).fetchall()
-    if len(tournament_rows) >= 2:
-        return [row[0] for row in tournament_rows]
-    rows = connection.execute(
-        "SELECT DISTINCT user_id FROM game_cards WHERE session_id=?",
-        (session_id,)).fetchall()
-    return [row[0] for row in rows]
-
-
-def db_game_cards_at_location(session_id, location, card_type=None,
-                              user_id=None, conn=None):
-    """Return ordered full card rows for one game zone."""
-    connection = conn or _db_layer._db
-    sql = ("SELECT card_uid, template_guid, user_id, card_type, card_state, "
-           "card_abilities, card_attributes FROM game_cards "
-           "WHERE session_id=? AND location=?")
-    params = [session_id, location]
-    if card_type is not None:
-        sql += " AND card_type=?"
-        params.append(card_type)
-    if user_id is not None:
-        sql += " AND user_id=?"
-        params.append(user_id)
-    sql += " ORDER BY position, id"
-    return connection.execute(sql, params).fetchall()
-
-
-def db_game_cards_at_location_scalar(session_id, location, user_id=None,
-                                     conn=None):
-    """Return ordered card UIDs for one game zone."""
-    connection = conn or _db_layer._db
-    sql = "SELECT card_uid FROM game_cards WHERE session_id=? AND location=?"
-    params = [session_id, location]
-    if user_id is not None:
-        sql += " AND user_id=?"
-        params.append(user_id)
-    sql += " ORDER BY position, id"
-    return [row[0] for row in connection.execute(sql, params).fetchall()]
-
-
-def db_warzone_troops_basic(session_id, user_id=None, conn=None):
-    """Return ``(card_uid, card_type, card_state)`` for warzone troops."""
-    connection = conn or _db_layer._db
-    sql = ("SELECT card_uid, card_type, card_state FROM game_cards "
-           "WHERE session_id=? AND location='warzone' "
-           "AND card_type LIKE '%Troop%'")
-    params = [session_id]
-    if user_id is not None:
-        # This query has no ``gc`` alias; using one here makes every caller
-        # that asks for one player's attack options fail at DeclareAttack.
-        sql += " AND user_id=?"
-        params.append(user_id)
-    return connection.execute(sql, params).fetchall()
-
-
-def db_owner_card_uids_with_counters(session_id, user_id, conn=None):
-    """Return ``(card_uid,)`` for one player's cards carrying any counter.
-
-    A coarse text prefilter over ``permanent_buffs``; callers decode the
-    JSON and test the specific counter template.
-    """
-    connection = conn or _db_layer._db
-    return connection.execute(
-        "SELECT card_uid FROM game_cards WHERE session_id=? AND user_id=? "
-        "AND permanent_buffs LIKE '%\"counters\"%'",
-        (session_id, user_id)).fetchall()
-
-
-def db_warzone_troops_with_state(session_id, user_id=None, conn=None):
-    """Return ``(uid, template_guid, state, user_id)`` warzone troops."""
-    connection = conn or _db_layer._db
-    sql = ("SELECT card_uid, template_guid, card_state, user_id "
-           "FROM game_cards WHERE session_id=? AND location='warzone' "
-           "AND card_type LIKE '%Troop%'")
-    params = [session_id]
-    if user_id is not None:
-        sql += " AND user_id=?"
-        params.append(user_id)
-    return connection.execute(sql, params).fetchall()
-
-
-def db_hand_card_count(session_id, user_id, conn=None):
-    """Return the number of cards in a player's hand."""
-    row = (conn or _db_layer._db).execute(
-        "SELECT COUNT(*) FROM game_cards WHERE session_id=? AND user_id=? "
-        "AND location='hand'", (session_id, user_id)).fetchone()
-    return row[0] if row else 0
-
-
-def db_bulk_blocker_state(session_id, blocker_uids, conn=None):
-    """Mark each declared blocker as Blocking within the caller's transaction."""
-    if not blocker_uids:
-        return
-    connection = conn or _db_layer._db
-    connection.executemany(
-        "UPDATE game_cards SET card_state = (card_state | ?) "
-        "WHERE session_id=? AND card_uid=?",
-        [(ECardStates.Blocking, session_id, int(uid))
-         for uid in blocker_uids],
-    )
-    if conn is None:
-        connection.commit()
-
-
-def db_game_deck_cards(session_id, user_id, conn=None):
-    """Return ordered ``(card_uid, template_guid)`` deck rows."""
-    return (conn or _db_layer._db).execute(
-        "SELECT card_uid, template_guid FROM game_cards "
-        "WHERE session_id=? AND user_id=? AND location='deck' "
-        "ORDER BY position", (session_id, user_id)).fetchall()
-
-
-def db_apply_tournament_main_deck(session_id, user_id, main_card_uids,
-                                  conn=None):
-    """Move a saved tournament main deck into the playable deck zone."""
-    connection = conn or _db_layer._db
-    ids = [int(uid) for uid in main_card_uids]
-    connection.execute(
-        "UPDATE game_cards SET location='sideboard', position=0 "
-        "WHERE session_id=? AND user_id=? AND card_type!='Champion'",
-        (session_id, user_id))
-    connection.executemany(
-        "UPDATE game_cards SET location='deck', position=? "
-        "WHERE session_id=? AND user_id=? AND card_uid=?",
-        [(index, session_id, user_id, card_uid)
-         for index, card_uid in enumerate(ids)])
-    if conn is None:
-        connection.commit()
-
-
-def db_game_draw_cards(session_id, user_id, count=7, conn=None):
-    """Move the first ordered deck cards into hand and return their rows."""
-    connection = conn or _db_layer._db
-    rows = connection.execute(
-        "SELECT card_uid, template_guid FROM game_cards "
-        "WHERE session_id=? AND user_id=? AND location='deck' "
-        "ORDER BY position LIMIT ?", (session_id, user_id, count)
-    ).fetchall()
-    for card_uid, _template_guid in rows:
-        connection.execute(
-            "UPDATE game_cards SET location='hand' "
-            "WHERE card_uid=? AND session_id=?", (int(card_uid), session_id))
-    if conn is None:
-        connection.commit()
-    return rows
-
-
-def deck_rng_index(rng, bound):
-    """Return a uniform index in ``[0, bound)`` from the session RNG.
-
-    Falls back to the stdlib RNG when no session RNG is bound.  ``bound <= 0``
-    returns 0, matching C# ``Random.Next`` callers that guard on a positive
-    count.
-    """
-    if bound <= 0:
-        return 0
-    if rng is not None and hasattr(rng, "next"):
-        # Next(1) still advances the C# RNG, so draw even for one slot.
-        return int(rng.next(bound)) % bound
-    import random as _shuf_rnd
-    return _shuf_rnd.randrange(bound)
-
-
-def db_game_shuffle_deck(session_id, user_id, conn=None, rng=None):
-    """Shuffle one player's deck positions within the caller's transaction.
-
-    ``rng`` is the battle's session RNG (``bstate["_rules_rng"]``); it is
-    optional so legacy callers keep the stdlib behaviour.
-    """
-    connection = conn or _db_layer._db
-    rows = connection.execute(
-        "SELECT card_uid FROM game_cards "
-        "WHERE session_id=? AND user_id=? AND location='deck' "
-        "ORDER BY position", (session_id, user_id)).fetchall()
-    remaining = [int(row[0]) for row in rows]
-    # C# CardCollection.Shuffle repeatedly takes Next(count) from the
-    # remaining cards.
-    deck = [remaining.pop(deck_rng_index(rng, len(remaining)))
-            for _ in range(len(remaining))]
-    connection.executemany(
-        "UPDATE game_cards SET position=? "
-        "WHERE card_uid=? AND session_id=?",
-        [(position, card_uid, session_id)
-         for position, card_uid in enumerate(deck)])
-    if conn is None:
-        connection.commit()
-
-
-def db_game_get_hand(session_id, user_id, conn=None):
-    """Return ordered ``(card_uid, template_guid)`` hand rows."""
-    return (conn or _db_layer._db).execute(
-        "SELECT card_uid, template_guid FROM game_cards "
-        "WHERE session_id=? AND user_id=? AND location='hand' "
-        "ORDER BY position", (session_id, user_id)).fetchall()
-
-
-def db_game_card_type(template_guid, conn=None):
-    """Return a template's stored card type, defaulting legacy rows to Troop."""
-    if not template_guid:
-        return "Troop"
-    connection = conn or _db_layer._db
-    row = _cached_static_row(
-        connection, ("card_type", str(template_guid).lower()),
-        "SELECT card_type FROM card_templates WHERE guid=?",
-        (template_guid,))
-    return row[0] if row else "Troop"
-
-
-def db_get_card_abilities(template_guid, conn=None):
-    """Return ``(abilities_json, attributes)`` for a card template."""
-    row = (conn or _db_layer._db).execute(
-        "SELECT abilities_json, attributes FROM card_templates WHERE guid=?",
-        (template_guid,)).fetchone()
-    if row:
-        return row[0] or "[]", int(row[1] or 0)
-    return "[]", 0
-
-
-def db_card_ability_list(session_id, card_uid, conn=None):
-    """Return the current normalized ability GUIDs on a game-card instance."""
-    row = (conn or _db_layer._db).execute(
-        "SELECT card_abilities FROM game_cards WHERE session_id=? AND card_uid=?",
-        (session_id, int(card_uid))).fetchone()
-    if not row or not row[0]:
-        return []
-    try:
-        return [guid.lower() for guid in json.loads(row[0])]
-    except Exception:
-        return []
-
-
-def db_card_uses(session_id, card_uid, conn=None):
-    """Return per-instance ability usage counts."""
-    with _CARD_COOLDOWN_LOCK:
-        row = (conn or _db_layer._db).execute(
-            "SELECT card_uses FROM game_cards WHERE session_id=? AND card_uid=?",
-            (session_id, int(card_uid))).fetchone()
-    if not row or not row[0]:
-        return {}
-    try:
-        return dict(json.loads(row[0]))
-    except Exception:
-        return {}
-
-
-def db_reset_card_uses(session_id, card_uid, *,
-                       preserve_turn_and_cooldowns=True, conn=None):
-    """Reset instance usage like C# TransformCardBase/Card.Revert.
-
-    A direct transform clears only per-game counts. Reverting first runs
-    ``Card.Revert``, which clears per-turn counts and cooldowns too.
-    """
-    connection = conn or _db_layer._db
-    with _CARD_COOLDOWN_LOCK:
-        uses = db_card_uses(session_id, card_uid, conn=connection)
-        if preserve_turn_and_cooldowns:
-            uses = {key: value for key, value in uses.items()
-                    if key in {"__turn_uses__", _CARD_COOLDOWNS_KEY}}
-        else:
-            uses = {}
-        return connection.execute(
-            "UPDATE game_cards SET card_uses=? "
-            "WHERE session_id=? AND card_uid=?",
-            (json.dumps(uses, separators=(",", ":")),
-             session_id, int(card_uid))).rowcount
-
-
-def db_bump_card_use(session_id, card_uid, ability_guid, conn=None):
-    """Increment and return one instance ability's usage count."""
-    connection = conn or _db_layer._db
-    with _CARD_COOLDOWN_LOCK:
-        uses = db_card_uses(session_id, card_uid, conn=connection)
-        uses[ability_guid] = int(uses.get(ability_guid, 0)) + 1
-        connection.execute(
-            "UPDATE game_cards SET card_uses=? WHERE session_id=? AND card_uid=?",
-            (json.dumps(uses), session_id, int(card_uid)))
-        if conn is None:
-            connection.commit()
-        return uses[ability_guid]
-
-
-def db_card_ability_use_counts(session_id, card_uid, ability_guid,
-                              turn_number, conn=None):
-    """Return ``(game, this-turn)`` uses without conflating their limits."""
-    with _CARD_COOLDOWN_LOCK:
-        uses = db_card_uses(session_id, card_uid, conn=conn)
-        guid = str(ability_guid or "").lower()
-        try:
-            game_count = int(uses.get(guid, 0) or 0)
-        except (TypeError, ValueError):
-            game_count = 0
-        per_turn = uses.get("__turn_uses__", {})
-        key = f"{int(turn_number or 1)}:{guid}"
-        try:
-            turn_count = int(per_turn.get(key, 0) or 0) if isinstance(
-                per_turn, dict) else 0
-        except (TypeError, ValueError):
-            turn_count = 0
-        return game_count, turn_count
-
-
-def db_record_card_ability_use(session_id, card_uid, ability_guid,
-                               turn_number, conn=None, *,
-                               uses_per_game=True, uses_per_turn=True):
-    """Record one activation in independent game and turn counters."""
-    connection = conn or _db_layer._db
-    key = str(ability_guid or "").lower()
-    if not key or not (uses_per_game or uses_per_turn):
-        return 0, 0
-    with _CARD_COOLDOWN_LOCK:
-        uses = db_card_uses(session_id, card_uid, conn=connection)
-        game_count = 0
-        turn_count = 0
-        if uses_per_game:
-            try:
-                game_count = int(uses.get(key, 0) or 0) + 1
-            except (TypeError, ValueError):
-                game_count = 1
-            uses[key] = game_count
-        if uses_per_turn:
-            turn_key = f"{int(turn_number or 1)}:{key}"
-            per_turn = uses.get("__turn_uses__", {})
-            per_turn = dict(per_turn) if isinstance(per_turn, dict) else {}
-            try:
-                turn_count = int(per_turn.get(turn_key, 0) or 0) + 1
-            except (TypeError, ValueError):
-                turn_count = 1
-            per_turn[turn_key] = turn_count
-            uses["__turn_uses__"] = per_turn
-        connection.execute(
-            "UPDATE game_cards SET card_uses=? WHERE session_id=? AND card_uid=?",
-            (json.dumps(uses, separators=(",", ":")),
-             session_id, int(card_uid)))
-        if conn is None:
-            connection.commit()
-        return game_count, turn_count
-
-
-def db_card_cooldown_counts(session_id, card_uid, conn=None):
-    """Return positive, per-ability cooldowns for a card instance."""
-    with _CARD_COOLDOWN_LOCK:
-        raw = db_card_uses(session_id, card_uid, conn=conn)
-        counts = raw.get(_CARD_COOLDOWNS_KEY, {})
-        if not isinstance(counts, dict):
-            return {}
-        result = {}
-        for guid, value in counts.items():
-            try:
-                remaining = int(value or 0)
-            except (TypeError, ValueError):
-                continue
-            if remaining > 0:
-                result[str(guid).lower()] = remaining
-        return result
-
-
-def db_set_card_cooldown(session_id, card_uid, ability_guid, turns,
-                         conn=None):
-    """Set one authored ability cooldown without disturbing use counters."""
-    connection = conn or _db_layer._db
-    with _CARD_COOLDOWN_LOCK:
-        uses = db_card_uses(session_id, card_uid, conn=connection)
-        counts = uses.get(_CARD_COOLDOWNS_KEY)
-        counts = dict(counts) if isinstance(counts, dict) else {}
-        key = str(ability_guid or "").lower()
-        if not key:
-            return 0
-        remaining = max(0, int(turns or 0))
-        if remaining:
-            counts[key] = remaining
-        else:
-            counts.pop(key, None)
-        if counts:
-            uses[_CARD_COOLDOWNS_KEY] = counts
-        else:
-            uses.pop(_CARD_COOLDOWNS_KEY, None)
-        connection.execute(
-            "UPDATE game_cards SET card_uses=? WHERE session_id=? AND card_uid=?",
-            (json.dumps(uses, separators=(",", ":")),
-             session_id, int(card_uid)))
-        if conn is None:
-            connection.commit()
-        return remaining
-
-
-def db_decrement_card_cooldowns_for_owner(session_id, owner_id, conn=None):
-    """Decrement the active player's card cooldowns at the Ready boundary.
-
-    C# processes Warzone, Champions, then Hand for the active player. The
-    mutable session projection represents those regular cards in
-    ``game_cards``; synthetic champion cooldowns live in battle state.
-    """
-    connection = conn or _db_layer._db
-    owner = int(owner_id or 0)
-    with _CARD_COOLDOWN_LOCK:
-        rows = connection.execute(
-            "SELECT card_uid, card_uses FROM game_cards "
-            "WHERE session_id=? AND user_id=? "
-            "AND location IN ('warzone','champions','hand')",
-            (session_id, owner)).fetchall()
-        changed = []
-        for card_uid, raw in rows:
-            try:
-                uses = dict(json.loads(raw or "{}"))
-            except (TypeError, ValueError, json.JSONDecodeError):
-                uses = {}
-            counts = uses.get(_CARD_COOLDOWNS_KEY)
-            if not isinstance(counts, dict) or not counts:
-                continue
-            updated = {}
-            for guid, value in counts.items():
-                try:
-                    remaining = int(value or 0) - 1
-                except (TypeError, ValueError):
-                    continue
-                if remaining > 0:
-                    updated[str(guid).lower()] = remaining
-            if updated:
-                uses[_CARD_COOLDOWNS_KEY] = updated
-            else:
-                uses.pop(_CARD_COOLDOWNS_KEY, None)
-            connection.execute(
-                "UPDATE game_cards SET card_uses=? "
-                "WHERE session_id=? AND card_uid=?",
-                (json.dumps(uses, separators=(",", ":")),
-                 session_id, int(card_uid)))
-            changed.append(int(card_uid))
-        if conn is None:
-            connection.commit()
-        return changed
-
-
-def db_card_template_thresholds(template_guid, conn=None):
-    """Return threshold, ability, and attribute fields for a template."""
-    return (conn or _db_layer._db).execute(
-        "SELECT threshold_json, abilities_json, attributes "
-        "FROM card_templates WHERE guid=?", (template_guid,)).fetchone()
-
-
-def db_card_basic(session_id, card_uid, conn=None):
-    """Return ``(template_guid, user_id)`` for one game card."""
-    return (conn or _db_layer._db).execute(
-        "SELECT template_guid, user_id FROM game_cards "
-        "WHERE session_id=? AND card_uid=?",
-        (session_id, int(card_uid))).fetchone()
-
-
-def db_card_with_template(session_id, card_uid, conn=None):
-    """Return the legacy joined game-card/template projection."""
-    return (conn or _db_layer._db).execute(
-        "SELECT gc.template_guid, ct.card_type, gc.card_state, gc.user_id, "
-        "gc.card_attributes, gc.card_template_id, gc.card_abilities, "
-        "gc.card_attack_mod, gc.card_defense_mod, gc.card_damage, "
-        "gc.original_template_guid FROM game_cards gc "
-        "JOIN card_templates ct ON ct.guid=gc.template_guid "
-        "WHERE gc.session_id=? AND gc.card_uid=?",
-        (session_id, int(card_uid))).fetchone()
-
-
-def db_card_instance_dynamic_projection(session_id, card_uid, conn=None):
-    """Return mutable instance state and ownership in one indexed lookup.
-
-    The first eleven fields intentionally retain ``db_card_instance_full``'s
-    order. Printed template fields are resolved from the process-wide Records
-    cache by the caller, avoiding a repeated SQLite join on this hot path.
-    The final two fields are the persisted instance reference and socketed gem;
-    they let card encoding avoid two more point lookups.
-    """
-    connection = conn or _db_layer._db
-    sql = (
-        "SELECT gc.card_abilities, gc.card_attack_mod, gc.card_defense_mod, "
-        "gc.card_damage, gc.original_template_guid, gc.permanent_buffs, "
-        "gc.temporary_buffs, gc.card_cost_mod, gc.cost_mod_json, "
-        "gc.card_attributes, gc.temporary_attributes, "
-        "gc.user_id, gc.location, gc.template_guid, "
-        "gc.card_template_id, gc.gems "
-        "FROM game_cards gc "
-        "WHERE gc.session_id=? AND gc.card_uid=?"
-    )
-    try:
-        return connection.execute(sql, (session_id, int(card_uid))).fetchone()
-    except sqlite3.OperationalError as exc:
-        # Keep older focused fixtures usable when the optional socket columns
-        # have not been migrated yet. The normal production schema has both.
-        if "no such column" not in str(exc).lower():
-            raise
-        return connection.execute(
-            sql.replace(", gc.card_template_id, gc.gems ", " "),
-            (session_id, int(card_uid))).fetchone()
-
-
-def db_card_instance_dynamic_projections(session_id, card_uids, conn=None):
-    """Return dynamic card projections for many UIDs using one ``IN`` read.
-
-    The mapping values have the same field order as
-    :func:`db_card_instance_dynamic_projection`, so callers can feed a
-    prefetched row directly into the card encoder.  This is intentionally a
-    read-only batch helper: location, buffs, and abilities remain authoritative
-    mutable SQLite state and are never put in a process-wide cache.
-    """
-    ids = []
-    seen = set()
-    for raw_uid in card_uids or ():
-        try:
-            uid = int(raw_uid)
-        except (TypeError, ValueError):
-            continue
-        if uid not in seen:
-            seen.add(uid)
-            ids.append(uid)
-    if not ids:
-        return {}
-    connection = conn or _db_layer._db
-    result = {}
-    # SQLite's default host parameter limit is commonly 999. Keep the helper
-    # correct for a large revealed/deck batch as well as the normal small HUD
-    # batches.
-    for start in range(0, len(ids), 900):
-        chunk = ids[start:start + 900]
-        marks = ",".join("?" for _ in chunk)
-        sql = (
-            "SELECT gc.card_uid, gc.card_abilities, gc.card_attack_mod, "
-            "gc.card_defense_mod, gc.card_damage, gc.original_template_guid, "
-            "gc.permanent_buffs, gc.temporary_buffs, gc.card_cost_mod, "
-            "gc.cost_mod_json, gc.card_attributes, gc.temporary_attributes, "
-            "gc.user_id, gc.location, gc.template_guid, "
-            "gc.card_template_id, gc.gems FROM game_cards gc "
-            "WHERE gc.session_id=? AND gc.card_uid IN (" + marks + ")")
-        try:
-            rows = connection.execute(sql, [session_id, *chunk]).fetchall()
-        except sqlite3.OperationalError as exc:
-            if "no such column" not in str(exc).lower():
-                raise
-            old_sql = sql.replace(", gc.card_template_id, gc.gems ", " ")
-            rows = connection.execute(
-                old_sql, [session_id, *chunk]).fetchall()
-        for row in rows:
-            result[int(row[0])] = tuple(row[1:])
-    return result
-
-
-def db_is_champion_template(template_guid, conn=None):
-    """Whether a template is present in either champion catalog."""
-    connection = conn or _db_layer._db
-    try:
-        row = connection.execute(
-            "SELECT guid FROM champion_templates_extended WHERE guid=? "
-            "UNION ALL SELECT guid FROM champion_templates WHERE guid=? LIMIT 1",
-            (template_guid, template_guid)).fetchone()
-    except Exception as exc:
-        if "champion_templates_extended" not in str(exc):
-            raise
-        row = connection.execute(
-            "SELECT guid FROM champion_templates WHERE guid=? LIMIT 1",
-            (template_guid,)).fetchone()
-    return row is not None
-
-
-def db_card_set_attacking_state(session_id, card_uid, state_bits, conn=None):
-    """OR attacking/tapped state onto a warzone card."""
-    connection = conn or _db_layer._db
-    connection.execute(
-        "UPDATE game_cards SET card_state = (card_state | ?) "
-        "WHERE session_id=? AND card_uid=?",
-        (int(state_bits), session_id, int(card_uid)),
-    )
-    if conn is None:
-        connection.commit()
-
-
-def db_card_set_warzone_arrival(session_id, card_uid, conn=None):
-    """Move a resolved troop to warzone and apply its arrival state bits."""
-    connection = conn or _db_layer._db
-    connection.execute(
-        "UPDATE game_cards SET location='warzone', "
-        "card_state = (card_state & ~?) | ? "
-        "WHERE session_id=? AND card_uid=?",
-        (ECardStates.StartedATurnOnYourSide, ECardStates.CameOutThisTurn,
-         session_id, int(card_uid)),
-    )
-    if conn is None:
-        connection.commit()
-
-
-def db_set_card_resolved_at(session_id, card_uid, resolved_at, conn=None):
-    """Stamp the authoritative resolve-order counter on a game card."""
-    connection = conn or _db_layer._db
-    connection.execute(
-        "UPDATE game_cards SET resolved_at=? WHERE session_id=? AND card_uid=?",
-        (int(resolved_at), session_id, int(card_uid)))
-    if conn is None:
-        connection.commit()
-
-
-def db_card_discard_spell(session_id, card_uid, conn=None):
-    """Discard a resolved spell through the shared discard mutation."""
-    return db_discard_card(session_id, card_uid, conn=conn)
-
-
-def db_champion_ability_guids(champion_guid, conn=None):
-    """Return the authored ability GUIDs for one champion template."""
-    rows = (conn or _db_layer._db).execute(
-        "SELECT ability_guid FROM champion_abilities WHERE champion_guid=?",
-        (champion_guid,)).fetchall()
-    return [row[0] for row in rows]
-
-
-def db_champion_ability_costs(ability_guid, conn=None):
-    """Return normalized charge-power costs and phase restrictions."""
-    row = (conn or _db_layer._db).execute(
-        "SELECT charge_cost, spell_cost, casting_behavior "
-        "FROM champion_abilities WHERE ability_guid=? LIMIT 1",
-        (str(ability_guid),)).fetchone()
-    if not row:
-        return None
-    casting = row[2] or 0
-    if casting == ECardTypes.QuickAction:
-        phases = 0
-    elif casting == ECardTypes.BasicAction:
-        phases = ((1 << ETurnPhases.FirstMainPhase)
-                  | (1 << ETurnPhases.SecondMainPhase))
-    else:
-        phases = 0
-        casting = ECardTypes.QuickAction
-    return (row[0] or 0, row[1] or 0, phases, casting)
-
-
-def db_champion_ability_thresholds(ability_guid, conn=None):
-    """Return ``(color, quantity)`` threshold requirements for a power."""
-    row = (conn or _db_layer._db).execute(
-        "SELECT thresholds_json FROM champion_abilities "
-        "WHERE ability_guid=? LIMIT 1", (str(ability_guid),)).fetchone()
-    if not row or not row[0]:
-        return []
-    try:
-        data = json.loads(row[0])
-    except Exception:
-        return []
-    return [(str(item.get("color", "")),
-             int(item.get("quantity", 0) or 0))
-            for item in data if isinstance(item, dict)] if isinstance(data, list) else []
-
-
-def db_warzone_troop_attributes(session_id, user_id, conn=None):
-    """Return the instance/template attributes used by attack eligibility."""
-    connection = conn or _db_layer._db
-    return connection.execute(
-        "SELECT gc.card_uid, gc.card_state, gc.card_attributes, "
-        "gc.temporary_attributes, ct.attributes, gc.card_abilities "
-        "FROM game_cards gc JOIN card_templates ct ON ct.guid=gc.template_guid "
-        "WHERE gc.session_id=? AND gc.user_id=? AND gc.location='warzone' "
-        "AND gc.card_type LIKE '%Troop%'",
-        (session_id, user_id),
-    ).fetchall()
-
-
-def db_warzone_attack_candidates(session_id, user_id, conn=None):
-    """Return the joined fields needed by the AI attack evaluator."""
-    connection = conn or _db_layer._db
-    return connection.execute(
-        "SELECT gc.card_uid, gc.template_guid, ct.attributes, "
-        "gc.card_attributes, gc.card_state, ct.attack "
-        "FROM game_cards gc JOIN card_templates ct ON ct.guid=gc.template_guid "
-        "WHERE gc.session_id=? AND gc.user_id=? AND gc.location='warzone' "
-        "AND gc.card_type LIKE '%Troop%'",
-        (session_id, user_id),
-    ).fetchall()
-
-
-def db_warzone_attack_option_rows(session_id, user_id, conn=None):
-    """Return the joined fields used to publish PvP attack options."""
-    connection = conn or _db_layer._db
-    return connection.execute(
-        "SELECT gc.card_uid, gc.card_state, gc.card_type, "
-        "(ct.attributes | gc.card_attributes | "
-        "COALESCE(gc.temporary_attributes, 0)) "
-        "FROM game_cards gc JOIN card_templates ct ON ct.guid=gc.template_guid "
-        "WHERE gc.session_id=? AND gc.user_id=? AND gc.location='warzone' "
-        "AND gc.card_type LIKE '%Troop%'",
-        (session_id, user_id),
-    ).fetchall()
-
-
-def db_warzone_blocker_uids(session_id, user_id, tapped_mask, conn=None):
-    """Return untapped defender troop UIDs for a PvP block window."""
-    connection = conn or _db_layer._db
-    return connection.execute(
-        "SELECT gc.card_uid FROM game_cards gc "
-        "JOIN card_templates ct ON ct.guid=gc.template_guid "
-        "WHERE gc.session_id=? AND gc.user_id=? AND gc.location='warzone' "
-        "AND gc.card_type LIKE '%Troop%' AND (gc.card_state & ?) = 0",
-        (session_id, user_id, tapped_mask),
-    ).fetchall()
-
-
-def db_card_attribute_rows(session_id, card_uids, conn=None):
-    """Return effective stored/template attributes for selected session cards."""
-    if not card_uids:
-        return []
-    connection = conn or _db_layer._db
-    marks = ",".join("?" for _ in card_uids)
-    return connection.execute(
-        "SELECT ct.attributes | gc.card_attributes | "
-        "COALESCE(gc.temporary_attributes, 0) "
-        "FROM game_cards gc JOIN card_templates ct ON ct.guid=gc.template_guid "
-        "WHERE gc.session_id=? AND gc.card_uid IN (" + marks + ")",
-        [session_id] + [int(uid) for uid in card_uids],
-    ).fetchall()
-
-
-def db_card_uids_in_zone(session_id, user_id, zone, conn=None):
-    """Return card UIDs owned by a player in one game zone."""
-    connection = conn or _db_layer._db
-    return connection.execute(
-        "SELECT card_uid FROM game_cards WHERE session_id=? AND user_id=? "
-        "AND location=?", (session_id, user_id, zone)).fetchall()
-
-
-def db_card_location(session_id, card_uid, conn=None):
-    """Return the current zone for one session card, or ``None``."""
-    connection = conn or _db_layer._db
-    row = connection.execute(
-        "SELECT location FROM game_cards WHERE session_id=? AND card_uid=?",
-        (session_id, int(card_uid)),
-    ).fetchone()
-    return row[0] if row else None
-
-
-def db_hand_cards_for_discard(session_id, user_id, conn=None):
-    """Return stable hand rows used by discard selection."""
-    connection = conn or _db_layer._db
-    return connection.execute(
-        "SELECT gc.id, gc.card_uid, gc.template_guid, ct.card_type "
-        "FROM game_cards gc JOIN card_templates ct ON ct.guid=gc.template_guid "
-        "WHERE gc.session_id=? AND gc.user_id=? AND gc.location='hand' "
-        "ORDER BY gc.position",
-        (session_id, user_id),
-    ).fetchall()
-
-
-def db_ability_option_cards(session_id, user_id, conn=None):
-    """Return owned hand/warzone cards and fields used for activation options."""
-    connection = conn or _db_layer._db
-    return connection.execute(
-        "SELECT gc.card_uid, gc.template_guid, gc.card_state, "
-        "(ct.attributes | gc.card_attributes), ct.card_type, gc.location "
-        "FROM game_cards gc JOIN card_templates ct ON ct.guid=gc.template_guid "
-        "WHERE gc.session_id=? AND gc.user_id=? "
-        "AND gc.location IN ('warzone','hand')",
-        (session_id, user_id),
-    ).fetchall()
-
-
-def db_card_ability_payload(session_id, card_uid, conn=None):
-    """Return the raw per-instance ability payload, retaining NULL semantics."""
-    connection = conn or _db_layer._db
-    row = connection.execute(
-        "SELECT card_abilities FROM game_cards WHERE session_id=? "
-        "AND card_uid=?", (session_id, int(card_uid))).fetchone()
-    return row[0] if row else None
-
-
-def db_card_ability_state(session_id, card_uid, conn=None):
-    """Return a card's serialized abilities, authored abilities, and state."""
-    connection = conn or _db_layer._db
-    return connection.execute(
-        "SELECT gc.card_abilities, ct.abilities_json, gc.card_state "
-        "FROM game_cards gc JOIN card_templates ct ON ct.guid=gc.template_guid "
-        "WHERE gc.session_id=? AND gc.card_uid=?",
-        (session_id, int(card_uid)),
-    ).fetchone()
-
-
-def db_card_damage_shield_fields(session_id, card_uid, conn=None):
-    """Return the two serialized modifier stores used by damage shields."""
-    return (conn or _db_layer._db).execute(
-        "SELECT permanent_buffs, temporary_buffs FROM game_cards "
-        "WHERE session_id=? AND card_uid=?",
-        (session_id, int(card_uid)),
-    ).fetchone()
-
-
-def db_condition_card_row(session_id, card_uid, conn=None):
-    """Return the full mutable/template projection used by conditions. Index 22 is the template's socket count."""
-    connection = conn or _db_layer._db
-    sockets = _target_projection_columns(connection)[1]
-    return connection.execute(
-        "SELECT gc.card_uid, COALESCE(gc.card_type, ct.card_type), "
-        "gc.location, gc.user_id, gc.card_state, "
-        "COALESCE(ct.attack,0), COALESCE(ct.defense,0), gc.template_guid, "
-        "ct.name, COALESCE(ct.cost,0), ct.subtype, ct.threshold_json, "
-        "gc.card_attributes, ct.attributes, gc.card_attack_mod, "
-        "gc.card_defense_mod, COALESCE(gc.permanent_buffs,'{}') "
-        ", COALESCE(gc.card_abilities, '[]'), gc.position, "
-        "COALESCE(gc.original_template_guid,''), COALESCE(gc.gems,0), "
-        "COALESCE(ct.rarity,''), " + sockets + " "
-        "FROM game_cards gc LEFT JOIN card_templates ct "
-        "ON ct.guid = gc.template_guid "
-        "WHERE gc.session_id=? AND gc.card_uid=?",
-        (session_id, int(card_uid)),
-    ).fetchone()
-
-
-def db_condition_cards_in_zones(session_id, zones, user_id=None, conn=None):
-    """Return card projections needed for zone-based condition filters."""
-    if not zones:
-        return []
-    connection = conn or _db_layer._db
-    marks = ",".join("?" for _ in zones)
-    params = [session_id] + list(zones)
-    sql = (
-        "SELECT gc.card_uid, gc.card_type, gc.location, gc.user_id, "
-        "gc.card_state, COALESCE(ct.attack,0), COALESCE(ct.defense,0), "
-        "ct.name, COALESCE(ct.cost,0), ct.subtype, ct.threshold_json, "
-        "gc.card_attributes, ct.attributes, gc.template_guid, "
-        "COALESCE(gc.permanent_buffs,'{}') FROM game_cards gc "
-        "JOIN card_templates ct ON ct.guid = gc.template_guid "
-        "WHERE gc.session_id=? AND gc.location IN (" + marks + ")"
-    )
-    if user_id is not None:
-        sql += " AND gc.user_id=?"
-        params.append(user_id)
-    return connection.execute(sql, params).fetchall()
-
-
-def db_template_in_zones(session_id, template_guid, zones, conn=None):
-    """Whether a template is present in any requested session zone."""
-    if not zones:
-        return False
-    marks = ",".join("?" for _ in zones)
-    row = (conn or _db_layer._db).execute(
-        "SELECT 1 FROM game_cards WHERE session_id=? AND template_guid=? "
-        "AND location IN (" + marks + ") LIMIT 1",
-        [session_id, template_guid] + list(zones),
-    ).fetchone()
-    return bool(row)
-
-
-def db_card_permanent_buffs(session_id, card_uid, conn=None):
-    """Return one card's persistent modifier payload."""
-    row = (conn or _db_layer._db).execute(
-        "SELECT permanent_buffs FROM game_cards WHERE session_id=? "
-        "AND card_uid=?", (session_id, int(card_uid))).fetchone()
-    return row[0] if row else None
-
-
-def db_charge_ability_cost(ability_guid, conn=None):
-    """Return the authored charge cost for a champion/talent ability."""
-    connection = conn or _db_layer._db
-    for table in ("champion_abilities", "talent_abilities"):
-        row = connection.execute(
-            "SELECT charge_cost FROM " + table + " WHERE ability_guid=? "
-            "LIMIT 1", (str(ability_guid).lower(),)).fetchone()
-        if row is not None:
-            return row[0]
-    return None
-
-
-def db_effect_condition_json(condition_id, conn=None):
-    """Return serialized metadata for one BOM effect condition."""
-    row = (conn or _db_layer._db).execute(
-        "SELECT condition_json FROM ability_effect_conditions "
-        "WHERE condition_id=?", (condition_id,)).fetchone()
-    return row[0] if row else None
-
-
-def db_template_ability_payload(template_guid, conn=None):
-    """Return a template's raw authored ability payload."""
-    connection = conn or _db_layer._db
-    row = connection.execute(
-        "SELECT abilities_json FROM card_templates WHERE guid=?",
-        (template_guid,)).fetchone()
-    return row[0] if row else None
-
-
-def db_template_ability_data(template_guid, conn=None):
-    """Return authored abilities and variable-cost flags for a template."""
-    connection = conn or _db_layer._db
-    columns = {row[1] for row in connection.execute(
-        "PRAGMA table_info(card_templates)")}
-    variable_cost_double = (
-        "variable_cost_double" if "variable_cost_double" in columns else "0")
-    return connection.execute(
-        "SELECT abilities_json, variable_cost, " + variable_cost_double + " "
-        "FROM card_templates WHERE guid=?",
-        (template_guid,)).fetchone()
-
-
-def db_card_zone_details(session_id, card_uid, conn=None):
-    """Return template, instance template ID, owner, and zone for one card."""
-    connection = conn or _db_layer._db
-    return connection.execute(
-        "SELECT template_guid, card_template_id, user_id, location "
-        "FROM game_cards WHERE session_id=? AND card_uid=?",
-        (session_id, int(card_uid))).fetchone()
-
-
-def db_card_owner_location_position(session_id, card_uid, conn=None):
-    """Return owner, zone, and position for one session card."""
-    return (conn or _db_layer._db).execute(
-        "SELECT user_id, location, position FROM game_cards "
-        "WHERE session_id=? AND card_uid=?",
-        (session_id, int(card_uid))).fetchone()
-
-
-def db_move_card_for_effect(session_id, card_uid, location, position, state,
-                            clear_dead=False, clear_bits=0, conn=None):
-    """Move a card using the effect-zone state transition contract."""
-    if location not in {"deck", "hand", "warzone", "underground", "discard", "void"}:
-        raise ValueError("unsupported effect destination")
-    connection = conn or _db_layer._db
-    state_expr = "card_state & ~?" if clear_dead else "?"
-    params = ((location, int(position), int(clear_bits), session_id, int(card_uid))
-              if clear_dead else
-              (location, int(position), int(state), session_id, int(card_uid)))
-    return connection.execute(
-        "UPDATE game_cards SET location=?, position=?, card_state = "
-        + state_expr + " WHERE session_id=? AND card_uid=?", params)
-
-
-def db_card_collection_info(session_id, card_uid, conn=None):
-    """Return collection owner and original/current template IDs."""
-    return (conn or _db_layer._db).execute(
-        "SELECT user_id, original_template_guid, template_guid "
-        "FROM game_cards WHERE session_id=? AND card_uid=?",
-        (session_id, int(card_uid))).fetchone()
-
-
-def db_card_grant_info(session_id, card_uid, conn=None):
-    """Return effective abilities and projection fields for a grant."""
-    return (conn or _db_layer._db).execute(
-        "SELECT card_abilities, template_guid, user_id, location, card_state "
-        "FROM game_cards WHERE session_id=? AND card_uid=?",
-        (session_id, int(card_uid))).fetchone()
-
-
-def db_card_mutation_field(session_id, card_uid, field, conn=None):
-    """Read one approved mutable JSON field from a session card."""
-    if field not in {"permanent_buffs", "temporary_buffs"}:
-        raise ValueError("unsupported card mutation field")
-    row = (conn or _db_layer._db).execute(
-        "SELECT " + field + " FROM game_cards WHERE session_id=? AND card_uid=?",
-        (session_id, int(card_uid))).fetchone()
-    return row[0] if row else None
-
-
-def db_set_card_mutation_field(session_id, card_uid, field, value, conn=None):
-    """Persist one approved mutable JSON field without forcing a commit."""
-    if field not in {"permanent_buffs", "temporary_buffs"}:
-        raise ValueError("unsupported card mutation field")
-    return (conn or _db_layer._db).execute(
-        "UPDATE game_cards SET " + field + "=? WHERE session_id=? AND card_uid=?",
-        (value, session_id, int(card_uid))).rowcount
-
-
-def db_card_template_threshold_subtype(session_id, card_uid, conn=None):
-    """Return printed threshold JSON and subtype for one session card."""
-    return (conn or _db_layer._db).execute(
-        "SELECT ct.threshold_json, ct.subtype FROM game_cards gc "
-        "JOIN card_templates ct ON ct.guid=gc.template_guid "
-        "WHERE gc.session_id=? AND gc.card_uid=?",
-        (session_id, int(card_uid))).fetchone()
-
-
-def db_card_original_and_template(session_id, card_uid, conn=None):
-    """Return original and current template identities for a session card."""
-    return (conn or _db_layer._db).execute(
-        "SELECT original_template_guid, template_guid FROM game_cards "
-        "WHERE session_id=? AND card_uid=?", (session_id, int(card_uid))
-    ).fetchone()
-
-
-def db_card_abilities_state(session_id, card_uid, conn=None):
-    """Return mutable ability JSON and state for a session card."""
-    return (conn or _db_layer._db).execute(
-        "SELECT card_abilities, card_state FROM game_cards "
-        "WHERE session_id=? AND card_uid=?", (session_id, int(card_uid))
-    ).fetchone()
-
-
-def db_reset_card_modifiers(session_id, card_uid, permanent_buffs, conn=None):
-    """Clear stat/cost modifiers while retaining serialized card buffs."""
-    return (conn or _db_layer._db).execute(
-        "UPDATE game_cards SET card_attack_mod=0, card_defense_mod=0, "
-        "card_cost_mod=0, permanent_buffs=? WHERE session_id=? AND card_uid=?",
-        (permanent_buffs, session_id, int(card_uid))).rowcount
-
-
-def db_card_type_effective_defense(session_id, card_uid, conn=None):
-    """Return card type and effective defense for one session card."""
-    connection = conn or _db_layer._db
-    return connection.execute(
-        "SELECT gc.card_type, COALESCE(ct.defense,0) "
-        "+ COALESCE(gc.card_defense_mod,0) "
-        "FROM game_cards gc JOIN card_templates ct ON ct.guid=gc.template_guid "
-        "WHERE gc.session_id=? AND gc.card_uid=?",
-        (session_id, int(card_uid)),
-    ).fetchone()
-
-
-def db_cards_for_filter(session_id, owners, locations, conn=None):
-    """Return card fields consumed by metadata card-filter evaluation."""
-    if not owners or not locations:
-        return []
-    connection = conn or _db_layer._db
-    owner_marks = ",".join("?" for _ in owners)
-    location_marks = ",".join("?" for _ in locations)
-    return connection.execute(
-        "SELECT gc.card_uid, gc.card_type, gc.location, gc.user_id, "
-        "gc.card_state, COALESCE(ct.attack,0), COALESCE(ct.defense,0), "
-        "ct.name, COALESCE(ct.cost,0), ct.subtype "
-        "FROM game_cards gc JOIN card_templates ct ON ct.guid=gc.template_guid "
-        f"WHERE gc.session_id=? AND gc.user_id IN ({owner_marks}) "
-        f"AND lower(gc.location) IN ({location_marks})",
-        [session_id, *[int(owner) for owner in owners], *locations],
-    ).fetchall()
-
-
-def db_hand_exists(session_id, user_id, conn=None):
-    """Whether a player has at least one card in hand."""
-    connection = conn or _db_layer._db
-    return connection.execute(
-        "SELECT 1 FROM game_cards WHERE session_id=? AND user_id=? "
-        "AND location='hand' LIMIT 1", (session_id, int(user_id))).fetchone()
-
-
-def db_hand_card_for_discard(session_id, card_uid, user_id, conn=None):
-    """Return a submitted hand card only when controlled by the player."""
-    connection = conn or _db_layer._db
-    return connection.execute(
-        "SELECT user_id, COALESCE(owner_user_id, user_id), "
-        "template_guid, card_template_id FROM game_cards "
-        "WHERE session_id=? AND card_uid=? AND user_id=? "
-        "AND location='hand'",
-        (session_id, int(card_uid), int(user_id))).fetchone()
-
-
-def db_deck_top_card(session_id, user_id, conn=None):
-    """Return the next card in a player's deck by authoritative position."""
-    connection = conn or _db_layer._db
-    return connection.execute(
-        "SELECT card_uid, template_guid, card_template_id FROM game_cards "
-        "WHERE session_id=? AND user_id=? AND location='deck' "
-        "ORDER BY position LIMIT 1", (session_id, int(user_id))).fetchone()
-
-
-def db_hand_count(session_id, user_id, conn=None):
-    """Return the number of cards in a player's hand."""
-    connection = conn or _db_layer._db
-    row = connection.execute(
-        "SELECT COUNT(*) FROM game_cards WHERE session_id=? AND user_id=? "
-        "AND location='hand'", (session_id, int(user_id))).fetchone()
-    return int(row[0] or 0) if row else 0
-
-
-def db_card_play_info(session_id, card_uid, conn=None):
-    """Return template/card-type/resource fields for a played card."""
-    connection = conn or _db_layer._db
-    return connection.execute(
-        "SELECT gc.template_guid, ct.card_type, ct.name, "
-        "ct.current_resources_granted, ct.max_resources_granted, "
-        "ct.abilities_json FROM game_cards gc "
-        "JOIN card_templates ct ON ct.guid=gc.template_guid "
-        "WHERE gc.session_id=? AND gc.card_uid=?",
-        (session_id, int(card_uid))).fetchone()
-
-
-def db_card_chain_info(session_id, card_uid, conn=None):
-    """Return template GUID, type, and cost for a chain card."""
-    connection = conn or _db_layer._db
-    return connection.execute(
-        "SELECT gc.template_guid, ct.card_type, ct.cost "
-        "FROM game_cards gc JOIN card_templates ct ON ct.guid=gc.template_guid "
-        "WHERE gc.session_id=? AND gc.card_uid=?",
-        (session_id, int(card_uid))).fetchone()
-
-
-def db_warzone_display_rows(session_id, conn=None):
-    """Return all warzone fields needed for a PvP CardUpdated projection."""
-    connection = conn or _db_layer._db
-    return connection.execute(
-        "SELECT card_uid, template_guid, user_id, card_state, card_type "
-        "FROM game_cards WHERE session_id=? AND location='warzone'",
-        (session_id,)).fetchall()
-
-
-def db_cards_in_zones_with_abilities(session_id, owner_id, zones, conn=None):
-    """Return card UIDs and ability payloads for trigger-holder scanning."""
-    if not zones:
-        return []
-    marks = ",".join("?" for _ in zones)
-    cursor = (conn or _db_layer._db).execute(
-        "SELECT card_uid, card_abilities FROM game_cards "
-        "WHERE session_id=? AND user_id=? AND location IN (" + marks + ") "
-        "AND card_abilities IS NOT NULL AND card_abilities != ''",
-        [session_id, int(owner_id), *zones])
-    return cursor.fetchall() if hasattr(cursor, "fetchall") else []
-
-
-def db_all_cards_in_zones_with_abilities(session_id, zones, conn=None):
-    """Return all players' card UIDs and controllers for static aura scans."""
-    if not zones:
-        return []
-    marks = ",".join("?" for _ in zones)
-    cursor = (conn or _db_layer._db).execute(
-        "SELECT card_uid, user_id, card_abilities FROM game_cards "
-        "WHERE session_id=? AND location IN (" + marks + ") "
-        "AND card_abilities IS NOT NULL AND card_abilities != ''",
-        [session_id, *zones])
-    return cursor.fetchall() if hasattr(cursor, "fetchall") else []
-
-
-def db_template_name(template_guid, conn=None):
-    """Return a card template's display name, or None."""
-    connection = conn or _db_layer._db
-    row = connection.execute(
-        "SELECT name FROM card_templates WHERE guid=?", (template_guid,)
-    ).fetchone()
-    return row[0] if row else None
-
-
-def db_deck_card_by_uid(session_id, user_id, card_uid, conn=None):
-    """Return a specific card instance while it remains in a deck."""
-    return (conn or _db_layer._db).execute(
-        "SELECT card_uid, template_guid, card_template_id FROM game_cards "
-        "WHERE session_id=? AND user_id=? AND location='deck' "
-        "AND card_uid=? LIMIT 1",
-        (session_id, int(user_id), int(card_uid))).fetchone()
-
-
-def db_deck_card_by_name(session_id, user_id, name_fragment, conn=None):
-    """Return the first deck card matching an authored display name."""
-    return (conn or _db_layer._db).execute(
-        "SELECT gc.card_uid, gc.template_guid, gc.card_template_id "
-        "FROM game_cards gc JOIN card_templates ct ON ct.guid=gc.template_guid "
-        "WHERE gc.session_id=? AND gc.user_id=? AND gc.location='deck' "
-        "AND LOWER(ct.name) LIKE LOWER(?) ORDER BY gc.position LIMIT 1",
-        (session_id, int(user_id), "%" + str(name_fragment) + "%")).fetchone()
-
-
-def db_hand_card_by_uid(session_id, user_id, card_uid, conn=None):
-    """Return a specific controlled hand card with display identity."""
-    return (conn or _db_layer._db).execute(
-        "SELECT gc.card_uid, gc.template_guid, gc.card_template_id, ct.name "
-        "FROM game_cards gc JOIN card_templates ct ON ct.guid=gc.template_guid "
-        "WHERE gc.session_id=? AND gc.user_id=? AND gc.location='hand' "
-        "AND gc.card_uid=? LIMIT 1",
-        (session_id, int(user_id), int(card_uid))).fetchone()
-
-
-def db_hand_card_by_name(session_id, user_id, name, exact=True, conn=None):
-    """Return the first controlled hand card matching an authored name."""
-    operator = "=" if exact else "LIKE"
-    value = str(name) if exact else "%" + str(name) + "%"
-    return (conn or _db_layer._db).execute(
-        "SELECT gc.card_uid, gc.template_guid, gc.card_template_id, ct.name "
-        "FROM game_cards gc JOIN card_templates ct ON ct.guid=gc.template_guid "
-        "WHERE gc.session_id=? AND gc.user_id=? AND gc.location='hand' "
-        "AND LOWER(ct.name) " + operator + " LOWER(?) "
-        "ORDER BY gc.position, gc.card_uid LIMIT 1",
-        (session_id, int(user_id), value)).fetchone()
-
-
-def db_move_hand_card_to_deck_top(session_id, user_id, card_uid, conn=None):
-    """Move a controlled hand card to deck position zero, preserving order."""
-    connection = conn or _db_layer._db
-    row = connection.execute(
-        "SELECT COUNT(*) FROM game_cards WHERE session_id=? AND user_id=? "
-        "AND location='deck'", (session_id, int(user_id))).fetchone()
-    deck_count = int(row[0] if row else 0)
-    connection.execute(
-        "UPDATE game_cards SET position=position+? WHERE session_id=? "
-        "AND user_id=? AND location='deck'",
-        (deck_count + 1, session_id, int(user_id)))
-    connection.execute(
-        "UPDATE game_cards SET location='deck', position=0, card_state=0 "
-        "WHERE session_id=? AND user_id=? AND card_uid=? AND location='hand'",
-        (session_id, int(user_id), int(card_uid)))
-    connection.execute(
-        "UPDATE game_cards SET position=position-? WHERE session_id=? "
-        "AND user_id=? AND location='deck' AND card_uid<>?",
-        (deck_count, session_id, int(user_id), int(card_uid)))
-    return deck_count
-
-
-def db_zone_display_rows(session_id, user_id, conn=None):
-    """Return owned cards ordered for the debug zone listing."""
-    return (conn or _db_layer._db).execute(
-        "SELECT gc.card_uid, gc.location, ct.name, ct.guid "
-        "FROM game_cards gc JOIN card_templates ct ON ct.guid=gc.template_guid "
-        "WHERE gc.session_id=? AND gc.user_id=? "
-        "ORDER BY gc.location, gc.position",
-        (session_id, int(user_id))).fetchall()
-
-
-def db_hand_display_rows(session_id, user_id, conn=None):
-    """Return hand fields used by the debug hand command."""
-    return (conn or _db_layer._db).execute(
-        "SELECT gc.card_uid, ct.name, ct.cost, ct.card_type "
-        "FROM game_cards gc JOIN card_templates ct ON ct.guid=gc.template_guid "
-        "WHERE gc.session_id=? AND gc.user_id=? AND gc.location='hand' "
-        "ORDER BY gc.position", (session_id, int(user_id))).fetchall()
-
-
-def db_ai_hand_template_rows(session_id, conn=None):
-    """Return AI hand UIDs and template GUIDs in display order."""
-    return (conn or _db_layer._db).execute(
-        "SELECT gc.card_uid, gc.template_guid FROM game_cards gc "
-        "WHERE gc.session_id=? AND gc.user_id=0 AND gc.location='hand' "
-        "ORDER BY gc.position", (session_id,)).fetchall()
-
-
-def db_playable_hand_rows(session_id, user_id, limit=7, conn=None):
-    """Return the first hand cards eligible for debug outline display."""
-    return (conn or _db_layer._db).execute(
-        "SELECT gc.card_uid, ct.name FROM game_cards gc "
-        "JOIN card_templates ct ON ct.guid=gc.template_guid "
-        "WHERE gc.session_id=? AND gc.user_id=? AND gc.position < 100 "
-        "ORDER BY gc.position LIMIT ?",
-        (session_id, int(user_id), int(limit))).fetchall()
-
-
-def db_card_template_abilities_by_name_prefix(prefix, conn=None):
-    """Return (guid, abilities_json) for templates whose name starts with prefix."""
-    return (conn or _db_layer._db).execute(
-        "SELECT guid, abilities_json FROM card_templates "
-        "WHERE name LIKE ? ORDER BY name",
-        (str(prefix) + "%",)).fetchall()
-
-
-def db_gencard_template(name, conn=None):
-    """Return the preferred authored template for a debug card grant."""
-    connection = conn or _db_layer._db
-    try:
-        return connection.execute(
-            "SELECT guid, card_type, cost, attack, defense, abilities_json, attributes "
-            "FROM card_templates WHERE LOWER(name) LIKE ? "
-            "ORDER BY CASE WHEN LOWER(name)=? THEN 0 ELSE 1 END, "
-            "COALESCE(equipment_modified,0) ASC, no_pvp ASC, is_pve ASC, guid ASC LIMIT 1",
-            ("%" + str(name) + "%", str(name))).fetchone()
-    except Exception:
-        return connection.execute(
-            "SELECT guid, card_type, cost, attack, defense, abilities_json, attributes "
-            "FROM card_templates WHERE LOWER(name) LIKE ? "
-            "ORDER BY CASE WHEN LOWER(name)=? THEN 0 ELSE 1 END, "
-            "no_pvp ASC, is_pve ASC, guid ASC LIMIT 1",
-            ("%" + str(name) + "%", str(name))).fetchone()
-
-
-def db_move_debug_card(session_id, card_uid, location, conn=None):
-    """Move a debug-selected card to an explicitly requested zone."""
-    if not location:
-        raise ValueError("missing card location")
-    return (conn or _db_layer._db).execute(
-        "UPDATE game_cards SET location=? WHERE session_id=? AND card_uid=?",
-        (str(location), session_id, int(card_uid)))
-
-
-def db_card_positions(session_id, card_uids, conn=None):
-    """Return selected session-card positions in authoritative order."""
-    if not card_uids:
-        return []
-    connection = conn or _db_layer._db
-    marks = ",".join("?" for _ in card_uids)
-    return connection.execute(
-        "SELECT card_uid, position FROM game_cards "
-        "WHERE session_id=? AND card_uid IN (" + marks + ") "
-        "ORDER BY position", [session_id] + [int(uid) for uid in card_uids]
-    ).fetchall()
-
-
-def db_move_card_to_deck_top(session_id, card_uid, card_state, conn=None):
-    """Place a session card at deck position zero and shift existing cards."""
-    connection = conn or _db_layer._db
-    connection.execute(
-        "UPDATE game_cards SET position=COALESCE(position, 0)+1 "
-        "WHERE session_id=? AND location='deck' AND card_uid<>?",
-        (session_id, int(card_uid)))
-    connection.execute(
-        "UPDATE game_cards SET location='deck', position=0, card_state=? "
-        "WHERE session_id=? AND card_uid=?",
-        (card_state, session_id, int(card_uid)))
-    if conn is None:
-        connection.commit()
-
-
-def db_move_card_to_deck(session_id, card_uid, card_state, conn=None):
-    """Return a card to its deck zone without changing its position."""
-    connection = conn or _db_layer._db
-    connection.execute(
-        "UPDATE game_cards SET location='deck', card_state=? "
-        "WHERE session_id=? AND card_uid=?",
-        (card_state, session_id, int(card_uid)))
-    if conn is None:
-        connection.commit()
-
-
-def db_latest_deck_id_for_user(user_id, conn=None):
-    """Return a user's most recently saved deck ID."""
-    connection = conn or _db_layer._db
-    row = connection.execute(
-        "SELECT id FROM decks WHERE user_id=? "
-        "ORDER BY COALESCE(last_saved, created_at, 0) DESC, id DESC LIMIT 1",
-        (user_id,)).fetchone()
-    return row[0] if row else None
-    return row[0] if row else None
-
-
-def db_template_card_info(template_guid, conn=None):
-    """Return display/type/stat fields used to materialize a card definition."""
-    connection = conn or _db_layer._db
-    return connection.execute(
-        "SELECT card_type, name, cost, attack, defense FROM card_templates "
-        "WHERE guid=?", (template_guid,)).fetchone()
-
-
-def db_template_by_guid(template_guid, conn=None):
-    """Return the legacy six-field card-template projection."""
-    row = (conn or _db_layer._db).execute(
-        "SELECT guid, card_type, name, cost, attack, defense "
-        "FROM card_templates WHERE guid=?", (template_guid,)).fetchone()
-    if not row:
-        return None
-    return (row[0], row[1], row[2], row[3] or 0, row[4] or 0, row[5] or 0)
-
-
-def db_card_template_lethal(template_guid, conn=None):
-    """Return the optional printed Lethal flag for a template."""
-    connection = conn or _db_layer._db
-    try:
-        row = _cached_static_row(
-            connection, ("card_lethal", str(template_guid).lower()),
-            "SELECT lethal FROM card_templates WHERE guid=?",
-            (template_guid,))
-    except Exception:
-        return 0
-    return int(row[0] or 0) if row else 0
-
-
-def db_rules_port_card_projection(session_id, card_uid, conn=None):
-    """Return the typed play/resource card projection."""
-    return (conn or _db_layer._db).execute(
-        "SELECT gc.template_guid, gc.location, gc.user_id, ct.name, "
-        "ct.card_type, ct.abilities_json, ct.current_resources_granted, "
-        "ct.max_resources_granted, ct.attack, ct.defense "
-        "FROM game_cards gc JOIN card_templates ct ON ct.guid=gc.template_guid "
-        "WHERE gc.session_id=? AND gc.card_uid=?",
-        (session_id, int(card_uid))).fetchone()
-
-
-def db_rules_port_card_state_projection(session_id, card_uid, conn=None):
-    """Return the typed ready-card state projection."""
-    return (conn or _db_layer._db).execute(
-        "SELECT template_guid, card_type, user_id, card_state "
-        "FROM game_cards WHERE session_id=? AND card_uid=?",
-        (session_id, int(card_uid))).fetchone()
-
-
-def db_rules_port_hand_rows(session_id, user_id, conn=None):
-    """Return opening-hand row IDs and card UIDs in display order."""
-    return (conn or _db_layer._db).execute(
-        "SELECT id, card_uid FROM game_cards "
-        "WHERE session_id=? AND user_id=? AND location='hand' "
-        "ORDER BY position", (session_id, int(user_id))).fetchall()
-
-
-def db_rules_port_session_card_ids(session_id, user_id, conn=None):
-    """Return stable game-card row IDs for an opening-hand shuffle."""
-    return [row[0] for row in (conn or _db_layer._db).execute(
-        "SELECT id FROM game_cards WHERE session_id=? AND user_id=?",
-        (session_id, int(user_id))).fetchall()]
-
-
-def db_rules_port_draw_rows(session_id, user_id, count, conn=None):
-    """Return ordered deck rows and template fields for redraw projection."""
-    return (conn or _db_layer._db).execute(
-        "SELECT gc.card_uid, gc.card_template_id, gc.template_guid, "
-        "ct.name, ct.card_type, ct.cost, ct.attack, ct.defense, "
-        "ct.threshold_json, ct.abilities_json FROM game_cards gc "
-        "JOIN card_templates ct ON ct.guid=gc.template_guid "
-        "WHERE gc.session_id=? AND gc.user_id=? AND gc.location='deck' "
-        "ORDER BY gc.position LIMIT ?",
-        (session_id, int(user_id), int(count))).fetchall()
-
-
-def db_rules_port_redraw_hand(session_id, user_id, draw_count, conn=None):
-    """Atomically replace an opening hand and return old/new projection rows."""
-    import random
-
-    connection = conn or _db_layer._db
-    old_rows = db_rules_port_hand_rows(session_id, user_id, conn=connection)
-    if old_rows:
-        connection.executemany(
-            "UPDATE game_cards SET location='deck', card_state=0 WHERE id=?",
-            [(row[0],) for row in old_rows])
-    ids = db_rules_port_session_card_ids(session_id, user_id, conn=connection)
-    random.shuffle(ids)
-    if ids:
-        connection.executemany(
-            "UPDATE game_cards SET position=? WHERE id=?",
-            [(position, row_id) for position, row_id in enumerate(ids)])
-    new_rows = db_rules_port_draw_rows(
-        session_id, user_id, draw_count, conn=connection)
-    if new_rows:
-        connection.executemany(
-            "UPDATE game_cards SET location='hand' "
-            "WHERE session_id=? AND card_uid=?",
-            [(session_id, row[0]) for row in new_rows])
-    if conn is None:
-        connection.commit()
-    return old_rows, new_rows
-
-
-def db_rules_port_warzone_projection(session_id, conn=None):
-    """Return warzone UID, template, controller, and state rows."""
-    return (conn or _db_layer._db).execute(
-        "SELECT card_uid, template_guid, user_id, card_state FROM game_cards "
-        "WHERE session_id=? AND location='warzone'", (session_id,)).fetchall()
-
-
-def db_rules_port_hand_card(session_id, card_uid, user_id, conn=None):
-    """Return a specific owned hand card's row ID and template GUID."""
-    return (conn or _db_layer._db).execute(
-        "SELECT id, template_guid FROM game_cards WHERE session_id=? "
-        "AND card_uid=? AND user_id=? AND location='hand'",
-        (session_id, int(card_uid), int(user_id))).fetchone()
-
-
-def db_set_resource_guids(set_guid, conn=None):
-    """Return resource template GUIDs from a set for a PvP fixture."""
-    return [row[0] for row in (conn or _db_layer._db).execute(
-        "SELECT DISTINCT guid FROM card_templates WHERE set_guid=? "
-        "AND card_type='Resource'", (set_guid,)).fetchall()]
-
-
-def db_set_constructed_guids(set_guid, conn=None):
-    """Return collectible non-resource PvP template GUIDs from a set."""
-    return [row[0] for row in (conn or _db_layer._db).execute(
-        "SELECT guid FROM card_templates WHERE set_guid=? "
-        "AND card_type!='Resource' AND is_pve=0 AND no_pvp=0",
-        (set_guid,)).fetchall()]
-
-
-def db_card_catalog(conn=None):
-    """Return the card catalog fields used by pack/profile projections."""
-    connection = conn or _db_layer._db
-    return connection.execute(
-        "SELECT guid, set_guid, name, rarity, cost, attack, defense, "
-        "is_pve, no_pvp, card_type FROM card_templates"
-    ).fetchall()
-
-
-def db_pvp_set_guids(conn=None):
-    """Return collectible set IDs that contain eligible PVP cards."""
-    connection = conn or _db_layer._db
-    return connection.execute(
-        "SELECT set_guid FROM card_templates "
-        "WHERE is_pve=0 AND no_pvp=0 "
-        "AND rarity IN ('Common','Uncommon','Rare','Legendary') "
-        "GROUP BY set_guid"
-    ).fetchall()
-
-
-def db_pvp_booster_card_guids(conn=None):
-    """Return standard collectible PvP card templates eligible for boosters.
-
-    Non-basic resources use the normal card rarities and belong in this pool;
-    basic resources use the ``Land`` rarity and remain excluded.  Equipment-
-    modified/alternate-art printings are excluded from the standard pool.
-    """
-    connection = conn or _db_layer._db
-    rows = connection.execute(
-        "SELECT guid FROM card_templates "
-        "WHERE is_pve=0 AND no_pvp=0 "
-        "AND rarity IN ('Common','Uncommon','Rare','Legendary') "
-        "AND COALESCE(equipment_modified,0)=0 "
-        "ORDER BY guid"
-    ).fetchall()
-    return [row[0] for row in rows]
-
-
-def db_deck_cards_json(deck_id, user_id, conn=None):
-    """Return a deck's serialized card list when owned by the user."""
-    connection = conn or _db_layer._db
-    row = connection.execute(
-        "SELECT cards FROM decks WHERE id=? AND user_id=?",
-        (int(deck_id), int(user_id))).fetchone()
-    return row[0] if row else None
-
-
-def db_deck_active_gems(deck_id, conn=None):
-    """Return the serialized active-gem map for a deck."""
-    connection = conn or _db_layer._db
-    row = connection.execute(
-        "SELECT active_gems FROM decks WHERE id=?", (int(deck_id),)
-    ).fetchone()
-    return row[0] if row else None
-
-
-def db_template_exists(template_guid, conn=None):
-    """Whether a card template exists in the static card catalog."""
-    connection = conn or _db_layer._db
-    return bool(connection.execute(
-        "SELECT 1 FROM card_templates WHERE guid=?", (template_guid,)
-    ).fetchone())
-
-
-def db_empty_socket_gems(template_guid, conn=None):
-    """Return the client value for an unfilled socketable card.
-
-    Generated cards do not inherit a gem unless their authored effect says
-    to copy one. Socketable cards still need the new gem-format marker so
-    the client renders their empty sockets and permits socketing. Keep the
-    lookup tolerant of older focused test schemas that predate
-    ``card_templates.socket_count``.
-    """
-    connection = conn or _db_layer._db
-    try:
-        row = _cached_static_row(
-            connection, ("card_socket_count", str(template_guid).lower()),
-            "SELECT socket_count FROM card_templates WHERE guid=?",
-            (str(template_guid).lower(),))
-    except sqlite3.OperationalError as exc:
-        if "no such column" not in str(exc).lower():
-            raise
-        return 0
-    return (EMPTY_SOCKET_GEMS if row and int(row[0] or 0) > 0 else 0)
-
-
-def db_first_template_guid(conn=None):
-    """Return a deterministic catalog fallback template, if available."""
-    connection = conn or _db_layer._db
-    row = connection.execute(
-        "SELECT guid FROM card_templates ORDER BY guid LIMIT 1"
-    ).fetchone()
-    return row[0] if row else None
-
-
-def db_gem_templates(conn=None):
-    """Return authored gem names, types, and granted abilities."""
-    connection = conn or _db_layer._db
-    return connection.execute(
-        "SELECT gem_type_name, gem_type, abilities_json FROM gem_templates"
-    ).fetchall()
-
-
-def db_encounter_deck_cards(deck_guid, conn=None):
-    """Return ``(card_guid, quantity, gem_types_new_list_json)`` rows for an encounter deck.
-
-    Served from campaign_content (Records and campaign/campaign_data): scene opponent
-    decks and Arena decks, with unresolved GUIDs mapped by the card map. Rows keep
-    their order and count, since callers index each row's gem slots. ``conn`` is
-    unused and kept so callers do not change.
-    """
-    import campaign_source
-    campaign_source.ensure_campaign_path()
-    import campaign_content
-
-    return [(row["card_guid"], row["quantity"], row["gem_types_new_list_json"])
-            for row in campaign_content.deck_cards(deck_guid)]
-
-
-def db_scene_mods(scene_guid, conn=None):
-    """Return the serialized encounter-scene modifier payload (campaign_content).
-
-    ``conn`` is unused and kept so callers do not change.
-    """
-    import campaign_source
-    campaign_source.ensure_campaign_path()
-    import campaign_content
-    row = campaign_content.scene(scene_guid)
-    return row.get("mods_json") if row else None
-
-
-def db_template_ability_guids(template_guid, conn=None):
-    """Return the authored ability GUID list for one card template."""
-    connection = conn or _db_layer._db
-    row = connection.execute(
-        "SELECT abilities_json FROM card_templates WHERE guid=?",
-        (template_guid,)).fetchone()
-    return row[0] if row else None
-
-
-def db_ability_metadata(ability_guid, conn=None):
-    """Return setup-relevant manual/trigger metadata for an ability."""
-    connection = conn or _db_layer._db
-    return connection.execute(
-        "SELECT is_manual, trigger_event_type FROM card_abilities_meta "
-        "WHERE ability_guid=?", (str(ability_guid).lower(),)
-    ).fetchone()
-
-
-def db_ability_raw_json(ability_guid, conn=None):
-    """Return the raw authored metadata for one ability."""
-    connection = conn or _db_layer._db
-    row = _cached_static_row(
-        connection, ("ability_raw", str(ability_guid).lower()),
-        "SELECT raw_json FROM card_abilities_meta WHERE ability_guid=?",
-        (str(ability_guid).lower(),))
-    return row[0] if row else None
-
-
-def db_any_ability_raw_json(ability_guid, conn=None):
-    """Return raw metadata for a card or champion ability."""
-    connection = conn or _db_layer._db
-    guid = str(ability_guid).lower()
-
-    def load():
-        try:
-            value = db_ability_raw_json(guid, conn=connection)
-        except Exception:
-            value = None
-        if value:
-            return value
-        try:
-            row = connection.execute(
-                "SELECT raw_json FROM champion_abilities "
-                "WHERE ability_guid=? LIMIT 1", (guid,)).fetchone()
-        except Exception:
-            row = None
-        return row[0] if row else None
-
-    return _cached_static_value(connection, ("any_ability_raw", guid), load)
-
-
-def db_ability_trigger_metadata(ability_guid, conn=None):
-    """Return trigger/manual classification for one ability."""
-    connection = conn or _db_layer._db
-    return connection.execute(
-        "SELECT is_triggered, is_manual, trigger_event_type "
-        "FROM card_abilities_meta WHERE ability_guid=? LIMIT 1",
-        (str(ability_guid).lower(),)).fetchone()
-
-
-def db_ability_activation_metadata(ability_guid, conn=None):
-    """Return activation limits, manual flag, and raw metadata."""
-    connection = conn or _db_layer._db
-    return connection.execute(
-        "SELECT activation_cost, uses_per_game, uses_per_turn, "
-        "exhausts_on_use, is_manual, raw_json FROM card_abilities_meta "
-        "WHERE ability_guid=?", (str(ability_guid).lower(),)).fetchone()
-
-
-def db_ability_effect_rows(ability_guid, conn=None):
-    """Return BOM effect IDs, types, and parameters for an ability."""
-    connection = conn or _db_layer._db
-    return _cached_static_rows(
-        connection, ("ability_effect_rows", str(ability_guid).lower()),
-        "SELECT effect_guid, effect_type, param FROM ability_effects "
-        "WHERE ability_guid=?", (str(ability_guid).lower(),)
-    )
-
-
-def db_ability_effect_type_params(ability_guid, conn=None):
-    """Return ordered effect types and serialized parameters."""
-    connection = conn or _db_layer._db
-    return _cached_static_rows(
-        connection, ("ability_effect_type_params", str(ability_guid).lower()),
-        "SELECT effect_type, param FROM ability_effects "
-        "WHERE ability_guid=? ORDER BY effect_order",
-        (str(ability_guid).lower(),))
-
-
-def db_ability_effect_target_index(ability_guid, effect_guid, conn=None):
-    """Return the authored target index for one ability effect."""
-    row = (conn or _db_layer._db).execute(
-        "SELECT target_index FROM ability_effects WHERE ability_guid=? "
-        "AND effect_guid=? LIMIT 1",
-        (ability_guid, effect_guid)).fetchone()
-    return row[0] if row else None
-
-
-def db_ability_has_effect(ability_guid, conn=None):
-    """Whether an ability has at least one materialized BOM effect."""
-    connection = conn or _db_layer._db
-    return connection.execute(
-        "SELECT 1 FROM ability_effects WHERE ability_guid=? LIMIT 1",
-        (str(ability_guid).lower(),)).fetchone()
-
-
-def db_ability_metadata_exists(ability_guid, conn=None):
-    """Whether a card ability is present in the materialized metadata."""
-    return (conn or _db_layer._db).execute(
-        "SELECT 1 FROM card_abilities_meta WHERE ability_guid=? LIMIT 1",
-        (str(ability_guid).lower(),)).fetchone() is not None
-
-
-def db_ability_target_template_ids(ability_guid, conn=None):
-    """Return the serialized target-template IDs for an ability."""
-    connection = conn or _db_layer._db
-    row = _cached_static_row(
-        connection, ("ability_target_ids", str(ability_guid).lower()),
-        "SELECT target_template_ids FROM card_abilities_meta "
-        "WHERE ability_guid=?", (str(ability_guid).lower(),)
-    )
-    return row[0] if row else None
-
-
-def db_champion_ability_target_template_ids(ability_guid, conn=None):
-    """Return target-template IDs authored for a champion ability."""
-    connection = conn or _db_layer._db
-    row = connection.execute(
-        "SELECT target_template_ids FROM champion_abilities "
-        "WHERE ability_guid=? LIMIT 1", (str(ability_guid).lower(),)
-    ).fetchone()
-    return row[0] if row else None
-
-
-def db_target_template_filter(template_id, conn=None):
-    """Return one target template's serialized filter."""
-    connection = conn or _db_layer._db
-    row = _cached_static_row(
-        connection, ("target_filter", str(template_id)),
-        "SELECT filter_json FROM target_templates WHERE template_id=?",
-        (template_id,))
-    return row[0] if row else None
-
-
-def db_template_subtype(template_guid, conn=None):
-    """Return a card template's authored subtype."""
-    connection = conn or _db_layer._db
-    row = _cached_static_row(
-        connection, ("card_subtype", str(template_guid).lower()),
-        "SELECT subtype FROM card_templates WHERE guid=?", (template_guid,))
-    return row[0] if row else None
-
-
-def db_session_user_ids(session_id, conn=None):
-    """Return distinct controllers represented by session cards."""
-    return (conn or _db_layer._db).execute(
-        "SELECT DISTINCT user_id FROM game_cards WHERE session_id=?",
-        (session_id,)).fetchall()
-
-
-def db_static_card_rows(session_id, zones, conn=None):
-    """Return card fields needed by static filter evaluation."""
-    if not zones:
-        return []
-    marks = ",".join("?" for _ in zones)
-    return (conn or _db_layer._db).execute(
-        "SELECT gc.card_uid, gc.card_type, gc.location, gc.user_id, "
-        "gc.card_state, COALESCE(ct.attack,0), COALESCE(ct.defense,0), "
-        "ct.name, COALESCE(ct.cost,0), ct.subtype, ct.threshold_json, "
-        "gc.card_attributes, ct.attributes FROM game_cards gc "
-        "JOIN card_templates ct ON ct.guid=gc.template_guid "
-        "WHERE gc.session_id=? AND gc.location IN (" + marks + ")",
-        [session_id, *zones]).fetchall()
-
-
-def db_card_static_fields(session_id, card_uid, conn=None):
-    """Return every column the static cost and threshold views read, in one row.
-
-    ``template_guid`` is NULL when the card's template is missing, so callers
-    can tell "no card" from "card with no template" the way the separate
-    inner-join helpers did.  Keep the columns in one query: a cost or
-    threshold projection scans many candidate cards, and one round trip per
-    helper dominated that scan.
-    """
-    cursor = (conn or _db_layer._db).execute(
-        "SELECT gc.user_id AS user_id, gc.permanent_buffs AS permanent_buffs, "
-        "gc.temporary_buffs AS temporary_buffs, "
-        "gc.card_cost_mod AS card_cost_mod, gc.cost_mod_json AS cost_mod_json, "
-        "gc.location AS location, ct.guid AS template_guid, ct.cost AS cost, "
-        "ct.threshold_json AS threshold_json, ct.subtype AS subtype, "
-        "COALESCE(gc.card_type, ct.card_type) AS card_type "
-        "FROM game_cards gc LEFT JOIN card_templates ct "
-        "ON ct.guid=gc.template_guid "
-        "WHERE gc.session_id=? AND gc.card_uid=?",
-        (session_id, int(card_uid)))
-    row = cursor.fetchone()
-    if row is None:
-        return None
-    # Named access on any connection (plain tuples have no column names).
-    return dict(zip([column[0] for column in cursor.description], row))
-
-
-def db_card_static_row(session_id, card_uid, conn=None):
-    """Return full card/template combat state for static evaluation."""
-    return (conn or _db_layer._db).execute(
-        "SELECT gc.card_attack_mod, gc.card_defense_mod, gc.card_damage, "
-        "gc.card_attributes, ct.attack, ct.defense, ct.attributes, "
-        "gc.permanent_buffs, gc.temporary_buffs, gc.temporary_attributes, "
-        "ct.rage_value, ct.lethal FROM game_cards gc "
-        "JOIN card_templates ct ON ct.guid=gc.template_guid "
-        "WHERE gc.session_id=? AND gc.card_uid=?",
-        (session_id, int(card_uid))).fetchone()
-
-
-def db_card_combat_state(session_id, card_uid, conn=None):
-    """Return combat stats and mutable payloads without optional columns."""
-    return (conn or _db_layer._db).execute(
-        "SELECT gc.card_attack_mod, gc.card_defense_mod, gc.card_damage, "
-        "gc.card_attributes, ct.attack, ct.defense, ct.attributes, "
-        "gc.permanent_buffs, gc.temporary_buffs, gc.temporary_attributes "
-        "FROM game_cards gc JOIN card_templates ct ON ct.guid=gc.template_guid "
-        "WHERE gc.session_id=? AND gc.card_uid=?",
-        (session_id, int(card_uid))).fetchone()
-
-
-def db_warzone_card_uids(session_id, owner_id=None, conn=None):
-    """Return warzone card UIDs, optionally restricted to one controller."""
-    connection = conn or _db_layer._db
-    if owner_id is None:
-        return connection.execute(
-            "SELECT card_uid FROM game_cards WHERE session_id=? "
-            "AND location='warzone'", (session_id,)).fetchall()
-    return connection.execute(
-        "SELECT card_uid FROM game_cards WHERE session_id=? AND user_id=? "
-        "AND location='warzone'", (session_id, int(owner_id))).fetchall()
-
-
-def db_warzone_owner_ids(session_id, conn=None):
-    """Return controllers with cards in the warzone."""
-    return (conn or _db_layer._db).execute(
-        "SELECT DISTINCT user_id FROM game_cards "
-        "WHERE session_id=? AND location='warzone'", (session_id,)).fetchall()
-
-
-def db_next_card_uid(session_id, conn=None):
-    """Allocate a collision-free client SessionCard UID."""
-    connection = conn or _db_layer._db
-    row = connection.execute(
-        "SELECT COALESCE(MAX(card_uid >> 8), 10000) + 1 "
-        "FROM game_cards WHERE session_id=?", (session_id,)).fetchone()
-    instance = max(10001, int(row[0] or 10001))
-    from game_engine import UID
-    while connection.execute(
-            "SELECT 1 FROM game_cards WHERE session_id=? AND card_uid=? LIMIT 1",
-            (session_id, UID.make(1, instance).uid64)).fetchone():
-        instance += 1
-    return UID.make(1, instance).uid64
-
-
-def db_debug_template(template_guid, conn=None):
-    """Return the template projection required by DebugCheatTransaction."""
-    return (conn or _db_layer._db).execute(
-        "SELECT guid, card_type, name, cost, attack, defense, "
-        "abilities_json, attributes, threshold_json "
-        "FROM card_templates WHERE guid=?", (str(template_guid).lower(),)
-    ).fetchone()
-
-
-def db_insert_debug_card(session_id, owner_id, card_uid, template, location,
-                         conn=None):
-    """Insert a card created by the client debug-cheat transaction."""
-    connection = conn or _db_layer._db
-    row = connection.execute(
-        "SELECT COALESCE(MAX(position), -1) + 1 FROM game_cards "
-        "WHERE session_id=? AND user_id=? AND location=?",
-        (session_id, int(owner_id), location)).fetchone()
-    position = int(row[0] or 0)
-    if location == "deck":
-        connection.execute(
-            "UPDATE game_cards SET position=position+1 "
-            "WHERE session_id=? AND user_id=? AND location='deck'",
-            (session_id, int(owner_id)))
-        position = 0
-    row_id = db_next_game_card_row_id(session_id, conn=connection)
-    connection.execute(
-        "INSERT INTO game_cards (id, user_id, session_id, card_uid, "
-        "card_template_id, location, position, is_champion, card_type, "
-        "template_guid, owner_user_id, original_template_guid) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)",
-        (row_id, int(owner_id), session_id, int(card_uid), 0, location,
-         position, template[1], template[0], int(owner_id), template[0]),
-    )
-    if conn is None:
-        connection.commit()
-    return int(card_uid), template
-
-
-def db_debug_nonchampion_cards(session_id, owner_id, conn=None):
-    """Return non-champion cards that a debug nuke may move to the void."""
-    return (conn or _db_layer._db).execute(
-        "SELECT card_uid FROM game_cards WHERE session_id=? AND user_id=? "
-        "AND is_champion=0 AND location!='void'",
-        (session_id, int(owner_id))).fetchall()
-
-
-def db_clear_warzone_damage(session_id, conn=None):
-    """Clear marked damage from cards currently in the warzone.
-
-    C# ``Card.ResetCardDamage`` also clears ``ECardStates.Damaged``.
-    """
-    return (conn or _db_layer._db).execute(
-        "UPDATE game_cards SET card_damage=0, "
-        "card_state = COALESCE(card_state, 0) & ? "
-        "WHERE session_id=? AND location='warzone'",
-        (~_DAMAGED_STATE_BIT, session_id))
-
-
-def db_clear_warzone_damage_except(session_id, exempt_uids, conn=None):
-    """Clear warzone damage except cards that cannot heal at end of turn."""
-    uids = [int(uid) for uid in exempt_uids or ()]
-    if not uids:
-        return db_clear_warzone_damage(session_id, conn=conn)
-    marks = ",".join("?" for _ in uids)
-    return (conn or _db_layer._db).execute(
-        "UPDATE game_cards SET card_damage=0, "
-        "card_state = COALESCE(card_state, 0) & ? "
-        "WHERE session_id=? AND location='warzone' "
-        "AND card_uid NOT IN (" + marks + ")",
-        (~_DAMAGED_STATE_BIT, session_id, *uids))
-
-
-def db_temporary_attribute_rows(session_id, conn=None):
-    """Return cards carrying temporary attributes or temporary buffs."""
-    return (conn or _db_layer._db).execute(
-        "SELECT card_uid, user_id, temporary_attributes, temporary_buffs "
-        "FROM game_cards WHERE session_id=? AND "
-        "(temporary_attributes != 0 OR "
-        "(temporary_buffs IS NOT NULL AND temporary_buffs != '{}'))",
-        (session_id,)).fetchall()
-
-
-def db_set_temporary_card_state(session_id, card_uid, attributes, buffs,
-                                conn=None):
-    """Persist temporary attributes and their expiration metadata."""
-    return (conn or _db_layer._db).execute(
-        "UPDATE game_cards SET temporary_attributes=?, temporary_buffs=? "
-        "WHERE session_id=? AND card_uid=?",
-        (int(attributes), buffs, session_id, int(card_uid)))
-
-
-def db_card_attribute_value(session_id, card_uid, field, conn=None):
-    """Read one approved integer card-attribute field."""
-    if field not in {"card_attributes", "temporary_attributes"}:
-        raise ValueError("unsupported card attribute field")
-    row = (conn or _db_layer._db).execute(
-        "SELECT " + field + " FROM game_cards WHERE session_id=? AND card_uid=?",
-        (session_id, int(card_uid))).fetchone()
-    return row[0] if row else 0
-
-
-def db_set_card_attribute_value(session_id, card_uid, field, value, conn=None):
-    """Persist one approved integer card-attribute field."""
-    if field not in {"card_attributes", "temporary_attributes"}:
-        raise ValueError("unsupported card attribute field")
-    return (conn or _db_layer._db).execute(
-        "UPDATE game_cards SET " + field + "=? WHERE session_id=? AND card_uid=?",
-        (int(value), session_id, int(card_uid)))
-
-
-def db_deck_card_count(session_id, user_id, conn=None):
-    """Count cards currently in one player's deck."""
-    row = (conn or _db_layer._db).execute(
-        "SELECT COUNT(*) FROM game_cards WHERE session_id=? AND user_id=? "
-        "AND location='deck'", (session_id, int(user_id))).fetchone()
-    return int(row[0] if row else 0)
-
-
-def db_talent_ability_condition(ability_guid, conn=None):
-    """Return the talent and condition attached to an ability."""
-    return (conn or _db_layer._db).execute(
-        "SELECT talent_guid, condition FROM talent_abilities "
-        "WHERE ability_guid=? LIMIT 1", (str(ability_guid),)).fetchone()
-
-
-def db_pregame_talent_rows(ability_guids, conn=None):
-    """Return selected abilities authored for the pregame phase."""
-    if not ability_guids:
-        return []
-    marks = ",".join("?" for _ in ability_guids)
-    return (conn or _db_layer._db).execute(
-        "SELECT DISTINCT ability_guid, condition FROM talent_abilities "
-        "WHERE ability_guid IN (" + marks + ") AND (activatable_phases & 4) != 0",
-        tuple(str(guid) for guid in ability_guids)).fetchall()
-
-
-def db_card_list_stat_row(session_id, card_uid, conn=None):
-    """Return the card/template fields used by list-property variables."""
-    return (conn or _db_layer._db).execute(
-        "SELECT gc.card_uid, gc.card_type, gc.location, gc.user_id, "
-        "gc.card_state, COALESCE(ct.attack,0), COALESCE(ct.defense,0), "
-        "ct.name, COALESCE(ct.cost,0), ct.subtype, ct.threshold_json, "
-        "gc.card_attributes, ct.attributes, gc.card_attack_mod, "
-        "gc.card_defense_mod, gc.permanent_buffs, gc.temporary_buffs "
-        "FROM game_cards gc JOIN card_templates ct ON ct.guid=gc.template_guid "
-        "WHERE gc.session_id=? AND gc.card_uid=?",
-        (session_id, int(card_uid))).fetchone()
-
-
-def db_static_target_template(template_id, conn=None):
-    """Return target fields used by continuous static evaluation."""
-    connection = conn or _db_layer._db
-    return _cached_static_row(
-        connection, ("static_target", str(template_id)),
-        "SELECT collection_flags, player_filter, filter_json, game_text, "
-        "target_kind "
-        "FROM target_templates WHERE template_id=?", (template_id,))
-
-
-def db_ability_static_metadata(ability_guid, conn=None):
-    """Return trigger/manual/raw metadata for static ability filtering.
-
-    Card abilities carry it in ``card_abilities_meta``. A champion or talent ability has none there, so its trigger and
-    manual flag come from its Records template (the same fields the card rows are extracted from).
-    """
-    connection = conn or _db_layer._db
-    row = _cached_static_row(
-        connection, ("ability_static", str(ability_guid).lower()),
-        "SELECT trigger_event_type, is_manual, raw_json "
-        "FROM card_abilities_meta WHERE ability_guid=?",
-        (str(ability_guid).lower(),))
-    if row is not None:
-        return row
-    if not (db_talent_has_ability_guid(ability_guid, conn=connection)
-            or db_champion_ability_guid_exists(ability_guid, conn=connection)):
-        return None
-    from gamedata import DEFAULT_RECORD_STORE
-    record = DEFAULT_RECORD_STORE.get("AbilityTemplate", str(ability_guid).lower())
-    if record is None:
-        return None
-    trigger = record.field("m_TriggerEventType", None) or {}
-    trigger_type = str(trigger.get("m_InternalType") or "").rsplit(".", 1)[-1] if isinstance(trigger, dict) else ""
-    return (trigger_type or None, 1 if record.field("m_Manual", 0) else 0, "")
-
-
-def db_talent_has_ability_guid(ability_guid, conn=None):
-    """Whether a talent authors this ability."""
-    connection = conn or _db_layer._db
-    return connection.execute(
-        "SELECT 1 FROM talent_data WHERE ability_guid=? AND has_ability=1 "
-        "UNION SELECT 1 FROM talent_abilities WHERE ability_guid=? LIMIT 1",
-        (str(ability_guid).lower(), str(ability_guid).lower())).fetchone() is not None
-
-
-def db_champion_ability_guid_exists(ability_guid, conn=None):
-    """Whether any champion template authors this ability."""
-    connection = conn or _db_layer._db
-    return connection.execute(
-        "SELECT 1 FROM champion_abilities WHERE ability_guid=? LIMIT 1",
-        (str(ability_guid).lower(),)).fetchone() is not None
-
-
-def db_talent_ability_guids(talent_guids, conn=None):
-    """The abilities the given talents author, in talent order."""
-    connection = conn or _db_layer._db
-    guids = []
-    for talent in talent_guids or ():
-        talent_guid = str(talent).lower()
-        for row in connection.execute(
-                "SELECT ability_guid FROM talent_data WHERE talent_guid=? AND has_ability=1 "
-                "ORDER BY rowid", (talent_guid,)).fetchall():
-            if row[0] and str(row[0]).lower() not in guids:
-                guids.append(str(row[0]).lower())
-        for row in connection.execute(
-                "SELECT ability_guid FROM talent_abilities WHERE talent_guid=? ORDER BY rowid",
-                (talent_guid,)).fetchall():
-            if row[0] and str(row[0]).lower() not in guids:
-                guids.append(str(row[0]).lower())
-    return guids
-
-
-def db_gem_abilities(gem_type, conn=None):
-    """Return the serialized ability list for a gem type."""
-    connection = conn or _db_layer._db
-    row = _cached_static_row(
-        connection, ("gem_abilities", int(gem_type or 0)),
-        "SELECT abilities_json FROM gem_templates WHERE gem_type=?",
-        (gem_type,))
-    return row[0] if row else None
-
-
-def db_gem_ability_guids(gem_value, conn=None):
-    """Return ability GUIDs for a legacy gem or packed socket value.
-
-    The client stores all socket positions in one UInt64.  Bit 62 marks that
-    packed representation; each of the six sockets uses a ten-bit gem type.
-    Older persisted rows can still contain a single gem type, so accept both
-    forms at this boundary.
-    """
-    try:
-        raw = int(gem_value or 0)
-    except (TypeError, ValueError):
-        return []
-    if raw <= 0:
-        return []
-    if raw & EMPTY_SOCKET_GEMS or raw > 0x3FF:
-        # Older server builds truncated the UInt64 marker off at deck-save
-        # time. A value above the ten-bit EGemTypesNew slot range is therefore
-        # still recognizable as the low socket payload (for example 1056 is
-        # slot 0 = 32 and slot 1 = 1).
-        values = [(raw >> (slot * 10)) & 0x3FF for slot in range(6)]
-    else:
-        values = [raw]
-    guids = []
-    for gem_type in dict.fromkeys(value for value in values if value):
-        payload = db_gem_abilities(gem_type, conn=conn)
-        if not payload:
-            continue
-        try:
-            abilities = json.loads(payload or "[]")
-        except (TypeError, ValueError, json.JSONDecodeError):
-            continue
-        for ability in abilities:
-            if ability:
-                guid = str(ability).lower()
-                if guid not in guids:
-                    guids.append(guid)
-    return guids
-
-
-def db_card_gem_ability_guids(session_id, card_uid, conn=None):
-    """Return the ability GUIDs granted by a card's socketed gems.
-
-    Session gems are stored either as one legacy gem type or as the packed
-    positional bitfield the client uses (ten bits per socket, bit 62 marks the
-    packed form).  Both shapes decode against ``gem_templates``.
-    """
-    row = db_card_gem_type(session_id, int(card_uid), conn=conn)
-    try:
-        raw = int(row or 0)
-    except (TypeError, ValueError):
-        return []
-    if not raw:
-        return []
-    return db_gem_ability_guids(raw, conn=conn)
-
-
-def db_card_template_creation_profile(template_guid, conn=None):
-    """Return (cost, subtype, card_type) for a would-be created template."""
-    row = (conn or _db_layer._db).execute(
-        "SELECT cost, subtype, card_type FROM card_templates WHERE guid=?",
-        (str(template_guid).lower(),)).fetchone()
-    if not row:
-        return None
-    return (int(row[0] or 0), str(row[1] or ""), str(row[2] or ""))
-
-
-def db_card_manual_ability_guids(session_id, card_uid, conn=None):
-    """Return the card's current abilities whose metadata marks them manual."""
-    connection = conn or _db_layer._db
-    row = connection.execute(
-        "SELECT card_abilities FROM game_cards WHERE session_id=? AND card_uid=?",
-        (session_id, int(card_uid))).fetchone()
-    if not row:
-        return []
-    try:
-        abilities = json.loads(row[0] or "[]")
-    except (TypeError, ValueError, json.JSONDecodeError):
-        return []
-    out = []
-    for ability in abilities:
-        guid = str(ability or "").lower()
-        if not guid:
-            continue
-        manual = connection.execute(
-            "SELECT is_manual FROM card_abilities_meta WHERE ability_guid=?",
-            (guid,)).fetchone()
-        if manual and int(manual[0] or 0):
-            out.append(guid)
-    return out
-
-
-def db_champion_charge_power_guids(conn=None):
-    """Return the distinct authored champion charge-power ability GUIDs."""
-    return [str(row[0]).lower() for row in (
-        conn or _db_layer._db).execute(
-            "SELECT DISTINCT ability_guid FROM champion_abilities "
-            "WHERE ability_guid IS NOT NULL AND ability_guid<>''")]
-
-
-def db_inspire_ability_guids(conn=None):
-    """Return ability GUIDs whose game text starts with the Inspire prefix."""
-    return [str(row[0]).lower() for row in (
-        conn or _db_layer._db).execute(
-            "SELECT ability_guid FROM card_abilities_meta "
-            "WHERE game_text LIKE '<b>Inspire</b>%'")]
-
-
-def db_set_card_abilities(session_id, card_uid, abilities_json, conn=None):
-    """Persist the effective ability list for one materialized card."""
-    connection = conn or _db_layer._db
-    connection.execute(
-        "UPDATE game_cards SET card_abilities=? "
-        "WHERE session_id=? AND card_uid=?",
-        (abilities_json, session_id, int(card_uid)),
-    )
-
-
-def db_set_card_abilities_and_attributes(session_id, card_uid, abilities_json,
-                                         attributes, conn=None):
-    """Persist effective abilities and attributes for one session card."""
-    connection = conn or _db_layer._db
-    connection.execute(
-        "UPDATE game_cards SET card_abilities=?, card_attributes=? "
-        "WHERE session_id=? AND card_uid=?",
-        (abilities_json, int(attributes), session_id, int(card_uid)),
-    )
-
-
-def db_session_turn_order(session_id, conn=None):
-    """Return the decoded session battle state, if one was persisted."""
-    flush_pending_session_saves()
-    connection = conn or _db_layer._db
-    row = connection.execute(
-        "SELECT turn_order_json FROM game_sessions WHERE session_id=?",
-        (str(session_id),)).fetchone()
-    return row[0] if row else None
-    if conn is None:
-        connection.commit()
-
-
-def db_ai_hand_cards(session_id, conn=None):
-    """Return AI hand cards in the client-visible position order."""
-    connection = conn or _db_layer._db
-    return connection.execute(
-        "SELECT card_uid, template_guid FROM game_cards "
-        "WHERE session_id=? AND user_id=0 AND location='hand' "
-        "ORDER BY position", (session_id,)).fetchall()
-
-
-def db_ai_deck_top_card(session_id, conn=None):
-    """Return the complete persisted row needed for an AI draw."""
-    connection = conn or _db_layer._db
-    return connection.execute(
-        "SELECT id, card_uid, card_template_id, template_guid "
-        "FROM game_cards WHERE session_id=? AND user_id=0 "
-        "AND location='deck' ORDER BY position LIMIT 1", (session_id,)
-    ).fetchone()
-
-
-def db_ai_hand_tunneling_cards(session_id, conn=None, owner_id=0):
-    """Return non-resource AI hand cards and their tunneling metadata."""
-    connection = conn or _db_layer._db
-    return connection.execute(
-        "SELECT gc.card_uid, gc.template_guid, gc.card_state, "
-        "gc.permanent_buffs, COALESCE(ct.cost, 0), ct.threshold_json, "
-        "gc.card_abilities FROM game_cards gc "
-        "JOIN card_templates ct ON ct.guid=gc.template_guid "
-        "WHERE gc.session_id=? AND gc.user_id=? AND gc.location='hand' "
-        "AND ct.card_type NOT LIKE '%Resource%' "
-        "ORDER BY gc.position, gc.card_uid",
-        (session_id, int(owner_id))).fetchall()
-
-
-def db_target_template_info(template_id, conn=None):
-    """Return filter/kind/auto fields for one target template."""
-    connection = conn or _db_layer._db
-    return connection.execute(
-        "SELECT filter_json, target_kind, is_auto_target "
-        "FROM target_templates WHERE template_id=?", (template_id,)
-    ).fetchone()
-
-
-def db_target_template_row(template_id, conn=None):
-    """Return the complete target-template projection for resolution."""
-    return (conn or _db_layer._db).execute(
-        "SELECT template_id, game_text, is_auto_target, is_random_target, "
-        "optional, explicit, player_filter, collection_flags, "
-        "min_target_count, max_target_count, filter_json, target_kind "
-        "FROM target_templates WHERE template_id=?", (template_id,)
-    ).fetchone()
-
-
-def db_session_card_owners(session_id, conn=None):
-    """Return card UID/controller pairs for a session."""
-    return (conn or _db_layer._db).execute(
-        "SELECT card_uid, user_id FROM game_cards WHERE session_id=?",
-        (session_id,)).fetchall()
-
-
-def _target_projection_columns(connection):
-    """Return optional columns used by the generic target projection."""
-    # Target candidate enumeration is repeated for each generated target
-    # witness in the card contract sweep.  Reading both table schemas on every
-    # call made a large catalogue pass spend most of its time in PRAGMA table
-    # introspection.  Include SQLite's schema version so migrations and test
-    # fixture DDL naturally invalidate the cached projection.
-    version_row = connection.execute("PRAGMA schema_version").fetchone()
-    cache_key = (connection, int(version_row[0] or 0)
-                 if version_row else 0)
-    with _TARGET_PROJECTION_LOCK:
-        cached = _TARGET_PROJECTION_CACHE.get(cache_key)
-        if cached is not None:
-            _TARGET_PROJECTION_CACHE.move_to_end(cache_key)
-            return cached
-    gc = {row[1] for row in connection.execute(
-        "PRAGMA table_info(game_cards)").fetchall()}
-    ct = {row[1] for row in connection.execute(
-        "PRAGMA table_info(card_templates)").fetchall()}
-    result = (
-        "ct.rarity" if "rarity" in ct else "''",
-        "ct.socket_count" if "socket_count" in ct else "0",
-        "gc.gems" if "gems" in gc else "0",
-        "gc.original_template_guid" if "original_template_guid" in gc else "''",
-        "gc.card_abilities" if "card_abilities" in gc else "'[]'",
-    )
-    with _TARGET_PROJECTION_LOCK:
-        _TARGET_PROJECTION_CACHE[cache_key] = result
-        _TARGET_PROJECTION_CACHE.move_to_end(cache_key)
-        while len(_TARGET_PROJECTION_CACHE) > _TARGET_PROJECTION_CACHE_LIMIT:
-            _TARGET_PROJECTION_CACHE.popitem(last=False)
-    return result
-
-
-def db_target_source_row(session_id, card_uid, conn=None):
-    """Return the optional-column-safe source projection for targeting."""
-    connection = conn or _db_layer._db
-    rarity, sockets, gems, original, abilities = _target_projection_columns(connection)
-    sql = ("SELECT gc.card_uid, gc.card_type, gc.location, gc.user_id, "
-           + "gc.card_state, COALESCE(ct.attack,0), COALESCE(ct.defense,0), "
-           + "gc.template_guid, ct.name, COALESCE(ct.cost,0), ct.subtype, "
-           + "ct.threshold_json, COALESCE(gc.card_attributes,0) | COALESCE(ct.attributes,0), " + rarity + ", "
-           + sockets + ", " + gems + ", " + original + ", " + abilities + ", "
-           + "gc.permanent_buffs FROM game_cards gc LEFT JOIN card_templates ct "
-           + "ON ct.guid=gc.template_guid WHERE gc.session_id=? AND gc.card_uid=?")
-    return connection.execute(
-        sql,
-        (session_id, int(card_uid))).fetchone()
-
-
-def db_target_candidate_rows(session_id, zones, controller_uid=None,
-                             both_players=False, top_n=False, conn=None):
-    """Return optional-column-safe card candidates for target evaluation."""
-    if not zones:
-        return []
-    connection = conn or _db_layer._db
-    rarity, sockets, gems, original, _abilities = _target_projection_columns(connection)
-    marks = ",".join("?" for _ in zones)
-    sql = (
-        "SELECT gc.card_uid, gc.card_type, gc.location, gc.user_id, "
-        "gc.template_guid, gc.card_state, COALESCE(ct.attack,0), "
-        "COALESCE(ct.defense,0), ct.name, COALESCE(ct.cost,0), ct.subtype, "
-        "ct.threshold_json, gc.card_abilities, gc.permanent_buffs, "
-        + rarity + ", " + sockets + ", " + gems + ", " + original + ", "
-        + "COALESCE(gc.card_attributes,0) | COALESCE(ct.attributes,0) "
-        + "FROM game_cards gc JOIN card_templates ct ON ct.guid=gc.template_guid "
-        + "WHERE gc.session_id=? AND gc.location IN (" + marks + ")"
-    )
-    params = [session_id] + list(zones)
-    if not both_players:
-        sql += " AND gc.user_id=?"
-        params.append(controller_uid)
-    sql += " ORDER BY gc.user_id, gc.position" if top_n else " ORDER BY gc.position"
-    return connection.execute(sql, params).fetchall()
-
-
-def db_trace_card_rows(session_id, columns, conn=None):
-    """Return trace columns, substituting NULL for legacy missing fields."""
-    connection = conn or _db_layer._db
-    valid = {row[1] for row in connection.execute(
-        "PRAGMA table_info(game_cards)").fetchall()}
-    selected = [column if column in valid else "NULL AS " + column
-                for column in columns]
-    return connection.execute(
-        "SELECT card_uid, " + ", ".join(selected) +
-        " FROM game_cards WHERE session_id=?", (session_id,)).fetchall()
-
-
-def db_ai_evaluator_card_rows(session_id, user_id, zone, conn=None):
-    """Return the joined card snapshot consumed by the AI evaluator."""
-    if zone not in {"hand", "warzone"}:
-        raise ValueError("unsupported evaluator zone")
-    connection = conn or _db_layer._db
-    ct_cols = {row[1] for row in connection.execute(
-        "PRAGMA table_info(card_templates)").fetchall()}
-    current = ("ct.current_resources_granted" if
-               "current_resources_granted" in ct_cols else "0")
-    maximum = ("ct.max_resources_granted" if
-               "max_resources_granted" in ct_cols else "0")
-    # ``card_abilities``/``card_attributes`` are the live instance values
-    # (granted/revoked abilities and attribute flags).  The AI evaluator must
-    # see them or a troop carrying a granted curse/keyword is scored as its
-    # printed template (Spider Nest re-targeting the same trooper).
-    extra = ", gc.card_attack_mod, gc.card_defense_mod" if zone == "warzone" else ""
-    return connection.execute(
-        "SELECT gc.card_uid, gc.template_guid, gc.location, ct.card_type, "
-        "ct.name, ct.rarity, ct.cost, ct.attack, ct.defense, "
-        "ct.threshold_json, ct.abilities_json, ct.attributes, ct.subtype, "
-        "ct.variable_cost, ct.variable_cost_double, " + current + ", " +
-        maximum + ", gc.card_state, "
-        "gc.card_damage, gc.permanent_buffs, gc.temporary_buffs, "
-        "gc.temporary_attributes" + extra +
-        ", gc.card_abilities, gc.card_attributes FROM game_cards gc "
-        "JOIN card_templates ct ON ct.guid=gc.template_guid "
-        "WHERE gc.session_id=? AND gc.user_id=? AND gc.location=? "
-        "ORDER BY gc.position", (session_id, int(user_id), zone)).fetchall()
-
-
-def db_ai_evaluator_card_row(session_id, card_uid, conn=None):
-    """Return one joined card snapshot for an ability source in any zone.
-
-    Triggered and nested abilities can resolve after their source card has
-    left the hand or Warzone.  The AI still needs that source's authored
-    ability metadata to choose a fresh explicit target, so this deliberately
-    does not restrict the card location or controller.
-    """
-    connection = conn or _db_layer._db
-    ct_cols = {row[1] for row in connection.execute(
-        "PRAGMA table_info(card_templates)").fetchall()}
-    current = ("ct.current_resources_granted" if
-               "current_resources_granted" in ct_cols else "0")
-    maximum = ("ct.max_resources_granted" if
-               "max_resources_granted" in ct_cols else "0")
-    return connection.execute(
-        "SELECT gc.card_uid, gc.template_guid, gc.location, ct.card_type, "
-        "ct.name, ct.rarity, ct.cost, ct.attack, ct.defense, "
-        "ct.threshold_json, ct.abilities_json, ct.attributes, ct.subtype, "
-        "ct.variable_cost, ct.variable_cost_double, " + current + ", " +
-        maximum + ", gc.card_state, "
-        "gc.card_damage, gc.permanent_buffs, gc.temporary_buffs, "
-        "gc.temporary_attributes, gc.card_abilities, gc.card_attributes "
-        "FROM game_cards gc "
-        "JOIN card_templates ct ON ct.guid=gc.template_guid "
-        "WHERE gc.session_id=? AND gc.card_uid=? LIMIT 1",
-        (session_id, int(card_uid))).fetchone()
-
-
-def db_target_template_targeting_info(template_id, conn=None):
-    """Return display/filter fields used by legacy target classification."""
-    return (conn or _db_layer._db).execute(
-        "SELECT game_text, player_filter, filter_json FROM target_templates "
-        "WHERE template_id=?", (template_id,)).fetchone()
-
-
-def db_target_template_resolution_info(template_id, conn=None):
-    """Return fields used by BOM target selection and randomization."""
-    return (conn or _db_layer._db).execute(
-        "SELECT filter_json, target_kind, is_random_target "
-        "FROM target_templates WHERE template_id=?", (template_id,)).fetchone()
-
-
-def db_ability_is_triggered(ability_guid, conn=None):
-    """Return the authored trigger classification for an ability."""
-    connection = conn or _db_layer._db
-    row = connection.execute(
-        "SELECT is_triggered FROM card_abilities_meta "
-        "WHERE lower(ability_guid)=?", (str(ability_guid).lower(),)
-    ).fetchone()
-    return None if row is None else bool(row[0])
-
-
-def db_ability_game_text(ability_guid, conn=None):
-    """Return authored display text for one ability."""
-    connection = conn or _db_layer._db
-    row = connection.execute(
-        "SELECT game_text FROM card_abilities_meta WHERE ability_guid=?",
-        (str(ability_guid).lower(),)).fetchone()
-    return row[0] if row else None
-
-
-def db_template_attributes(template_guid, conn=None):
-    """Return a card template's static attribute bitmask."""
-    connection = conn or _db_layer._db
-    row = connection.execute(
-        "SELECT attributes FROM card_templates WHERE guid=?",
-        (template_guid,)).fetchone()
-    return row[0] if row else None
-
-
-def db_card_mutation_info(session_id, card_uid, conn=None):
-    """Return template, owner, and type for a mutable session card."""
-    connection = conn or _db_layer._db
-    return connection.execute(
-        "SELECT template_guid, user_id, card_type FROM game_cards "
-        "WHERE session_id=? AND card_uid=?",
-        (session_id, int(card_uid))).fetchone()
-
-
-def db_card_mutation_snapshot(session_id, card_uid, conn=None):
-    """Return template, owner, zone, and state for card mutation paths."""
-    connection = conn or _db_layer._db
-    return connection.execute(
-        "SELECT template_guid, user_id, location, card_state "
-        "FROM game_cards WHERE session_id=? AND card_uid=?",
-        (session_id, int(card_uid))).fetchone()
-
-
-def db_card_modifier_state(session_id, card_uid, conn=None):
-    """Return card identity, zone, state, and permanent buff payload."""
-    return (conn or _db_layer._db).execute(
-        "SELECT template_guid, user_id, location, card_state, permanent_buffs "
-        "FROM game_cards WHERE session_id=? AND card_uid=?",
-        (session_id, int(card_uid))).fetchone()
-
-
-def db_transform_target_info(session_id, card_uid, conn=None):
-    """Return the complete card/template projection used by random transforms."""
-    return (conn or _db_layer._db).execute(
-        "SELECT gc.template_guid, gc.card_type, gc.location, gc.user_id, "
-        "gc.card_state, gc.permanent_buffs, ct.name, ct.cost, ct.rarity, "
-        "ct.threshold_json, ct.subtype, ct.attributes, gc.card_attributes "
-        "FROM game_cards gc JOIN card_templates ct ON ct.guid=gc.template_guid "
-        "WHERE gc.session_id=? AND gc.card_uid=?",
-        (session_id, int(card_uid))).fetchone()
-
-
-def db_transform_candidate_templates(conn=None):
-    """Return eligible PVP transform candidate templates.
-
-    Equipment-modified printings are not valid generated-card choices.  They
-    are encounter/deck equipment variants, even when their base card type and
-    PvP flags look collectible.
-
-    Non-ownable cards are excluded as well.  ``CardTemplate.IsOwnable`` is
-    ``CardRarity > ERarity.Land || IsBasicResource()``, so a Land-rarity card
-    that is not a basic shard is a token/encounter card that only ever exists
-    because another card creates it (Valor, Vine Goliath).  Offering those as
-    random generated cards handed the client cards the collection never
-    contains.
-    """
-    connection = conn or _db_layer._db
-    columns = {row[1] for row in connection.execute(
-        "PRAGMA table_info(card_templates)").fetchall()}
-    rarity_expr = "rarity" if "rarity" in columns else "''"
-    threshold_expr = ("threshold_json" if "threshold_json" in columns
-                      else "'[]'")
-    socket_expr = "socket_count" if "socket_count" in columns else "0"
-    is_pve_expr = "is_pve" if "is_pve" in columns else "0"
-    no_pvp_expr = "no_pvp" if "no_pvp" in columns else "0"
-    equipment_expr = ("equipment_modified" if "equipment_modified" in columns
-                      else "0")
-    attack_expr = "attack" if "attack" in columns else "0"
-    defense_expr = "defense" if "defense" in columns else "0"
-    # Columns 9/10 (printed attack/defense) are appended so existing
-    # index-based consumers keep their layout.
-    return connection.execute(
-        "SELECT guid, name, card_type, cost, " + rarity_expr + ", "
-        + threshold_expr + ", subtype, attributes, " + socket_expr
-        + ", " + attack_expr + ", " + defense_expr
-        + " FROM card_templates WHERE COALESCE(" + is_pve_expr + ", 0)=0 "
-        + "AND COALESCE(" + no_pvp_expr + ", 0)=0 "
-        + "AND COALESCE(" + equipment_expr + ", 0)=0 "
-        + "AND (COALESCE(" + rarity_expr + ", '')<>'Land' "
-        + "OR (card_type LIKE '%Resource%' "
-        + "AND COALESCE(subtype, '') LIKE '%Standard%')) "
-        "AND card_type NOT LIKE '%Choice%'"
-    ).fetchall()
-
-
-def db_resolve_talent_modified_template(template_guid, talent_guids,
-                                         conn=None):
-    """Select the authored alternate card for the active champion talents.
-
-    CardTemplate's serialized TAC is the client-owned source of the
-    alternate-version relationship and its RequiredTalents conditions.  Do
-    not select a variant by card name or by the ability text: the same rule is
-    used for every talent-modified generated card.
-    """
-    active = {str(value).lower() for value in (talent_guids or [])}
-    if not active:
-        return str(template_guid).lower()
-    from gamedata import DEFAULT_RECORD_STORE
-    from rules_port.tac import (_tac_attr_hash, decode_tac_tree)
-    record = DEFAULT_RECORD_STORE.get("CardTemplate", str(template_guid))
-    if record is None:
-        return str(template_guid).lower()
-    serialized = record.field("m_SerializedTAC", {}) or {}
-    data = serialized.get("data") if isinstance(serialized, dict) else serialized
-    tree = decode_tac_tree(data)
-    alternates = tree.get(_tac_attr_hash("AlternateVersions"), [])
-    chosen = str(template_guid).lower()
-    best = 0
-    connection = conn or _db_layer._db
-    for alternate in alternates if isinstance(alternates, list) else []:
-        if not isinstance(alternate, dict):
-            continue
-        guid = alternate.get(_tac_attr_hash("Guid"))
-        condition = alternate.get(_tac_attr_hash("Condition"), {})
-        required = condition.get(_tac_attr_hash("RequiredTalents"), []) \
-            if isinstance(condition, dict) else []
-        required = {
-            str(item.get(_tac_attr_hash("Guid"))).lower()
-            for item in required if isinstance(item, dict)
-        }
-        if not guid or not required.issubset(active) or len(required) <= best:
-            continue
-        exists = connection.execute(
-            "SELECT 1 FROM card_templates WHERE guid=? LIMIT 1", (str(guid),)
-        ).fetchone()
-        if exists:
-            chosen, best = str(guid).lower(), len(required)
-    return chosen
-
-
-def db_copy_template_payload(template_guid, conn=None, talent_guids=None):
-    """Return typed fields needed to materialize a generated copy."""
-    resolved = db_resolve_talent_modified_template(
-        template_guid, talent_guids, conn=conn)
-    connection = conn or _db_layer._db
-    row = connection.execute(
-        "SELECT card_type, abilities_json, attributes FROM card_templates "
-        "WHERE guid=?", (resolved,)).fetchone()
-    if row is None:
-        # A champion template (the target of a champion transform) has no card
-        # row; its payload is its ability list, as the champion was built from.
-        abilities = [str(value[0]).lower() for value in connection.execute(
-            "SELECT ability_guid FROM champion_abilities WHERE champion_guid=? "
-            "ORDER BY ability_guid", (str(resolved).lower(),)).fetchall()]
-        if abilities:
-            return ("Champion", json.dumps(abilities), 0)
-    return row
-
-
-def db_next_game_card_row_id(session_id, conn=None):
-    """Allocate the historical per-session generated-card row ID."""
-    row = (conn or _db_layer._db).execute(
-        "SELECT COALESCE(MAX(id), 10000) + 1 FROM game_cards "
-        "WHERE session_id=?", (session_id,)).fetchone()
-    return int(row[0])
-
-
-def db_deck_next_position(session_id, owner_id, conn=None):
-    """Return the next stable position for a generated deck card."""
-    row = (conn or _db_layer._db).execute(
-        "SELECT COALESCE(MAX(position), -1) + 1 FROM game_cards "
-        "WHERE session_id=? AND user_id=? AND location='deck'",
-        (session_id, int(owner_id))).fetchone()
-    return int(row[0])
-
-
-def db_insert_deck_card_at(session_id, user_id, card_uid, index,
-                           from_bottom=False, conn=None):
-    """Place one card in a deck at a C# ``AddCardAtIndexAndLocation`` slot.
-
-    ``index`` counts from the top (index 0 is the top card) or, when
-    ``from_bottom`` is set, from the bottom (index 0 is the last card), as
-    C# does for ``ECardLocations.Bottom``.  The card's own row is excluded
-    from the ordering and every other deck card keeps its relative order.
-    """
-    connection = conn or _db_layer._db
-    rows = connection.execute(
-        "SELECT card_uid FROM game_cards "
-        "WHERE session_id=? AND user_id=? AND location='deck' "
-        "ORDER BY position", (session_id, int(user_id))).fetchall()
-    others = [int(row[0]) for row in rows if int(row[0]) != int(card_uid)]
-    index = min(max(int(index), 0), len(others))
-    split = len(others) - index if from_bottom else index
-    ordered = others[:split] + [int(card_uid)] + others[split:]
-    assignments = " ".join("WHEN ? THEN ?" for _uid in ordered)
-    params = []
-    for position, uid in enumerate(ordered):
-        params.extend((uid, position))
-    marks = ",".join("?" for _uid in ordered)
-    connection.execute(
-        "UPDATE game_cards SET position=CASE card_uid "
-        + assignments + " ELSE position END "
-        "WHERE session_id=? AND user_id=? AND card_uid IN (" + marks + ")",
-        (*params, session_id, int(user_id), *ordered))
-    if connection is _db_layer._db:
-        connection.commit()
-    return ordered.index(int(card_uid))
-
-
-def db_randomly_insert_deck_cards(session_id, user_id, card_uids,
-                                  connection=None, conn=None, rng=None):
-    """Reinsert selected cards at random deck slots without shuffling others.
-
-    This is the persistence operation behind ``shuffle into deck`` effects.
-    The selected cards are randomized among random slots while the relative
-    order of all unselected cards remains unchanged.  ``rng`` is the session
-    RNG when available; the stdlib RNG is used otherwise.
-    """
-    connection = connection or conn or _db_layer._db
-    wanted = {int(uid) for uid in (card_uids or [])}
-    if not wanted:
-        return []
-    rows = connection.execute(
-        "SELECT card_uid FROM game_cards "
-        "WHERE session_id=? AND user_id=? AND location='deck' "
-        "ORDER BY position", (session_id, user_id)).fetchall()
-    if not rows:
-        return []
-    if len(wanted) == 1:
-        card_uid = next(iter(wanted))
-        exists = connection.execute(
-            "SELECT 1 FROM game_cards WHERE session_id=? AND user_id=? "
-            "AND card_uid=? LIMIT 1",
-            (session_id, user_id, card_uid)).fetchone()
-        if not exists:
-            return []
-        # Rebuild the deck order with the card at a uniformly random slot.
-        # ``rows`` already contains the card when the caller moved it into the
-        # deck before randomizing its slot (the "put into deck" leaf does
-        # exactly this), so exclude it before choosing the slot.  Shifting the
-        # in-place positions instead left a gap and could place the card at
-        # ``deck_count`` (past the end).
-        deck_uids = [int(row[0]) for row in rows]
-        others = [uid for uid in deck_uids if uid != int(card_uid)]
-        insert_position = deck_rng_index(rng, len(others) + 1)
-        ordered = (others[:insert_position] + [int(card_uid)]
-                   + others[insert_position:])
-        assignments = " ".join("WHEN ? THEN ?" for _uid in ordered)
-        params = []
-        for position, uid in enumerate(ordered):
-            params.extend((uid, position))
-        marks = ",".join("?" for _ in ordered)
-        connection.execute(
-            "UPDATE game_cards SET location='deck', position=CASE card_uid "
-            + assignments + " ELSE position END "
-            "WHERE session_id=? AND user_id=? AND card_uid IN (" + marks + ")",
-            (*params, session_id, user_id, *ordered))
-        if connection is _shared_db_connection():
-            connection.commit()
-        return [card_uid]
-    selected = [int(row[0]) for row in rows if int(row[0]) in wanted]
-    if not selected:
-        return []
-    for i in range(len(selected) - 1, 0, -1):
-        j = deck_rng_index(rng, i + 1)
-        selected[i], selected[j] = selected[j], selected[i]
-    slots = list(range(len(rows)))
-    for i in range(len(slots) - 1, 0, -1):
-        j = deck_rng_index(rng, i + 1)
-        slots[i], slots[j] = slots[j], slots[i]
-    selected_by_slot = dict(zip(sorted(slots[:len(selected)]), selected))
-    remaining = [int(row[0]) for row in rows if int(row[0]) not in wanted]
-    remaining_iter = iter(remaining)
-    ordered = []
-    for rank in range(len(rows)):
-        ordered.append(selected_by_slot[rank] if rank in selected_by_slot
-                       else next(remaining_iter))
-    # Assign the complete permutation in one set-based statement.  The CASE
-    # expression gives each card its final position without issuing one UPDATE
-    # per card through executemany().
-    assignments = " ".join(
-        "WHEN ? THEN ?" for _card_uid in ordered)
-    params = []
-    for position, card_uid in enumerate(ordered):
-        params.extend((card_uid, position))
-    connection.execute(
-        "UPDATE game_cards SET position=CASE card_uid "
-        + assignments + " END "
-        "WHERE session_id=? AND user_id=? AND location='deck'",
-        (*params, session_id, user_id))
-    if connection is _shared_db_connection():
-        connection.commit()
-    return [card_uid for card_uid in ordered if card_uid in wanted]
-
-
-def db_set_card_played_to_zone(session_id, card_uid, location, conn=None):
-    """Move a played card to its resolved zone at the client sentinel slot."""
-    connection = conn or _db_layer._db
-    cursor = connection.execute(
-        "UPDATE game_cards SET location=?, position=? "
-        "WHERE session_id=? AND card_uid=?",
-        (location, PLAYED_CARD_POSITION, session_id, int(card_uid)),
-    )
-    if conn is None:
-        connection.commit()
-    return cursor.rowcount
-
-
-def db_insert_generated_card(session_id, owner_id, card_uid, template_guid,
-                             location, card_type, abilities_json, attributes,
-                             row_id, conn=None, position=0, card_state=0,
-                             owner_user_id=None, original_template_guid=None,
-                             gems=None, permanent_buffs=None):
-    """Insert a generated copy in the caller's transaction."""
-    connection = conn or _db_layer._db
-    columns = ["id", "session_id", "user_id", "card_uid", "template_guid",
-               "card_template_id", "location", "position", "card_state",
-               "card_abilities", "card_type", "card_attributes"]
-    values = [int(row_id), session_id, int(owner_id), int(card_uid),
-              template_guid, template_guid, location, int(position),
-              int(card_state), abilities_json or "[]", card_type,
-              int(attributes or 0)]
-    existing = {row[1] for row in connection.execute(
-        "PRAGMA table_info(game_cards)").fetchall()}
-    if "gems" in existing and gems is None:
-        gems = db_empty_socket_gems(template_guid, conn=connection)
-    optional = {
-        "owner_user_id": owner_id if owner_user_id is None else owner_user_id,
-        "original_template_guid": (template_guid if original_template_guid is None
-                                    else original_template_guid),
-        "gems": gems,
-        "permanent_buffs": permanent_buffs,
-    }
-    for column, value in optional.items():
-        if column in existing and value is not None:
-            columns.append(column)
-            values.append(value)
-    marks = ",".join("?" for _ in columns)
-    return connection.execute(
-        "INSERT INTO game_cards (" + ",".join(columns) + ") VALUES (" +
-        marks + ")", values)
-
-
-def db_ability_effect_metadata_rows(ability_guid, conn=None):
-    """Return effect IDs/types for creation-replacement inspection."""
-    return (conn or _db_layer._db).execute(
-        "SELECT effect_guid, effect_type FROM ability_effects "
-        "WHERE ability_guid=?", (str(ability_guid).lower(),)).fetchall()
-
-
-def db_card_template_ability_payload(template_guid, conn=None):
-    """Return the serialized ability list for a card template."""
-    row = (conn or _db_layer._db).execute(
-        "SELECT abilities_json FROM card_templates WHERE guid=?",
-        (template_guid,)).fetchone()
-    return row[0] if row else None
-
-
-def db_choice_card_rows(session_id, conn=None):
-    """Return temporary choice cards awaiting selection."""
-    return (conn or _db_layer._db).execute(
-        "SELECT card_uid, user_id, template_guid, card_type FROM game_cards "
-        "WHERE session_id=? AND location='choosing'", (session_id,)).fetchall()
-
-
-def db_move_choice_to_played_resources(session_id, card_uid, conn=None):
-    """Consume a temporary choice card without granting resources."""
-    return (conn or _db_layer._db).execute(
-        "UPDATE game_cards SET location='PlayedResources', position=0, "
-        "card_state=0 WHERE session_id=? AND card_uid=?",
-        (session_id, int(card_uid)))
-
-
-def db_template_catalog_for_filter(conn=None):
-    """Return typed card-template fields used by random-card filters."""
-    return (conn or _db_layer._db).execute(
-        "SELECT guid, name, card_type, cost, attack, defense, attributes, "
-        "subtype, rarity, socket_count, threshold_json, is_pve, no_pvp "
-        "FROM card_templates").fetchall()
-
-
-def db_add_card_cost_modifier(session_id, card_uid, delta, conn=None):
-    """Apply an additive cost modifier without forcing a commit."""
-    return (conn or _db_layer._db).execute(
-        "UPDATE game_cards SET card_cost_mod = "
-        "COALESCE(card_cost_mod, 0) + ? WHERE session_id=? AND card_uid=?",
-        (int(delta), session_id, int(card_uid)))
-
-
-def db_tame_card(session_id, card_uid, permanent_buffs, card_state, conn=None):
-    """Persist capture markers and move the captured card to the void."""
-    return (conn or _db_layer._db).execute(
-        "UPDATE game_cards SET permanent_buffs=?, location='void', "
-        "position=0, card_state=? WHERE session_id=? AND card_uid=?",
-        (permanent_buffs, int(card_state), session_id, int(card_uid)))
-
-
-def db_card_owner_id(session_id, card_uid, conn=None):
-    """Return the persisted controller of a session card."""
-    connection = conn or _db_layer._db
-    row = connection.execute(
-        "SELECT user_id FROM game_cards WHERE session_id=? AND card_uid=?",
-        (session_id, int(card_uid))).fetchone()
-    return row[0] if row else None
-
-
-def db_card_original_owner_id(session_id, card_uid, conn=None):
-    """Return original owner, falling back to current controller."""
-    row = (conn or _db_layer._db).execute(
-        "SELECT COALESCE(owner_user_id, user_id) FROM game_cards "
-        "WHERE session_id=? AND card_uid=?",
-        (session_id, int(card_uid))).fetchone()
-    return row[0] if row else None
-
-
-def db_card_state_value(session_id, card_uid, conn=None):
-    """Return the persisted state bitmask for one session card."""
-    row = (conn or _db_layer._db).execute(
-        "SELECT card_state FROM game_cards WHERE session_id=? AND card_uid=?",
-        (session_id, int(card_uid))).fetchone()
-    return row[0] if row else None
-
-
-def db_add_temporary_attributes(session_id, card_uid, attributes, conn=None,
-                                owner_id=None, boundary=None):
-    """OR temporary card attributes and optionally record their expiry.
-
-    A grant written without an expiry rule is cleared at the affected card's
-    next owner boundary, which is wrong for a grant with an authored duration
-    that is issued inside the same turn-start sequence it belongs to (a
-    Tunneling Surface resolves at StartTurn and the Prep that follows would
-    clear it before the turn it was granted for has ended).  Callers that know
-    the duration pass ``owner_id``/``boundary`` so the shared
-    ``clear_expired_temporary_attributes`` readers expire it at the right
-    boundary; the metadata key and rule shape are theirs.
-    """
-    connection = conn or _db_layer._db
-    connection.execute(
-        "UPDATE game_cards SET temporary_attributes = "
-        "COALESCE(temporary_attributes, 0) | ? "
-        "WHERE session_id=? AND card_uid=?",
-        (int(attributes), session_id, int(card_uid)))
-    if not attributes or owner_id is None or not boundary:
-        return
-    row = connection.execute(
-        "SELECT COALESCE(temporary_attributes, 0), temporary_buffs "
-        "FROM game_cards WHERE session_id=? AND card_uid=?",
-        (session_id, int(card_uid))).fetchone()
-    if not row:
-        return
-    bits = int(row[0] or 0) & int(attributes)
-    try:
-        buffs = json.loads(row[1] or "{}")
-    except (TypeError, ValueError, json.JSONDecodeError):
-        buffs = {}
-    if not isinstance(buffs, dict):
-        buffs = {}
-    metadata = buffs.setdefault("__attribute_expirations", {})
-    for bit in (1 << index for index in range(bits.bit_length())
-                if bits & (1 << index)):
-        metadata[str(bit)] = {"owner": int(owner_id),
-                              "boundary": str(boundary)}
-    connection.execute(
-        "UPDATE game_cards SET temporary_buffs=? "
-        "WHERE session_id=? AND card_uid=?",
-        (json.dumps(buffs, separators=(",", ":"), sort_keys=True), session_id,
-         int(card_uid)))
-
-
-def db_warzone_cards_with_state(session_id, conn=None):
-    """Return all warzone cards with template, owner, and state."""
-    return (conn or _db_layer._db).execute(
-        "SELECT card_uid, template_guid, user_id, card_state "
-        "FROM game_cards WHERE session_id=? AND location='warzone'",
-        (session_id,)).fetchall()
-
-
-def db_warzone_troop_state_rows(session_id, conn=None):
-    """Return mutable combat fields for warzone troops."""
-    return (conn or _db_layer._db).execute(
-        "SELECT gc.card_uid, gc.template_guid, ct.defense, "
-        "gc.card_defense_mod, gc.card_damage, gc.permanent_buffs, "
-        "gc.temporary_buffs FROM game_cards gc "
-        "JOIN card_templates ct ON ct.guid=gc.template_guid "
-        "WHERE gc.session_id=? AND gc.location='warzone' "
-        "AND gc.card_type LIKE '%Troop%'", (session_id,)).fetchall()
-
-
-def db_warzone_card_heal_rows(session_id, conn=None):
-    """Return owner, type and buffs for every warzone card (end-of-turn heal)."""
-    return (conn or _db_layer._db).execute(
-        "SELECT card_uid, user_id, template_guid, card_type, "
-        "permanent_buffs, temporary_buffs FROM game_cards "
-        "WHERE session_id=? AND location='warzone'", (session_id,)).fetchall()
-
-
-def db_card_death_info(session_id, card_uid, conn=None):
-    """Return template, controller, and effective authored attributes."""
-    return (conn or _db_layer._db).execute(
-        "SELECT gc.template_guid, gc.user_id, "
-        "(ct.attributes | gc.card_attributes) FROM game_cards gc "
-        "JOIN card_templates ct ON ct.guid=gc.template_guid "
-        "WHERE gc.session_id=? AND gc.card_uid=?",
-        (session_id, int(card_uid))).fetchone()
-
-
-def db_kill_card_to_discard(session_id, card_uid, clear_mask, dead_state,
-                            conn=None):
-    """Move a troop to its discard pile and apply the death state reset."""
-    connection = conn or _db_layer._db
-    owner_row = connection.execute(
-        "SELECT user_id FROM game_cards WHERE session_id=? AND card_uid=?",
-        (session_id, int(card_uid))).fetchone()
-    if not owner_row:
-        return None
-    owner = int(owner_row[0])
-    position = connection.execute(
-        "SELECT COALESCE(MAX(position) + 1, 1) FROM game_cards "
-        "WHERE session_id=? AND user_id=? AND location='discard'",
-        (session_id, owner)).fetchone()[0]
-    connection.execute(
-        "UPDATE game_cards SET user_id=?, location='discard', position=?, "
-        "card_state=(card_state & ~?) | ?, card_damage=0, "
-        "temporary_buffs='{}', temporary_attributes=0 "
-        "WHERE session_id=? AND card_uid=?",
-        (owner, int(position or 1), int(clear_mask), int(dead_state),
-         session_id, int(card_uid)))
-    return owner
-
-
-def db_transform_card_instance(session_id, card_uid, template_guid, card_type,
-                               abilities_json, attributes, location, position,
-                               card_state, conn=None,
-                               preserve_instance_state=False, gems=None):
-    """Apply the canonical template projection for an existing card instance."""
-    connection = conn or _db_layer._db
-    if preserve_instance_state:
-        return connection.execute(
-            "UPDATE game_cards SET template_guid=?, card_template_id=?, "
-            "card_type=?, card_abilities=?, card_attributes=?, location=?, "
-            "position=?, card_state=?, gems=COALESCE(?,gems) "
-            "WHERE session_id=? AND card_uid=?",
-            (template_guid, template_guid, card_type, abilities_json,
-             int(attributes or 0), location, int(position), int(card_state),
-             gems, session_id, int(card_uid)))
-    return (conn or _db_layer._db).execute(
-        "UPDATE game_cards SET template_guid=?, card_template_id=?, "
-        "card_type=?, card_abilities=?, card_attributes=?, "
-        "temporary_attributes=0, temporary_buffs='{}', location=?, "
-        "position=?, card_state=?, gems=COALESCE(?,gems) "
-        "WHERE session_id=? AND card_uid=?",
-        (template_guid, template_guid, card_type, abilities_json,
-         int(attributes or 0), location, int(position), int(card_state),
-         gems, session_id, int(card_uid)))
-
-
-def db_capture_original_gems(session_id, card_uid, conn=None):
-    """Save a card's pre-transform active gems once, as C# does in Card."""
-    connection = conn or _db_layer._db
-    cursor = connection.execute(
-        "UPDATE game_cards SET original_gems=gems "
-        "WHERE session_id=? AND card_uid=? AND original_gems IS NULL "
-        "AND (original_template_guid IS NULL OR original_template_guid='' "
-        "OR original_template_guid=template_guid)",
-        (session_id, int(card_uid)))
-    if conn is None:
-        connection.commit()
-    return cursor.rowcount
-
-
-def db_card_original_gems(session_id, card_uid, conn=None):
-    """Return the active gems recorded before the card's first transform."""
-    row = (conn or _db_layer._db).execute(
-        "SELECT original_gems FROM game_cards "
-        "WHERE session_id=? AND card_uid=?", (session_id, int(card_uid))
-    ).fetchone()
-    return row[0] if row and row[0] is not None else None
-
-
-def db_copy_transform_instance_state(session_id, target_uid, source_uid, *,
-                                     is_replica=False, conn=None):
-    """Copy persisted ``Card.CopyFrom`` fields for TransformIntoCopy.
-
-    All copies take the source's active gems, card integer variables, and
-    escalation count. Ordinary copies also take damage and use state and add
-    the source's counters/shields. Active C# effect instances, activation data,
-    extended/resource-spend fields, and session-only boon maps are not
-    represented by these rows.
-    """
-    connection = conn or _db_layer._db
-    session_id = int(session_id)
-    target_uid = int(target_uid)
-    source_uid = int(source_uid)
-    with _CARD_COOLDOWN_LOCK:
-        target = connection.execute(
-            "SELECT gems, card_damage, card_uses, permanent_buffs, "
-            "temporary_buffs FROM game_cards "
-            "WHERE session_id=? AND card_uid=?", (session_id, target_uid)
-        ).fetchone()
-        source = connection.execute(
-            "SELECT gems, card_damage, card_uses, permanent_buffs, "
-            "temporary_buffs FROM game_cards "
-            "WHERE session_id=? AND card_uid=?", (session_id, source_uid)
-        ).fetchone()
-        if not target or not source:
-            return 0
-
-        def read_payload(value):
-            try:
-                parsed = json.loads(value or "{}")
-            except (TypeError, ValueError, json.JSONDecodeError):
-                parsed = {}
-            return parsed if isinstance(parsed, dict) else {}
-
-        permanent = read_payload(target[3])
-        temporary = read_payload(target[4])
-        source_permanent = read_payload(source[3])
-        source_temporary = read_payload(source[4])
-
-        # Card.CopyFrom copies these fields even when making a replica.
-        source_variables = source_permanent.get("card_integer_variables", {})
-        if isinstance(source_variables, dict) and source_variables:
-            permanent["card_integer_variables"] = source_variables
-        else:
-            permanent.pop("card_integer_variables", None)
-        try:
-            permanent["escalation_count"] = int(
-                source_permanent.get("escalation_count", 1))
-        except (TypeError, ValueError):
-            permanent["escalation_count"] = 1
-
-        if is_replica:
-            return connection.execute(
-                "UPDATE game_cards SET gems=?, permanent_buffs=? "
-                "WHERE session_id=? AND card_uid=?",
-                (source[0], json.dumps(permanent, separators=(",", ":")),
-                 session_id, target_uid)).rowcount
-
-        target_counters = permanent.setdefault("counters", {})
-        source_counters = source_permanent.get("counters", {})
-        if isinstance(target_counters, dict) and isinstance(source_counters, dict):
-            for name, value in source_counters.items():
-                target_counters[name] = (
-                    int(target_counters.get(name, 0) or 0) + int(value or 0))
-        target_counter_guids = permanent.setdefault("counter_guids", {})
-        source_counter_guids = source_permanent.get("counter_guids", {})
-        if isinstance(target_counter_guids, dict) and isinstance(
-                source_counter_guids, dict):
-            target_counter_guids.update(source_counter_guids)
-
-        for destination, copied in ((permanent, source_permanent),
-                                    (temporary, source_temporary)):
-            existing = destination.get("damage_shields", [])
-            incoming = copied.get("damage_shields", [])
-            if not isinstance(existing, list):
-                existing = []
-            if isinstance(incoming, list) and incoming:
-                destination["damage_shields"] = existing + incoming
-        try:
-            source_uses = json.loads(source[2] or "{}")
-        except (TypeError, ValueError, json.JSONDecodeError):
-            source_uses = {}
-        if not isinstance(source_uses, dict):
-            source_uses = {}
-        return connection.execute(
-            "UPDATE game_cards SET gems=?, card_damage=?, card_uses=?, "
-            "permanent_buffs=?, temporary_buffs=? "
-            "WHERE session_id=? AND card_uid=?",
-            (source[0], int(source[1] or 0),
-             json.dumps(source_uses, separators=(",", ":")),
-             json.dumps(permanent, separators=(",", ":")),
-             json.dumps(temporary, separators=(",", ":")),
-             session_id, target_uid)).rowcount
-
-
-def db_warzone_card_state_attributes(session_id, card_uid, conn=None):
-    """Return persisted state and temporary attributes for one warzone card."""
-    return (conn or _db_layer._db).execute(
-        "SELECT card_state, temporary_attributes FROM game_cards "
-        "WHERE session_id=? AND card_uid=?", (session_id, int(card_uid))
-    ).fetchone()
-
-
-def db_card_source_info(session_id, card_uid, conn=None):
-    """Return template, type, zone, and owner for a public source card."""
-    return (conn or _db_layer._db).execute(
-        "SELECT template_guid, card_type, location, user_id FROM game_cards "
-        "WHERE session_id=? AND card_uid=?",
-        (session_id, int(card_uid))).fetchone()
-
-
-def db_card_command_info(session_id, user_id, card_uid, conn=None):
-    """Return instance/template IDs and zone for a commanded card."""
-    return (conn or _db_layer._db).execute(
-        "SELECT card_template_id, location, template_guid FROM game_cards "
-        "WHERE session_id=? AND user_id=? AND card_uid=?",
-        (session_id, int(user_id), int(card_uid))).fetchone()
-
-
-def db_template_projection(template_guid, conn=None):
-    """Return template fields required for a CardUpdated projection."""
-    return (conn or _db_layer._db).execute(
-        "SELECT card_type, cost, attack, defense, threshold_json, abilities_json "
-        "FROM card_templates WHERE guid=?", (template_guid,)).fetchone()
-
-
-def db_ability_target_effect_rows(ability_guid, conn=None):
-    """Return target-indexed effects in authored order."""
-    return (conn or _db_layer._db).execute(
-        "SELECT target_index, effect_type FROM ability_effects "
-        "WHERE ability_guid=? AND target_index>=0 ORDER BY effect_order",
-        (str(ability_guid).lower(),)).fetchall()
-
-
-def db_champion_trigger_ability_guids(champion_guid, conn=None):
-    """Return metadata-indexed triggered abilities for a champion."""
-    return (conn or _db_layer._db).execute(
-        "SELECT ca.ability_guid FROM champion_abilities ca "
-        "JOIN card_abilities_meta cam ON cam.ability_guid=ca.ability_guid "
-        "WHERE ca.champion_guid=? AND cam.trigger_event_type IS NOT NULL "
-        "AND cam.trigger_event_type != '' ORDER BY ca.ability_guid",
-        (str(champion_guid),)).fetchall()
-
-
-def db_card_cost(session_id, card_uid, conn=None):
-    """Return the printed cost for a session card."""
-    row = (conn or _db_layer._db).execute(
-        "SELECT ct.cost FROM game_cards gc JOIN card_templates ct "
-        "ON ct.guid=gc.template_guid WHERE gc.session_id=? AND gc.card_uid=?",
-        (session_id, int(card_uid))).fetchone()
-    return row[0] if row else None
-
-
-def db_warzone_ability_cards(session_id, include_non_troops=False, conn=None,
-                            owner_id=0):
-    """Return AI-eligible warzone cards and their authored ability payload."""
-    sql = ("SELECT gc.card_uid, gc.template_guid, gc.card_state, ct.attributes, "
-           "gc.card_attributes, gc.card_abilities FROM game_cards gc "
-           "JOIN card_templates ct ON ct.guid=gc.template_guid "
-           "WHERE gc.session_id=? AND gc.user_id=? AND gc.location='warzone'")
-    if not include_non_troops:
-        sql += " AND gc.card_type LIKE '%Troop%'"
-    return (conn or _db_layer._db).execute(
-        sql, (session_id, int(owner_id))).fetchall()
-
-
-def db_warzone_troop_stats(session_id, user_id, conn=None):
-    """Return UID and mutable/base combat stats for a player's troops."""
-    return (conn or _db_layer._db).execute(
-        "SELECT gc.card_uid, ct.attack, ct.defense, gc.card_defense_mod, "
-        "gc.card_damage, gc.card_state, gc.position FROM game_cards gc "
-        "JOIN card_templates ct ON ct.guid=gc.template_guid "
-        "WHERE gc.session_id=? AND gc.user_id=? AND gc.location='warzone' "
-        "AND gc.card_type LIKE '%Troop%'",
-        (session_id, user_id)).fetchall()
-
-
-def db_warzone_card_stats(session_id, user_id=None, conn=None):
-    """Return UID and combat stats for warzone permanents."""
-    sql = ("SELECT gc.card_uid, ct.attack, ct.defense, gc.card_defense_mod, "
-           "gc.card_damage, gc.card_state, gc.position, gc.card_type "
-           "FROM game_cards gc JOIN card_templates ct ON ct.guid=gc.template_guid "
-           "WHERE gc.session_id=? AND gc.location='warzone'")
-    params = [session_id]
-    if user_id is not None:
-        sql += " AND gc.user_id=?"
-        params.append(user_id)
-    return (conn or _db_layer._db).execute(sql, params).fetchall()
-
-
-def db_card_state_rows(session_id, card_uids, conn=None):
-    """Return ``(card_uid, card_state)`` for selected session cards."""
-    if not card_uids:
-        return []
-    marks = ",".join("?" for _ in card_uids)
-    return (conn or _db_layer._db).execute(
-        "SELECT card_uid, card_state FROM game_cards WHERE session_id=? "
-        "AND card_uid IN (" + marks + ")",
-        [session_id] + [int(uid) for uid in card_uids]).fetchall()
-
-
-def db_ai_hand_summary(session_id, conn=None):
-    """Return AI hand count and resource count in position-independent form."""
-    return (conn or _db_layer._db).execute(
-        "SELECT COUNT(*), SUM(CASE WHEN COALESCE(ct.card_type, gc.card_type)="
-        "'Resource' THEN 1 ELSE 0 END) FROM game_cards gc "
-        "LEFT JOIN card_templates ct ON ct.guid=gc.template_guid "
-        "WHERE gc.session_id=? AND gc.user_id=0 AND gc.location='hand'",
-        (session_id,)).fetchone()
-
-
-def db_ai_zone_rows(session_id, zone, limit=None, conn=None):
-    """Return AI game-card IDs/Uids ordered by authoritative deck position."""
-    sql = ("SELECT id, card_uid FROM game_cards WHERE session_id=? "
-           "AND user_id=0 AND location=? ORDER BY position")
-    params = [session_id, zone]
-    if limit is not None:
-        sql += " LIMIT ?"
-        params.append(int(limit))
-    return (conn or _db_layer._db).execute(sql, params).fetchall()
-
-
-def db_deck_top_card_details(session_id, user_id, conn=None):
-    """Return the top deck row needed for a draw transaction."""
-    return (conn or _db_layer._db).execute(
-        "SELECT id, card_uid, card_template_id, template_guid "
-        "FROM game_cards WHERE session_id=? AND user_id=? AND location='deck' "
-        "ORDER BY position LIMIT 1", (session_id, user_id)).fetchone()
-
-
-def db_move_card_row_to_hand(session_id, row_id, conn=None):
-    """Move one identified session-card row into hand."""
-    return (conn or _db_layer._db).execute(
-        "UPDATE game_cards SET location='hand', position=100 "
-        "WHERE session_id=? AND id=?", (session_id, int(row_id))).rowcount
-
-
-def db_draw_card_to_hand(session_id, row_id, owner_user_id, conn=None):
-    """Move one deck row to hand and assign its current controller."""
-    return (conn or _db_layer._db).execute(
-        "UPDATE game_cards SET user_id=?, location='hand', position=100 "
-        "WHERE session_id=? AND id=?",
-        (int(owner_user_id), session_id, int(row_id))).rowcount
-
-
-def db_void_card(session_id, card_uid, conn=None):
-    """Move a session card to void without forcing a commit."""
-    return (conn or _db_layer._db).execute(
-        "UPDATE game_cards SET location='void', position=0 "
-        "WHERE session_id=? AND card_uid=?",
-        (session_id, int(card_uid))).rowcount
-
-
-def db_set_card_owner(session_id, card_uid, owner_user_id, conn=None):
-    """Change current control of a session card without changing provenance."""
-    return (conn or _db_layer._db).execute(
-        "UPDATE game_cards SET user_id=? WHERE session_id=? AND card_uid=?",
-        (int(owner_user_id), session_id, int(card_uid))).rowcount
-
-
-def db_steal_card_to_hand(session_id, card_uid, owner_user_id, conn=None):
-    """Take a deck card into hand, clearing transient state."""
-    return (conn or _db_layer._db).execute(
-        "UPDATE game_cards SET user_id=?, location='hand', position=100, "
-        "card_state=0 WHERE session_id=? AND card_uid=?",
-        (int(owner_user_id), session_id, int(card_uid))).rowcount
-
-
-def db_zone_card_count(session_id, user_id, zone, card_type=None, conn=None):
-    """Count cards in a player's session zone, optionally by exact type."""
-    connection = conn or _db_layer._db
-    sql = "SELECT COUNT(*) FROM game_cards WHERE session_id=? AND user_id=? AND location=?"
-    params = [session_id, user_id, zone]
-    if card_type is not None:
-        sql += " AND card_type=?"
-        params.append(card_type)
-    row = connection.execute(sql, params).fetchone()
-    return int(row[0] or 0) if row else 0
-
-
-def db_warzone_defender_rows(session_id, user_id, tapped_mask, conn=None):
-    """Return untapped troop UIDs and effective attributes for blocking."""
-    connection = conn or _db_layer._db
-    return connection.execute(
-        "SELECT gc.card_uid, (ct.attributes | gc.card_attributes | "
-        "COALESCE(gc.temporary_attributes, 0)) "
-        "FROM game_cards gc JOIN card_templates ct ON ct.guid=gc.template_guid "
-        "WHERE gc.session_id=? AND gc.user_id=? AND gc.location='warzone' "
-        "AND gc.card_type LIKE '%Troop%' AND (gc.card_state & ?) = 0",
-        (session_id, user_id, tapped_mask)).fetchall()
-
-
-def db_hand_card_uids(session_id, user_id, conn=None):
-    """Return hand card UIDs in authoritative position order."""
-    connection = conn or _db_layer._db
-    return connection.execute(
-        "SELECT card_uid FROM game_cards WHERE session_id=? AND user_id=? "
-        "AND location='hand' ORDER BY position", (session_id, user_id)
-    ).fetchall()
-
-
-def db_card_zone_projection(session_id, card_uid, conn=None):
-    """Return template/type/state for a client zone update."""
-    connection = conn or _db_layer._db
-    return connection.execute(
-        "SELECT template_guid, card_type, card_state FROM game_cards "
-        "WHERE session_id=? AND card_uid=?", (session_id, int(card_uid))
-    ).fetchone()
-
-
-def db_card_gem_type(session_id, card_uid, conn=None):
-    """Return the socketed gem type persisted on a session card."""
-    row = (conn or _db_layer._db).execute(
-        "SELECT gems FROM game_cards WHERE session_id=? AND card_uid=?",
-        (session_id, int(card_uid))).fetchone()
-    return row[0] if row else None
-
-
-def db_card_owner_zone_state(session_id, card_uid, conn=None):
-    """Return owner, zone, and state for a selected cost card."""
-    connection = conn or _db_layer._db
-    return connection.execute(
-        "SELECT user_id, location, card_state FROM game_cards "
-        "WHERE session_id=? AND card_uid=?", (session_id, int(card_uid))
-    ).fetchone()
-
-
-def db_card_sacrifice_info(session_id, card_uid, conn=None):
-    """Return owner, zone, and type for a sacrifice validation."""
-    connection = conn or _db_layer._db
-    return connection.execute(
-        "SELECT user_id, location, card_type FROM game_cards "
-        "WHERE session_id=? AND card_uid=?", (session_id, int(card_uid))
-    ).fetchone()
-
-
-def db_ordered_zone_rows(session_id, user_id, zone, conn=None):
-    """Return database ID and card UID rows in zone position order."""
-    return (conn or _db_layer._db).execute(
-        "SELECT id, card_uid FROM game_cards WHERE session_id=? AND user_id=? "
-        "AND location=? ORDER BY position, id", (session_id, user_id, zone)
-    ).fetchall()
-
-
-def db_card_combat_identity(session_id, card_uid, conn=None):
-    """Return owner, zone, template, and mutable combat stats for a card."""
-    return (conn or _db_layer._db).execute(
-        "SELECT gc.user_id, gc.location, gc.template_guid, "
-        "COALESCE(ct.attack,0)+COALESCE(gc.card_attack_mod,0), "
-        "COALESCE(ct.defense,0)+COALESCE(gc.card_defense_mod,0) "
-        "FROM game_cards gc LEFT JOIN card_templates ct "
-        "ON ct.guid=gc.template_guid WHERE gc.session_id=? AND gc.card_uid=?",
-        (session_id, int(card_uid))).fetchone()
-
-
-def db_warzone_troop_uids(session_id, conn=None):
-    """Return warzone troop UIDs in stable database order."""
-    return (conn or _db_layer._db).execute(
-        "SELECT card_uid FROM game_cards WHERE session_id=? "
-        "AND location='warzone' AND card_type LIKE '%Troop%'",
-        (session_id,)).fetchall()
-
-
-def db_counter_template_name(template_id, conn=None):
-    """Return the display name for a serialized counter template ID."""
-    row = (conn or _db_layer._db).execute(
-        "SELECT name FROM card_counter_templates WHERE template_id=?",
-        (template_id,)).fetchone()
-    return row[0] if row else None
-
-
-def db_counter_template_id(name, conn=None):
-    """Return the counter-template ID matching a display name."""
-    row = (conn or _db_layer._db).execute(
-        "SELECT template_id FROM card_counter_templates "
-        "WHERE LOWER(name)=LOWER(?)", (name,)).fetchone()
-    return row[0] if row else None
-
-
-def db_underground_card_rows(session_id, owner_id, conn=None):
-    """Return underground card UIDs and templates for one controller."""
-    return (conn or _db_layer._db).execute(
-        "SELECT card_uid, template_guid FROM game_cards "
-        "WHERE session_id=? AND user_id=? AND location='underground'",
-        (session_id, int(owner_id))).fetchall()
-
-
-def db_visibility_underground_rows(session_id, conn=None):
-    """Return underground cards and ability payloads for visibility scans."""
-    return (conn or _db_layer._db).execute(
-        "SELECT card_uid, user_id, card_abilities FROM game_cards "
-        "WHERE session_id=? AND location='underground'", (session_id,)).fetchall()
-
-
-def db_visibility_hand_rows(session_id, user_id, conn=None):
-    """Return hand projections used when revealing an opponent's hand."""
-    return (conn or _db_layer._db).execute(
-        "SELECT card_uid, template_guid, user_id, card_type, card_state "
-        "FROM game_cards WHERE session_id=? AND user_id=? AND location='hand' "
-        "ORDER BY position, id", (session_id, int(user_id))).fetchall()
-
-
-def db_card_effective_defense(session_id, card_uid, conn=None):
-    """Return printed plus mutable defense for one session card."""
-    return (conn or _db_layer._db).execute(
-        "SELECT ct.defense, gc.card_defense_mod FROM game_cards gc "
-        "JOIN card_templates ct ON ct.guid=gc.template_guid "
-        "WHERE gc.session_id=? AND gc.card_uid=?",
-        (session_id, int(card_uid))).fetchone()
-
-
-def db_deck_card_uids(session_id, user_id, limit, conn=None):
-    """Return the top deck card UIDs for an owner."""
-    return (conn or _db_layer._db).execute(
-        "SELECT card_uid FROM game_cards WHERE session_id=? AND user_id=? "
-        "AND location='deck' ORDER BY position, id LIMIT ?",
-        (session_id, int(user_id), int(limit))).fetchall()
-
-
-def db_set_card_owners(card_owners, conn=None):
-    """Apply current-controller changes to multiple session cards."""
-    if not card_owners:
-        return
-    (conn or _db_layer._db).executemany(
-        "UPDATE game_cards SET user_id=? WHERE session_id=? AND card_uid=?",
-        [(int(owner), session_id, int(uid))
-         for session_id, uid, owner in card_owners])
-
-
-def db_deck_top_card_type(session_id, user_id, conn=None):
-    """Return the top deck card UID and type."""
-    return (conn or _db_layer._db).execute(
-        "SELECT card_uid, card_type FROM game_cards WHERE session_id=? "
-        "AND user_id=? AND location='deck' ORDER BY position, id LIMIT 1",
-        (session_id, int(user_id))).fetchone()
-
-
-def db_move_card_to_discard_reset(session_id, card_uid, conn=None):
-    """Mill one card to discard and clear its transient state."""
-    return (conn or _db_layer._db).execute(
-        "UPDATE game_cards SET location='discard', position=0, card_state=0 "
-        "WHERE session_id=? AND card_uid=?",
-        (session_id, int(card_uid))).rowcount
-
-
-def db_ordered_zone_uids(session_id, user_id, location, conn=None):
-    """Return all card UIDs in an owned zone by authoritative order."""
-    return (conn or _db_layer._db).execute(
-        "SELECT card_uid FROM game_cards WHERE session_id=? AND user_id=? "
-        "AND location=? ORDER BY position, id",
-        (session_id, int(user_id), location)).fetchall()
-
-
-def db_set_card_positions(card_positions, conn=None):
-    """Persist ordered positions for session cards."""
-    if not card_positions:
-        return
-    (conn or _db_layer._db).executemany(
-        "UPDATE game_cards SET position=? WHERE session_id=? AND card_uid=?",
-        [(int(position), session_id, int(uid))
-         for session_id, uid, position in card_positions])
-
-
-def db_hand_resources_with_template(session_id, user_id, conn=None):
-    """Return hand resources with their printed grants and authored abilities."""
-    connection = conn or _db_layer._db
-    return connection.execute(
-        "SELECT gc.id, gc.card_uid, gc.template_guid, "
-        "COALESCE(ct.current_resources_granted, 0), "
-        "COALESCE(ct.max_resources_granted, 0), ct.abilities_json "
-        "FROM game_cards gc JOIN card_templates ct ON ct.guid=gc.template_guid "
-        "WHERE gc.session_id=? AND gc.user_id=? AND gc.location='hand' "
-        "AND gc.card_type='Resource' ORDER BY gc.position LIMIT 1",
-        (session_id, user_id),
-    ).fetchall()
-
-
-def db_hand_cards_with_templates(session_id, user_id, conn=None):
-    """Return ordered hand cards with the fields used by play-option logic."""
-    return (conn or _db_layer._db).execute(
-        "SELECT gc.card_uid, ct.cost, ct.card_type, ct.threshold_json, "
-        "ct.abilities_json FROM game_cards gc "
-        "JOIN card_templates ct ON ct.guid=gc.template_guid "
-        "WHERE gc.session_id=? AND gc.user_id=? AND gc.location='hand' "
-        "ORDER BY gc.position", (session_id, user_id)).fetchall()
-
-
-def db_hand_cards_raw(session_id, user_id, conn=None):
-    """Return ordered ``(card_uid, card_template_id, template_guid)`` rows."""
-    return (conn or _db_layer._db).execute(
-        "SELECT card_uid, card_template_id, template_guid FROM game_cards "
-        "WHERE session_id=? AND user_id=? AND location='hand' "
-        "ORDER BY position", (session_id, user_id)).fetchall()
-
-
-def db_card_template_attrs_joined(session_id, card_uid, conn=None):
-    """Return template and instance attributes for one game card."""
-    return (conn or _db_layer._db).execute(
-        "SELECT gc.template_guid, ct.attributes, gc.card_attributes "
-        "FROM game_cards gc LEFT JOIN card_templates ct "
-        "ON ct.guid=gc.template_guid WHERE gc.session_id=? AND gc.card_uid=?",
-        (session_id, int(card_uid))).fetchone()
-
-
-def db_reveal_owned_card(session_id, card_uid, owner_id, conn=None):
-    """Return one owned card row and its current zone for source reveals."""
-    return (conn or _db_layer._db).execute(
-        "SELECT card_uid, position, template_guid, user_id, card_state, "
-        "location FROM game_cards WHERE session_id=? AND card_uid=? "
-        "AND user_id=?",
-        (session_id, int(card_uid), int(owner_id))).fetchone()
-
-
-def db_reveal_cards(session_id, owner_id, zone, limit, card_uids=None,
-                    conn=None):
-    """Return ordered reveal rows, optionally restricted to candidate UIDs."""
-    connection = conn or _db_layer._db
-    params = [session_id, int(owner_id), zone]
-    sql = ("SELECT card_uid, position, template_guid, user_id, card_state "
-           "FROM game_cards WHERE session_id=? AND user_id=? "
-           "AND location=?")
-    if card_uids is not None:
-        if not card_uids:
-            return []
-        marks = ",".join("?" for _ in card_uids)
-        sql += " AND card_uid IN (" + marks + ")"
-        params.extend(int(uid) for uid in card_uids)
-    sql += " ORDER BY position"
-    if card_uids is None:
-        sql += " LIMIT ?"
-        params.append(int(limit))
-    return connection.execute(sql, params).fetchall()
-
-
-def db_starting_hand_candidates(session_id, user_id, card_types=None,
-                                conn=None):
-    """Return hand cards eligible for metadata-driven opening effects."""
-    connection = conn or _db_layer._db
-    if card_types:
-        placeholders = ",".join("?" for _ in card_types)
-        return connection.execute(
-            "SELECT card_uid, template_guid, permanent_buffs FROM game_cards "
-            "WHERE session_id=? AND user_id=? AND location='hand' "
-            "AND card_type IN (" + placeholders + ")",
-            (session_id, int(user_id), *card_types)).fetchall()
-    return connection.execute(
-        "SELECT card_uid, template_guid, permanent_buffs FROM game_cards "
-        "WHERE session_id=? AND user_id=? AND location='hand' "
-        "AND card_type LIKE '%Troop%'", (session_id, int(user_id))).fetchall()
-
-
-def db_apply_starting_hand_effect(session_id, card_uid, cost_mod=0,
-                                  permanent_buffs=None, conn=None):
-    """Apply an opening-hand cost/rage mutation without committing."""
-    connection = conn or _db_layer._db
-    if cost_mod:
-        connection.execute(
-            "UPDATE game_cards SET card_cost_mod=COALESCE(card_cost_mod, 0) + ? "
-            "WHERE session_id=? AND card_uid=?",
-            (int(cost_mod), session_id, int(card_uid)))
-    if permanent_buffs is not None:
-        connection.execute(
-            "UPDATE game_cards SET permanent_buffs=? WHERE session_id=? "
-            "AND card_uid=?", (permanent_buffs, session_id, int(card_uid)))
-
-
-def db_cleanup_game_sessions(conn=None):
-    """Remove ended sessions and cards orphaned by session cleanup."""
-    # A queued session save must land before this statement, or it would
-    # re-insert the row after the delete.
-    flush_pending_session_saves()
-    connection = conn or _db_layer._db
-    connection.execute("DELETE FROM game_sessions WHERE state='ended'")
-    connection.execute(
-        "DELETE FROM game_cards WHERE session_id NOT IN "
-        "(SELECT session_id FROM game_sessions)"
-    )
-    if conn is None:
-        connection.commit()
-
-
-def db_ai_hand_playables(session_id, user_id, kind, conn=None):
-    """Return AI hand cards eligible for the requested play family."""
-    connection = conn or _db_layer._db
-    if kind == "permanent":
-        predicate = "(ct.card_type LIKE '%Troop%' OR ct.card_type LIKE '%Artifact%' OR ct.card_type LIKE '%Constant%')"
-    elif kind == "spell":
-        predicate = "ct.card_type IN ('BasicAction','QuickAction')"
-    else:
-        raise ValueError("unknown AI play family")
-    return connection.execute(
-        "SELECT gc.id, gc.card_uid, gc.template_guid, ct.cost, ct.card_type, "
-        "ct.threshold_json, ct.attack, ct.defense FROM game_cards gc "
-        "JOIN card_templates ct ON ct.guid=gc.template_guid "
-        "WHERE gc.session_id=? AND gc.user_id=? AND gc.location='hand' AND "
-        + predicate + " ORDER BY gc.position",
-        (session_id, user_id),
-    ).fetchall()
-
-
-def db_move_card_if_in_zone(session_id, card_uid, owner_user_id, source_zone,
-                            destination_zone, position=0, card_state=None,
-                            conn=None):
-    """Move an owned card only if it is still in the expected source zone."""
-    connection = conn or _db_layer._db
-    if card_state is None:
-        cursor = connection.execute(
-            "UPDATE game_cards SET location=?, position=? "
-            "WHERE session_id=? AND card_uid=? AND user_id=? AND location=?",
-            (destination_zone, position, session_id, int(card_uid),
-             owner_user_id, source_zone),
-        )
-    else:
-        cursor = connection.execute(
-            "UPDATE game_cards SET location=?, position=?, card_state=? "
-            "WHERE session_id=? AND card_uid=? AND user_id=? AND location=?",
-            (destination_zone, position, card_state, session_id, int(card_uid),
-             owner_user_id, source_zone),
-        )
-    connection.commit()
-    return int(cursor.rowcount or 0)
-
-
-def db_add_card_damage(session_id, card_uid, amount, conn=None):
-    """Add damage to one card; the caller owns the transaction.
-
-    Like C# ``Session.DealDamage``, taking damage also sets
-    ``ECardStates.Damaged``, which ``IsDamagedThisTurn`` filters read.
-    """
-    connection = conn or _db_layer._db
-    damaged = _DAMAGED_STATE_BIT if int(amount) > 0 else 0
-    connection.execute(
-        "UPDATE game_cards SET card_damage = card_damage + ?, "
-        "card_state = COALESCE(card_state, 0) | ? "
-        "WHERE session_id=? AND card_uid=?",
-        (int(amount), damaged, session_id, int(card_uid)),
-    )
-
-
-def db_reset_warzone_troop(session_id, card_uid, clear_state_bits, conn=None):
-    """Clear a troop's turn/combat state bits.
-
-    Damage is not touched here: C# ``Session.ReadyCard`` only clears Tapped,
-    and marked damage is removed solely by the end-of-turn heal
-    (``clear_combat_damage``), which keeps ``CantHealAtEndOfTurn`` troops.
-    """
-    connection = conn or _db_layer._db
-    connection.execute(
-        "UPDATE game_cards SET card_state = card_state & ~? "
-        "WHERE session_id=? AND card_uid=?",
-        (clear_state_bits, session_id, int(card_uid)),
-    )
-
-
-def db_update_card_state(session_id, card_uid, set_bits=0, clear_bits=0,
-                         reset_damage=False, conn=None):
-    """Apply state bit changes to one card without forcing a commit."""
-    connection = conn or _db_layer._db
-    damage_sql = ", card_damage=0" if reset_damage else ""
-    connection.execute(
-        "UPDATE game_cards SET card_state = (card_state | ?) & ~?" + damage_sql
-        + " WHERE session_id=? AND card_uid=?",
-        (set_bits, clear_bits, session_id, int(card_uid)),
-    )
-
-
-def db_move_card_to_location(session_id, card_uid, location, position=0,
-                             reset_state=False, conn=None):
-    """Move a session card to a zone, optionally clearing its state bits."""
-    if location not in {"deck", "hand", "warzone", "discard", "void",
-                        "underground", "resources", "playedresources"}:
-        raise ValueError("unsupported card location")
-    connection = conn or _db_layer._db
-    state_sql = ", card_state=0" if reset_state else ""
-    cur = connection.execute(
-        "UPDATE game_cards SET location='" + location + "', position=?" + state_sql +
-        " WHERE session_id=? AND card_uid=?",
-        (int(position), session_id, int(card_uid)))
-    return getattr(cur, "rowcount", None)
-
-
-def db_set_card_state_exact(session_id, card_uid, state, conn=None):
-    """Persist an exact card-state bitmask without forcing a commit."""
-    connection = conn or _db_layer._db
-    cur = connection.execute(
-        "UPDATE game_cards SET card_state=? WHERE session_id=? AND card_uid=?",
-        (int(state), session_id, int(card_uid)))
-    return getattr(cur, "rowcount", None)
-
-
-def db_move_card_rows(row_ids, destination_zone, position=0, conn=None):
-    """Move cards identified by stable game-card row IDs without committing."""
-    if not row_ids:
-        return
-    connection = conn or _db_layer._db
-    connection.executemany(
-        "UPDATE game_cards SET location=?, position=? WHERE id=?",
-        [(destination_zone, position, int(row_id)) for row_id in row_ids],
-    )
-
-
-def db_set_card_row_positions(row_positions, conn=None):
-    """Set positions for card rows without committing the caller transaction."""
-    if not row_positions:
-        return
-    connection = conn or _db_layer._db
-    connection.executemany(
-        "UPDATE game_cards SET position=? WHERE id=?",
-        [(int(position), int(row_id)) for row_id, position in row_positions],
-    )
-
-
-def db_insert_game_cards(rows, conn=None):
-    """Insert prepared player or opponent cards with the same card shape."""
-    if not rows:
-        return
-    connection = conn or _db_layer._db
-    connection.executemany(
-        "INSERT INTO game_cards (user_id, session_id, card_uid, "
-        "card_template_id, card_type, template_guid, location, position, "
-        "owner_user_id, original_template_guid, card_abilities, "
-        "card_attributes, card_uses, gems) "
-        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)", rows)
-
-
-def db_update_game_card_abilities(rows, conn=None):
-    """Update prepared ability lists after player deck materialization."""
-    if not rows:
-        return
-    connection = conn or _db_layer._db
-    connection.executemany(
-        "UPDATE game_cards SET card_abilities=? "
-        "WHERE session_id=? AND card_uid=?", rows)
+__all__ = [name for name in globals() if name.startswith("db_")]
+
+
+from pvp_db_ability import (
+    _cached_static_row,
+    _cached_static_rows,
+    db_ability_activation_metadata,
+    db_ability_effect_metadata_rows,
+    db_ability_effect_rows,
+    db_ability_effect_target_index,
+    db_ability_effect_type_params,
+    db_ability_game_text,
+    db_ability_has_effect,
+    db_ability_is_triggered,
+    db_ability_metadata,
+    db_ability_metadata_exists,
+    db_ability_option_cards,
+    db_ability_raw_json,
+    db_ability_static_metadata,
+    db_ability_target_effect_rows,
+    db_ability_target_template_ids,
+    db_ability_trigger_metadata,
+    db_add_card_cost_modifier,
+    db_add_card_damage,
+    db_add_temporary_attributes,
+    db_ai_deck_top_card,
+    db_ai_evaluator_card_row,
+    db_ai_evaluator_card_rows,
+    db_ai_hand_cards,
+    db_ai_hand_playables,
+    db_ai_hand_summary,
+    db_ai_hand_template_rows,
+    db_ai_hand_tunneling_cards,
+    db_ai_zone_rows,
+    db_all_cards_in_zones_with_abilities,
+    db_any_ability_raw_json,
+    db_apply_replica_mods,
+    db_apply_starting_hand_effect,
+    db_apply_tournament_main_deck,
+    db_bulk_blocker_state,
+    db_champion_ability_costs,
+    db_champion_ability_guid_exists,
+    db_champion_ability_guids,
+    db_champion_ability_target_template_ids,
+    db_champion_ability_thresholds,
+    db_champion_charge_power_guids,
+    db_champion_template_health,
+    db_champion_template_health_by_class,
+    db_champion_trigger_ability_guids,
+    db_discard_card,
+    db_gem_abilities,
+    db_gem_ability_guids,
+    db_gem_templates,
+    db_talent_ability_condition,
+    db_talent_ability_guids,
+    db_talent_has_ability_guid,
+)
+from pvp_db_card import (
+    db_bump_card_use,
+    db_capture_original_gems,
+    db_card_abilities_state,
+    db_card_ability_list,
+    db_card_ability_payload,
+    db_card_ability_state,
+    db_card_ability_use_counts,
+    db_card_attribute_rows,
+    db_card_attribute_value,
+    db_card_basic,
+    db_card_catalog,
+    db_card_chain_info,
+    db_card_collection_info,
+    db_card_combat_identity,
+    db_card_combat_state,
+    db_card_command_info,
+    db_card_cooldown_counts,
+    db_card_cost,
+    db_card_damage_shield_fields,
+    db_card_death_info,
+    db_card_discard_spell,
+    db_card_effective_defense,
+    db_card_gem_ability_guids,
+    db_card_gem_type,
+    db_card_grant_info,
+    db_card_instance_dynamic_projection,
+    db_card_instance_dynamic_projections,
+    db_card_list_stat_row,
+    db_card_load_player_stops,
+    db_card_location,
+    db_card_manual_ability_guids,
+    db_card_modifier_state,
+    db_card_mutation_field,
+    db_card_mutation_info,
+    db_card_mutation_snapshot,
+    db_card_original_and_template,
+    db_card_original_gems,
+    db_card_original_owner_id,
+    db_card_owner_id,
+    db_card_owner_location_position,
+    db_card_owner_zone_state,
+    db_card_permanent_buffs,
+    db_card_play_info,
+    db_card_positions,
+    db_card_sacrifice_info,
+    db_card_save_player_stops,
+    db_card_set_attacking_state,
+    db_card_set_warzone_arrival,
+    db_card_source_info,
+    db_card_state_rows,
+    db_card_state_value,
+    db_card_static_fields,
+    db_card_static_row,
+    db_card_sync_abilities,
+    db_card_template_abilities_by_name_prefix,
+    db_card_template_ability_payload,
+    db_card_template_attrs_joined,
+    db_card_template_creation_profile,
+    db_card_template_field,
+    db_card_template_lethal,
+    db_card_template_threshold_subtype,
+    db_card_template_thresholds,
+    db_card_type_effective_defense,
+    db_card_uids_in_zone,
+    db_card_uses,
+    db_card_with_template,
+    db_card_zone_details,
+    db_card_zone_projection,
+    db_cards_for_filter,
+    db_cards_in_zones_with_abilities,
+    db_charge_ability_cost,
+    db_choice_card_rows,
+    flush_pending_session_saves,
+)
+from pvp_db_game import (
+    _target_projection_columns,
+    db_cleanup_game_sessions,
+    db_cleanup_stale_sessions,
+    db_clear_session_cards,
+    db_clear_warzone_damage,
+    db_clear_warzone_damage_except,
+    db_condition_card_row,
+    db_condition_cards_in_zones,
+    db_copy_template_payload,
+    db_copy_transform_instance_state,
+    db_counter_template_id,
+    db_counter_template_name,
+    db_debug_nonchampion_cards,
+    db_debug_template,
+    db_deck_active_gems,
+    db_deck_card_by_name,
+    db_deck_card_by_uid,
+    db_deck_card_count,
+    db_deck_card_uids,
+    db_deck_cards_json,
+    db_deck_next_position,
+    db_deck_top_card,
+    db_deck_top_card_details,
+    db_deck_top_card_type,
+    db_decrement_card_cooldowns_for_owner,
+    db_delete_game_session,
+    db_draw_card_to_hand,
+    db_effect_condition_json,
+    db_empty_socket_gems,
+    db_encounter_deck_cards,
+    db_first_template_guid,
+    db_game_card_effective_attributes,
+    db_game_card_effective_cost,
+    db_game_card_type,
+    db_game_cards_at_location,
+    db_game_cards_at_location_scalar,
+    db_game_champion,
+    db_game_deck_cards,
+    db_game_draw_cards,
+    db_game_get_hand,
+    db_game_session_pids,
+    db_game_shuffle_deck,
+    db_gencard_template,
+    db_resolve_talent_modified_template,
+    deck_rng_index,
+)
+from pvp_db_move import (
+    _session_row_params,
+    db_get_card_abilities,
+    db_get_champion_ability_guids,
+    db_get_charge_power,
+    db_get_session,
+    db_get_session_by_name,
+    db_get_sessions,
+    db_hand_card_by_name,
+    db_hand_card_by_uid,
+    db_hand_card_count,
+    db_hand_card_for_discard,
+    db_hand_card_uids,
+    db_hand_cards_for_discard,
+    db_hand_cards_raw,
+    db_hand_cards_with_templates,
+    db_hand_count,
+    db_hand_display_rows,
+    db_hand_exists,
+    db_hand_resources_with_template,
+    db_insert_debug_card,
+    db_insert_deck_card_at,
+    db_insert_game_card,
+    db_insert_game_cards,
+    db_insert_generated_card,
+    db_inspire_ability_guids,
+    db_is_champion_template,
+    db_kill_card_to_discard,
+    db_latest_deck_id_for_user,
+    db_move_card_for_effect,
+    db_move_card_if_in_zone,
+    db_move_card_row_to_hand,
+    db_move_card_rows,
+    db_move_card_to_deck,
+    db_move_card_to_deck_top,
+    db_move_card_to_discard_reset,
+    db_move_card_to_location,
+    db_move_choice_to_played_resources,
+    db_move_debug_card,
+    db_move_hand_card_to_deck_top,
+    db_next_card_uid,
+    db_next_game_card_row_id,
+    db_next_session_instance,
+    db_ordered_zone_rows,
+    db_ordered_zone_uids,
+    db_owner_card_uids_with_counters,
+    db_playable_hand_rows,
+    db_pregame_talent_rows,
+    db_pvp_booster_card_guids,
+    db_pvp_set_guids,
+    db_randomly_insert_deck_cards,
+    db_record_card_ability_use,
+    db_remove_session,
+    db_reset_card_modifiers,
+    db_reset_card_uses,
+    db_reset_warzone_troop,
+    db_reveal_cards,
+    db_reveal_owned_card,
+    db_rules_port_card_projection,
+    db_rules_port_card_state_projection,
+    db_rules_port_draw_rows,
+    db_rules_port_hand_card,
+    db_rules_port_hand_rows,
+    db_rules_port_redraw_hand,
+    db_rules_port_session_card_ids,
+    db_rules_port_warzone_projection,
+    db_save_session,
+)
+from pvp_db_warzone import (
+    db_scene_mods,
+    db_session_card_owners,
+    db_session_turn_order,
+    db_session_user_ids,
+    db_set_card_abilities,
+    db_set_card_abilities_and_attributes,
+    db_set_card_attribute_value,
+    db_set_card_cooldown,
+    db_set_card_location,
+    db_set_card_mutation_field,
+    db_set_card_owner,
+    db_set_card_owners,
+    db_set_card_played_to_zone,
+    db_set_card_positions,
+    db_set_card_resolved_at,
+    db_set_card_row_positions,
+    db_set_card_state_exact,
+    db_set_card_state_or,
+    db_set_constructed_guids,
+    db_set_resource_guids,
+    db_set_temporary_card_state,
+    db_starting_hand_candidates,
+    db_static_card_rows,
+    db_static_target_template,
+    db_steal_card_to_hand,
+    db_tame_card,
+    db_target_candidate_rows,
+    db_target_source_row,
+    db_target_template_filter,
+    db_target_template_info,
+    db_target_template_resolution_info,
+    db_target_template_row,
+    db_target_template_targeting_info,
+    db_template_ability_data,
+    db_template_ability_guids,
+    db_template_ability_payload,
+    db_template_attributes,
+    db_template_by_guid,
+    db_template_card_info,
+    db_template_catalog_for_filter,
+    db_template_exists,
+    db_template_in_zones,
+    db_template_name,
+    db_template_projection,
+    db_template_subtype,
+    db_temporary_attribute_rows,
+    db_trace_card_rows,
+    db_transform_candidate_templates,
+    db_transform_card_instance,
+    db_transform_target_info,
+    db_underground_card_rows,
+    db_update_card_state,
+    db_update_game_card_abilities,
+    db_visibility_hand_rows,
+    db_visibility_underground_rows,
+    db_void_card,
+    db_warzone_ability_cards,
+    db_warzone_attack_candidates,
+    db_warzone_attack_option_rows,
+    db_warzone_blocker_uids,
+    db_warzone_card_heal_rows,
+    db_warzone_card_state_attributes,
+    db_warzone_card_stats,
+    db_warzone_card_uids,
+    db_warzone_cards_with_state,
+    db_warzone_defender_rows,
+    db_warzone_display_rows,
+    db_warzone_owner_ids,
+    db_warzone_troop_attributes,
+    db_warzone_troop_count,
+    db_warzone_troop_state_rows,
+    db_warzone_troop_stats,
+    db_warzone_troop_uids,
+    db_warzone_troops_basic,
+    db_warzone_troops_with_state,
+    db_zone_card_count,
+    db_zone_display_rows,
+    queue_session_save,
+    session_save_batch,
+)
+
+
+from pvp_db_ability import (
+    _cached_static_row,
+    _cached_static_rows,
+    db_discard_card,
+    db_champion_template_health,
+    db_champion_template_health_by_class,
+    db_apply_replica_mods,
+    db_bulk_blocker_state,
+    db_apply_tournament_main_deck,
+    db_champion_ability_guids,
+    db_champion_ability_costs,
+    db_champion_ability_thresholds,
+    db_ability_option_cards,
+    db_all_cards_in_zones_with_abilities,
+    db_ai_hand_template_rows,
+    db_gem_templates,
+    db_ability_metadata,
+    db_ability_raw_json,
+    db_any_ability_raw_json,
+    db_ability_trigger_metadata,
+    db_ability_activation_metadata,
+    db_ability_effect_rows,
+    db_ability_effect_type_params,
+    db_ability_effect_target_index,
+    db_ability_has_effect,
+    db_ability_metadata_exists,
+    db_ability_target_template_ids,
+    db_champion_ability_target_template_ids,
+    db_talent_ability_condition,
+    db_ability_static_metadata,
+    db_talent_has_ability_guid,
+    db_champion_ability_guid_exists,
+    db_talent_ability_guids,
+    db_gem_abilities,
+    db_gem_ability_guids,
+    db_champion_charge_power_guids,
+    db_ai_hand_cards,
+    db_ai_deck_top_card,
+    db_ai_hand_tunneling_cards,
+    db_ai_evaluator_card_rows,
+    db_ai_evaluator_card_row,
+    db_ability_is_triggered,
+    db_ability_game_text,
+    db_ability_effect_metadata_rows,
+    db_add_card_cost_modifier,
+    db_add_temporary_attributes,
+    db_ability_target_effect_rows,
+    db_champion_trigger_ability_guids,
+    db_ai_hand_summary,
+    db_ai_zone_rows,
+    db_apply_starting_hand_effect,
+    db_ai_hand_playables,
+    db_add_card_damage,
+)
+
+from pvp_db_card import (
+    flush_pending_session_saves,
+    db_card_template_field,
+    db_card_save_player_stops,
+    db_card_load_player_stops,
+    db_card_sync_abilities,
+    db_card_ability_list,
+    db_card_uses,
+    db_bump_card_use,
+    db_card_ability_use_counts,
+    db_card_cooldown_counts,
+    db_card_template_thresholds,
+    db_card_basic,
+    db_card_with_template,
+    db_card_instance_dynamic_projection,
+    db_card_instance_dynamic_projections,
+    db_card_set_attacking_state,
+    db_card_set_warzone_arrival,
+    db_card_discard_spell,
+    db_card_attribute_rows,
+    db_card_uids_in_zone,
+    db_card_location,
+    db_card_ability_payload,
+    db_card_ability_state,
+    db_card_damage_shield_fields,
+    db_card_permanent_buffs,
+    db_charge_ability_cost,
+    db_card_zone_details,
+    db_card_owner_location_position,
+    db_card_collection_info,
+    db_card_grant_info,
+    db_card_mutation_field,
+    db_card_template_threshold_subtype,
+    db_card_original_and_template,
+    db_card_abilities_state,
+    db_card_type_effective_defense,
+    db_cards_for_filter,
+    db_card_play_info,
+    db_card_chain_info,
+    db_cards_in_zones_with_abilities,
+    db_card_template_abilities_by_name_prefix,
+    db_card_positions,
+    db_card_template_lethal,
+    db_card_catalog,
+    db_card_static_fields,
+    db_card_static_row,
+    db_card_combat_state,
+    db_card_attribute_value,
+    db_card_list_stat_row,
+    db_card_gem_ability_guids,
+    db_card_template_creation_profile,
+    db_card_manual_ability_guids,
+    db_card_mutation_info,
+    db_card_mutation_snapshot,
+    db_card_modifier_state,
+    db_card_template_ability_payload,
+    db_choice_card_rows,
+    db_card_owner_id,
+    db_card_original_owner_id,
+    db_card_state_value,
+    db_card_death_info,
+    db_capture_original_gems,
+    db_card_original_gems,
+    db_card_source_info,
+    db_card_command_info,
+    db_card_cost,
+    db_card_state_rows,
+    db_card_zone_projection,
+    db_card_gem_type,
+    db_card_owner_zone_state,
+    db_card_sacrifice_info,
+    db_card_combat_identity,
+    db_card_effective_defense,
+    db_card_template_attrs_joined,
+)
+
+from pvp_db_game import (
+    db_cleanup_stale_sessions,
+    db_game_card_effective_cost,
+    db_game_card_effective_attributes,
+    db_game_champion,
+    db_clear_session_cards,
+    db_delete_game_session,
+    db_game_session_pids,
+    db_game_cards_at_location,
+    db_game_cards_at_location_scalar,
+    db_game_deck_cards,
+    db_game_draw_cards,
+    deck_rng_index,
+    db_game_shuffle_deck,
+    db_game_get_hand,
+    db_game_card_type,
+    db_decrement_card_cooldowns_for_owner,
+    db_condition_card_row,
+    db_condition_cards_in_zones,
+    db_effect_condition_json,
+    db_deck_top_card,
+    db_deck_card_by_uid,
+    db_deck_card_by_name,
+    db_gencard_template,
+    db_deck_cards_json,
+    db_deck_active_gems,
+    db_empty_socket_gems,
+    db_first_template_guid,
+    db_encounter_deck_cards,
+    db_debug_template,
+    db_debug_nonchampion_cards,
+    db_clear_warzone_damage,
+    db_clear_warzone_damage_except,
+    db_deck_card_count,
+    _target_projection_columns,
+    db_resolve_talent_modified_template,
+    db_copy_template_payload,
+    db_deck_next_position,
+    db_copy_transform_instance_state,
+    db_deck_top_card_details,
+    db_draw_card_to_hand,
+    db_counter_template_name,
+    db_counter_template_id,
+    db_deck_card_uids,
+    db_deck_top_card_type,
+    db_cleanup_game_sessions,
+)
+
+from pvp_db_move import (
+    db_next_session_instance,
+    _session_row_params,
+    db_save_session,
+    db_get_session,
+    db_get_session_by_name,
+    db_get_sessions,
+    db_remove_session,
+    db_insert_game_card,
+    db_get_charge_power,
+    db_get_champion_ability_guids,
+    db_owner_card_uids_with_counters,
+    db_hand_card_count,
+    db_get_card_abilities,
+    db_reset_card_uses,
+    db_record_card_ability_use,
+    db_is_champion_template,
+    db_hand_cards_for_discard,
+    db_move_card_for_effect,
+    db_reset_card_modifiers,
+    db_hand_exists,
+    db_hand_card_for_discard,
+    db_hand_count,
+    db_hand_card_by_uid,
+    db_hand_card_by_name,
+    db_move_hand_card_to_deck_top,
+    db_hand_display_rows,
+    db_playable_hand_rows,
+    db_move_debug_card,
+    db_move_card_to_deck_top,
+    db_move_card_to_deck,
+    db_latest_deck_id_for_user,
+    db_rules_port_card_projection,
+    db_rules_port_card_state_projection,
+    db_rules_port_hand_rows,
+    db_rules_port_session_card_ids,
+    db_rules_port_draw_rows,
+    db_rules_port_redraw_hand,
+    db_rules_port_warzone_projection,
+    db_rules_port_hand_card,
+    db_pvp_set_guids,
+    db_pvp_booster_card_guids,
+    db_next_card_uid,
+    db_insert_debug_card,
+    db_pregame_talent_rows,
+    db_inspire_ability_guids,
+    db_next_game_card_row_id,
+    db_insert_deck_card_at,
+    db_randomly_insert_deck_cards,
+    db_insert_generated_card,
+    db_move_choice_to_played_resources,
+    db_kill_card_to_discard,
+    db_move_card_row_to_hand,
+    db_hand_card_uids,
+    db_ordered_zone_rows,
+    db_move_card_to_discard_reset,
+    db_ordered_zone_uids,
+    db_hand_resources_with_template,
+    db_hand_cards_with_templates,
+    db_hand_cards_raw,
+    db_reveal_owned_card,
+    db_reveal_cards,
+    db_move_card_if_in_zone,
+    db_reset_warzone_troop,
+    db_move_card_to_location,
+    db_move_card_rows,
+    db_insert_game_cards,
+)
+
+from pvp_db_warzone import (
+    session_save_batch,
+    queue_session_save,
+    db_warzone_troop_count,
+    db_set_card_state_or,
+    db_set_card_location,
+    db_warzone_troops_basic,
+    db_warzone_troops_with_state,
+    db_set_card_cooldown,
+    db_set_card_resolved_at,
+    db_warzone_troop_attributes,
+    db_warzone_attack_candidates,
+    db_warzone_attack_option_rows,
+    db_warzone_blocker_uids,
+    db_template_in_zones,
+    db_template_ability_payload,
+    db_template_ability_data,
+    db_set_card_mutation_field,
+    db_warzone_display_rows,
+    db_template_name,
+    db_zone_display_rows,
+    db_template_card_info,
+    db_template_by_guid,
+    db_set_resource_guids,
+    db_set_constructed_guids,
+    db_template_exists,
+    db_scene_mods,
+    db_template_ability_guids,
+    db_target_template_filter,
+    db_template_subtype,
+    db_session_user_ids,
+    db_static_card_rows,
+    db_warzone_card_uids,
+    db_warzone_owner_ids,
+    db_temporary_attribute_rows,
+    db_set_temporary_card_state,
+    db_set_card_attribute_value,
+    db_static_target_template,
+    db_set_card_abilities,
+    db_set_card_abilities_and_attributes,
+    db_session_turn_order,
+    db_target_template_info,
+    db_target_template_row,
+    db_session_card_owners,
+    db_target_source_row,
+    db_target_candidate_rows,
+    db_trace_card_rows,
+    db_target_template_targeting_info,
+    db_target_template_resolution_info,
+    db_template_attributes,
+    db_transform_target_info,
+    db_transform_candidate_templates,
+    db_set_card_played_to_zone,
+    db_template_catalog_for_filter,
+    db_tame_card,
+    db_warzone_cards_with_state,
+    db_warzone_troop_state_rows,
+    db_warzone_card_heal_rows,
+    db_transform_card_instance,
+    db_warzone_card_state_attributes,
+    db_template_projection,
+    db_warzone_ability_cards,
+    db_warzone_troop_stats,
+    db_warzone_card_stats,
+    db_void_card,
+    db_set_card_owner,
+    db_steal_card_to_hand,
+    db_zone_card_count,
+    db_warzone_defender_rows,
+    db_warzone_troop_uids,
+    db_underground_card_rows,
+    db_visibility_underground_rows,
+    db_visibility_hand_rows,
+    db_set_card_owners,
+    db_set_card_positions,
+    db_starting_hand_candidates,
+    db_update_card_state,
+    db_set_card_state_exact,
+    db_set_card_row_positions,
+    db_update_game_card_abilities,
+)
 
 
 __all__ = [name for name in globals() if name.startswith("db_")]
