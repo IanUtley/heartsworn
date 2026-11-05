@@ -9,6 +9,17 @@ from tests.test_db import fresh_database  # noqa: E402
 
 fresh_database()
 
+def _service_call(data_type, handler, reqid, comp, session_id, conh, inner_obj):
+    """Invoke a registered service handler the way the request dispatcher does."""
+    import importlib
+    from services import dispatch as service_dispatch
+    module_name, fn_name, extra = service_dispatch(data_type)
+    fn = getattr(importlib.import_module(module_name), fn_name)
+    fn(handler, 0, 0, reqid, comp, session_id, conh, inner_obj=inner_obj,
+       inner_bytes=b"", SERVICE_MAIL_UID=252, SERVICE_PROFILE_UID=0,
+       log_req=lambda *_a, **_k: True, **extra)
+
+
 DANDELION_SPRITE = "c1000a30-ff55-475f-a27d-41af488699b9"   # Troop, cost 2, 1/2
 
 
@@ -1663,7 +1674,6 @@ def test_editor_logout_answers_200_with_an_empty_body():
 
 def test_reconnect_request_with_no_game_is_answered_once():
     import hconnect_server
-    from services.legacy_loadbalancer import handle_tryreconnectiontodisconnectedgame_22013
     import db as shared
     db = make_db()
     previous = shared._db
@@ -1675,9 +1685,7 @@ def test_reconnect_request_with_no_game_is_answered_once():
         handler.client_reck_id = 5
         sent = []
         handler.send = lambda header, body: sent.append(header)
-        handle_tryreconnectiontodisconnectedgame_22013(
-            handler, 0, 0, 22013, 40, False, "11111111-1111-1111-1111-111111111111", 0,
-            None, b"", b"")
+        _service_call(22013, handler, 40, False, "11111111-1111-1111-1111-111111111111", 0, None)
         assert [header["reqid"] for header in sent] == [41], sent
     finally:
         shared._db = previous
@@ -2277,8 +2285,9 @@ def _rulesport_duel(db, attacker_state, monkeypatch):
     monkeypatch.setattr(hconnect_server, "_db", db)
     monkeypatch.setattr(tournament_game, "_db", db)
     # Every duel uses session 1, and the tournament keeps one host per session id.
-    monkeypatch.setattr(tournament_game, "_pvp_ports", dict(tournament_game._pvp_ports))
-    tournament_game._pvp_ports.pop(1, None)
+    from services import pvp_state
+    monkeypatch.setattr(pvp_state, "_pvp_ports", dict(pvp_state._pvp_ports))
+    pvp_state._pvp_ports.pop(1, None)
     for uid in (player, opponent):
         db.execute("INSERT OR IGNORE INTO users (id, name, gold, platinum) VALUES (?, ?, 0, 0)",
                    (uid, f"duel{uid}"))
@@ -2565,7 +2574,6 @@ def test_precombat_restriction_picks_the_most_valuable_opposing_troop_for_cant_b
 def test_game_entrance_request_is_answered_once_for_a_plain_player():
     import db as shared
     import hconnect_server
-    from services.legacy_tournaments import handle_request_25039
     db = make_db()
     previous = shared._db
     shared._db = db
@@ -2578,8 +2586,7 @@ def test_game_entrance_request_is_answered_once_for_a_plain_player():
         handler.client_reck_id = 5
         sent = []
         handler.send = lambda header, body: sent.append(header)
-        handle_request_25039(handler, 0, 0, 25039, 40, False,
-                             "11111111-1111-1111-1111-111111111111", 0, {}, b"", b"")
+        _service_call(25039, handler, 40, False, "11111111-1111-1111-1111-111111111111", 0, {})
         assert [header["reqid"] for header in sent] == [41], sent
     finally:
         shared._db = previous
@@ -2720,7 +2727,7 @@ def test_explore_of_a_new_champion_walks_the_campaign_route_to_a_stop():
 def test_enter_tournament_joins_a_sealed_room_and_replies_to_the_player(monkeypatch):
     from types import SimpleNamespace
     import hconnect_server
-    from services import legacy_tournaments
+    from services import tournaments
     ts = hconnect_server.tournament_server
     sent, calls = [], []
     handler = SimpleNamespace(client_reck_id=5, user_profile={"name": "duel5"}, scnt=0,
@@ -2731,15 +2738,13 @@ def test_enter_tournament_joins_a_sealed_room_and_replies_to_the_player(monkeypa
                         lambda tid, uid, name, deck_id=None, entry_group=0: (True, 1, 8, 2))
     monkeypatch.setattr(ts, "generate_sealed_deck",
                         lambda tid, uid, set_id: calls.append(("sealed", tid, uid, set_id)))
-    monkeypatch.setattr(hconnect_server, "uid_instance", lambda inner_bytes, name: 0)
-    monkeypatch.setattr(hconnect_server, "db_tournament_room_for_game",
+    monkeypatch.setattr(tournaments, "uid_instance", lambda inner_bytes, name: 0)
+    monkeypatch.setattr(tournaments, "db_tournament_room_for_game",
                         lambda tid, conn=None: {"set_id": "set02"})
-    monkeypatch.setattr(hconnect_server, "_is_corinth_room", lambda room: False)
-    monkeypatch.setattr(hconnect_server, "db_tournament_signups_by_tournament", lambda tid: [])
+    monkeypatch.setattr(tournaments, "_is_corinth_room", lambda room: False)
+    monkeypatch.setattr(tournaments, "db_tournament_signups_by_tournament", lambda tid: [])
     monkeypatch.setitem(hconnect_server.player_handlers, 5, None)
-    legacy_tournaments.handle_entertournament_25029(
-        handler, "target", "instance", 25029, 40, 0, "session", "conh",
-        {"TournamentID": 7, "EntryGroup": 0}, b"", b"")
+    _service_call(25029, handler, 40, 0, "session", "conh", {"TournamentID": 7, "EntryGroup": 0})
     assert hconnect_server.player_handlers[5] is handler
     assert ("leave", 5) in calls and ("sealed", 7, 5, "set02") in calls, calls
     assert len(sent) == 1 and sent[0][0]["reqid"] == 41, sent
@@ -2901,3 +2906,11 @@ def test_ai_pays_a_card_sacrifice_with_its_weakest_troop_or_cannot_play_it():
         assert sacrificed == []
     finally:
         ai._db, shared._db = previous, previous_shared
+
+
+if __name__ == "__main__":
+    # The file is written in pytest style. Run it through pytest so every test
+    # executes and failures set the exit status; a missing pytest fails loudly.
+    import pytest
+
+    raise SystemExit(pytest.main([__file__, "-q"]))
