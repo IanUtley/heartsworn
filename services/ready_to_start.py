@@ -598,7 +598,6 @@ def handle_readytostartgame_22031(handler, target, instance, data_type, reqid, c
                 pass
     except Exception:
         handler._player_talent_guids = []
-        pass
     handler._ai_talent_guids = []
     # The champion's signature charge power comes from gamedata
     # champion_abilities (e.g. Dimmid's "[DIAMOND][DIAMOND]: [BASIC] [2]
