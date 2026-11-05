@@ -36,3 +36,11 @@ def test_deck_saves_only_owned_copies_and_round_trips(monkeypatch):
 
     assert profile.delete_deck(saved["id"]) is True
     assert all(d["id"] != saved["id"] for d in profile.decks())
+
+
+if __name__ == "__main__":
+    # Written in pytest style: run through pytest so each test executes and failures
+    # set the exit status. A missing pytest fails loudly.
+    import pytest
+
+    raise SystemExit(pytest.main([__file__, "-q"]))

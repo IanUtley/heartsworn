@@ -31,3 +31,11 @@ def test_army_of_myth_starts_the_ai_at_the_army_level():
     assert _ai_resources(lb.ARMY_OF_MYTH_SCENE, {"fight_army_at_level": 4}) == 4
     assert _ai_resources(lb.ARMY_OF_MYTH_SCENE, {}) == 0
     assert _ai_resources("some-other-scene", {"fight_army_at_level": 4}) is None
+
+
+if __name__ == "__main__":
+    # Written in pytest style: run through pytest so each test executes and failures
+    # set the exit status. A missing pytest fails loudly.
+    import pytest
+
+    raise SystemExit(pytest.main([__file__, "-q"]))

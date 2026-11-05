@@ -58,3 +58,11 @@ def test_projection_offers_the_picker_with_top_level_bounds():
                              active=None, count_picker="B")
     loc = next(l["Data"] for l in out["VisLocs"] if l["Data"]["node"] == "B")
     assert loc["type"] != "CountPicker" and "gnomes_unsafe_pick_max" not in out["PublicState"]["Data"]
+
+
+if __name__ == "__main__":
+    # Written in pytest style: run through pytest so each test executes and failures
+    # set the exit status. A missing pytest fails loudly.
+    import pytest
+
+    raise SystemExit(pytest.main([__file__, "-q"]))

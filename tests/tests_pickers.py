@@ -1,6 +1,11 @@
 """The Unity picker sends one option list, then the activation request its prompt kind names, then a GreenLight."""
 
-import game_engine
+import os
+import sys
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+
+import game_engine  # noqa: E402
 from pickers import PickRequest, PickTarget, present_pick, to_web_message
 
 CHOICE_TEMPLATE = "11111111-2222-3333-4444-555555555555"
@@ -78,3 +83,11 @@ def test_option_list_declarations_carry_their_state_and_block_slots():
     assert [int(c.uid.uid64) for c in block.instances[0].target_instances[0].targets] == [0x201, 0x202]
     assert attack.state == game_engine.ECardUsage.Attack
     assert list(attack.instances) == []
+
+
+if __name__ == "__main__":
+    # Written in pytest style: run through pytest so each test executes and failures
+    # set the exit status. A missing pytest fails loudly.
+    import pytest
+
+    raise SystemExit(pytest.main([__file__, "-q"]))

@@ -71,3 +71,11 @@ def test_transcend_plays_the_deck_resources_for_free_as_the_live_path_does():
     for uid in RESOURCE_UIDS:
         assert locations[uid] != "deck", locations
     assert interpreted["events"], "the free plays pushed no client events"
+
+
+if __name__ == "__main__":
+    # Written in pytest style: run through pytest so each test executes and failures
+    # set the exit status. A missing pytest fails loudly.
+    import pytest
+
+    raise SystemExit(pytest.main([__file__, "-q"]))

@@ -35,3 +35,11 @@ def test_listed_pack_reaches_the_store_and_unlisting_removes_it():
     campaign_data.write_store_listings([])
     static._seed_store_listings(db)
     assert db.execute("SELECT COUNT(*) FROM store_items WHERE template_guid=?", (FULL_SET,)).fetchone()[0] == 0
+
+
+if __name__ == "__main__":
+    # Written in pytest style: run through pytest so each test executes and failures
+    # set the exit status. A missing pytest fails loudly.
+    import pytest
+
+    raise SystemExit(pytest.main([__file__, "-q"]))

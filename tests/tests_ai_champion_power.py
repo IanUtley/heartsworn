@@ -62,3 +62,11 @@ def test_ai_summons_with_its_charge_power_when_ahead_on_board(db):
     decision = ai.ai_use_champion_ability(
         handler, game, session, ai_t, pl_t, bstate, decision_only=True)
     assert decision and decision["ability_guid"] == DRYAD_POWER, decision
+
+
+if __name__ == "__main__":
+    # Written in pytest style: run through pytest so each test executes and failures
+    # set the exit status. A missing pytest fails loudly.
+    import pytest
+
+    raise SystemExit(pytest.main([__file__, "-q"]))

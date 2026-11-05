@@ -50,3 +50,11 @@ def test_targeted_round_entry_is_deferred_and_granted_on_its_turn(monkeypatch):
     assert applied_calls == [("player", "currentresource", 1),
                              ("player", "totalresource", 1)]
     assert state["pending_scene_round_mods"] == []
+
+
+if __name__ == "__main__":
+    # Written in pytest style: run through pytest so each test executes and failures
+    # set the exit status. A missing pytest fails loudly.
+    import pytest
+
+    raise SystemExit(pytest.main([__file__, "-q"]))

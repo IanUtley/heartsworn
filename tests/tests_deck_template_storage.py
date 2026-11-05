@@ -89,3 +89,11 @@ def test_template_round_trips_through_columns():
     assert not db._db.execute(
         "SELECT 1 FROM player_deck_template_cards WHERE template_id=?",
         (template_id,)).fetchone()
+
+
+if __name__ == "__main__":
+    # Written in pytest style: run through pytest so each test executes and failures
+    # set the exit status. A missing pytest fails loudly.
+    import pytest
+
+    raise SystemExit(pytest.main([__file__, "-q"]))

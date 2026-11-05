@@ -64,3 +64,11 @@ def test_unrelated_activation_slot_is_kept():
         resolution.resume_ability_continuation_parents(
             None, None, session, None, None, None, {}, child)
     assert port.pending_activation is slot
+
+
+if __name__ == "__main__":
+    # Written in pytest style: run through pytest so each test executes and failures
+    # set the exit status. A missing pytest fails loudly.
+    import pytest
+
+    raise SystemExit(pytest.main([__file__, "-q"]))

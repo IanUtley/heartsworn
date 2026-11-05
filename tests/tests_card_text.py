@@ -34,3 +34,11 @@ def test_sockets_round_trip_through_the_game_text():
     troop = {"name": "Socketed", "impl_stage": "Done", "own_text": text, "socket_types": ["Major", "Minor"]}
     built = card_text.build(troop, [])
     assert built["text"] == "Socketable Major\nSocketable Minor"
+
+
+if __name__ == "__main__":
+    # Written in pytest style: run through pytest so each test executes and failures
+    # set the exit status. A missing pytest fails loudly.
+    import pytest
+
+    raise SystemExit(pytest.main([__file__, "-q"]))

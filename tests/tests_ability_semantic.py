@@ -33,3 +33,11 @@ def test_sampled_exact_abilities_read_check_and_render_back():
         assert sem.check(found["ir"]) == [], guid
         assert sem.text(found["ir"]) == found["text"], guid
     assert readable >= 10
+
+
+if __name__ == "__main__":
+    # Written in pytest style: run through pytest so each test executes and failures
+    # set the exit status. A missing pytest fails loudly.
+    import pytest
+
+    raise SystemExit(pytest.main([__file__, "-q"]))

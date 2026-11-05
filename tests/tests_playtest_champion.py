@@ -31,3 +31,11 @@ def test_playtest_champion_is_the_last_played_not_the_newest():
     assert tuple(db_last_played_champion_for_user(900, conn=db)) == (1, 10)
     db_mark_champion_played(3, conn=db)
     assert tuple(db_last_played_champion_for_user(900, conn=db)) == (3, 30)
+
+
+if __name__ == "__main__":
+    # Written in pytest style: run through pytest so each test executes and failures
+    # set the exit status. A missing pytest fails loudly.
+    import pytest
+
+    raise SystemExit(pytest.main([__file__, "-q"]))

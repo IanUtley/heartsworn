@@ -39,3 +39,11 @@ def test_hand_revealed_cards_stay_in_hand_when_hidden():
         "SELECT card_uid, location FROM game_cards WHERE card_uid IN (900, 901)"))
     assert locations[900] == "hand"
     assert locations[901] == "deck"
+
+
+if __name__ == "__main__":
+    # Written in pytest style: run through pytest so each test executes and failures
+    # set the exit status. A missing pytest fails loudly.
+    import pytest
+
+    raise SystemExit(pytest.main([__file__, "-q"]))

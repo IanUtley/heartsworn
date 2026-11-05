@@ -113,3 +113,11 @@ def test_authored_rule_text_reaches_the_emitted_effects():
     assert "Choose a revealed non-resource card." in text
     assert "They discard that card." in text
     assert text.count("[rule text not in the Blueprint yet]") == 1   # only the invoke effect has no text of its own
+
+
+if __name__ == "__main__":
+    # Written in pytest style: run through pytest so each test executes and failures
+    # set the exit status. A missing pytest fails loudly.
+    import pytest
+
+    raise SystemExit(pytest.main([__file__, "-q"]))

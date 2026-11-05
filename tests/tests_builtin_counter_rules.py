@@ -105,3 +105,11 @@ def test_soulcursed_death_sacrifices_each_soulcursed_troop(db):
         "WHERE card_uid IN (301, 302, 303)").fetchall())
     assert locations == {301: "discard", 302: "discard", 303: "warzone"}, (
         locations, bstate.get("stack"))
+
+
+if __name__ == "__main__":
+    # Written in pytest style: run through pytest so each test executes and failures
+    # set the exit status. A missing pytest fails loudly.
+    import pytest
+
+    raise SystemExit(pytest.main([__file__, "-q"]))

@@ -138,3 +138,11 @@ def test_group_attack_value_charges_an_attacker_that_is_double_blocked():
     attacker = StubCard(1, 2, 4)
     two_blockers = [StubCard(201, 2, 4), StubCard(202, 2, 4)]
     assert ai._aieval_attack_set_value(evaluator, [attacker], two_blockers) < 0
+
+
+if __name__ == "__main__":
+    # Written in pytest style: run through pytest so each test executes and failures
+    # set the exit status. A missing pytest fails loudly.
+    import pytest
+
+    raise SystemExit(pytest.main([__file__, "-q"]))

@@ -125,3 +125,11 @@ def test_ai_turn_resumes_from_native_phase_window_after_discard():
     assert port.chain.is_empty
     assert resumed == [(True, True)], resumed
     handler._run_ai_turn.assert_not_called()
+
+
+if __name__ == "__main__":
+    # Written in pytest style: run through pytest so each test executes and failures
+    # set the exit status. A missing pytest fails loudly.
+    import pytest
+
+    raise SystemExit(pytest.main([__file__, "-q"]))

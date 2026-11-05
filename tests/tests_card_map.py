@@ -38,3 +38,11 @@ def test_server_battle_deck_swaps_unresolved_cards_in_place():
     assert len(rows) == 7
     assert rows[0][0] == SHARD
     assert all(len(row) == 3 for row in rows)
+
+
+if __name__ == "__main__":
+    # Written in pytest style: run through pytest so each test executes and failures
+    # set the exit status. A missing pytest fails loudly.
+    import pytest
+
+    raise SystemExit(pytest.main([__file__, "-q"]))

@@ -12,10 +12,11 @@ from rules_port.tac import _tac_attr_hash  # noqa: E402
 
 
 def _serialized_function(name):
-    """A serialized TAC whose FunctionName is ``name``, in the client's layout (a header, then the attribute)."""
-    raw = b"\x00\x00" + struct.pack("<I", _tac_attr_hash("FunctionName"))
+    """A serialized TAC whose FunctionName is ``name``: the client's hash-keyed format (an int16 version of 2, then
+    int32 attribute keys each followed by its value, ended by a zero key)."""
     encoded = name.encode("utf-8")
-    raw += bytes([len(encoded)]) + encoded + struct.pack("<I", 0)
+    key = struct.unpack("<i", struct.pack("<I", _tac_attr_hash("FunctionName")))[0]
+    raw = struct.pack("<h", 2) + struct.pack("<i", key) + bytes([len(encoded)]) + encoded + struct.pack("<i", 0)
     return base64.b64encode(raw).decode("ascii")
 
 
@@ -44,3 +45,11 @@ def test_bookkeeping_effects_are_native_leaves():
                  "RegisterTriggerAbilityEffectTemplate", "ActivateTriggeredAbilityEffectTemplate"):
         assert kind in NATIVE_LEAF_EFFECTS
         assert coverage_of(kind, {}) == []
+
+
+if __name__ == "__main__":
+    # Written in pytest style: run through pytest so each test executes and failures
+    # set the exit status. A missing pytest fails loudly.
+    import pytest
+
+    raise SystemExit(pytest.main([__file__, "-q"]))

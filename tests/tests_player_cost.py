@@ -20,3 +20,11 @@ def test_all_zone_action_cost_compiles_to_a_turn_long_cost_and_reads_back():
     target = dsl._target_content("your actions in all zones")
     assert target["m_CollectionFlags"] == dsl._ALL_ZONES
     assert "BasicAction|QuickAction" in str(target["m_CardFilter"])
+
+
+if __name__ == "__main__":
+    # Written in pytest style: run through pytest so each test executes and failures
+    # set the exit status. A missing pytest fails loudly.
+    import pytest
+
+    raise SystemExit(pytest.main([__file__, "-q"]))

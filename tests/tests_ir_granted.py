@@ -63,3 +63,11 @@ def test_grant_for_an_unknown_duration_is_refused():
     effect = {"m_GrantedAbilityTemplateId": {"m_Guid": "647fa8ff-fbe9-b701-0ab3-9f26c2e86166"}}
     assert granted_abilities.gaps("GrantAbilityEffectTemplate", effect, "EndOfNextTurn") == [
         "grant duration EndOfNextTurn"]
+
+
+if __name__ == "__main__":
+    # Written in pytest style: run through pytest so each test executes and failures
+    # set the exit status. A missing pytest fails loudly.
+    import pytest
+
+    raise SystemExit(pytest.main([__file__, "-q"]))

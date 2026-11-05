@@ -75,3 +75,11 @@ def test_store_targets_stores_each_target_for_this_ability_and_restores_the_stat
     assert context.calls == [(4, effect_raw, "root-guid"), (6, effect_raw, "root-guid")]
     assert context.bstate["resolving_ability"] == "outer-guid"
     assert context.effect_template_override is None
+
+
+if __name__ == "__main__":
+    # Written in pytest style: run through pytest so each test executes and failures
+    # set the exit status. A missing pytest fails loudly.
+    import pytest
+
+    raise SystemExit(pytest.main([__file__, "-q"]))

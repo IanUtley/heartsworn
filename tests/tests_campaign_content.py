@@ -46,3 +46,11 @@ def test_campaign_tables_come_from_records_and_the_data_files():
             campaign_data.DATA_DIR = saved
     assert len(built) == 337, len(built)   # the 336 scenes plus the valid file's one
     assert any(r.get("name") == "Test scene" for r in built)
+
+
+if __name__ == "__main__":
+    # Written in pytest style: run through pytest so each test executes and failures
+    # set the exit status. A missing pytest fails loudly.
+    import pytest
+
+    raise SystemExit(pytest.main([__file__, "-q"]))

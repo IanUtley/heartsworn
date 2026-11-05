@@ -16,9 +16,6 @@ import pytest
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
 CHROMIUM = os.environ.get("HEX_CHROMIUM", "/snap/bin/chromium")
 
-sync_api = pytest.importorskip("playwright.sync_api")
-if not os.path.exists(CHROMIUM):
-    pytest.skip(f"no Chromium at {CHROMIUM}", allow_module_level=True)
 
 
 def _free_port():
@@ -53,6 +50,9 @@ def server_url():
 
 @pytest.fixture
 def page(server_url):
+    sync_api = pytest.importorskip("playwright.sync_api")
+    if not os.path.exists(CHROMIUM):
+        pytest.skip(f"no Chromium at {CHROMIUM}")
     with sync_api.sync_playwright() as playwright:
         browser = playwright.chromium.launch(executable_path=CHROMIUM, args=["--no-sandbox"], headless=True)
         try:
@@ -102,3 +102,11 @@ def test_targeting_cursor_is_a_cross_while_a_target_is_chosen_and_reverts_after(
     page.click("button[data-act=cancel]")
     assert not page.evaluate("document.body.classList.contains('targeting')")
     assert "target_cursor.svg" not in _cursor(page)
+
+
+if __name__ == "__main__":
+    # Written in pytest style: run through pytest so each test executes and failures
+    # set the exit status. A missing pytest fails loudly.
+    import pytest
+
+    raise SystemExit(pytest.main([__file__, "-q"]))

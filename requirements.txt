@@ -5,3 +5,6 @@ supervisor==4.2.5
 setuptools<81
 # Optional local debugger for phase/turn investigations.
 debugpy>=1.8,<2
+
+# Test runner for the pytest-style test files (tests/*.py with a pytest entry point).
+pytest==9.2.0

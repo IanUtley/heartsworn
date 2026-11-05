@@ -70,3 +70,11 @@ def test_discombobulate_counters_the_chosen_spell_as_the_live_path_does():
     assert interpreted == live
     locations = {uid: location for uid, _owner, location, _damage, _buffs in interpreted["cards"]}
     assert locations[SPELL_UID].lower() != "castspells", locations
+
+
+if __name__ == "__main__":
+    # Written in pytest style: run through pytest so each test executes and failures
+    # set the exit status. A missing pytest fails loudly.
+    import pytest
+
+    raise SystemExit(pytest.main([__file__, "-q"]))

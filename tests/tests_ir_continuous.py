@@ -54,3 +54,11 @@ def test_running_the_static_ability_does_not_apply_its_stat_twice():
     ir_exec.run_ability(COMMAND_TOWER, None, context=context, source_uid=TOWER_UID, owner_uid=5, event={"player": 5})
     assert effective_stats(db, session, bstate, TROOP_UID)[0] == before
     assert db.execute("SELECT permanent_buffs FROM game_cards WHERE card_uid=?", (TROOP_UID,)).fetchone()[0] == "{}"
+
+
+if __name__ == "__main__":
+    # Written in pytest style: run through pytest so each test executes and failures
+    # set the exit status. A missing pytest fails loudly.
+    import pytest
+
+    raise SystemExit(pytest.main([__file__, "-q"]))
