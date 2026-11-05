@@ -380,10 +380,8 @@ def emit(card: Card, game_text: str | None = None) -> str:
     local = lowered.local
     game_text = card.text or game_text or ""
     lines = [f"# {card.name}: {game_text}", "# Written from the Blueprint card by gamedata/ir_blueprint.emit."]
-    for index, target in enumerate(local._surface_targets):
-        lines.append(f"CHOOSE_TARGET_{index} = {ir_python.dumps(target)}")
-    for index, effect in enumerate(local._surface_does):
-        lines.append(f"CHOOSE_DOES_{index} = {ir_python.dumps(effect)}")
+    lines.extend((f"CHOOSE_TARGET_{index} = {ir_python.dumps(target)}") for index, target in (enumerate(local._surface_targets)))
+    lines.extend((f"CHOOSE_DOES_{index} = {ir_python.dumps(effect)}") for index, effect in (enumerate(local._surface_does)))
     lines.append(f"CHOOSE = {ir_python.dumps(local)}")
     lines.append(f"INVOKE = {ir_python.dumps(lowered.invoke)}")
     root = S.ability(game_text, id=S._stable_guid("ability", game_text), ability_effect_list=lowered.clauses,

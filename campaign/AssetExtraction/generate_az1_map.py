@@ -568,8 +568,7 @@ def write_svg(output: Path, nodes, paths, project):
         radius = 9 if node_id != "Node001" else 13
         tooltip = html.escape(node_tooltip(node))
         lines.append(f'<g><title>{tooltip}</title>')
-        for index, status in enumerate(node_statuses(node)):
-            lines.append(f'<circle cx="{x:.1f}" cy="{y:.1f}" r="{radius + 4 + index * 3:.1f}" fill="none" stroke="{STATUS_COLORS[status]}" stroke-width="2"/>')
+        lines.extend((f'<circle cx="{x:.1f}" cy="{y:.1f}" r="{radius + 4 + index * 3:.1f}" fill="none" stroke="{STATUS_COLORS[status]}" stroke-width="2"/>') for index, status in (enumerate(node_statuses(node))))
         lines.append(f'<circle cx="{x:.1f}" cy="{y:.1f}" r="{radius}" fill="{color}" stroke="#ffffff" stroke-width="2"/>')
         lines.append(f'<text x="{x + 13:.1f}" y="{y + 4:.1f}" fill="#f3f6f7" font-family="sans-serif" font-size="12">{html.escape(node.title)}</text></g>')
     lines += [
@@ -592,8 +591,7 @@ def write_svg(output: Path, nodes, paths, project):
         color = COLORS.get(node.terrain, COLORS["Other"])
         lines.append(f'<g><title>{html.escape(node_tooltip(node))}</title>')
         lines.append(f'<circle cx="{x + 6}" cy="{y - 5}" r="6" fill="{color}"/>')
-        for status in node_statuses(node):
-            lines.append(f'<circle cx="{x + 6}" cy="{y - 5}" r="8" fill="none" stroke="{STATUS_COLORS[status]}" stroke-width="1.5"/>')
+        lines.extend((f'<circle cx="{x + 6}" cy="{y - 5}" r="8" fill="none" stroke="{STATUS_COLORS[status]}" stroke-width="1.5"/>') for status in (node_statuses(node)))
         title = html.escape(node.title[:25] + ("…" if len(node.title) > 25 else ""))
         lines.append(f'<text x="{x + 18}" y="{y}" fill="#f3f6f7" font-family="sans-serif" font-size="12" font-weight="bold">{title}</text>')
         lines.append(f'<text x="{x + 18}" y="{y + 16}" fill="#aebfc6" font-family="sans-serif" font-size="10">{html.escape(node.node_id)}</text></g>')

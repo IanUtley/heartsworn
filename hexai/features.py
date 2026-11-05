@@ -252,8 +252,7 @@ def encode_state(evaluator, state, seat_pid, opponent_pid, *,
         keys.append(f"h:{tpl}")
         keys.append(f"htype:{ctype}")
         keys.append(f"hcost:{bucket(getattr(card, 'cost', 0), _COST_EDGES)}")
-        for keyword in _keywords(card):
-            keys.append(f"hkw:{keyword}")
+        keys.extend((f"hkw:{keyword}") for keyword in (_keywords(card)))
         if getattr(card, "has_variable_cost", False):
             keys.append("hvar")
         if getattr(card, "is_quick_action", lambda: False)():
@@ -283,8 +282,7 @@ def encode_state(evaluator, state, seat_pid, opponent_pid, *,
                 keys.append(f"{prefix}ready:{tpl}")
             if state_bits & _ATTACKING:
                 keys.append(f"{prefix}attacking:{tpl}")
-            for keyword in _keywords(card):
-                keys.append(f"{prefix}kw:{keyword}")
+            keys.extend((f"{prefix}kw:{keyword}") for keyword in (_keywords(card)))
             damage = int(getattr(card, "card_damage", 0) or 0)
             if damage:
                 keys.append(f"{prefix}dmg:{bucket(damage, _COUNT_EDGES)}")
@@ -316,8 +314,7 @@ def encode_action(kind: str, card=None, *, targets=(), target_templates=(),
             keys.append(f"act_card:{tpl}")
         keys.append(f"act_type:{_card_type(card)}")
         keys.append(f"act_cost:{bucket(getattr(card, 'cost', 0), _COST_EDGES)}")
-        for keyword in _keywords(card):
-            keys.append(f"act_kw:{keyword}")
+        keys.extend((f"act_kw:{keyword}") for keyword in (_keywords(card)))
         if getattr(card, "has_variable_cost", False):
             keys.append("act_var")
     for index, tpl in enumerate(target_templates or ()):
@@ -326,8 +323,7 @@ def encode_action(kind: str, card=None, *, targets=(), target_templates=(),
         tpl = str(tpl or "").lower()
         if tpl:
             keys.append(f"act_target:{tpl}")
-    for key in extra_keys or ():
-        keys.append(f"act:{key}")
+    keys.extend((f"act:{key}") for key in (extra_keys or ()))
     return feature_ids(keys)
 
 

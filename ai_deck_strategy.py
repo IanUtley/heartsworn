@@ -410,7 +410,7 @@ def evaluate_deck_strategy(deck_cards: Iterable[tuple[str, int]]) -> DeckStrateg
     count = totals["nonresource"]
     troop_count = totals["troops"]
     if count <= 0:
-        return DeckStrategyEvaluation(None, {name: 0.0 for name in _STRATEGIES},
+        return DeckStrategyEvaluation(None, dict.fromkeys(_STRATEGIES, 0.0),
                                       dict(totals))
 
     cheap_troop_share = totals["cheap_troops"] / count

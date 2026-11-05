@@ -450,8 +450,7 @@ class AbilityInstance:
                 errors.append(f"target {index} has {count} selections; maximum is {spec.maximum}")
             if count < spec.minimum and not spec.optional and not spec.allow_best_effort_minimum:
                 errors.append(f"target {index} needs at least {spec.minimum} selections")
-        for prompt in self.required_prompts():
-            errors.append(f"missing {prompt.kind} input at index {prompt.index}")
+        errors.extend((f"missing {prompt.kind} input at index {prompt.index}") for prompt in (self.required_prompts()))
         for index, selected in self.activation.option_map.items():
             if self.graph is None or index < 0 or index >= len(self.options):
                 errors.append(f"unknown option-group index {index}")

@@ -602,13 +602,11 @@ def markdown_report(report):
         ("Abilities missing BOM rows", "abilities_without_effect_rows"),
         ("Uncovered features", "uncovered_features"),
     ]
-    for label, key in labels:
-        lines.append("| %s | %s |" % (label, summary[key]))
+    lines.extend(("| %s | %s |" % (label, summary[key])) for label, key in (labels))
 
     lines.extend(["", "## Feature counts", "", "| Feature kind | Count |",
                   "|---|---:|"])
-    for kind, count in report["feature_counts_by_kind"].items():
-        lines.append("| `%s` | %s |" % (kind, count))
+    lines.extend(("| `%s` | %s |" % (kind, count)) for kind, count in (report["feature_counts_by_kind"].items()))
 
     lines.extend(["", "## BOM leaf catalog", "",
                   "Leaf types are the primary implementation coverage unit; "
@@ -632,12 +630,10 @@ def markdown_report(report):
 
     if report["missing_metadata"]:
         lines.extend(["", "## Missing ability metadata", ""])
-        for item in report["missing_metadata"]:
-            lines.append("- `%s` — `%s`" % (item["card"], item["ability_guid"]))
+        lines.extend(("- `%s` — `%s`" % (item["card"], item["ability_guid"])) for item in (report["missing_metadata"]))
     if report["abilities_without_effect_rows"]:
         lines.extend(["", "## Abilities without BOM rows", ""])
-        for item in report["abilities_without_effect_rows"]:
-            lines.append("- `%s` — `%s`" % (item["card"], item["ability_guid"]))
+        lines.extend(("- `%s` — `%s`" % (item["card"], item["ability_guid"])) for item in (report["abilities_without_effect_rows"]))
     return "\n".join(lines) + "\n"
 
 

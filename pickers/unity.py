@@ -55,8 +55,7 @@ def _build_option(game, ge, option: PickOption):
     inst = game._make_event(ge.OptionInstanceSessionEventArgs)
     inst.opt_id = ge.ResourceId.from_str(option.prompt_ability)
     # ConfigureAbility matches target instances through this parallel target-template list (see HOWTO.md).
-    for parallel_id in option.option_target_ids():
-        inst.target_ids.append(ge.ResourceId.from_str(parallel_id))
+    inst.target_ids.extend((ge.ResourceId.from_str(parallel_id)) for parallel_id in (option.option_target_ids()))
     for slot in option.targets:
         tgt = game._make_event(ge.TargetInstanceSessionEventArgs)
         tgt.target_index = slot.index
@@ -75,8 +74,7 @@ def present_options(game, player_id, options) -> None:
     import game_engine as ge
     ev = game._make_event(ge.PlayerOptionListSessionEventArgs)
     ev.player_id = player_id
-    for option in options:
-        ev.options.append(_build_option(game, ge, option))
+    ev.options.extend((_build_option(game, ge, option)) for option in (options))
     game._push(ev)
 
 

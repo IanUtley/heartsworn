@@ -318,8 +318,7 @@ def _collection_fix_command(handler, args=()):
     if not any(str(arg).lower() == "apply" for arg in args):
         lines = [f"{len(rows)} template(s) disagree: {extra} extra collection "
                  f"copies, {missing} missing."]
-        for guid, name, have, owned in rows[:_COLLECTION_FIX_REPORT_LIMIT]:
-            lines.append(f"  {name or guid[:8]}: collection {have} -> {owned}")
+        lines.extend((f"  {name or guid[:8]}: collection {have} -> {owned}") for guid, name, have, owned in (rows[:_COLLECTION_FIX_REPORT_LIMIT]))
         if len(rows) > _COLLECTION_FIX_REPORT_LIMIT:
             lines.append(f"  ... and {len(rows) - _COLLECTION_FIX_REPORT_LIMIT} more")
         lines.append("Run !collection-fix apply to correct them.")
