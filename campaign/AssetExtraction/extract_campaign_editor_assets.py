@@ -683,14 +683,15 @@ def records_node_ids(records_dir: Path, template: str) -> set[str]:
     sys.path.insert(0, str(REPO_ROOT))
     from AssetExtraction.gamedata_seed import parse_record
     path = records_dir / "SceneData.jsonl"
-    for index, line in enumerate(path.open(encoding="utf-8")):
-        if index == 0:
-            continue
-        value = json.loads(line)
-        record = parse_record(value if isinstance(value, str) else line) or {}
-        if record.get("m_Name") == template and record.get("m_ItemData"):
-            return {item.get("m_MapNodeId") for item in record["m_ItemData"]
-                    if item.get("m_MapNodeId")}
+    with path.open(encoding="utf-8") as handle:
+        for index, line in enumerate(handle):
+            if index == 0:
+                continue
+            value = json.loads(line)
+            record = parse_record(value if isinstance(value, str) else line) or {}
+            if record.get("m_Name") == template and record.get("m_ItemData"):
+                return {item.get("m_MapNodeId") for item in record["m_ItemData"]
+                        if item.get("m_MapNodeId")}
     return set()
 
 

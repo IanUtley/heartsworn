@@ -238,21 +238,22 @@ def extract_terrain(env):
 
 def scene_labels(records_path: Path) -> dict[str, tuple[str, str]]:
     labels = {}
-    for line_number, line in enumerate(records_path.open(encoding="utf-8"), 1):
-        if line_number == 1:
-            continue  # section marker
-        outer = json.loads(line)
-        record = json.loads(outer) if isinstance(outer, str) else outer
-        if record.get("m_Name") != "Howling Plains":
-            continue
-        for item in record.get("m_ItemData", []):
-            node_id = item.get("m_MapNodeId")
-            if node_id:
-                labels[str(node_id)] = (
-                    str(item.get("m_Title") or item.get("m_Name") or node_id),
-                    str(item.get("m_TerrainType") or "Other"),
-                )
-        break
+    with records_path.open(encoding="utf-8") as handle:
+        for line_number, line in enumerate(handle, 1):
+            if line_number == 1:
+                continue  # section marker
+            outer = json.loads(line)
+            record = json.loads(outer) if isinstance(outer, str) else outer
+            if record.get("m_Name") != "Howling Plains":
+                continue
+            for item in record.get("m_ItemData", []):
+                node_id = item.get("m_MapNodeId")
+                if node_id:
+                    labels[str(node_id)] = (
+                        str(item.get("m_Title") or item.get("m_Name") or node_id),
+                        str(item.get("m_TerrainType") or "Other"),
+                    )
+            break
     return labels
 
 
@@ -261,19 +262,20 @@ def champion_names(records_path: Path) -> dict[str, str]:
     path = records_path.parent / "ChampionTemplate.jsonl"
     if not path.exists():
         return names
-    for line_number, line in enumerate(path.open(encoding="utf-8"), 1):
-        if line_number == 1 or not line.strip():
-            continue
-        try:
-            outer = json.loads(line)
-            record = json.loads(outer) if isinstance(outer, str) else outer
-        except (TypeError, ValueError, json.JSONDecodeError):
-            continue
-        if not isinstance(record, dict):
-            continue
-        guid = (record.get("m_Id") or {}).get("m_Guid")
-        if guid and record.get("m_Name"):
-            names[str(guid).lower()] = str(record["m_Name"]).strip()
+    with path.open(encoding="utf-8") as handle:
+        for line_number, line in enumerate(handle, 1):
+            if line_number == 1 or not line.strip():
+                continue
+            try:
+                outer = json.loads(line)
+                record = json.loads(outer) if isinstance(outer, str) else outer
+            except (TypeError, ValueError, json.JSONDecodeError):
+                continue
+            if not isinstance(record, dict):
+                continue
+            guid = (record.get("m_Id") or {}).get("m_Guid")
+            if guid and record.get("m_Name"):
+                names[str(guid).lower()] = str(record["m_Name"]).strip()
     return names
 
 
