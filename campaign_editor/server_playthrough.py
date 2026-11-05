@@ -65,7 +65,12 @@ def _setup(race: str, champion: int | None = None):
         user_id = conn.execute("SELECT user_id FROM champions WHERE id=?",
                                (champion,)).fetchone()[0]
         return tmp, conn, champion, user_id
-    user_id = conn.execute("SELECT id FROM users ORDER BY id LIMIT 1").fetchone()[0]
+    row = conn.execute("SELECT id FROM users ORDER BY id LIMIT 1").fetchone()
+    if row is None:
+        # A fresh test database has no profile yet; the champion needs an owner.
+        conn.execute("INSERT INTO users (id, name, gold, platinum) VALUES (1, 'playthrough', 0, 0)")
+        row = (1,)
+    user_id = row[0]
     cur = conn.execute(
         "INSERT INTO champions (user_id, champion_name, race, champion_class) "
         "VALUES (?, 'Runtime Test', ?, 3)", (user_id, RACE_IDS[race]))
