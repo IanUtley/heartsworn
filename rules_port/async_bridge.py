@@ -8,6 +8,7 @@ from collections import defaultdict
 from typing import Any, Awaitable, Callable, Mapping, cast
 
 from .parity import event_record
+from dataclasses import dataclass
 
 
 class AsyncUIEventBus:
@@ -137,11 +138,11 @@ class AsyncRulesCoordinator:
         raise RuntimeError("rules session exceeded async tick budget")
 
 
+@dataclass(eq=False)
 class AsyncEventPublisher:
     """Turn a synchronous ``GameEngineEventSink`` observer into async events."""
 
-    def __init__(self, bus: AsyncUIEventBus) -> None:
-        self.bus = bus
+    bus: AsyncUIEventBus
 
     def __call__(self, event) -> None:
         record = event_record(event)

@@ -39,6 +39,7 @@ from gamedata import DEFAULT_RECORD_STORE as STORE
 from gamedata import mechanics_types as T
 from gamedata.mechanics_base import Typed, _record_names, _typed_value
 from gamedata.mechanics_fields import ir_name
+from dataclasses import dataclass
 
 ZERO_GUID = "00000000-0000-0000-0000-000000000000"
 # The ability's target slots that are empty unless the ability uses one. A written ability leaves them out.
@@ -58,12 +59,12 @@ def _plain_text(text: Any) -> str:
     return re.sub(r"\s+", " ", _TAGS.sub("", str(text))).strip().lower()
 
 
+@dataclass(eq=False)
 class Counter:
     """A card counter, found in the Records by its name."""
 
-    def __init__(self, guid: str, name: str) -> None:
-        self.guid = guid
-        self.name = name
+    guid: str
+    name: str
 
     def reference(self) -> dict[str, Any]:
         return _ref(self.guid)
@@ -81,12 +82,12 @@ def counter(name: str) -> Counter:
     return Counter(matches[0].guid.lower(), name)
 
 
+@dataclass(eq=False)
 class Target:
     """A target a clause picks: this card, or a library target found by its game text."""
 
-    def __init__(self, guid: str, text: str) -> None:
-        self.guid = guid
-        self.text = text
+    guid: str
+    text: str
 
 
 THIS = Target("190a4d8c-7c2c-10d0-6429-99c5aeb0791f", "this")
@@ -102,11 +103,11 @@ def library_target(text: str) -> Target:
     return Target(found[0].guid.lower(), text)
 
 
+@dataclass(eq=False)
 class Zone:
     """A collection of cards, by the name cards use for it."""
 
-    def __init__(self, collection: str) -> None:
-        self.collection = collection
+    collection: str
 
 
 class CardCount:
@@ -158,13 +159,13 @@ def counter_value(target: Target, counter_: Counter) -> CounterValue:
     return CounterValue(counter_)
 
 
+@dataclass(eq=False)
 class Body:
     """What an effect does, before it is named: its modifier, the variables it reads, and its target."""
 
-    def __init__(self, modifier: Typed, variables: list[Typed], target: Target) -> None:
-        self.modifier = modifier
-        self.variables = variables
-        self.target = target
+    modifier: Typed
+    variables: list[Typed]
+    target: Target
 
 
 def damage(target: Target, *, amount: CounterValue) -> Body:
