@@ -73,8 +73,7 @@ def effect_list(rec):
     m = re.search(r'"m_AbilityEffectList"\s*:\s*\[(.*?)\]\s*,?\s*"m_AbilityTargetTemplateIds"', rec, re.S)
     body = m.group(1) if m else ""
     out = []
-    for eg in re.findall(r'"m_EffectTemplateId"\s*:\s*\{\s*"m_Guid"\s*:\s*"([0-9a-fA-F-]+)"', body):
-        out.append((eg.lower(), ""))
+    out.extend(((eg.lower(), "")) for eg in (re.findall(r'"m_EffectTemplateId"\s*:\s*\{\s*"m_Guid"\s*:\s*"([0-9a-fA-F-]+)"', body)))
     durs = re.findall(r'"m_EffectDuration"\s*:\s*"([^"]+)"', body)
     for i, eg in enumerate([e for e, _ in out]):
         out[i] = (eg, durs[i] if i < len(durs) else "")
@@ -226,16 +225,14 @@ def main():
     lines = ["# Champion ability BOM rows: "
              "(ability_guid, effect_guid, effect_order, effect_type, param)",
              "CHAMPION_ABILITY_EFFECTS = ["]
-    for ag, eg, order, ttype, param in ability_effects:
-        lines.append(f"    ({ag!r}, {eg!r}, {order}, {ttype!r}, {param!r}),")
+    lines.extend((f"    ({ag!r}, {eg!r}, {order}, {ttype!r}, {param!r}),") for ag, eg, order, ttype, param in (ability_effects))
     lines.append("]")
     block = "\n".join(lines)
     meta_lines = [
         "# Champion ability metadata rows: (card_abilities_meta columns)",
         "CHAMPION_ABILITY_META = [",
     ]
-    for row in champion_meta:
-        meta_lines.append(f"    {row!r},")
+    meta_lines.extend((f"    {row!r},") for row in (champion_meta))
     meta_lines.append("]")
     meta_block = "\n".join(meta_lines)
 

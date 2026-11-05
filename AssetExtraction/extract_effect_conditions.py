@@ -55,8 +55,7 @@ def main():
     lines = ["# AbilityEffectCondition rows: (condition_id, name, condition_json). "
              "Generated from hex-private/Records/AbilityEffectConditionTemplate.jsonl.",
              "ABILITY_EFFECT_CONDITIONS = ["]
-    for cid, name, cond in rows:
-        lines.append(f"    ({cid!r}, {name!r}, {cond!r}),")
+    lines.extend((f"    ({cid!r}, {name!r}, {cond!r}),") for cid, name, cond in (rows))
     lines.append("]")
     block = "\n".join(lines)
 

@@ -736,16 +736,14 @@ def main():
     lines.append("")
     lines.append("# card ability BOM rows: (ability_guid, effect_guid, effect_order, effect_type, param, effect_group_id, condition_id, target_index, effect_instance_id, contingent_effect_instance_id, secondary_target_index, recalculate_targets, is_optional, effect_duration, output_variables)")
     lines.append("CARD_ABILITY_EFFECTS = [")
-    for row in bom_rows:
-        lines.append("    (" + ", ".join(repr(value) for value in row) + "),")
+    lines.extend(("    (" + ", ".join(repr(value) for value in row) + "),") for row in (bom_rows))
     lines.append("]")
     lines.append("")
     lines.append("# card ability activation meta rows: (ability_guid, casting_behavior, is_manual, "
                  "activation_cost, uses_per_game, uses_per_turn, cooldown, exhausts_on_use, "
                  "is_triggered, target_template_ids, trigger_event_type, game_text, raw_json)")
     lines.append("CARD_ABILITY_META = [")
-    for (ag, casting, manual, cost, upg, upt, cd, exh, trig, tpls, evt, txt, rawj) in meta_rows:
-        lines.append(f"    ({ag!r}, {casting}, {manual}, {cost}, {upg}, {upt}, {cd}, {exh}, {trig}, {tpls!r}, {evt!r}, {txt!r}, {rawj!r}),")
+    lines.extend((f"    ({ag!r}, {casting}, {manual}, {cost}, {upg}, {upt}, {cd}, {exh}, {trig}, {tpls!r}, {evt!r}, {txt!r}, {rawj!r}),") for (ag, casting, manual, cost, upg, upt, cd, exh, trig, tpls, evt, txt, rawj) in (meta_rows))
     lines.append("]")
     lines.append("")
     lines.append("# AbilityTargetTemplate rows: (template_id, game_text, is_auto_target, "
@@ -754,8 +752,7 @@ def main():
                  "columns are backfilled from AbilityTargetTemplate.jsonl by "
                  "AssetExtraction/update_target_templates.py.")
     lines.append("TARGET_TEMPLATES = [")
-    for tid, gtext in sorted(target_rows):
-        lines.append(f"    ({tid!r}, {gtext!r}, 0, 0, 0, 0, '', '', 1, 1, '{{}}'),")
+    lines.extend((f"    ({tid!r}, {gtext!r}, 0, 0, 0, 0, '', '', 1, 1, '{{}}'),") for tid, gtext in (sorted(target_rows)))
     lines.append("]")
     block = "\n".join(lines)
 

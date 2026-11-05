@@ -86,7 +86,7 @@ def generate(data: str) -> dict[str, dict[str, Any]]:
     rarities = _card_rarities(data)
     champion_races = _champion_races(data)
     selected: dict[str, dict[str, Any]] = {}
-    candidate_counts = {race: 0 for race in RACES}
+    candidate_counts = dict.fromkeys(RACES, 0)
 
     for _, deck in records(data, "DeckTemplate")[0]:
         name = str(deck.get("m_DeckName") or "")

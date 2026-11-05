@@ -57,8 +57,7 @@ def main():
     lines = ["# CardCounterTemplate rows: (template_id, name, description). "
              "Generated from hex-private/Records/CardCounterTemplate.jsonl.",
              "CARD_COUNTER_TEMPLATES = ["]
-    for cid, name, desc in rows:
-        lines.append(f"    ({cid!r}, {name!r}, {desc!r}),")
+    lines.extend((f"    ({cid!r}, {name!r}, {desc!r}),") for cid, name, desc in (rows))
     lines.append("]")
     block = "\n".join(lines)
 

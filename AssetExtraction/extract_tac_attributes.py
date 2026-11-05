@@ -46,8 +46,7 @@ def render(attributes):
         "",
         "ATTRIBUTES: dict[str, str] = {",
     ]
-    for name in sorted(attributes):
-        lines.append(f"    {name!r}: {attributes[name]!r},")
+    lines.extend((f"    {name!r}: {attributes[name]!r},") for name in (sorted(attributes)))
     lines.append("}")
     return "\n".join(lines) + "\n"
 
