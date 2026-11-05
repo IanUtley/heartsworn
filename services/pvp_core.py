@@ -1990,7 +1990,7 @@ def _pvp_check_game_end(session, state):
     for pid in pids:
         if int(state.get(f'hp_{pid}', 20)) <= 0:
             other = pids[1] if pid == pids[0] else pids[0]
-            _resolve('_pvp_end_game')(session, state, other, pid, f'champion at 0 health')
+            _resolve('_pvp_end_game')(session, state, other, pid, 'champion at 0 health')
             return True
     return False
 
@@ -2180,7 +2180,7 @@ def handle_join_disconnected_game(handler, target, instance, reqid, comp, sessio
     and transitioning to Battle. Return the requested active session so the
     client adds its local player and sends ReadyToContinueGame.
     """
-    log_req(f'>>> JoinDisconnectedGame (dt=22023)')
+    log_req('>>> JoinDisconnectedGame (dt=22023)')
     player_uid_val = _objfmt_uid_field(inner_obj, inner_bytes, 'PlayerId')
     player_uid = player_uid_val
     player_pid = _pvp_raw_player_id(player_uid_val)
@@ -3207,7 +3207,7 @@ def pvp_debug_draw(handler, session, count):
 @_pvp_locked
 def handle_ready_to_continue_game(handler, target, instance, reqid, comp, session_id, conh, inner_obj, inner_bytes, log_req=log_req, **_kw):
     """Handle DT 22025 — ReadyToContinueGame after join."""
-    log_req(f'>>> ReadyToContinueGame (dt=22025)')
+    log_req('>>> ReadyToContinueGame (dt=22025)')
     player_uid_val = _objfmt_uid_field(inner_obj, inner_bytes, 'PlayerId')
     player_pid = _pvp_raw_player_id(player_uid_val)
     import game_session as gs
