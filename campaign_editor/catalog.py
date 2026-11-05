@@ -18,6 +18,18 @@ from pathlib import Path
 from typing import Any
 
 from paths import CAMPAIGN_ROOT, GENERATED, RECORDS, REPO  # noqa: E402,F401  (also sets sys.path)
+
+import campaign_data  # noqa: E402
+
+# The editor's file helpers write campaign JSON into the campaign data folder.
+DATA_DIR = campaign_data.DATA_DIR
+
+
+def __getattr__(name: str) -> Any:
+    """Forward the derived-catalog helpers (match_item, scene_node_id, ...) from campaign_runtime.catalog_data."""
+    from campaign_runtime import catalog_data
+
+    return getattr(catalog_data, name)
 _CARD_LOCATIONS = None
 _CARD_LOCATIONS_LOCK = threading.Lock()
 
