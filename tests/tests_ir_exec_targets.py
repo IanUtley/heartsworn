@@ -33,10 +33,10 @@ def test_follow_up_gaps_allow_a_chosen_secondary_target_and_refuse_a_variable_co
     assert ir_exec_targets.follow_up_gaps(variable, "SourceBuriedTargetTemplate") == ["target MaxTargetCount"]
 
 
-def test_follow_up_gaps_refuse_the_trigger_target_selector():
+def test_follow_up_gaps_run_the_trigger_target_selector():
+    # TriggerTarget is a supported selector (TRIGGER_SELECTORS): the card the event's other side names is wired.
     template = {"m_IsAutoTarget": 1, "m_TriggerSelector": "TriggerTarget"}
-    assert ir_exec_targets.follow_up_gaps(template, "AbilityTriggerCardTargetTemplate") == [
-        "trigger selector TriggerTarget"]
+    assert ir_exec_targets.follow_up_gaps(template, "AbilityTriggerCardTargetTemplate") == []
     assert ir_exec_targets.follow_up_gaps({"m_TriggerSelector": "TriggerSource"},
                                           "AbilityTriggerCardTargetTemplate") == []
 

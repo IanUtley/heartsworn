@@ -47,12 +47,13 @@ def test_revert_modifications_matches_native():
     assert interpreted == native
 
 
-def test_grant_with_unsupported_power_source_is_refused():
+def test_grant_from_socketed_powers_is_run_not_refused():
+    # A grant that takes its abilities from the source's sockets is run by the live leaf (granted_abilities.gaps).
     from rules_port import granted_abilities
 
     effect = {"m_GrantedAbilityTemplateId": {"m_Guid": "647fa8ff-fbe9-b701-0ab3-9f26c2e86166"},
               "m_AllSocketedPowersOfSource": 1}
-    assert granted_abilities.gaps("GrantAbilityEffectTemplate", effect, "Permanent")
+    assert granted_abilities.gaps("GrantAbilityEffectTemplate", effect, "Permanent") == []
     assert granted_abilities.gaps("GrantAbilityEffectTemplate", {
         "m_GrantedAbilityTemplateId": {"m_Guid": "647fa8ff-fbe9-b701-0ab3-9f26c2e86166"}}, "EndOfTurn") == []
 

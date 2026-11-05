@@ -61,12 +61,12 @@ def test_replenish_refills_the_current_pool_to_its_total(db):
 
 
 def test_card_cost_with_a_lasting_duration_is_refused_not_run(db):
-    """A cost change that lasts while its card is in play belongs to the static path (area H), so the interpreter
-    refuses the ability rather than running it."""
+    """A cost change that lasts while its card is in play is run by the interpreter: a linked clause takes the
+    while-in-play lifetime and records it in the linked ledger (see LINKED_COST_DURATIONS)."""
     from rules_port.ir_exec import coverage
 
     assert coverage("319ca38e-1fad-bbaa-e5a7-d11239f3a34f") == []
-    assert coverage("4023fec8-f9ff-7f40-70f0-5f672348699e") == ["cost duration WhileCardInPlay"]
+    assert coverage("4023fec8-f9ff-7f40-70f0-5f672348699e") == []
 
 
 if __name__ == "__main__":
