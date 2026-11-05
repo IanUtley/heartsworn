@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import IntFlag
-from typing import Callable, Iterable, Optional
+from typing import Callable, Iterable
 
 
 class CombatFlags(IntFlag):
@@ -105,7 +105,7 @@ class Combat:
         self.flags |= CombatFlags.ATTACKERS_DECLARED
         return True
 
-    def declare_blockers(self, blockers: Optional[Iterable[object]]) -> bool:
+    def declare_blockers(self, blockers: Iterable[object] | None) -> bool:
         self.blockers = list(blockers or ())
         self.flags |= CombatFlags.BLOCKERS_DECLARED
         if self.blockers:
@@ -163,7 +163,7 @@ class CombatManager:
     def contains(self, combat_id: CombatId) -> bool:
         return coerce_combat_id(combat_id) in self._combat_map
 
-    def get(self, combat_id: CombatId) -> Optional[Combat]:
+    def get(self, combat_id: CombatId) -> Combat | None:
         return self._combat_map.get(coerce_combat_id(combat_id))
 
     def create_attack(self, combat_id: CombatId, instigator, defender) -> Combat:
@@ -194,7 +194,7 @@ class CombatManager:
         return [combat for combat in self.combats
                 if _card_key(combat.attacker) == wanted]
 
-    def combat_for_attacker(self, card) -> Optional[Combat]:
+    def combat_for_attacker(self, card) -> Combat | None:
         """Return the existing declaration for a card, if any."""
         wanted = _card_key(card)
         return next((combat for combat in self.combats

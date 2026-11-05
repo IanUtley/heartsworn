@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from collections import deque
 from enum import Enum
-from typing import Any, Deque, Dict, Iterable, Iterator, Optional, cast
+from typing import Any, Iterable, Iterator, cast
 
 from .phases import phase_name
 
@@ -96,8 +96,8 @@ class GameAction:
     _next_instance_id = 0
 
     def __init__(self) -> None:
-        self.instance_id: Optional[int] = None
-        self.action_stack: Optional[GameActionStack] = None
+        self.instance_id: int | None = None
+        self.action_stack: GameActionStack | None = None
         self.session = None
         self.was_interrupted = False
 
@@ -145,7 +145,7 @@ class AbilityRegistry:
     """
 
     def __init__(self) -> None:
-        self._instances: Dict[int, object] = {}
+        self._instances: dict[int, object] = {}
         self._chain_instance_ids: set[int] = set()
 
     def add(self, instance_id: int, ability: object) -> None:
@@ -227,7 +227,7 @@ class Chain:
         self._instance_ids.pop()
         return self.ability_manager.get(instance_id)
 
-    def peek_ability(self, instance_id: Optional[int] = None):
+    def peek_ability(self, instance_id: int | None = None):
         if not self._instance_ids:
             return None
         top_id = self._instance_ids[-1]
@@ -267,14 +267,14 @@ class GameActionStack:
     def __init__(self, session) -> None:
         self.session = session
         self._stack: list[GameAction] = []
-        self.current_action: Optional[GameAction] = None
+        self.current_action: GameAction | None = None
         self.priority_player_id: object | None = None
 
     @property
     def count(self) -> int:
         return len(self._stack)
 
-    def peek(self) -> Optional[GameAction]:
+    def peek(self) -> GameAction | None:
         return self._stack[-1] if self._stack else None
 
     def update(self) -> bool:
@@ -355,7 +355,7 @@ class PriorityWindowAction(GameAction):
         super().__init__()
         self.priority_players = priority_players
         self.ability_responding_to = ability_responding_to
-        self._priority_queue: Deque[object] = deque()
+        self._priority_queue: deque[object] = deque()
         self._rules_port_phase: str | None = None
 
     @property

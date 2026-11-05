@@ -18,7 +18,7 @@ import time
 from collections import deque
 from dataclasses import dataclass, field
 from threading import RLock
-from typing import Any, Callable, Deque, Dict, Mapping, Optional
+from typing import Any, Callable, Mapping
 
 import game_engine
 from domain.constants import CARD_UID_TYPE
@@ -469,7 +469,7 @@ class SQLiteRulesSnapshot:
         self.game_session = game_session
         self._ephemeral: dict[str, Any] = {}
 
-    def load(self) -> Dict[str, Any]:
+    def load(self) -> dict[str, Any]:
         state = getattr(self.game_session, "_rules_port_battle_state", None)
         if not isinstance(state, dict):
             state = getattr(self.game_session, "turn_order", {})
@@ -509,7 +509,7 @@ class GameEngineEventSink:
     """
 
     def __init__(self, game: game_engine.Game, *, mutation_adapter=None,
-                 event_observer: Optional[Callable[[object], None]] = None) -> None:
+                 event_observer: Callable[[object], None] | None = None) -> None:
         self._unpublished: list[Any] = []
         self._game = game
         self.mutation_adapter = mutation_adapter
@@ -710,7 +710,7 @@ class AuthoritativeSession:
     """
 
     def __init__(self, session_id, player_ids, *, seed_z: int, seed_w: int,
-                 event_sink: Optional[GameEngineEventSink] = None,
+                 event_sink: GameEngineEventSink | None = None,
                  snapshot: Any = None) -> None:
         players = tuple(player_ids)
         if not players:
@@ -728,47 +728,47 @@ class AuthoritativeSession:
         self.event_sink = event_sink
         self.snapshot_store = snapshot
         self._native_phase_already_entered = False
-        self._transactions: Deque[RulesTransaction] = deque()
+        self._transactions: deque[RulesTransaction] = deque()
         self._transaction_history: list[dict[str, Any]] = []
-        self._trigger_events: Deque[object] = deque()
-        self._transaction_handlers: Dict[str, Callable[[RulesTransaction], bool]] = {}
-        self._trigger_handler: Optional[Callable[[object], None]] = None
-        self._state_based_handler: Optional[Callable[[], bool]] = None
+        self._trigger_events: deque[object] = deque()
+        self._transaction_handlers: dict[str, Callable[[RulesTransaction], bool]] = {}
+        self._trigger_handler: Callable[[object], None] | None = None
+        self._state_based_handler: Callable[[], bool] | None = None
         self._state_based_lock = RLock()
         # C# Session.cardsReadyToPlay: cards a host/effect chose to play
         # without an ordinary client transaction, finalized on the next tick.
         self._cards_ready_to_play: list[dict[str, Any]] = []
-        self._card_finisher: Optional[Callable[[dict[str, Any]], bool]] = None
-        self._turn_start_resolver: Optional[Callable[[], object]] = None
-        self._turn_boundary_resolver: Optional[Callable[[object], object]] = None
-        self._turn_phase_entry_resolver: Optional[Callable[[object], object]] = None
-        self._turn_phase_exit_resolver: Optional[Callable[[object], object]] = None
-        self._phase_priority_resolver: Optional[Callable[[object, object], object]] = None
-        self._ability_resolver: Optional[Callable[[object], AbilityResolutionState]] = None
-        self._activation_requester: Optional[Callable[[object, tuple], None]] = None
-        self._ability_cost_payer: Optional[Callable[[object], bool]] = None
+        self._card_finisher: Callable[[dict[str, Any]], bool] | None = None
+        self._turn_start_resolver: Callable[[], object] | None = None
+        self._turn_boundary_resolver: Callable[[object], object] | None = None
+        self._turn_phase_entry_resolver: Callable[[object], object] | None = None
+        self._turn_phase_exit_resolver: Callable[[object], object] | None = None
+        self._phase_priority_resolver: Callable[[object, object], object] | None = None
+        self._ability_resolver: Callable[[object], AbilityResolutionState] | None = None
+        self._activation_requester: Callable[[object, tuple], None] | None = None
+        self._ability_cost_payer: Callable[[object], bool] | None = None
         self._combat_damage_backend = None
-        self._card_transaction_resolver: Optional[Callable[[str, RulesTransaction], bool]] = None
-        self._resource_transaction_resolver: Optional[Callable[[RulesTransaction], bool]] = None
-        self._hand_transaction_resolver: Optional[Callable[[str, RulesTransaction], bool]] = None
-        self._setup_transaction_resolver: Optional[Callable[[RulesTransaction], bool]] = None
-        self._priority_transaction_resolver: Optional[Callable[[RulesTransaction], bool]] = None
-        self._discard_transaction_resolver: Optional[Callable[[RulesTransaction], bool]] = None
-        self._hand_limit_checker: Optional[Callable[[object], bool]] = None
-        self._discard_continuation_resolver: Optional[Callable[[RulesTransaction], bool]] = None
-        self._ready_card_transaction_resolver: Optional[Callable[[RulesTransaction], bool]] = None
-        self._triggered_ability_transaction_resolver: Optional[Callable[[RulesTransaction], bool]] = None
-        self._player_options_resolver: Optional[Callable[[RulesTransaction], bool]] = None
-        self._checksum_resolver: Optional[Callable[[RulesTransaction], bool]] = None
-        self._encounter_mod_resolver: Optional[Callable[[RulesTransaction], bool]] = None
-        self._quit_game_resolver: Optional[Callable[[RulesTransaction], bool]] = None
-        self._attack_transaction_resolver: Optional[Callable[[RulesTransaction], bool]] = None
-        self._defense_transaction_resolver: Optional[Callable[[RulesTransaction], bool]] = None
-        self._damage_transaction_resolver: Optional[Callable[[RulesTransaction], bool]] = None
-        self._choice_transaction_resolver: Optional[Callable[[RulesTransaction], bool]] = None
+        self._card_transaction_resolver: Callable[[str, RulesTransaction], bool] | None = None
+        self._resource_transaction_resolver: Callable[[RulesTransaction], bool] | None = None
+        self._hand_transaction_resolver: Callable[[str, RulesTransaction], bool] | None = None
+        self._setup_transaction_resolver: Callable[[RulesTransaction], bool] | None = None
+        self._priority_transaction_resolver: Callable[[RulesTransaction], bool] | None = None
+        self._discard_transaction_resolver: Callable[[RulesTransaction], bool] | None = None
+        self._hand_limit_checker: Callable[[object], bool] | None = None
+        self._discard_continuation_resolver: Callable[[RulesTransaction], bool] | None = None
+        self._ready_card_transaction_resolver: Callable[[RulesTransaction], bool] | None = None
+        self._triggered_ability_transaction_resolver: Callable[[RulesTransaction], bool] | None = None
+        self._player_options_resolver: Callable[[RulesTransaction], bool] | None = None
+        self._checksum_resolver: Callable[[RulesTransaction], bool] | None = None
+        self._encounter_mod_resolver: Callable[[RulesTransaction], bool] | None = None
+        self._quit_game_resolver: Callable[[RulesTransaction], bool] | None = None
+        self._attack_transaction_resolver: Callable[[RulesTransaction], bool] | None = None
+        self._defense_transaction_resolver: Callable[[RulesTransaction], bool] | None = None
+        self._damage_transaction_resolver: Callable[[RulesTransaction], bool] | None = None
+        self._choice_transaction_resolver: Callable[[RulesTransaction], bool] | None = None
         self._projection = TransactionProjection()
         self.runtime_facts = None
-        self.pending_activation: Optional[dict[str, Any]] = None
+        self.pending_activation: dict[str, Any] | None = None
         self.auto_pass_states: dict[object, object] = {}
         self.restored_action_descriptors: tuple[dict[str, Any], ...] = ()
         self.restored_chain_instance_ids: tuple[int, ...] = ()
@@ -1595,7 +1595,7 @@ class AuthoritativeSession:
         """Normalized accepted intents for deterministic parity captures."""
         return tuple(dict(item) for item in self._transaction_history)
 
-    def parity_state(self) -> Dict[str, Any]:
+    def parity_state(self) -> dict[str, Any]:
         """Return the state slice compared against a captured C# run."""
         return self.snapshot()
 
@@ -2759,7 +2759,7 @@ class AuthoritativeSession:
         self.action_stack.update()
         return True
 
-    def snapshot(self) -> Dict[str, Any]:
+    def snapshot(self) -> dict[str, Any]:
         z, w = self.random_number_generator.get_seed()
         projected = getattr(self, "_projected_chain_descriptors", {})
         active_ids = set(self.chain._instance_ids)

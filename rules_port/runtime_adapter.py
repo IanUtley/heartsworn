@@ -261,7 +261,6 @@ class PvpRuntimeFacts:
                     raise
                 # Focused test doubles and older non-battle callers may not
                 # expose the effective-cost facade yet.
-                pass
         if self.battle_state.get("_rules_port_attached"):
             raise RuntimeError(
                 "RulesPort runtime facts require the effective-cost facade")

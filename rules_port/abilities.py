@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 from collections.abc import Mapping
-from typing import Any, Optional
+from typing import Any
 
 from gamedata.play_plan import AbilityInstance as MetadataAbilityInstance
 from gamedata.play_plan import ActivationData
@@ -242,7 +242,7 @@ class AbilityInstance:
         return True
 
     def continuation(self, *, resume_effect_order: int = 0,
-                     variables: Optional[dict[str, Any]] = None,
+                     variables: dict[str, Any] | None = None,
                      source_uid: int | None = None,
                      owner_id: int | None = None,
                      target_map: dict[str, Any] | None = None) -> dict[str, Any]:

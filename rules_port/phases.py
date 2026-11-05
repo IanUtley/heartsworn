@@ -7,12 +7,11 @@ phase-entry effects remain the responsibility of a session adapter.
 
 from __future__ import annotations
 
-from typing import Dict, FrozenSet
 
 
 # State name -> permitted next states.  EndGame is included only where the C#
 # state registered it; NotPlaying is the special all-entry reset state.
-_PERMITS: Dict[str, FrozenSet[str]] = {
+_PERMITS: dict[str, frozenset[str]] = {
     "NotPlaying": frozenset({"AssignDamage", "AssignFirstStrikeDamage",
         "DeclareAttack", "DeclareAttackPriorityWindow", "DeclareDefense",
         "DeclareDefensePriorityWindow", "DeclareCombatPriorityWindow", "Discard",
@@ -75,7 +74,7 @@ def phase_name(phase) -> str:
         return str(phase)
 
 
-def permitted_next_phases(phase) -> FrozenSet[str]:
+def permitted_next_phases(phase) -> frozenset[str]:
     """Return the exact C# state-machine permit set for ``phase``."""
     try:
         return _PERMITS[phase_name(phase)]
