@@ -1,4 +1,5 @@
 from __future__ import annotations
+
 from .runtime_helpers import as_int
 import json
 from dataclasses import dataclass, replace
@@ -6,9 +7,10 @@ from typing import Any
 from .damage_effects import assign_damage_shield_order, serialized_damage
 from rules_port.card_view import CardView
 import rules_port.context as _context
+from rules_port.context_host import HostBase
 
 
-class VariableEffectsMixin:
+class VariableEffectsMixin(HostBase):
     """Methods of EffectContext grouped by variables.
 
     Mixed into EffectContext; attribute access goes through self, so the
