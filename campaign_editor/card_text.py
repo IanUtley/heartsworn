@@ -163,8 +163,7 @@ def build(card: dict[str, Any], abilities: list[dict[str, Any]]) -> dict[str, An
         if name not in NOTIFY_ATTRS or name in HIDDEN_ATTRS:
             continue
         if name in KEYWORD_NAMES:
-            for _ in range(int(ints[name]) if name in REPEATED_KEYWORDS else 1):
-                bar.append(name)
+            bar.extend((name) for _ in (range(int(ints[name]) if name in REPEATED_KEYWORDS else 1)))
         else:
             unresolved.append(f"{name} reminder (localised)")
 

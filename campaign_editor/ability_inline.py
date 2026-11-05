@@ -209,8 +209,7 @@ def inline_children(root: dict[str, Any], effect_of: Callable[[str], dict[str, A
             elif not any(v.get("m_Name") == child_var.get("m_Name") for v in variables):
                 variables.append(copy.deepcopy(child_var))
         condition = entry.get("m_ConditionId") if _guid(entry.get("m_ConditionId")) not in ("", NULL_GUID) else None
-        for child_entry in child.get("m_AbilityEffectList") or []:
-            entries.append(_renumber(child_entry, target_base, instance_base, condition))
+        entries.extend((_renumber(child_entry, target_base, instance_base, condition)) for child_entry in (child.get("m_AbilityEffectList") or []))
         instance_base += 1 + max([int(e.get("m_EffectInstanceId") or 0) for e in child.get("m_AbilityEffectList") or []] or [0])
     parent["m_AbilityTargetTemplateIds"] = targets
     parent["m_Variables"] = variables

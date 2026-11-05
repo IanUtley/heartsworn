@@ -207,8 +207,7 @@ def build_filter(properties: Properties) -> dict[str, Any]:
                        "defense": ("HasDefenseValue", "m_DefenseValue"),
                        "cost": ("HasResourceCost", "m_ResourceCost")}[comparison["stat"]]
         parts.append(_with_defaults(name, {field: comparison["value"], "m_ComparisonOp": comparison["op"]}))
-    for flags in properties.get("keywords") or []:
-        parts.append(_filter("HasAllAttributeFlags", m_CardAttributeFlags=flags))
+    parts.extend((_filter("HasAllAttributeFlags", m_CardAttributeFlags=flags)) for flags in (properties.get("keywords") or []))
     for flag, key in FLAGS.items():
         if properties.get(key):
             parts.append(_with_defaults(flag, {}))
@@ -224,13 +223,11 @@ def build_filter(properties: Properties) -> dict[str, Any]:
                                                       "m_Value": attribute["value"]}))
     if properties.get("faction"):
         parts.append(_filter("InFaction", m_Faction=properties["faction"]))
-    for inner in properties.get("without") or []:
-        parts.append(_filter("NotCardFilter", m_TargetFilter=build_filter(inner)))
+    parts.extend((_filter("NotCardFilter", m_TargetFilter=build_filter(inner))) for inner in (properties.get("without") or []))
     if properties.get("either"):
         parts.append(_filter("OrCardFilter",
                              m_TargetFilters=[build_filter(option) for option in properties["either"]]))
-    for part in properties.get("raw") or []:
-        parts.append(part)
+    parts.extend((part) for part in (properties.get("raw") or []))
     if not parts:
         raise ValueError("a target needs at least one property")
     if len(parts) == 1:

@@ -747,7 +747,7 @@ def _threshold_phrase(content: dict[str, Any]) -> str:
 def _effect_shape_key(content: dict[str, Any]) -> tuple[str, list[str]]:
     """An effect's content with its variable names blanked, and those names in order."""
     names = list(dict.fromkeys(_input_names(content, [])))
-    return _key(_rename(content, {name: "$" for name in names})), names
+    return _key(_rename(content, dict.fromkeys(names, "$"))), names
 
 
 def catalogue() -> dict[str, Any]:
