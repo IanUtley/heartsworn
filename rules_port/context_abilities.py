@@ -490,9 +490,7 @@ class AbilityEffectsMixin(HostBase):
                 values = json.loads(abilities_json or "[]")
             except (TypeError, ValueError, json.JSONDecodeError):
                 continue
-            for ability in values:
-                if ability:
-                    pool.append(str(ability).lower())
+            pool.extend(str(ability).lower() for ability in values if ability)
         if not pool:
             return ""
         rng = self.bstate.get("_rules_rng")

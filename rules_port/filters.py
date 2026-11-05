@@ -446,9 +446,7 @@ def _gem_abilities_for_card(card):
             values = json.loads(rows.get(value) or "[]")
         except (TypeError, ValueError, json.JSONDecodeError):
             values = []
-        for ability in values if isinstance(values, list) else ():
-            if ability:
-                abilities.append(str(ability).lower())
+        abilities.extend(str(ability).lower() for ability in (values if isinstance(values, list) else ()) if ability)
     return tuple(abilities)
 
 
