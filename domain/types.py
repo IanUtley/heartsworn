@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import uuid
-from typing import Optional
 
 from domain.binary_io import BinaryWriter, BinaryReader
 
@@ -75,7 +74,7 @@ class UID:
 
 class ResourceId:
     """Wraps a 16-byte GUID. Wire format: int32(16) + 16 bytes."""
-    def __init__(self, guid: Optional[uuid.UUID] = None):
+    def __init__(self, guid: uuid.UUID | None = None):
         self.guid = guid or uuid.UUID(int=0)
 
     def to_bytes(self) -> bytes:

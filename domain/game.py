@@ -2,7 +2,7 @@
 
 import random as _random
 from collections.abc import Sequence
-from typing import List, Dict, Any, Optional, Tuple, cast
+from typing import Any, Optional, cast
 
 from domain.types import UID, ResourceId, SessionCardId, CombatId
 from domain.enums import *
@@ -174,8 +174,8 @@ class CardDef:
     """Definition of a card in the game."""
     def __init__(self, name: str, card_type: int = ECardTypes.Troop,
                  cost: int = 0, attack: int = 0, defense: int = 0,
-                 shards: Optional[List[int]] = None,
-                 abilities: Optional[List[ResourceId]] = None,
+                 shards: list[int] | None = None,
+                 abilities: list[ResourceId] | None = None,
                  attributes: int = ECardAttributes.Unknown, lethal: bool = False,
                  subtype: str = ""):
         self.name = name
@@ -189,12 +189,12 @@ class CardDef:
         self.lethal = bool(lethal)
         self.subtype = str(subtype or "")
         self.escalation = 0
-        self.spell_point_cost_mods: Dict[ResourceId, int] = {}
-        self.uses_per_game_counts: Dict[ResourceId, int] = {}
-        self.cooldown_counts: Dict[ResourceId, int] = {}
-        self.orig_template: Optional[str] = None
-        self.counters: Dict[str, int] = {}
-        self.related_cards: List[SessionCardId] = []
+        self.spell_point_cost_mods: dict[ResourceId, int] = {}
+        self.uses_per_game_counts: dict[ResourceId, int] = {}
+        self.cooldown_counts: dict[ResourceId, int] = {}
+        self.orig_template: str | None = None
+        self.counters: dict[str, int] = {}
+        self.related_cards: list[SessionCardId] = []
         self.gems = 0
         self.rage = 0
         self.tunneling = 0
@@ -270,41 +270,41 @@ class Game:
         self.ai_resources = 0
         self.player_total_resources = 0
         self.ai_total_resources = 0
-        self.player_threshold: Dict[int, int] = {}
-        self.ai_threshold: Dict[int, int] = {}
-        self.player_champion_card_id: Optional[SessionCardId] = None
-        self.ai_champion_card_id: Optional[SessionCardId] = None
+        self.player_threshold: dict[int, int] = {}
+        self.ai_threshold: dict[int, int] = {}
+        self.player_champion_card_id: SessionCardId | None = None
+        self.ai_champion_card_id: SessionCardId | None = None
 
         self.player_charges = 0
         self.ai_charges = 0
         self.player_spell_points = 0
         self.ai_spell_points = 0
 
-        self.player_hand: List[SessionCardId] = []
-        self.player_deck: List[Tuple[SessionCardId, CardDef]] = []
-        self.player_warzone: List[SessionCardId] = []
-        self.player_resources_played: List[SessionCardId] = []
+        self.player_hand: list[SessionCardId] = []
+        self.player_deck: list[tuple[SessionCardId, CardDef]] = []
+        self.player_warzone: list[SessionCardId] = []
+        self.player_resources_played: list[SessionCardId] = []
 
-        self.ai_hand: List[SessionCardId] = []
-        self.ai_deck: List[Tuple[SessionCardId, CardDef]] = []
-        self.ai_warzone: List[SessionCardId] = []
-        self.ai_resources_played: List[SessionCardId] = []
+        self.ai_hand: list[SessionCardId] = []
+        self.ai_deck: list[tuple[SessionCardId, CardDef]] = []
+        self.ai_warzone: list[SessionCardId] = []
+        self.ai_resources_played: list[SessionCardId] = []
 
-        self.card_defs: Dict[SessionCardId, CardDef] = {}
+        self.card_defs: dict[SessionCardId, CardDef] = {}
         # Player-level visibility modifiers are keyed by the objective UID of
         # the player who has the permission.  They are projected into
         # PlayerUpdated and used to redact opposing hand CardUpdated events.
-        self._visibility_by_uid: Dict[int, Dict[str, int]] = {}
+        self._visibility_by_uid: dict[int, dict[str, int]] = {}
         # Deck sleeves are established once (GameStarted/DeckCreated) and then
         # must survive every later PlayerUpdated.  The client's
         # PlayerRepresentation.Update assigns DeckSleeveId unconditionally, so
         # an omitted field reverts the opponent's cards to the default Hex
         # sleeve as soon as any other player state is pushed.
-        self.deck_sleeve_ids: Dict[int, str] = {}
+        self.deck_sleeve_ids: dict[int, str] = {}
 
-        self.events: List[SessionEventArgs] = []
+        self.events: list[SessionEventArgs] = []
 
-        self.script_commands: List[dict] = []
+        self.script_commands: list[dict] = []
         self.script_index = 0
         self.interface_disabled = False
 
@@ -313,7 +313,7 @@ class Game:
         self.next_card_id += 1
         return cid
 
-    def _parse_deck(self, cards: List[str]) -> List[Tuple[str, int]]:
+    def _parse_deck(self, cards: list[str]) -> list[tuple[str, int]]:
         result = []
         for c in cards:
             c = c.strip().lower()
@@ -327,7 +327,7 @@ class Game:
                 result.append((name, 1))
         return result
 
-    def setup_deck(self, player_uid: UID, cards: List[str], champion: str):
+    def setup_deck(self, player_uid: UID, cards: list[str], champion: str):
         parsed = self._parse_deck(cards)
         is_player = player_uid == self.player_uid
 
@@ -552,7 +552,7 @@ class Game:
     def push_card_counters_changed(self, cid: SessionCardId,
                                    counter_template: ResourceId,
                                    new_value: int, old_value: int,
-                                   private_player_uid: Optional[UID] = None):
+                                   private_player_uid: UID | None = None):
         """Push the class-54 UI refresh event used by the client counter renderer."""
         ev = self._make_event(CardCountersChangedSessionEventArgs)
         ev.session_card_id = cid
@@ -590,7 +590,7 @@ class Game:
         self._push(ev)
 
     def push_card_destroyed(self, cid: SessionCardId, player_uid: UID,
-                            responsible_cid: Optional[SessionCardId] = None):
+                            responsible_cid: SessionCardId | None = None):
         ev = self._make_event(CardDestroyedSessionEventArgs)
         ev.player_id = player_uid
         ev.session_card_id = cid
@@ -612,7 +612,7 @@ class Game:
     def push_ability_on_chain(self, source_scid: SessionCardId,
                               ability_template_id: ResourceId,
                               ability_instance_id: int = 1,
-                              target_card_ids: Optional[List[SessionCardId]] = None,
+                              target_card_ids: list[SessionCardId] | None = None,
                               ignores_chain: bool = False):
         ev = self._make_event(AbilityPushedOnChainSessionEventArgs)
         ev.source_card_id = source_scid
@@ -663,7 +663,7 @@ class Game:
         self._push(ev)
 
     def push_blockers_assigned(self, combat_id: CombatId, attacker: SessionCardId,
-                               defender: SessionCardId, blockers: List[SessionCardId]):
+                               defender: SessionCardId, blockers: list[SessionCardId]):
         ev = self._make_event(BlockersAssignedSessionEventArgs)
         ev.combat_id = combat_id
         ev.attacker_id = attacker
@@ -672,7 +672,7 @@ class Game:
         self._push(ev)
 
     def push_combat_phase_resolved(self, combat_id: CombatId, attacker: SessionCardId,
-                                   defender: SessionCardId, blockers: List[SessionCardId],
+                                   defender: SessionCardId, blockers: list[SessionCardId],
                                    phase: int = ECombatPhase.Standard):
         ev = self._make_event(CombatPhaseResolvedSessionEventArgs)
         ev.combat_id = combat_id
@@ -689,7 +689,7 @@ class Game:
         self._push(self._make_event(EndCombatResolutionSessionEventArgs))
 
     def push_combat_removed(self, combat_id: CombatId, attacker: SessionCardId,
-                            defender: SessionCardId, blockers: List[SessionCardId]):
+                            defender: SessionCardId, blockers: list[SessionCardId]):
         ev = self._make_event(CombatRemovedSessionEventArgs)
         ev.combat_id = combat_id
         ev.attacker_id = attacker
@@ -703,14 +703,14 @@ class Game:
         ev.combats = list(combats)
         self._push(ev)
 
-    def push_combats_need_damage(self, player_uid: UID, combats: List[SessionEventArgs]):
+    def push_combats_need_damage(self, player_uid: UID, combats: list[SessionEventArgs]):
         ev = self._make_event(CombatsThatNeedDamageSessionEventArgs)
         ev.player_id = player_uid
         ev.combats = list(combats)
         self._push(ev)
 
-    def push_turn_phase(self, phase: int, active_uid: Optional[UID] = None,
-                        prior_uid: Optional[UID] = None):
+    def push_turn_phase(self, phase: int, active_uid: UID | None = None,
+                        prior_uid: UID | None = None):
         ev = self._make_event(TurnPhaseUpdatedSessionEventArgs)
         ev.turn_phase = phase
         ev.active_player_id = active_uid or self.active_player
@@ -752,7 +752,7 @@ class Game:
         ev.instances = []
         self._push(ev)
 
-    def push_playable_cards(self, card_ids: List[SessionCardId], player_uid: UID):
+    def push_playable_cards(self, card_ids: list[SessionCardId], player_uid: UID):
         ev_list = self._make_event(PlayerOptionListSessionEventArgs)
         ev_list.player_id = player_uid
         for scid in card_ids:
@@ -763,7 +763,7 @@ class Game:
             ev_list.options.append(opt)
         self._push(ev_list)
 
-    def set_deck_sleeve(self, player_uid: UID, sleeve_guid: Optional[str]):
+    def set_deck_sleeve(self, player_uid: UID, sleeve_guid: str | None):
         """Record a player's deck sleeve so later updates cannot clear it."""
         guid = str(sleeve_guid or "").strip().lower()
         if not guid or guid == "00000000-0000-0000-0000-000000000000":
@@ -782,7 +782,7 @@ class Game:
         return self.deck_sleeve_ids.get(key)
 
     def push_player_updated(self, player_uid: UID,
-                            deck_sleeve_id: Optional[str] = None,
+                            deck_sleeve_id: str | None = None,
                             champ_id: Optional['SessionCardId'] = None):
         is_player = player_uid == self.player_uid
         ev = self._make_event(PlayerUpdatedSessionEventArgs)
@@ -931,8 +931,8 @@ class Game:
         self._push(ev)
 
     def push_deck_created_with_cards(self, player_uid: UID,
-                                     card_ids: List[SessionCardId],
-                                     sleeve_guid: Optional[str] = None):
+                                     card_ids: list[SessionCardId],
+                                     sleeve_guid: str | None = None):
         ev = self._make_event(DeckCreatedSessionEventArgs)
         ev.player_id = player_uid
         ev.session_card_ids = card_ids
@@ -944,7 +944,7 @@ class Game:
         self._push(ev)
 
     def push_deck_created(self, player_uid: UID,
-                          sleeve_guid: Optional[str] = None):
+                          sleeve_guid: str | None = None):
         is_player = player_uid == self.player_uid
         deck = self.player_deck if is_player else self.ai_deck
         ev = self._make_event(DeckCreatedSessionEventArgs)
@@ -1010,7 +1010,7 @@ class Game:
 
     def push_encounter_cards_created(self, player_uid: UID, collection: int,
                                     location: int,
-                                    card_ids: List[SessionCardId]):
+                                    card_ids: list[SessionCardId]):
         ev = self._make_event(EncounterCardsCreatedInZoneSessionEventArgs)
         ev.player_id = player_uid
         ev.collection = collection
@@ -1020,7 +1020,7 @@ class Game:
 
     def push_card_transformed(self, cid: SessionCardId, template_id: str,
                               is_replica: bool = False,
-                              gems: Optional[int] = None,
+                              gems: int | None = None,
                               visible_to_viewer_uids=None):
         ev = self._make_event(CardTransformedSessionEventArgs)
         ev.session_card_id = cid
@@ -1045,7 +1045,7 @@ class Game:
                 _uid64(viewer) for viewer in visible_to_viewer_uids}
         self._push(ev)
 
-    def push_equipment_set(self, player_uid: UID, equipment_ids: List[str]):
+    def push_equipment_set(self, player_uid: UID, equipment_ids: list[str]):
         ev = self._make_event(EquipmentSetSessionEventArgs)
         ev.player_id = player_uid
         ev.equipment_ids = [rid if isinstance(rid, ResourceId)
@@ -1062,7 +1062,7 @@ class Game:
         self._push(ev)
 
     def push_champion_options(self, player_uid: UID, champ_scid: SessionCardId,
-                              ability_ids: List[ResourceId]):
+                              ability_ids: list[ResourceId]):
         ev = self._make_event(PlayerOptionListSessionEventArgs)
         ev.player_id = player_uid
         opt = self._make_event(PlayerOptionSessionEventArgs)
@@ -1076,10 +1076,10 @@ class Game:
         self._push(ev)
 
     def add_champion_to_options(self, player_uid: UID, champ_scid: SessionCardId,
-                                ability_ids: List[ResourceId],
-                                discard_costs: Optional[dict] = None,
-                                target_data: Optional[dict] = None,
-                                cost_data: Optional[dict] = None):
+                                ability_ids: list[ResourceId],
+                                discard_costs: dict | None = None,
+                                target_data: dict | None = None,
+                                cost_data: dict | None = None):
         """Append champion ability options (ECardUsage.Activate) to the most
         recent PlayerOptionList, one OptionInstance per affordable ability.
 
@@ -1190,7 +1190,7 @@ class Game:
         option_list.options.append(option)
         return option
 
-    def push_options(self, player_uid: UID, available_cards: List[SessionCardId]):
+    def push_options(self, player_uid: UID, available_cards: list[SessionCardId]):
         ev = self._make_event(PlayerOptionListSessionEventArgs)
         ev.player_id = player_uid
         for cid in available_cards:
@@ -1388,7 +1388,7 @@ class Game:
 
     DELAY = 0
 
-    def step(self) -> List[NetworkPacketSessionEventArgs]:
+    def step(self) -> list[NetworkPacketSessionEventArgs]:
         packets = []
 
         if self.script_index >= len(self.script_commands):
@@ -1553,7 +1553,7 @@ class Game:
 #  Script Parser
 # ======================================================================
 
-def parse_tutorial_script(filepath: str) -> List[dict]:
+def parse_tutorial_script(filepath: str) -> list[dict]:
     """Parse tutorial.txt into a list of command dicts."""
     commands = []
     try:

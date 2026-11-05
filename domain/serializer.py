@@ -1,6 +1,6 @@
 """SessionEventArgs binary serializer (.NET BinaryWriter format)."""
 
-from typing import List, Dict, cast
+from typing import List, cast
 
 from domain.binary_io import BinaryWriter, BinaryReader
 from domain.types import UID, ResourceId, SessionCardId, CombatId
@@ -72,32 +72,32 @@ class Serializer:
         self.w.write_int32(int(minutes))
         self.w.write_int32(int(seconds))
 
-    def add_list_int(self, lst: List[int]):
+    def add_list_int(self, lst: list[int]):
         self.w.write_int32(len(lst))
         for v in lst: self.w.write_int32(v)
 
-    def add_list_long(self, lst: List[int]):
+    def add_list_long(self, lst: list[int]):
         """List<long> (int64 elements) — used by class 39
         TriggeredAbilityActivationDataRequired.AbilityInstanceIds."""
         self.w.write_int32(len(lst))
         for v in lst: self.w.write_int64(v)
 
-    def add_list_uid(self, lst: List[UID]):
+    def add_list_uid(self, lst: list[UID]):
         self.w.write_int32(len(lst))
         # Keep list elements on the same wire-boundary path as scalar UIDs.
         # RulesPort and persistence-backed callers may still hold raw uid64
         # integers at this point.
         for v in lst: self.add_uid(v)
 
-    def add_list_resource_id(self, lst: List[ResourceId]):
+    def add_list_resource_id(self, lst: list[ResourceId]):
         self.w.write_int32(len(lst))
         for v in lst: v.write(self.w)
 
-    def add_list_string(self, lst: List[str]):
+    def add_list_string(self, lst: list[str]):
         self.w.write_int32(len(lst))
         for v in lst: self.w.write_string(v)
 
-    def add_list_scid(self, lst: List[SessionCardId]):
+    def add_list_scid(self, lst: list[SessionCardId]):
         self.w.write_int32(len(lst))
         for v in lst: v.write(self.w)
 
@@ -113,13 +113,13 @@ class Serializer:
         self.w.write_int32(len(raw))
         self.w.write_raw_bytes(raw)
 
-    def add_dict_str_int(self, d: Dict[str, int]):
+    def add_dict_str_int(self, d: dict[str, int]):
         self.w.write_int32(len(d))
         for k, v in d.items():
             self.w.write_string(k)
             self.w.write_int32(v)
 
-    def add_dict_str_str(self, d: Dict[str, str]):
+    def add_dict_str_str(self, d: dict[str, str]):
         self.w.write_int32(len(d))
         for k, v in d.items():
             self.w.write_string(k)

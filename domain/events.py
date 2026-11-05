@@ -1,6 +1,6 @@
 """SessionEventArgs event classes extracted from game_engine.py."""
 
-from typing import Any, List, Dict
+from typing import Any, List
 
 from domain.types import UID, ResourceId, SessionCardId, CombatId
 from domain.enums import (
@@ -45,18 +45,18 @@ class GameStartedSessionEventArgs(SessionEventArgs):
 
     def __init__(self):
         super().__init__()
-        self.turn_order: List[UID] = []
-        self.champion_names: List[str] = []
-        self.champion_template_ids: List[ResourceId] = []
-        self.sleeve_template_ids: List[ResourceId] = []
-        self.board_template_ids: List[ResourceId] = []
-        self.coin_template_ids: List[ResourceId] = []
-        self.divisions: List[int] = []
+        self.turn_order: list[UID] = []
+        self.champion_names: list[str] = []
+        self.champion_template_ids: list[ResourceId] = []
+        self.sleeve_template_ids: list[ResourceId] = []
+        self.board_template_ids: list[ResourceId] = []
+        self.coin_template_ids: list[ResourceId] = []
+        self.divisions: list[int] = []
         self.seed_w: int = 0
         self.seed_z: int = 0
         self.series_format = 0
         self.series_max_games = 0
-        self.series_prev_winners: List[int] = []
+        self.series_prev_winners: list[int] = []
 
     def to_byte_array(self) -> bytes:
         self.begin_write()
@@ -98,8 +98,8 @@ class GameEndedSessionEventArgs(SessionEventArgs):
 
     def __init__(self):
         super().__init__()
-        self.winners: List[UID] = []
-        self.losers: List[UID] = []
+        self.winners: list[UID] = []
+        self.losers: list[UID] = []
 
     def to_byte_array(self) -> bytes:
         self.begin_write()
@@ -329,7 +329,7 @@ class AbilityPushedOnChainSessionEventArgs(SessionEventArgs):
         super().__init__()
         self.ability_instance_id = 0
         self.source_card_id = SessionCardId()
-        self.target_card_ids: List[SessionCardId] = []
+        self.target_card_ids: list[SessionCardId] = []
         self.charge_point_cost = 0
         self.life_cost = 0
         self.resource_cost = 0
@@ -372,7 +372,7 @@ class AbilityActivationDataRequiredSessionEventArgs(SessionEventArgs):
         self.source_card_id = SessionCardId()
         self.ability_template_id = ResourceId.invalid()
         self.effect_group_id = 0
-        self.effect_instance_ids: List[int] = []
+        self.effect_instance_ids: list[int] = []
         self.resolve_chain = False
 
     def to_byte_array(self) -> bytes:
@@ -402,9 +402,9 @@ class TriggeredAbilityActivationDataRequiredSessionEventArgs(SessionEventArgs):
     def __init__(self):
         super().__init__()
         self.player_id = UID.invalid()
-        self.ability_instance_ids: List[int] = []
-        self.ability_template_ids: List[ResourceId] = []
-        self.source_card_ids: List[SessionCardId] = []
+        self.ability_instance_ids: list[int] = []
+        self.ability_template_ids: list[ResourceId] = []
+        self.source_card_ids: list[SessionCardId] = []
 
     def to_byte_array(self) -> bytes:
         self.begin_write()
@@ -426,10 +426,10 @@ class CardsRevealedSessionEventArgs(SessionEventArgs):
     def __init__(self):
         super().__init__()
         self.player_id = UID.invalid()
-        self.session_card_ids: List[SessionCardId] = []
-        self.collections: List[int] = []
-        self.owning_players: List[UID] = []
-        self.positions: List[int] = []
+        self.session_card_ids: list[SessionCardId] = []
+        self.collections: list[int] = []
+        self.owning_players: list[UID] = []
+        self.positions: list[int] = []
         self.ability_instance_id = 0
         self.inactive = False
 
@@ -478,7 +478,7 @@ class BlockersAssignedSessionEventArgs(SessionEventArgs):
         self.combat_id = CombatId()
         self.attacker_id = SessionCardId()
         self.defender_id = SessionCardId()
-        self.blocking_card_ids: List[SessionCardId] = []
+        self.blocking_card_ids: list[SessionCardId] = []
 
     def to_byte_array(self) -> bytes:
         self.begin_write()
@@ -499,7 +499,7 @@ class CombatPhaseResolvedSessionEventArgs(SessionEventArgs):
         self.combat_id = CombatId()
         self.attacker_id = SessionCardId()
         self.defender_id = SessionCardId()
-        self.blocking_card_ids: List[SessionCardId] = []
+        self.blocking_card_ids: list[SessionCardId] = []
         self.combat_phase = ECombatPhase.None_
 
     def to_byte_array(self) -> bytes:
@@ -540,7 +540,7 @@ class CombatRemovedSessionEventArgs(SessionEventArgs):
         self.combat_id = CombatId()
         self.attacker_id = SessionCardId()
         self.defender_id = SessionCardId()
-        self.blocking_card_ids: List[SessionCardId] = []
+        self.blocking_card_ids: list[SessionCardId] = []
 
     def to_byte_array(self) -> bytes:
         self.begin_write()
@@ -708,7 +708,7 @@ class DeckCreatedSessionEventArgs(SessionEventArgs):
     def __init__(self):
         super().__init__()
         self.player_id = UID.invalid()
-        self.session_card_ids: List[SessionCardId] = []
+        self.session_card_ids: list[SessionCardId] = []
         self.deck_sleeve_id = ResourceId.invalid()
         self.gameboard_id = ResourceId.invalid()
         self.coin_id = ResourceId.invalid()
@@ -799,7 +799,7 @@ class CombatsThatNeedDamageSessionEventArgs(SessionEventArgs):
     def __init__(self):
         super().__init__()
         self.player_id = UID.invalid()
-        self.combats: List[SessionEventArgs] = []
+        self.combats: list[SessionEventArgs] = []
 
     def to_byte_array(self) -> bytes:
         self.begin_write()
@@ -816,7 +816,7 @@ class CombatListingSessionEventArgs(SessionEventArgs):
     def __init__(self):
         super().__init__()
         self.player_id = UID.invalid()
-        self.combats: List[SessionEventArgs] = []
+        self.combats: list[SessionEventArgs] = []
 
     def to_byte_array(self) -> bytes:
         self.begin_write()
@@ -835,7 +835,7 @@ class CombatSessionEventArgs(SessionEventArgs):
         self.player_id = UID.invalid()
         self.id = CombatId()
         self.attacker = SessionCardId()
-        self.blockers: List[SessionCardId] = []
+        self.blockers: list[SessionCardId] = []
 
     def to_byte_array(self) -> bytes:
         self.begin_write()
@@ -870,23 +870,23 @@ class CardUpdatedSessionEventArgs(SessionEventArgs):
         self.ai_states = EAICardStates.None_
         self.attributes = ECardAttributes.Unknown
         self.collection = ECardCollections.None_
-        self.abilities: List[ResourceId] = []
-        self.intger_vars: Dict[str, int] = {}
-        self.int_attrs: Dict[str, int] = {}
-        self.counter_templates: List[ResourceId] = []
-        self.counter_counts: List[int] = []
+        self.abilities: list[ResourceId] = []
+        self.intger_vars: dict[str, int] = {}
+        self.int_attrs: dict[str, int] = {}
+        self.counter_templates: list[ResourceId] = []
+        self.counter_counts: list[int] = []
         self.gems = EGemTypesNew.Unknown
-        self.threshold_list: List[int] = []
+        self.threshold_list: list[int] = []
         self.nulling = False
-        self.related_cards: List[SessionCardId] = []
-        self.string_attrs: Dict[str, str] = {}
+        self.related_cards: list[SessionCardId] = []
+        self.string_attrs: dict[str, str] = {}
         self.activation_cost_mods = {}
         self.charge_point_cost_mods = {}
         self.spell_point_cost_mods = {}
         self.uses_per_game_counts = {}
         self.cooldown_counts = {}
         self.damage_shield = False
-        self.affecting_abilities: List[ResourceId] = []
+        self.affecting_abilities: list[ResourceId] = []
         self.feral = False
 
     def to_byte_array(self) -> bytes:
@@ -949,9 +949,9 @@ class PlayerUpdatedSessionEventArgs(SessionEventArgs):
         self.resources = 0; self.turn_number = 0
         self.total_resources = 0
         self.remaining_time_h = 0; self.remaining_time_m = 25; self.remaining_time_s = 0
-        self.threshold_values: List[int] = [0, 0, 0, 0, 0, 0]  # colorless, blood, ruby, sapphire, wild, diamond
+        self.threshold_values: list[int] = [0, 0, 0, 0, 0, 0]  # colorless, blood, ruby, sapphire, wild, diamond
         self.champion_id = SessionCardId()
-        self.thresholds: List[int] = []
+        self.thresholds: list[int] = []
         self.max_hand_size = 7
         self.can_see_enemy_hand = False
         self.can_see_enemy_underground = False
@@ -995,8 +995,8 @@ class TargetInstanceSessionEventArgs(SessionEventArgs):
         super().__init__()
         self.target_index = 0
         self.target_id = ResourceId.invalid()
-        self.targets: List[SessionCardId] = []
-        self.additional_targets: List[SessionCardId] = []
+        self.targets: list[SessionCardId] = []
+        self.additional_targets: list[SessionCardId] = []
 
     def to_byte_array(self) -> bytes:
         self.begin_write()
@@ -1023,7 +1023,7 @@ class CostInstanceSessionEventArgs(SessionEventArgs):
         self.min_target_count = 1
         self.max_target_count = 1
         self.cost_type = 0  # EAbilityCostType
-        self.targets: List[SessionCardId] = []
+        self.targets: list[SessionCardId] = []
         self.target_template_id = ResourceId.invalid()
 
     def to_byte_array(self) -> bytes:
@@ -1043,10 +1043,10 @@ class OptionInstanceSessionEventArgs(SessionEventArgs):
     def __init__(self):
         super().__init__()
         self.opt_id = ResourceId.invalid()
-        self.target_ids: List[ResourceId] = []
-        self.target_instances: List = []
-        self.min_target_counts: List[int] = []
-        self.max_target_counts: List[int] = []
+        self.target_ids: list[ResourceId] = []
+        self.target_instances: list = []
+        self.min_target_counts: list[int] = []
+        self.max_target_counts: list[int] = []
 
     def to_byte_array(self) -> bytes:
         self.begin_write()
@@ -1083,7 +1083,7 @@ class PlayerOptionListSessionEventArgs(SessionEventArgs):
     def __init__(self):
         super().__init__()
         self.player_id = UID.invalid()
-        self.options: List[SessionEventArgs] = []
+        self.options: list[SessionEventArgs] = []
 
     def to_byte_array(self) -> bytes:
         self.begin_write()
@@ -1098,7 +1098,7 @@ class BulkSessionEventSessionEventArgs(SessionEventArgs):
     def __init__(self):
         super().__init__()
         self.player_id = UID.invalid()
-        self.event_list: List[SessionEventArgs] = []
+        self.event_list: list[SessionEventArgs] = []
 
     def to_byte_array(self) -> bytes:
         self.begin_write()
@@ -1182,8 +1182,8 @@ class NetworkPacketSessionEventArgs(SessionEventArgs):
     def __init__(self):
         super().__init__()
         self.player_id = UID.invalid()
-        self.event_ids: List[int] = []
-        self.event_data: List[bytes] = []
+        self.event_ids: list[int] = []
+        self.event_data: list[bytes] = []
 
     def add_event(self, arg: SessionEventArgs):
         self.event_ids.append(arg.CLASS_ID)
@@ -1367,7 +1367,7 @@ class EncounterCardsCreatedInZoneSessionEventArgs(SessionEventArgs):
         self.player_id = UID.invalid()
         self.collection = ECardCollections.None_
         self.location = ECardLocations.Unknown
-        self.card_list: List[SessionCardId] = []
+        self.card_list: list[SessionCardId] = []
 
     def to_byte_array(self) -> bytes:
         self.begin_write()
@@ -1418,7 +1418,7 @@ class EquipmentSetSessionEventArgs(SessionEventArgs):
     def __init__(self):
         super().__init__()
         self.player_id = UID.invalid()
-        self.equipment_ids: List[ResourceId] = []
+        self.equipment_ids: list[ResourceId] = []
 
     def to_byte_array(self) -> bytes:
         self.begin_write()
