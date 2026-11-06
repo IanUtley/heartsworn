@@ -440,3 +440,288 @@ def int_attr_modifier(context, target, param):
     context._push_modifier_card(int(target), int_attrs=attrs)
     context.emit_int_attribute_gained(target, attr, old, value)
     return f"intattr {attr}={value} target={hex(int(target))}"
+
+
+def _card_modifier(context, effect):
+    """Dispatch typed CardModifier properties owned by EffectContext."""
+    try:
+        param = json.loads((effect or {}).get("param") or "{}")
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return None
+    if not isinstance(param, dict):
+        return None
+    # The child effect row carries the operation-specific fields; merge the
+    # typed modifier metadata before dispatching so variable inputs and
+    # duration/attribute flags are not lost at the RulesPort boundary.
+    try:
+        from .metadata import modifier_metadata
+        metadata = modifier_metadata(
+            context.effect_guid,
+            template=getattr(context, "effect_template_override", None)) or {}
+    except Exception:
+        metadata = {}
+    for key, value in metadata.items():
+        if key not in param or param.get(key) in (None, "", 0):
+            param[key] = value
+    property_name = str(param.get("property") or "").lower()
+    if property_name == "threshold" and not param.get("shard"):
+        # Records calls this field m_ThresholdColor; the resource transition
+        # uses the shared shard-name vocabulary.
+        param["shard"] = param.get("thresholdcolor")
+    if property_name in {"currentresource", "totalresource",
+                         "chargepoints", "threshold"}:
+        from rules_port.ir_exec_resources import _resource_modifier
+        return _resource_modifier(
+            context, {"param": json.dumps(param)})
+    target = context.resolved_target()
+    if property_name == "damage":
+        return context.damage_modifier(param, param)
+    if property_name == "loselife":
+        amount = context.modifier_value(param, {}, property_name)
+        return context.lose_life(target, amount, param)
+    if property_name == "setherohealth":
+        amount = context.modifier_value(param, {}, property_name)
+        return context.set_hero_health(target, amount)
+    if property_name == "spellpoints":
+        amount = context.modifier_value(param, {}, property_name)
+        return context.spell_points(target, amount)
+    if property_name == "cardthreshold":
+        return context.card_threshold(target, param)
+    if property_name == "subtype":
+        return context.subtype_modifier(target, param)
+    if property_name == "damageshield":
+        amount = context.modifier_value(param, {}, property_name)
+        return context.damage_shield(target, amount, param)
+    if property_name in {"attack", "defense"}:
+        return context.stat_modifier(param, param)
+    if property_name == "healhero":
+        return heal_hero_modifier(context, target, param)
+    if property_name == "cardcost":
+        return card_cost_modifier(context, target, param)
+    if property_name == "intattr":
+        return int_attr_modifier(context, target, param)
+    if property_name == "tag":
+        return _card_tag(context, target, param)
+    if property_name == "attribute":
+        if target is None:
+            return "attribute: no target"
+        text = str(param.get("attribute_flags") or param.get("text") or "")
+        from .attribute_effects import apply_attribute_grant
+        resolving_owner = context.bstate.get("resolving_owner_id", 0)
+        # BeginningOfOwnersTurn is owned by the ability's responsible player
+        # (the source controller), even when it grants an attribute to an
+        # opposing card.  AfterCardsReadyOnPlayersTurn is the exception: that
+        # duration ends at the affected troop controller's next Ready step.
+        expiration_owner = resolving_owner
+        if param.get("duration") == "AfterCardsReadyOnPlayersTurn":
+            expiration_owner = context.target_owner(
+                target, default=resolving_owner)
+        bits = apply_attribute_grant(context, int(target), {
+            **param, "text": text,
+            "source_owner_id": expiration_owner})
+        return f"attribute grant +{bits:b} target={hex(int(target))}"
+    if property_name == "counter":
+        if target is None:
+            return "counter: no target"
+        amount = int(param.get("amount") or 0)
+        if not amount:
+            amount = context.modifier_value(param, param, property_name)
+        operation = str(param.get("operation") or "add").lower()
+        counter_guid = param.get("counter_template_guid")
+        name = str(param.get("counter_name") or "counter")
+        if counter_guid:
+            from pvp_db import db_counter_template_name
+            name = db_counter_template_name(counter_guid, conn=context.db) or name
+        old, new = context.counter(
+            target, name, counter_guid, amount, operation)
+        return f"counter {name} {old}->{new} target={hex(int(target))}"
+    if property_name in {"damagemultiplier", "damageimmunity",
+                          "blockimmunity", "blockimmunityexception",
+                          "blockrestriction", "targetingimmunity",
+                          "attackimmunity"}:
+        return context.rule_modifier(target, param, param)
+    # Native resolution must not silently accept an unported CardModifier
+    # property. Records drift is safer as an explicit failed operation than
+    # as a second implementation mutating a different state projection.
+    raise RuntimeError(
+        "RulesPort CardModifier has no native handler for property "
+        f"{property_name or '<missing>'}")
+
+
+def _card_tag(context, target, param):
+    if target is None:
+        target = context.bstate.get("resolving_source_uid")
+    if target is None:
+        return "tag: no target"
+    tag = str(param.get("tag") or "")
+    if not tag:
+        return "tag: missing tag"
+    amount = int(param.get("amount") or 0)
+    if not amount:
+        amount = context.modifier_value(param, param, "tag")
+    amount = int(amount or 0)
+    operation = str(param.get("operation") or "add").lower()
+    duration = str(param.get("duration") or context.effect_duration)
+    temporary = duration in {
+        "EndOfTurn", "EndOfNextTurn", "BeginningOfOwnersTurn",
+        "BeginningOfOpponentsTurn", "AfterCardsReadyOnPlayersTurn",
+        "UntilDamaged", "UntilItLeavesYourHand"}
+    from pvp_db import db_card_mutation_field, db_set_card_mutation_field
+    column = "temporary_buffs" if temporary else "permanent_buffs"
+    raw = db_card_mutation_field(
+        context.session.session_id, int(target), column, conn=context.db)
+    try:
+        buffs = json.loads(raw or "{}")
+    except (TypeError, ValueError, json.JSONDecodeError):
+        buffs = {}
+    if not isinstance(buffs, dict):
+        buffs = {}
+    tags = buffs.get("tags")
+    if not isinstance(tags, dict):
+        tags = {}
+    key = tag.lower()
+    old = int(tags.get(key, 0) or 0)
+    if operation in ("add", "increment"):
+        tags[key] = old + amount
+    elif operation in ("remove", "subtract"):
+        if amount == 0:
+            tags.pop(key, None)
+        else:
+            tags[key] = max(0, old - amount)
+    elif operation == "set":
+        if amount:
+            tags[key] = amount
+        else:
+            tags.pop(key, None)
+    else:
+        return f"tag: unsupported operation {operation}"
+    if tags:
+        buffs["tags"] = tags
+    else:
+        buffs.pop("tags", None)
+    db_set_card_mutation_field(
+        context.session.session_id, int(target), column,
+        json.dumps(buffs), conn=context.db)
+    context.db.commit()
+    context._push_modifier_card(int(target))
+    return f"tag {key}={int(tags.get(key, 0) or 0)} target={hex(int(target))}"
+
+
+def _capture_tamed_card(context, target, buffs):
+    """A successful tame voids the troop (Taming Sphere capture).
+
+    Ported from the legacy IntAttrModifier path, which RulesPort battles no
+    longer use: without it a tamed Dire Toad stayed in play and the Tamed
+    quest never saw a tamed troop in the void.  Keyed on the typed Tamed
+    marker, so the 2-cost chance branch and the 5-cost branch behave alike.
+    """
+    import game_engine
+    from pvp_db import db_card_modifier_state, db_tame_card
+    from rules_port.runtime_helpers import owner_uid
+    from rules_port.zone_effects import state_after_zone_exit
+    row = db_card_modifier_state(
+        context.session.session_id, target, conn=context.db)
+    if not row or str(row[2] or "").lower() == "void":
+        return False
+    state = state_after_zone_exit(row[3])
+    db_tame_card(context.session.session_id, target, json.dumps(buffs),
+                 state, conn=context.db)
+    context.db.commit()
+    scid = game_engine.SessionCardId(game_engine.UID(target))
+    _tpl, ct, _name, cost, attack, defense, gems = \
+        context.handler._card_full_data(context.game, scid, row[0])
+    owner = owner_uid(row[1], context.player_uid, context.ai_uid,
+                      context.bstate)
+    context.game.push_card_updated(
+        scid, owner, game_engine.ECardCollections.Void, ct,
+        template_id=row[0], cost=cost, attack=attack, defense=defense,
+        state=state, gems=gems)
+    context._emit_trigger(
+        "CardExitedZoneEvent", target, int(row[1] or 0),
+        event_source_collection=str(row[2] or "").lower(),
+        event_destination_collection="void")
+    return True
+
+
+def _targets(context):
+    target = context.resolved_target()
+    if target is not None:
+        return [int(target)]
+    # Untap/tap "each" effects still have collection-wide target semantics
+    # owned by the Records backend.  Keep this native leaf limited to the
+    # typed single-card transition until that target filter is ported too.
+    return None
+
+
+def _each_untap_targets(context):
+    """The cards an untap-each effect readies, read as the interpreter reads them: the automatic targets of the
+    resolving ability's untap clauses, which are every card the clause's filter passes (none when no card passes).
+    None when the resolving ability has no untap clause that targets automatically (a chosen or single card)."""
+    from rules_port import ir_exec
+    bstate = context.bstate or {}
+    guid = bstate.get("resolving_ability")
+    source = bstate.get("resolving_source_uid")
+    owner = bstate.get("resolving_owner_id")
+    if not guid or source is None or owner is None:
+        return None
+    try:
+        root = ir_exec._load("AbilityTemplate", str(guid).lower())
+    except KeyError:
+        return None
+    scope = ir_exec.Scope(context=context, source_uid=int(source), owner_uid=int(owner),
+                          table=root.version_table)
+    untap_targets: list[int] = []
+    found = False
+    for clause in root.m_AbilityEffectList:
+        effect_type, _raw = ir_exec._stored("AbilityEffectTemplate", ir_exec._guid(ir_exec._field(clause, "m_EffectTemplateId")))
+        if ir_exec._short(effect_type) != "UntapCardAbilityEffectTemplate":
+            continue
+        index = int(ir_exec._field(clause, "m_TargetTemplateIndex") or 0)
+        template = ir_exec._load("AbilityTargetTemplate", ir_exec._guid(root.m_AbilityTargetTemplateIds[index]))
+        if ir_exec._short(template.type_name) != "AbilityTargetTemplate" or not template.m_IsAutoTarget:
+            return None
+        found = True
+        from rules_port import ir_exec
+        untap_targets.extend(ir_exec._targets(root, index, scope))
+    return list(dict.fromkeys(untap_targets)) if found else None
+
+
+def _untap(context, targets=None):
+    import game_engine
+    if targets is None:
+        targets = _each_untap_targets(context)
+    targets = _targets(context) if targets is None else list(targets)
+    if targets is None:
+        return None
+    for target in targets:
+        context.update_card_state(
+            target, remove=game_engine.ECardStates.Tapped, commit=False)
+    context.db.commit()
+    return f"readied {len(targets)}"
+
+
+def _tap(context, targets=None):
+    import game_engine
+    targets = _targets(context) if targets is None else list(targets)
+    if targets is None:
+        return None
+    from pvp_db import db_card_owner_id
+    from .combat_rules import card_int_attr
+    resolving = int(context.bstate.get("resolving_owner_id", 0) or 0)
+    tapped = 0
+    for target in targets:
+        # C# TapCardAbilityEffectTemplate: CantBeExhaustedByOpponent blocks an
+        # opponent-authored exhaust.
+        if card_int_attr(context.db, context.session.session_id, int(target),
+                         "CantBeExhaustedByOpponent",
+                         battle_state=context.bstate) > 0:
+            owner = db_card_owner_id(
+                context.session.session_id, int(target), conn=context.db)
+            if owner is not None and int(owner) != resolving:
+                continue
+        context.update_card_state(
+            target, add=game_engine.ECardStates.Tapped,
+            trigger="CardTappedEvent", commit=False)
+        tapped += 1
+    context.db.commit()
+    return f"tapped {tapped}"
