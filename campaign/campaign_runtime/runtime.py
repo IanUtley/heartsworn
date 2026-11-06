@@ -381,9 +381,7 @@ def visit_path(zone: Zone, oparms):
     zone.rt.pop("force_move", None)
     seen = zone.eng.setdefault("visited_paths", [])
     route, walked, blocked = _route(zone, str(zone.eng.get("current") or ""), ids)
-    for pid in walked:
-        if pid not in seen:
-            seen.append(pid)
+    seen.extend(pid for pid in walked if pid not in seen)
     stop = _route_stop(zone, route)
     if stop and stop != zone.eng.get("current"):
         arrive(zone, stop, route)

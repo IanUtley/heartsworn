@@ -925,9 +925,7 @@ class CardEvaluator:
             for activation in activations:
                 if isinstance(activation, dict):
                     values.extend((activation.get("target_map") or {}).values())
-            for uid in flatten(values):
-                if uid not in targeted:
-                    targeted.append(uid)
+            targeted.extend(uid for uid in flatten(values) if uid not in targeted)
         return targeted
 
     def bounce_target_order(self, cards):

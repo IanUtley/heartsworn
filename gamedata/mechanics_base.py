@@ -81,9 +81,7 @@ def _record_names(cls: type[Typed]) -> list[str]:
     """Every current field of a class, inherited ones first (the order the client serializes them in)."""
     names: list[str] = []
     for klass in reversed(_chain(cls)):
-        for name in klass.fields:
-            if name not in names:
-                names.append(name)
+        names.extend(name for name in klass.fields if name not in names)
     return names
 
 

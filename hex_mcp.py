@@ -468,9 +468,7 @@ def _champion_detail(champion: Mapping[str, Any]) -> dict[str, Any]:
         for row in rows
     ]
     authored = {str(row["ability_guid"]).lower() for row in rows}
-    for ability_guid in champion["record_abilities"]:
-        if ability_guid not in authored:
-            abilities.append(_ability_detail(ability_guid, include_users=False))
+    abilities.extend(_ability_detail(ability_guid, include_users=False) for ability_guid in champion["record_abilities"] if ability_guid not in authored)
     return {
         **_champion_summary(champion),
         "gender": champion["gender"],

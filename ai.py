@@ -4449,11 +4449,9 @@ def ai_choose_combat_trick(handler, session, battle_state, ai_t, pl_t, *,
     combats = []  # (my_uid, their_uid)
     for a_uid, blockers in my_blocks.items():
         if int(a_uid) in my_attackers:
-            for b in blockers:
-                combats.append((int(a_uid), b))     # our attacker vs their blocker
+            combats.extend((int(a_uid), b) for b in blockers)
         else:
-            for b in blockers:
-                combats.append((b, int(a_uid)))     # our blocker vs their attacker
+            combats.extend((b, int(a_uid)) for b in blockers)
     if not combats:
         return None
     my_cards = {int(c.card_uid): c for c in ev.ai_warzone}

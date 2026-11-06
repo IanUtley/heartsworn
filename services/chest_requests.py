@@ -188,8 +188,7 @@ def handle_opencardpack_2127(handler, target, instance, data_type, reqid, comp, 
             pool = full_set_pool(pool)
             for _ in range(open_amount):
                 for c in pool:
-                    for _ in range(4):  # 4x each card
-                        all_cards.append((c[0], c[1], c[3], c[4], c[5]))
+                    all_cards.extend((c[0], c[1], c[3], c[4], c[5]) for _ in range(4))
             log_req(f"    Full set: {len(pool)} unique cards x4 = {len(all_cards)} total")
         else:
             for _ in range(open_amount):

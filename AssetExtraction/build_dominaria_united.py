@@ -167,9 +167,7 @@ def land_production(oracle_text):
         if "any color" in line:
             colours = list(COLOR_FLAGS)
             break
-        for letter in re.findall(r"\{([WUBRG])\}", line):
-            if letter not in colours:
-                colours.append(letter)
+        colours.extend(letter for letter in re.findall(r"\{([WUBRG])\}", line) if letter not in colours)
     if "enters tapped unless" in text:
         enters_tapped = "unless"
     elif "enters tapped" in text:

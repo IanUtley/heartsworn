@@ -771,9 +771,7 @@ def _fra_encounter_specs(deck_guids=None, *, non_elite_only=False,
                         continue
                     if not gem_type:
                         gem_type = gem_data[0]
-                    for ability_guid in gem_data[1]:
-                        if ability_guid not in gem_abilities:
-                            gem_abilities.append(ability_guid)
+                    gem_abilities.extend(ability_guid for ability_guid in gem_data[1] if ability_guid not in gem_abilities)
                 cards.append((str(card_guid), gem_type, gem_abilities))
         if not cards or not champion_guid:
             continue

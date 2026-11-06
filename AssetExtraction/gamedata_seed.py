@@ -654,9 +654,7 @@ def _extract_champions(data: str, sections=("ChampionTemplate", "MercenaryTempla
                 if str(condition.get("_t") or "").endswith("HasThresholdAbilityCondition"):
                     thresholds.append({"color": condition.get("m_ColorFlags", ""), "quantity": int_value(condition.get("m_RequiredQuantity"))})
                 elif str(condition.get("_t") or "").endswith("AndAbilityCondition"):
-                    for child in condition.get("m_Conditions") or []:
-                        if isinstance(child, dict) and str(child.get("_t") or "").endswith("HasThresholdAbilityCondition"):
-                            thresholds.append({"color": child.get("m_ColorFlags", ""), "quantity": int_value(child.get("m_RequiredQuantity"))})
+                    thresholds.extend({"color": child.get("m_ColorFlags", ""), "quantity": int_value(child.get("m_RequiredQuantity"))} for child in condition.get("m_Conditions") or [] if isinstance(child, dict) and str(child.get("_t") or "").endswith("HasThresholdAbilityCondition"))
             target_ids = [guid(item) for item in (ability.get("m_AbilityTargetTemplateIds") or []) if guid(item)]
             casting = {"QuickAction": 64, "BasicAction": 8}.get(str(ability.get("m_CastingBehavior") or ""), 0)
             ability_rows.append(

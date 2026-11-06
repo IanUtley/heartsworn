@@ -807,9 +807,7 @@ def db_seed_tournament_game_deck(session_id, player_uid, deck_id, conn=None,
                     abilities = json.loads(abilities_json or "[]")
                 except (TypeError, ValueError):
                     abilities = []
-                for ability in gem_ability_by_instance.get(instance_key, []):
-                    if ability not in abilities:
-                        abilities.append(ability)
+                abilities.extend(ability for ability in gem_ability_by_instance.get(instance_key, []) if ability not in abilities)
                 connection.execute(
                     "UPDATE game_cards SET card_type=?, card_abilities=?, "
                     "card_attributes=?, gems=?, original_template_guid = CASE "

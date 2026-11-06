@@ -887,9 +887,7 @@ def _content():
 def _quest_rows(**where):
     """Quest conversation rows whose fields equal ``where``, in build order."""
     rows = []
-    for row in _content().quest_conversations():
-        if all(str(row.get(k)) == str(v) for k, v in where.items()):
-            rows.append(row)
+    rows.extend(row for row in _content().quest_conversations() if all(str(row.get(k)) == str(v) for k, v in where.items()))
     return rows
 
 

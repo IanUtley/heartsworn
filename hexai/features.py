@@ -257,9 +257,7 @@ def encode_state(evaluator, state, seat_pid, opponent_pid, *,
             keys.append("hvar")
         if getattr(card, "is_quick_action", lambda: False)():
             keys.append("hquick")
-    for ctype, count in hand_types.items():
-        if count:
-            keys.append(f"hcount:{ctype}:{bucket(count, _COUNT_EDGES)}")
+    keys.extend(f"hcount:{ctype}:{bucket(count, _COUNT_EDGES)}" for ctype, count in hand_types.items() if count)
 
     # -- public warzones ---------------------------------------------------
     for prefix, warzone in (("w", own_warzone), ("o", opp_warzone)):

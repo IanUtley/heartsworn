@@ -160,9 +160,7 @@ def _quest_objective_conversation_guids(db, champ_id, quest_script,
     if not isinstance(objective, dict):
         return []
     explicit = []
-    for value in objective.get("conversation_ids") or []:
-        if value and str(value) not in explicit:
-            explicit.append(str(value))
+    explicit.extend(str(value) for value in objective.get("conversation_ids") or [] if value and str(value) not in explicit)
     if objective.get("conversation") and str(objective["conversation"]) not in explicit:
         explicit.append(str(objective["conversation"]))
     try:

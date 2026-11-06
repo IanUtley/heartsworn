@@ -43,9 +43,7 @@ def listening_ports() -> set[int]:
 def main() -> int:
     active_ports = listening_ports()
     failures = []
-    for name, port in PORTS.items():
-        if port not in active_ports:
-            failures.append(f"{name}:{port} (no listening socket)")
+    failures.extend(f"{name}:{port} (no listening socket)" for name, port in PORTS.items() if port not in active_ports)
 
     if failures:
         print("unhealthy: " + "; ".join(failures), file=sys.stderr)

@@ -913,9 +913,7 @@ def handle_readytostartgame_22031(handler, target, instance, data_type, reqid, c
             ab_guids = list(_base_ags)
             # Gem-granted abilities (baked into the deck at save time)
             # join the card's ability list from the very first push.
-            for _gem_ag in (deck_gem_abilities.get(str(instance_id)) or []):
-                if str(_gem_ag).lower() not in [str(g).lower() for g in ab_guids]:
-                    ab_guids.append(str(_gem_ag).lower())
+            ab_guids.extend(str(_gem_ag).lower() for _gem_ag in deck_gem_abilities.get(str(instance_id)) or [] if str(_gem_ag).lower() not in [str(g).lower() for g in ab_guids])
             abilities = [game_engine.ResourceId.from_str(g) for g in ab_guids]
             # Fetch static/effective attributes from the setup cache.
             attributes = int(_base_attrs or 0)
@@ -1004,9 +1002,7 @@ def handle_readytostartgame_22031(handler, target, instance, data_type, reqid, c
         # precedence below.
         fallback_deck = _STARTER_DECKS.get("Human") or {}
         for card_guid, quantity in fallback_deck.get("cards", []):
-            for _ in range(max(0, int(quantity or 0))):
-                if db_template_exists(card_guid, conn=db._db):
-                    ai_card_specs.append((card_guid, 0, []))
+            ai_card_specs.extend((card_guid, 0, []) for _ in range(max(0, int(quantity or 0))) if db_template_exists(card_guid, conn=db._db))
     if ai_deck_guid or ai_card_specs:
         gem_types_by_name = {
             str(name): (int(gem_type or 0),

@@ -864,9 +864,7 @@ def explain_when(condition: Any, state: dict[str, Any],
         i for i in range(len(groups)) if i != closest]
     blocked = []
     for i in order:
-        for result in groups[i]["tags"]:
-            if not result["holds"] and result["tag"] not in blocked:
-                blocked.append(result["tag"])
+        blocked.extend(result["tag"] for result in groups[i]["tags"] if not result["holds"] and result["tag"] not in blocked)
     return {"holds": False, "groups": groups, "closest": closest,
             "blocked_by": blocked}
 

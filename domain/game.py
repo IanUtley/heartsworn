@@ -1111,9 +1111,7 @@ class Game:
         opt.card = champ_scid
         opt.state = ECardUsage.Activate
         all_ids = list(ability_ids)
-        for extra_g in (discard_costs or {}):
-            if not any(str(a.guid) == extra_g for a in ability_ids):
-                all_ids.append(ResourceId.from_str(extra_g))
+        all_ids.extend(ResourceId.from_str(extra_g) for extra_g in discard_costs or {} if not any(str(a.guid) == extra_g for a in ability_ids))
         for aid in all_ids:
             inst = self._make_event(OptionInstanceSessionEventArgs)
             inst.opt_id = aid
@@ -1481,9 +1479,7 @@ class Game:
                 for cid in self.player_hand:
                     cdef = self.card_defs.get(cid)
                     if cdef:
-                        for n in names:
-                            if cdef.name.lower() == n.lower():
-                                allowed.append(cid)
+                        allowed.extend(cid for n in names if cdef.name.lower() == n.lower())
                 if allowed:
                     self.push_options(self.player_uid, allowed)
             self.push_green_light(self.player_uid, EPriorityContext.Normal)

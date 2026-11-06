@@ -397,9 +397,7 @@ def ability(text: str, *, on: dict[str, str] | None = None, when: Typed | None =
     targets: list[dict[str, str]] = []
     clauses: list[dict[str, Any]] = []
     for index, item in enumerate(does):
-        for variable in item._surface_variables:
-            if variable.m_Name not in [existing.m_Name for existing in variables]:
-                variables.append(variable)
+        variables.extend(variable for variable in item._surface_variables if variable.m_Name not in [existing.m_Name for existing in variables])
         targets.append(_ref(item._surface_target.guid))
         clauses.append(_clause(effect_template_id=item, target_template_index=index,
                                effect_instance_id=index, effect_group_id=index + 1))
