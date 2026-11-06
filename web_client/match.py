@@ -204,8 +204,11 @@ class WebMatch:
     def _publish(self, extra=None):
         packets = self.capture.drain()
         with self.cond:
-            self.log.extend({"seq": len(self.log) + 1,
-                                     "events": events} for events in packets if events)
+            self.log.extend(
+                {"seq": len(self.log) + 1, "events": events}
+                for events in packets
+                if events
+            )
             if extra is not None:
                 self.log.append({"seq": len(self.log) + 1, **extra})
             self.cond.notify_all()

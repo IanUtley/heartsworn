@@ -231,8 +231,14 @@ def _ability_records(guids: list[str]) -> dict[str, list[dict[str, Any]]]:
             for entry in record.get("m_AbilityEffectList") or []:
                 queue.append(("AbilityEffectTemplate", (entry.get("m_EffectTemplateId") or {}).get("m_Guid")))
                 queue.append(("AbilityEffectConditionTemplate", (entry.get("m_ConditionId") or {}).get("m_Guid")))
-            queue.extend((("AbilityTargetTemplate", ref.get("m_Guid"))) for ref in (record.get("m_AbilityTargetTemplateIds") or []))
-            queue.extend((("AbilityTargetTemplate", (record.get(field) or {}).get("m_Guid"))) for field in (("m_SacrificeTarget", "m_VoidTarget", "m_ExhaustTarget")))
+            queue.extend(
+                (("AbilityTargetTemplate", ref.get("m_Guid")))
+                for ref in (record.get("m_AbilityTargetTemplateIds") or [])
+            )
+            queue.extend(
+                (("AbilityTargetTemplate", (record.get(field) or {}).get("m_Guid")))
+                for field in (("m_SacrificeTarget", "m_VoidTarget", "m_ExhaustTarget"))
+            )
         queue.extend((("AbilityTemplate", (record.get(field) or {}).get("m_Guid"))) for field in (LINKS.get(section, ())))
     return {section: list(records.values()) for section, records in out.items()}
 

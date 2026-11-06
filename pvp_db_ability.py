@@ -384,9 +384,15 @@ def db_talent_ability_guids(talent_guids, conn=None):
     guids = []
     for talent in talent_guids or ():
         talent_guid = str(talent).lower()
-        guids.extend(str(row[0]).lower() for row in connection.execute(
+        guids.extend(
+            str(row[0]).lower()
+            for row in connection.execute(
                 "SELECT ability_guid FROM talent_data WHERE talent_guid=? AND has_ability=1 "
-                "ORDER BY rowid", (talent_guid,)).fetchall() if row[0] and str(row[0]).lower() not in guids)
+                "ORDER BY rowid",
+                (talent_guid,),
+            ).fetchall()
+            if row[0] and str(row[0]).lower() not in guids
+        )
         guids.extend(str(row[0]).lower() for row in connection.execute(
                 "SELECT ability_guid FROM talent_abilities WHERE talent_guid=? ORDER BY rowid",
                 (talent_guid,)).fetchall() if row[0] and str(row[0]).lower() not in guids)

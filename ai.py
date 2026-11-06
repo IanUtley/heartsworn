@@ -2514,8 +2514,12 @@ def ai_choose_attackers(handler, evaluator, eligible, blockers, *,
     solved = determine_best_attack(
         attack_hints, block_hints, int(evaluator.player_health), evaluator)
     chosen = [int(h.uid) for h in solved]
-    chosen.extend(int(card.card_uid) for card in eligible if card.has_attribute(game_engine.ECardAttributes.ForceAttack) and \
-                int(card.card_uid) not in chosen)
+    chosen.extend(
+        int(card.card_uid)
+        for card in eligible
+        if card.has_attribute(game_engine.ECardAttributes.ForceAttack)
+        and int(card.card_uid) not in chosen
+    )
     reason = "combat_solver" if chosen else "combat_solver_held_back"
     return chosen, reason
 

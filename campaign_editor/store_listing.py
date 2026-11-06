@@ -114,8 +114,16 @@ def _packs_of(set_guid: str) -> list[dict[str, str]]:
     """The set's packs as ``{pack_guid, pack_type, name, source}``: Records packs, then custom."""
     found = [{"pack_guid": pack["pack_guid"], "pack_type": pack["pack_type"], "name": pack["name"],
               "source": "records"} for pack in _records_packs() if pack["set_guid"] == set_guid]
-    found.extend({"pack_guid": str(record["m_Id"]["m_Guid"]).lower(),
-                          "pack_type": record["m_CardPackType"], "name": record["m_Name"], "source": "custom"} for record in campaign_data.load_custom_packs() if str(record["m_SetId"]["m_Guid"]).lower() == set_guid)
+    found.extend(
+        {
+            "pack_guid": str(record["m_Id"]["m_Guid"]).lower(),
+            "pack_type": record["m_CardPackType"],
+            "name": record["m_Name"],
+            "source": "custom",
+        }
+        for record in campaign_data.load_custom_packs()
+        if str(record["m_SetId"]["m_Guid"]).lower() == set_guid
+    )
     return found
 
 

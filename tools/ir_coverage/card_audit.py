@@ -271,12 +271,16 @@ def _field_parity(used: dict[str, int], data_fields: dict[str, set[str]],
     gaps = []
     for effect_type in used:
         csharp_fields, sources = _csharp_reads(effect_type)
-        gaps.extend({
+        gaps.extend(
+            {
                 "effect_type": effect_type,
                 "field": field,
                 "csharp_sources": sources,
-            } for field in sorted((csharp_fields & data_fields.get(effect_type, set()))
-                            - python_fields))
+            }
+            for field in sorted(
+                (csharp_fields & data_fields.get(effect_type, set())) - python_fields
+            )
+        )
     return gaps
 
 
@@ -391,8 +395,11 @@ def _graph_issues(store, graphs, gaps_by_type, reference_lower: str,
                         **base, "kind": "unmapped_card_modifier",
                         "detail": _short_type(template.get("m_Modifier"))
                         or "<none>"})
-            issues.extend({**base, "kind": "field_gap",
-                                   "detail": gap} for gap in gaps_by_type.get(effect.concrete_type, ()) if _field_is_active(template.get(gap)))
+            issues.extend(
+                {**base, "kind": "field_gap", "detail": gap}
+                for gap in gaps_by_type.get(effect.concrete_type, ())
+                if _field_is_active(template.get(gap))
+            )
             issues.extend(_value_issues(
                 base, effect, template, reference_lower, csharp_intattrs))
         target_ids = list(getattr(graph.source, "target_template_guids", ()))

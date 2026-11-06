@@ -748,23 +748,47 @@ class AuthoritativeSession:
         self._activation_requester: Callable[[object, tuple], None] | None = None
         self._ability_cost_payer: Callable[[object], bool] | None = None
         self._combat_damage_backend = None
-        self._card_transaction_resolver: Callable[[str, RulesTransaction], bool] | None = None
-        self._resource_transaction_resolver: Callable[[RulesTransaction], bool] | None = None
-        self._hand_transaction_resolver: Callable[[str, RulesTransaction], bool] | None = None
-        self._setup_transaction_resolver: Callable[[RulesTransaction], bool] | None = None
-        self._priority_transaction_resolver: Callable[[RulesTransaction], bool] | None = None
-        self._discard_transaction_resolver: Callable[[RulesTransaction], bool] | None = None
+        self._card_transaction_resolver: (
+            Callable[[str, RulesTransaction], bool] | None
+        ) = None
+        self._resource_transaction_resolver: (
+            Callable[[RulesTransaction], bool] | None
+        ) = None
+        self._hand_transaction_resolver: (
+            Callable[[str, RulesTransaction], bool] | None
+        ) = None
+        self._setup_transaction_resolver: Callable[[RulesTransaction], bool] | None = (
+            None
+        )
+        self._priority_transaction_resolver: (
+            Callable[[RulesTransaction], bool] | None
+        ) = None
+        self._discard_transaction_resolver: (
+            Callable[[RulesTransaction], bool] | None
+        ) = None
         self._hand_limit_checker: Callable[[object], bool] | None = None
-        self._discard_continuation_resolver: Callable[[RulesTransaction], bool] | None = None
-        self._ready_card_transaction_resolver: Callable[[RulesTransaction], bool] | None = None
-        self._triggered_ability_transaction_resolver: Callable[[RulesTransaction], bool] | None = None
+        self._discard_continuation_resolver: (
+            Callable[[RulesTransaction], bool] | None
+        ) = None
+        self._ready_card_transaction_resolver: (
+            Callable[[RulesTransaction], bool] | None
+        ) = None
+        self._triggered_ability_transaction_resolver: (
+            Callable[[RulesTransaction], bool] | None
+        ) = None
         self._player_options_resolver: Callable[[RulesTransaction], bool] | None = None
         self._checksum_resolver: Callable[[RulesTransaction], bool] | None = None
         self._encounter_mod_resolver: Callable[[RulesTransaction], bool] | None = None
         self._quit_game_resolver: Callable[[RulesTransaction], bool] | None = None
-        self._attack_transaction_resolver: Callable[[RulesTransaction], bool] | None = None
-        self._defense_transaction_resolver: Callable[[RulesTransaction], bool] | None = None
-        self._damage_transaction_resolver: Callable[[RulesTransaction], bool] | None = None
+        self._attack_transaction_resolver: Callable[[RulesTransaction], bool] | None = (
+            None
+        )
+        self._defense_transaction_resolver: (
+            Callable[[RulesTransaction], bool] | None
+        ) = None
+        self._damage_transaction_resolver: Callable[[RulesTransaction], bool] | None = (
+            None
+        )
         self._choice_transaction_resolver: Callable[[RulesTransaction], bool] | None = None
         self._projection = TransactionProjection()
         self.runtime_facts = None

@@ -149,10 +149,24 @@ def flag_problems(rules: dict) -> list[dict[str, str]]:
                      if name in node_reads | node_writes), "flags")
 
     problems = []
-    problems.extend({"level": "warn", "where": where(name), "text":
-                             f"flag {name!r} is read but never set anywhere in the campaign"} for name in sorted(reads) if not _covered(name, all_writes))
-    problems.extend({"level": "info", "where": where(name), "text":
-                             f"flag {name!r} is set but never read anywhere in the campaign"} for name in sorted(writes) if not _covered(name, all_reads))
+    problems.extend(
+        {
+            "level": "warn",
+            "where": where(name),
+            "text": f"flag {name!r} is read but never set anywhere in the campaign",
+        }
+        for name in sorted(reads)
+        if not _covered(name, all_writes)
+    )
+    problems.extend(
+        {
+            "level": "info",
+            "where": where(name),
+            "text": f"flag {name!r} is set but never read anywhere in the campaign",
+        }
+        for name in sorted(writes)
+        if not _covered(name, all_reads)
+    )
     return problems
 
 
@@ -222,8 +236,15 @@ def zone_problems(rules: dict, template: str = "") -> list[dict[str, str]]:
     for node_id, spec in nodes.items():
         for entry in spec.get("entries") or ():
             where = f"{node_id}.{entry.get('id', '?')}"
-            problems.extend({"level": "info", "where": where, "text":
-                                     f"{kind} {name!r} is used only once in the campaign (possible typo)"} for kind, name in sorted(set(_names_in(json.dumps(entry)))) if (kind, name) in singles)
+            problems.extend(
+                {
+                    "level": "info",
+                    "where": where,
+                    "text": f"{kind} {name!r} is used only once in the campaign (possible typo)",
+                }
+                for kind, name in sorted(set(_names_in(json.dumps(entry))))
+                if (kind, name) in singles
+            )
     return problems + flag_problems(rules)
 
 
@@ -240,8 +261,13 @@ def set_accepted(zone: str, where: str, text: str, accept: bool) -> dict[str, in
     """Accept (or un-accept) one Rules-check problem; ``{"accepted": count}``."""
     entry = {"zone": zone, "where": where, "text": text}
     with _EXCEPTIONS_LOCK:
-        entries = list((json.loads(EXCEPTIONS_PATH.read_text(encoding="utf-8"))["accepted"]
-                               if EXCEPTIONS_PATH.exists() else []))
+        entries = list(
+            (
+                json.loads(EXCEPTIONS_PATH.read_text(encoding="utf-8"))["accepted"]
+                if EXCEPTIONS_PATH.exists()
+                else []
+            )
+        )
         entries = [e for e in entries if e != entry]
         if accept:
             entries.append(entry)

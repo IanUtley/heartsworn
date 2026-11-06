@@ -2287,11 +2287,23 @@ class CardPlayMixin(_HostBase):
             graph = _hc._records_ability_graph(self, ag)
             if graph is None:
                 continue
-            out.setdefault(ag, []).extend((cost.guid, cost_type_for_kind(cost.kind), cost.candidates,
-                     cost.minimum, cost.maximum) for cost in ability_cost_targets(
-                    graph, db._db, session.session_id,
-                    self.user_profile["id"], int(champ_uid or 0),
-                    champions=self._champion_targets()))
+            out.setdefault(ag, []).extend(
+                (
+                    cost.guid,
+                    cost_type_for_kind(cost.kind),
+                    cost.candidates,
+                    cost.minimum,
+                    cost.maximum,
+                )
+                for cost in ability_cost_targets(
+                    graph,
+                    db._db,
+                    session.session_id,
+                    self.user_profile["id"],
+                    int(champ_uid or 0),
+                    champions=self._champion_targets(),
+                )
+            )
         return out
 
 

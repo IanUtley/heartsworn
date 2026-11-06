@@ -741,17 +741,31 @@ def _issues(layout, authored, catalog, node_conversations,
     layout_nodes = {node["id"] for node in layout["nodes"]}
     forks = {node["id"] for node in layout["nodes"]
              if node.get("fork") or node["id"].startswith("Fork")}
-    issues.extend({"level": "warn", "node": node,
-                           "text": "prefab node has no SceneData entry"} for node in sorted(layout_nodes - set(authored)) if node not in forks)
-    issues.extend({"level": "info", "node": node,
-                       "text": "SceneData node is not placed in the prefab"} for node in sorted(set(authored) - layout_nodes))
+    issues.extend(
+        {"level": "warn", "node": node, "text": "prefab node has no SceneData entry"}
+        for node in sorted(layout_nodes - set(authored))
+        if node not in forks
+    )
+    issues.extend(
+        {
+            "level": "info",
+            "node": node,
+            "text": "SceneData node is not placed in the prefab",
+        }
+        for node in sorted(set(authored) - layout_nodes)
+    )
     if catalog["edges"]:
         prefab_edges = {frozenset((p["from"], p["to"])) for p in layout["paths"]}
         db_edges = {frozenset((e["from_node"], e["to_node"]))
                     for e in catalog["edges"]}
-        issues.extend({"level": "warn", "node": sorted(edge)[0],
-                           "text": "server edge %s-%s is not a prefab path"
-                           % tuple(sorted(edge))} for edge in sorted(db_edges - prefab_edges, key=sorted))
+        issues.extend(
+            {
+                "level": "warn",
+                "node": sorted(edge)[0],
+                "text": "server edge %s-%s is not a prefab path" % tuple(sorted(edge)),
+            }
+            for edge in sorted(db_edges - prefab_edges, key=sorted)
+        )
         issues.extend({"level": "warn", "node": sorted(edge)[0],
                            "text": "prefab path %s-%s is missing from "
                            "campaign_node_edges" % tuple(sorted(edge))} for edge in sorted(prefab_edges - db_edges, key=sorted))

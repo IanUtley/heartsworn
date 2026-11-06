@@ -1205,8 +1205,11 @@ def _ai_block_decision(handler, session, state, owner_id, opponent_id,
                     getattr(card, "template_guid", "") or "").lower()
         pairs = []
         for attacker, blockers in sorted(blocker_map.items()):
-            pairs.extend(f"{templates.get(int(attacker), '?')}>"
-                             f"{templates.get(int(blocker), '?')}" for blocker in blockers)
+            pairs.extend(
+                f"{templates.get(int(attacker), '?')}>"
+                f"{templates.get(int(blocker), '?')}"
+                for blocker in blockers
+            )
         block_key = "block:" + "+".join(sorted(pairs))
     else:
         block_key = "block:none"
@@ -3179,16 +3182,25 @@ def main_fra(deck_guids=None, turns_cap=30, show_profile=False,
                 print(f"      {card['name']} — "
                       f"{card['turns_in_hand']} turn(s) in hand")
         report["runs"].append(run_summary)
-        report["actions"].extend({
-                "run": run_index + 1, "seed": run_seed, **action} for action in run_report.get("actions", ()))
-        report["combat_decisions"].extend({
-                "run": run_index + 1, "seed": run_seed, **decision} for decision in run_report.get("combat_decisions", ()))
-        report["health_changes"].extend({
-                "run": run_index + 1, "seed": run_seed, **change} for change in run_report.get("health_changes", ()))
-        report["ability_decisions"].extend({
-                "run": run_index + 1, "seed": run_seed, **decision} for decision in run_report.get("ability_decisions", ()))
-        report["combat_steps"].extend({
-                "run": run_index + 1, "seed": run_seed, **step} for step in combat_steps)
+        report["actions"].extend(
+            {"run": run_index + 1, "seed": run_seed, **action}
+            for action in run_report.get("actions", ())
+        )
+        report["combat_decisions"].extend(
+            {"run": run_index + 1, "seed": run_seed, **decision}
+            for decision in run_report.get("combat_decisions", ())
+        )
+        report["health_changes"].extend(
+            {"run": run_index + 1, "seed": run_seed, **change}
+            for change in run_report.get("health_changes", ())
+        )
+        report["ability_decisions"].extend(
+            {"run": run_index + 1, "seed": run_seed, **decision}
+            for decision in run_report.get("ability_decisions", ())
+        )
+        report["combat_steps"].extend(
+            {"run": run_index + 1, "seed": run_seed, **step} for step in combat_steps
+        )
         for owner_id, decisions in run_report.get(
                 "card_decisions", {}).items():
             destination = report["card_decisions"].setdefault(owner_id, {})

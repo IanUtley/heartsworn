@@ -210,6 +210,13 @@ def _ability_line(text: str, card: dict[str, Any], unresolved: list[str]) -> str
     """One ability's line: its text with the card's name in place of ``#SELF#``. Runtime
     placeholders stay as written and are reported."""
     line = text.replace("#SELF#", str(card.get("name") or "this card")).strip()
-    unresolved.extend(f"{label} placeholder kept as written" for pattern, label in ((r"\[?\(?ESC:\d+\)?\]?", "escalation"), (r"#VAR\d+_\d+#", "variable"),
-                           (r"#PET_[^# ]*#", "pet name")) if re.search(pattern, line))
+    unresolved.extend(
+        f"{label} placeholder kept as written"
+        for pattern, label in (
+            (r"\[?\(?ESC:\d+\)?\]?", "escalation"),
+            (r"#VAR\d+_\d+#", "variable"),
+            (r"#PET_[^# ]*#", "pet name"),
+        )
+        if re.search(pattern, line)
+    )
     return line.strip()

@@ -690,8 +690,11 @@ def records_node_ids(records_dir: Path, template: str) -> set[str]:
             value = json.loads(line)
             record = parse_record(value if isinstance(value, str) else line) or {}
             if record.get("m_Name") == template and record.get("m_ItemData"):
-                return {item.get("m_MapNodeId") for item in record["m_ItemData"]
-                        if item.get("m_MapNodeId")}
+                return {
+                    item.get("m_MapNodeId")
+                    for item in record["m_ItemData"]
+                    if item.get("m_MapNodeId")
+                }
     return set()
 
 

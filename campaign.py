@@ -1794,8 +1794,13 @@ def _battle_events(db, session, player_user_id):
             db, session.session_id, player_user_id,
             {"type": "void_tamed_troop", "owner": "opponent"}):
         events.append("tamed_troop")
-    events.extend(event for event, template_guid in WARZONE_CARD_EVENTS.items() if pve_db.db_card_in_warzone(session.session_id, player_user_id,
-                                     template_guid, "opponent", db))
+    events.extend(
+        event
+        for event, template_guid in WARZONE_CARD_EVENTS.items()
+        if pve_db.db_card_in_warzone(
+            session.session_id, player_user_id, template_guid, "opponent", db
+        )
+    )
     return events
 
 

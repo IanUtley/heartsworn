@@ -1124,8 +1124,11 @@ def _extract_quest_conversations(data: str) -> list[tuple[Any, ...]]:
         full_norm = _normalise_quest_label(name)
         matches = [script for _length, title, script in title_candidates
                    if title in full_norm]
-        matches.extend(script for script, aliases in _QUEST_CONVERSATION_ALIASES.items() if any(_normalise_quest_label(alias) in full_norm
-                   for alias in aliases))
+        matches.extend(
+            script
+            for script, aliases in _QUEST_CONVERSATION_ALIASES.items()
+            if any(_normalise_quest_label(alias) in full_norm for alias in aliases)
+        )
         # Node002 is the authored hand-off conversation for Tamed plus the
         # faction-specific Find quest, despite having no quest title in its
         # name.  Keep this source-data exception in the extracted catalog,

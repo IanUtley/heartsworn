@@ -721,15 +721,35 @@ def main():
                  "card_type, socket_count, no_pvp, is_pve, threshold_json, abilities_json, "
                  "attributes, sacrifice_target, variable_cost, variable_cost_double, variable_cost_minimum, rage_value, lethal)")
     lines.append("CARD_TEMPLATES = [")
-    lines.extend(f"    ({guid!r}, {set_guid!r}, {name!r}, {rarity!r}, {cost}, {attack}, {defense}, "
-            f"{card_type!r}, {socket_count}, {no_pvp}, {is_pve}, {threshold_json!r}, "
-            f"{abilities_json!r}, {attributes}, {sacrifice_target!r}, "
-            f"{variable_cost}, {variable_cost_double}, {variable_cost_minimum}, "
-            f"{rage_value}, {lethal})," for (guid, set_guid, name, rarity, cost, attack, defense, card_type,
-         socket_count, no_pvp, is_pve, threshold_json, abilities_json, attributes,
-         sacrifice_target, variable_cost, variable_cost_double,
-         variable_cost_minimum,
-         rage_value, lethal) in card_rows)
+    lines.extend(
+        f"    ({guid!r}, {set_guid!r}, {name!r}, {rarity!r}, {cost}, {attack}, {defense}, "
+        f"{card_type!r}, {socket_count}, {no_pvp}, {is_pve}, {threshold_json!r}, "
+        f"{abilities_json!r}, {attributes}, {sacrifice_target!r}, "
+        f"{variable_cost}, {variable_cost_double}, {variable_cost_minimum}, "
+        f"{rage_value}, {lethal}),"
+        for (
+            guid,
+            set_guid,
+            name,
+            rarity,
+            cost,
+            attack,
+            defense,
+            card_type,
+            socket_count,
+            no_pvp,
+            is_pve,
+            threshold_json,
+            abilities_json,
+            attributes,
+            sacrifice_target,
+            variable_cost,
+            variable_cost_double,
+            variable_cost_minimum,
+            rage_value,
+            lethal,
+        ) in card_rows
+    )
     lines.append("]")
     lines.append("")
     lines.append("# card ability BOM rows: (ability_guid, effect_guid, effect_order, effect_type, param, effect_group_id, condition_id, target_index, effect_instance_id, contingent_effect_instance_id, secondary_target_index, recalculate_targets, is_optional, effect_duration, output_variables)")

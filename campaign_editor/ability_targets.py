@@ -207,7 +207,10 @@ def build_filter(properties: Properties) -> dict[str, Any]:
                        "defense": ("HasDefenseValue", "m_DefenseValue"),
                        "cost": ("HasResourceCost", "m_ResourceCost")}[comparison["stat"]]
         parts.append(_with_defaults(name, {field: comparison["value"], "m_ComparisonOp": comparison["op"]}))
-    parts.extend((_filter("HasAllAttributeFlags", m_CardAttributeFlags=flags)) for flags in (properties.get("keywords") or []))
+    parts.extend(
+        (_filter("HasAllAttributeFlags", m_CardAttributeFlags=flags))
+        for flags in (properties.get("keywords") or [])
+    )
     parts.extend(_with_defaults(flag, {}) for flag, key in FLAGS.items() if properties.get(key))
     if properties.get("name"):
         parts.append(_with_defaults("IsCardName", {"m_CardName": properties["name"]}))

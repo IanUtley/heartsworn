@@ -172,12 +172,19 @@ def _card_update_visible_to_viewer(event, viewer_uid, visibility, *,
 
 class CardDef:
     """Definition of a card in the game."""
-    def __init__(self, name: str, card_type: int = ECardTypes.Troop,
-                 cost: int = 0, attack: int = 0, defense: int = 0,
-                 shards: list[int] | None = None,
-                 abilities: list[ResourceId] | None = None,
-                 attributes: int = ECardAttributes.Unknown, lethal: bool = False,
-                 subtype: str = ""):
+    def __init__(
+        self,
+        name: str,
+        card_type: int = ECardTypes.Troop,
+        cost: int = 0,
+        attack: int = 0,
+        defense: int = 0,
+        shards: list[int] | None = None,
+        abilities: list[ResourceId] | None = None,
+        attributes: int = ECardAttributes.Unknown,
+        lethal: bool = False,
+        subtype: str = "",
+    ):
         self.name = name
         self.card_type = card_type
         self.cost = cost
@@ -709,8 +716,9 @@ class Game:
         ev.combats = list(combats)
         self._push(ev)
 
-    def push_turn_phase(self, phase: int, active_uid: UID | None = None,
-                        prior_uid: UID | None = None):
+    def push_turn_phase(
+        self, phase: int, active_uid: UID | None = None, prior_uid: UID | None = None
+    ):
         ev = self._make_event(TurnPhaseUpdatedSessionEventArgs)
         ev.turn_phase = phase
         ev.active_player_id = active_uid or self.active_player
@@ -930,9 +938,12 @@ class Game:
         ev.session_card_id = champ_card_id
         self._push(ev)
 
-    def push_deck_created_with_cards(self, player_uid: UID,
-                                     card_ids: list[SessionCardId],
-                                     sleeve_guid: str | None = None):
+    def push_deck_created_with_cards(
+        self,
+        player_uid: UID,
+        card_ids: list[SessionCardId],
+        sleeve_guid: str | None = None,
+    ):
         ev = self._make_event(DeckCreatedSessionEventArgs)
         ev.player_id = player_uid
         ev.session_card_ids = card_ids
@@ -1075,11 +1086,15 @@ class Game:
         ev.options.append(opt)
         self._push(ev)
 
-    def add_champion_to_options(self, player_uid: UID, champ_scid: SessionCardId,
-                                ability_ids: list[ResourceId],
-                                discard_costs: dict | None = None,
-                                target_data: dict | None = None,
-                                cost_data: dict | None = None):
+    def add_champion_to_options(
+        self,
+        player_uid: UID,
+        champ_scid: SessionCardId,
+        ability_ids: list[ResourceId],
+        discard_costs: dict | None = None,
+        target_data: dict | None = None,
+        cost_data: dict | None = None,
+    ):
         """Append champion ability options (ECardUsage.Activate) to the most
         recent PlayerOptionList, one OptionInstance per affordable ability.
 
