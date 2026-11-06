@@ -7,6 +7,7 @@ here; lasting durations belong to area H.
 
 from __future__ import annotations
 
+import json
 from typing import Any, Iterable
 
 from gamedata.mechanics_objects import MechanicsObject
@@ -158,10 +159,9 @@ def run_modifier(modifier: MechanicsObject, effect_guid: str, duration: str,
         return
     if kind == "IntAttrModifier":
         # The native int attribute leaf applies Set and Add, and writes the card's temporary or permanent buffs.
-        from rules_port.effects import _int_attribute
         amount = _amount(modifier, scope)
         for target in targets:
-            _int_attribute(context, int(target), {
+            int_attr_modifier(context, int(target), {
                 "attribute": modifier.m_Attribute, "operation": modifier.m_Operation,
                 "amount": amount, "duration": duration, "double": bool(modifier.m_Double)})
         return
@@ -188,3 +188,255 @@ def run_modifier(modifier: MechanicsObject, effect_guid: str, duration: str,
     param = {**metadata, "duration": duration}
     for target in targets:
         context.rule_modifier(int(target), param, metadata)
+
+
+# The three modifier operations below are the bodies the native CardModifier dispatch (rules_port.effects)
+# delegates to; each lives with the IR operation it implements.
+
+
+def heal_hero_modifier(context, target, param):
+    owner = context.target_owner(
+        target, default=context.bstate.get("resolving_owner_id", 0))
+    amount = context.modifier_value(param, param, "healhero")
+    if not amount:
+        amount = int(param.get("amount") or 0)
+    return context.gain_health(int(owner or 0), amount)
+
+
+def card_cost_modifier(context, target, param):
+    if target is None:
+        target = context.bstate.get("resolving_source_uid")
+    if target is None:
+        return "cardcost: no target"
+    from pvp_db import (db_add_card_cost_modifier, db_card_zone_details,
+                        db_card_mutation_field, db_set_card_mutation_field)
+    amount = int(param.get("amount") or 0)
+    if not amount:
+        amount = context.modifier_value(param, param, "cardcost")
+    replace = bool(param.get("replaceexistingvalue"))
+    # A replace modifier can legitimately assign 0 ("... become cost [(0)]"),
+    # so only an additive modifier falls back to the game-text operand.
+    if not amount and not replace:
+        # Extracted CardModifier rows can carry amount 0 with the operand only
+        # in the localized game text (e.g. "cost -[(1)]") or in an ability
+        # variable whose raw record is unavailable.  Recover the signed delta
+        # from the text so the effect still applies.
+        import re
+        match = re.search(r"cost\s*([+-])\s*\[?\(?\s*(\d+)",
+                          str(param.get("text") or ""), re.IGNORECASE)
+        if match:
+            value = int(match.group(2))
+            amount = -value if match.group(1) == "-" else value
+    if not amount and not replace:
+        return "cardcost: no change"
+    assigned_cost = int(amount)
+    if replace:
+        # C# ``CardCostModifier.Apply`` assigns ``card.ResourceCost = value``
+        # when ReplaceExistingValue is set (Raucous Revelry: "your cards with
+        # Rowdy in all zones become cost 1").  This port stores additive
+        # deltas, so convert the assignment into the delta that makes the
+        # card's current effective cost equal the authored value.
+        from rules_port.static_rules import effective_cost
+        current = int(effective_cost(
+            context.db, context.session.session_id, context.bstate,
+            int(target)) or 0)
+        amount = assigned_cost - current
+        if not amount:
+            return f"cost already {assigned_cost} on {hex(int(target))}"
+    duration = str(param.get("duration") or context.effect_duration)
+    if duration == "UntilItLeavesYourHand":
+        try:
+            buffs = json.loads(db_card_mutation_field(
+                context.session.session_id, int(target), "temporary_buffs",
+                conn=context.db) or "{}")
+        except (TypeError, ValueError, json.JSONDecodeError):
+            buffs = {}
+        if not isinstance(buffs, dict):
+            buffs = {}
+        mods = buffs.setdefault("temporary_cost_modifiers", [])
+        mods.append({"delta": int(amount), "duration": duration,
+                     "source_uid": context.bstate.get("resolving_source_uid"),
+                     "target_uid": int(target)})
+        db_set_card_mutation_field(
+            context.session.session_id, int(target), "temporary_buffs",
+            json.dumps(buffs, separators=(",", ":"), sort_keys=True),
+            conn=context.db)
+    else:
+        db_add_card_cost_modifier(
+            context.session.session_id, int(target), amount, conn=context.db)
+        if duration in ("BeginningOfOwnersTurn", "AfterCardsReadyOnPlayersTurn",
+                        "WhileCardInPlay", "EndOfTurn"):
+            # "Cost [(1)] until the start of your next turn" (Thk'tatcha) is
+            # reversed at the owner's boundary instead of staying forever; a
+            # while-in-play change is reversed when its source is gone; "this
+            # turn" is reversed at the end of the turn (C# disables the
+            # effect instance in RemoveEndOfTurnAbilities).
+            from .effect_lifetimes import record_temporary_stat
+            resolving_owner = int(
+                context.bstate.get("resolving_owner_id", 0) or 0)
+            expiration_owner = (
+                resolving_owner if duration == "BeginningOfOwnersTurn"
+                else int(context.target_owner(
+                    int(target), default=resolving_owner) or 0))
+            from pvp_db import db_card_location
+            record_temporary_stat(
+                context.bstate, int(target), 0, 0, duration=duration,
+                owner_id=expiration_owner, cost=int(amount),
+                location=db_card_location(
+                    context.session.session_id, int(target), conn=context.db),
+                source_uid=context.bstate.get("resolving_source_uid"))
+    context.db.commit()
+    row = db_card_zone_details(
+        context.session.session_id, int(target), conn=context.db)
+    if row:
+        context._push_modifier_card(int(target))
+    if replace:
+        return f"cost -> {assigned_cost} on {hex(int(target))}"
+    return f"cost {amount:+} on {hex(int(target))}"
+
+
+def int_attr_modifier(context, target, param):
+    if target is None:
+        return "intattr: no target"
+    attr = str(param.get("attribute") or "")
+    if not attr:
+        return "intattr: missing attribute"
+    amount = int(param.get("amount") or 0)
+    if not amount:
+        amount = context.modifier_value(param, param, "intattr")
+    operation = str(param.get("operation") or "set").lower()
+    double = bool(param.get("double") or param.get("doubled") or False)
+    duration = str(param.get("duration") or context.effect_duration)
+
+    def apply_operation(old):
+        # C# IntAttrModifier.Apply checks m_Double before m_Operation, then
+        # Add/Remove/Set; Remove deletes the attribute regardless of value and
+        # any other operation logs an error and does nothing.
+        if double:
+            return old + old
+        if operation in ("add", "increment"):
+            return old + amount
+        if operation in ("remove", "removeall", "clear"):
+            return 0
+        if operation == "subtract":
+            return old - amount
+        if operation == "set":
+            return amount
+        return None
+    temporary_durations = {
+        "EndOfTurn", "EndOfNextTurn", "BeginningOfOwnersTurn",
+        "BeginningOfOpponentsTurn", "AfterCardsReadyOnPlayersTurn",
+        "UntilDamaged", "UntilItLeavesYourHand",
+        # A while-in-play write is a recorded grant: it lives in the temporary payload and the linked ledger
+        # expires it with the source (the sweep at each event and turn boundary).
+        "WhileCardInPlay",
+        # Likewise a write for as long as its source stays on top of its deck (the sweep checks the top card).
+        "WhileCardOnTopOfDeck",
+    }
+    resolving_owner = int(context.bstate.get("resolving_owner_id", 0) or 0)
+    if duration == "BeginningOfOwnersTurn":
+        expiration_owner = resolving_owner
+    elif duration == "BeginningOfOpponentsTurn":
+        if context.bstate.get("pvp"):
+            expiration_owner = next((int(pid) for pid in
+                context.bstate.get("pids", ())
+                if int(pid) != resolving_owner), 0)
+        else:
+            profile = getattr(context.handler, "user_profile", None) or {}
+            player_owner = int(profile.get("id", 0) or 0)
+            expiration_owner = (0 if resolving_owner == player_owner
+                                else player_owner)
+    elif duration == "AfterCardsReadyOnPlayersTurn":
+        expiration_owner = int(context.target_owner(
+            target, default=resolving_owner) or resolving_owner)
+    else:
+        expiration_owner = None
+    champion_owner = context._champion_owner(target)
+    if champion_owner is not None:
+        uid_key = str(int(target))
+        all_attrs = context.bstate.setdefault("champion_int_attrs", {})
+        attrs = all_attrs.setdefault(uid_key, {})
+        previous = attrs.get(attr)
+        value = apply_operation(int(previous or 0))
+        if value is None:
+            return f"intattr: unsupported operation {operation} on {attr}"
+        if value:
+            attrs[attr] = value
+        else:
+            attrs.pop(attr, None)
+        if duration in temporary_durations:
+            from .effect_lifetimes import record_temporary_intattr
+            record_temporary_intattr(
+                context.bstate, int(target), attr, previous, attrs.get(attr),
+                champion=True, duration=duration,
+                owner_id=resolving_owner,
+                target_owner_id=champion_owner,
+                source_uid=context.bstate.get("resolving_source_uid"),
+                expiration_owner_id=expiration_owner)
+        context._push_champion_intattrs(
+            champion_owner, int(target),
+            cleared=() if value else (attr,))
+        context.emit_int_attribute_gained(target, attr, previous, value)
+        return f"intattr {attr}={value} champion={hex(int(target))}"
+
+    from pvp_db import db_card_mutation_field, db_set_card_mutation_field
+    temporary = duration in {
+        "EndOfTurn", "EndOfNextTurn", "BeginningOfOwnersTurn",
+        "BeginningOfOpponentsTurn",
+        "AfterCardsReadyOnPlayersTurn", "UntilDamaged",
+        "UntilItLeavesYourHand", "WhileCardInPlay", "WhileCardOnTopOfDeck"}
+    column = "temporary_buffs" if temporary else "permanent_buffs"
+    raw = db_card_mutation_field(
+        context.session.session_id, int(target), column, conn=context.db)
+    try:
+        buffs = json.loads(raw or "{}")
+    except (TypeError, ValueError, json.JSONDecodeError):
+        buffs = {}
+    attrs = buffs.setdefault("int_attrs", {})
+    old = int(attrs.get(attr, 0) or 0)
+    # A persisted Tunneling IntAttr is the card's current absolute value
+    # (rules_port.tunneling.tunneling_value), so a modifier on a card that
+    # has none yet applies to the printed CardTemplate value: Tectonic
+    # Megahulk's "Tunneling -1 for each Robot" is 15 -> 14, not 0 -> -1.
+    # Keep an explicit 0 as well, or the threshold would revert to print.
+    keep_zero = False
+    if attr.lower() == "tunneling" and not temporary:
+        from pvp_db import db_card_basic
+        from .tunneling import tunneling_value
+        basic = db_card_basic(
+            context.session.session_id, int(target), conn=context.db)
+        printed = tunneling_value(context.db, basic[0], {}) if basic else 0
+        if attr not in attrs:
+            old = printed
+        keep_zero = printed > 0 and operation not in (
+            "remove", "removeall", "clear")
+    value = apply_operation(old)
+    if value is None:
+        return f"intattr: unsupported operation {operation} on {attr}"
+    if value or keep_zero:
+        attrs[attr] = value
+    else:
+        attrs.pop(attr, None)
+    tamed = attr.lower() == "tamed" and value > 0
+    if tamed:
+        # Tamed and Untamed are mutually exclusive.
+        attrs.pop("Untamed", None)
+    db_set_card_mutation_field(
+        context.session.session_id, int(target), column,
+        json.dumps(buffs), conn=context.db)
+    context.db.commit()
+    from .effects import _capture_tamed_card  # the capture leaf stays with the Taming Sphere's effect in effects
+    if tamed and _capture_tamed_card(context, int(target), buffs):
+        return f"intattr {attr}={value} target={hex(int(target))} (captured)"
+    if duration in temporary_durations:
+        from .effect_lifetimes import record_temporary_intattr
+        record_temporary_intattr(
+            context.bstate, int(target), attr, old if old else None,
+            attrs.get(attr), duration=duration,
+            owner_id=resolving_owner,
+            target_owner_id=context.target_owner(int(target), default=None),
+            source_uid=context.bstate.get("resolving_source_uid"),
+            expiration_owner_id=expiration_owner)
+    context._push_modifier_card(int(target), int_attrs=attrs)
+    context.emit_int_attribute_gained(target, attr, old, value)
+    return f"intattr {attr}={value} target={hex(int(target))}"

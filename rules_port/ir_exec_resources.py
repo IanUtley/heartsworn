@@ -188,7 +188,7 @@ def _apply_to_target(kind: str, modifier: MechanicsObject, target: int, amount: 
 def _run_card_cost(modifier: MechanicsObject, root: MechanicsObject, index: int, duration: str,
                    scope: ix.Scope) -> None:
     """C# CardCostModifier: each target's cost changes through the live cost leaf, for the clause's duration."""
-    from rules_port.effects import _card_cost
+    from rules_port.ir_modifiers import card_cost_modifier as _card_cost
     amount = ix._input_value(modifier, scope)
     replace = bool(modifier.m_ReplaceExistingValue)
     if not amount and not replace:
