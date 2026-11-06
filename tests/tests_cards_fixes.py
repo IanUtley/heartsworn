@@ -550,6 +550,10 @@ def test_crazed_squirrel_titan_ai_battles_a_legal_opposing_troop(db):
         "kind": "trigger", "ability_guid": ability_guid,
         "source_uid": 331, "source_owner_uid": 1002,
         "target_uid": 332, "trigger_target_uid": 331,
+        "trigger_source_uid": 331,
+        "trigger_event_type": "Game.Shared.Mechanics.CardEnteredZoneEvent",
+        "trigger_event_data": {"event_source_collection": "hand",
+                               "event_destination_collection": "warzone"},
         "activation_data": {"target_map": {str(target_index): [332]}},
         "instance_id": 17,
     }

@@ -408,7 +408,8 @@ def _filter_holds(card_filter: Any, card: Card, scope: Scope) -> bool:
     if cls == "NotCardFilter":
         return not _filter_holds(typed.m_TargetFilter, card, scope)
     if cls == "IsType":
-        return card.card_type in {part.strip() for part in str(typed.m_CardType).split("|")}
+        # The wanted types are a flag list, and a card carries a flag list too: it passes if it has any of them.
+        return any(_has_card_type(card, part.strip()) for part in str(typed.m_CardType).split("|"))
     if cls == "InZone":
         zones = {part.strip().lower() for part in typed.m_Collection.split("|")}
         return card.zone in zones
@@ -714,7 +715,7 @@ def _resolved_targets(root: MechanicsObject, index: int, scope: Scope) -> list[i
             return []
         return [int(uid) for uid in chosen] if isinstance(chosen, list) else [int(chosen)]
     if kind == "SourceRevealedTargetTemplate":
-        return _revealed_candidates(template, index, scope)
+        return _revealed_candidates(template, index, scope, root)
     if kind in ("AbilityTargetTemplate", "SourceRevealedTargetTemplate", "SecondaryTargetTemplate",
                 "MatchSecondaryTargetTemplate", "TargetsAPlayerOrHisStuff") \
             and not template.m_IsAutoTarget \
@@ -818,13 +819,17 @@ def _card_candidates(template: MechanicsObject, scope: Scope) -> list[int]:
     return chosen
 
 
-def _revealed_candidates(template: MechanicsObject, index: int, scope: Scope) -> list[int]:
+def _revealed_candidates(template: MechanicsObject, index: int, scope: Scope, root: MechanicsObject) -> list[int]:
     """The cards a SourceRevealedTargetTemplate names: the cards the source's reveal showed, in the template's zones,
     that pass its filter. A later target of the same ability does not name a card an earlier target took (the
     "remaining cards" of an effect are the revealed cards the first target did not take)."""
     revealed = [int(uid) for uid in (scope.context.bstate.get("revealed_cards") or [])]
     zones = _zones_of(template.m_CollectionFlags)
+    # Only the other revealed picks take a revealed card: the ability's own source card (Argus, which reveals itself
+    # and then gets the cost) is not one of the remaining cards.
     taken = {int(uid) for position, value in scope.chosen.items() if position != index and value is not None
+             and _short(_load("AbilityTargetTemplate", _guid(root.m_AbilityTargetTemplateIds[position])).type_name)
+             in ("SourceRevealedTargetTemplate", "SecondaryTargetTemplate")
              for uid in (value if isinstance(value, list) else [value])}
     if getattr(template, "m_IgnoreActedOn", False):
         # "The remaining cards" ignores the cards an earlier effect acted on (the troops the free play put onto the
@@ -863,7 +868,7 @@ def _choice_candidates(root: MechanicsObject, index: int, scope: Scope) -> tuple
     """The cards a chosen target may name, and whether the player may choose none (its m_Optional)."""
     template = _load("AbilityTargetTemplate", _guid(root.m_AbilityTargetTemplateIds[index]))
     if _short(template.type_name) == "SourceRevealedTargetTemplate":
-        return _revealed_candidates(template, index, scope), bool(template.m_Optional)
+        return _revealed_candidates(template, index, scope, root), bool(template.m_Optional)
     if _short(template.type_name) == "SecondaryTargetTemplate":
         return _secondary_candidates(template, scope), bool(template.m_Optional)
     if _short(template.type_name) == "MatchSecondaryTargetTemplate":
@@ -1401,11 +1406,14 @@ def run_ability(guid: str, event_type: str | None, *, context: Any, source_uid: 
         raise NotImplementedError("ability threshold requirement")
     trigger = _field(root, "m_TriggerEventType")
     # A continuous card aura (a permanent CardModifier with no trigger, such as "your non-Tamed Dire Toads are
-    # Untamed") is re-applied when a card enters play under its champion, as the native dispatch does.
-    continuous_aura = (event_type == "CardEnteredZoneEvent" and
-                       not _short(_field(trigger, "m_InternalType")) and
-                       any(_short(_stored("AbilityEffectTemplate", _guid(_field(clause, "m_EffectTemplateId")))[0])
-                           == "CardModifierAbilityEffectTemplate" for clause in root.m_AbilityEffectList))
+    # Untamed") is re-applied when a card enters play under its champion, as the native dispatch does. A start-of-game
+    # setup card (an encounter scene's card) has no trigger either; the native dispatch admits it on GameStartedEvent.
+    untriggered = not _short(_field(trigger, "m_InternalType"))
+    has_card_modifier = any(
+        _short(_stored("AbilityEffectTemplate", _guid(_field(clause, "m_EffectTemplateId")))[0])
+        == "CardModifierAbilityEffectTemplate" for clause in root.m_AbilityEffectList)
+    continuous_aura = untriggered and (
+        (event_type == "CardEnteredZoneEvent" and has_card_modifier) or event_type == "GameStartedEvent")
     if (event_type is not None and not continuous_aura and
             _short(_field(trigger, "m_InternalType")) != event_type):
         return False
@@ -1420,6 +1428,9 @@ def run_ability(guid: str, event_type: str | None, *, context: Any, source_uid: 
     # With m_UsesPreviousState the flags are tested against the zone the source was in before the event
     # (C# PassesCollectionFlagRequirements), which for the card that moved is the event's "from" zone.
     zone = source.zone if source else None
+    # A hidden encounter-setup card (the Mod collection) is judged as a warzone card, as the native dispatch does.
+    if zone == "mod" and event_type == "GameStartedEvent":
+        zone = "warzone"
     if _field(root, "m_UsesPreviousState") and event.get("card") is not None \
             and int(event["card"]) == int(source_uid) and event.get("from"):
         zone = str(event["from"]).lower()
@@ -1770,7 +1781,7 @@ def _revealed_target_empty(root: MechanicsObject, index: int, scope: Scope) -> b
     """Whether a clause's revealed target is a chosen one that finds no card.""" 
     template = _load("AbilityTargetTemplate", _guid(root.m_AbilityTargetTemplateIds[index]))
     return _short(template.type_name) == "SourceRevealedTargetTemplate" and not template.m_IsAutoTarget \
-        and not _revealed_candidates(template, index, scope)
+        and not _revealed_candidates(template, index, scope, root)
 
 
 def _loop_count(field: dict[str, Any], scope: Scope) -> int:
