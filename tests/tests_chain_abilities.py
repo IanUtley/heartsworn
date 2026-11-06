@@ -309,7 +309,8 @@ def test_runeweb_infiltrator_puts_two_spiderling_eggs_in_opponent_deck(db):
         db=db, handler=handler, game=game, session=SessionStub(),
         player_uid=pl_t, ai_uid=ai_t, battle_state=bstate,
         event_type="CardDealtDamageEvent", source_card_id=101,
-        source_player_id=0, target_card_id=player_champ_uid)
+        source_player_id=0, target_card_id=player_champ_uid,
+            target_player_id=pl_t)
     assert AG_RUNEWEB_INFILTRATOR_DAMAGE[:8] in result, result
 
     item = next(item for item in (bstate.get("stack") or [])
@@ -366,7 +367,8 @@ def test_vampire_king_steals_a_random_troop_from_the_damaged_hand(db):
             db=db, handler=handler, game=game, session=SessionStub(),
             player_uid=pl_t, ai_uid=ai_t, battle_state=bstate,
             event_type="CardDealtDamageEvent", source_card_id=101,
-            source_player_id=0, target_card_id=player_champ_uid)
+            source_player_id=0, target_card_id=player_champ_uid,
+            target_player_id=pl_t)
         for item in list(bstate.get("stack") or []):
             bstate["stack"].remove(item)
             resolve_port_trigger(
@@ -455,7 +457,8 @@ def test_vampire_prince_rewards_buried_opponent_resource(db):
             db=db, handler=handler, game=game, session=SessionStub(),
             player_uid=pl_t, ai_uid=ai_t, battle_state=bstate,
             event_type="CardDealtDamageEvent", source_card_id=101,
-            source_player_id=0, target_card_id=player_champ_uid)
+            source_player_id=0, target_card_id=player_champ_uid,
+            target_player_id=pl_t)
         while bstate.get("stack"):
             item = bstate["stack"].pop(0)
             resolve_port_trigger(
