@@ -1,0 +1,27 @@
+# Ruff configuration for the Heartsworn server.
+#
+# The repository is not fully formatted or lint-clean, so this file sets a
+# conservative gate: only real errors (syntax errors, undefined names, and
+# invalid comparisons) are reported. Formatting is opt-in per file with
+# `ruff format <file>`, because a repo-wide format would rewrite most modules.
+#
+# Run from the repository root:
+#   ruff check .
+#   ruff format --range START-END <file>   # format only the lines you changed
+
+target-version = "py312"
+line-length = 120
+extend-exclude = [
+    "hex-private",
+    # Test fixtures include generated and exec-based card definitions that
+    # reference names only at run time, so they are not linted.
+    "tests",
+]
+
+[lint]
+select = [
+    "E9",   # syntax errors and I/O errors
+    "F63",  # invalid comparisons and literal misuse
+    "F7",   # statement-level errors (return/yield outside function, etc.)
+    "F82",  # undefined names
+]
