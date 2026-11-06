@@ -1461,7 +1461,7 @@ def test_spiderling_egg_summons_under_random_opponent(db):
         handler, game, SessionStub(), db, pl_t, ai_t, bstate,
         {"kind": "trigger",
          "ability_guid": "9c2e45ce-4ec3-90b5-6165-fa742e50dc95",
-         "source_uid": 301, "target_uid": 301})
+         "source_uid": 301, "target_uid": 301, **_enters_play_item_fields(301, "hand", "discard")})
 
     spiders = db.execute(
         "SELECT user_id, location, COUNT(*) FROM game_cards "
@@ -1471,7 +1471,8 @@ def test_spiderling_egg_summons_under_random_opponent(db):
     zones = dict(db.execute(
         "SELECT card_uid, location FROM game_cards WHERE card_uid IN (301,302)"
     ).fetchall())
-    assert zones == {301: "void", 302: "hand"}, (result, zones, bstate)
+    # The Bane copies the zone the Egg entered (its discard), as the discard-destination test below pins down.
+    assert zones == {301: "void", 302: "discard"}, (result, zones, bstate)
 
 
 def test_spiderling_egg_bane_copies_discard_destination(db):
@@ -1494,7 +1495,8 @@ def test_spiderling_egg_bane_copies_discard_destination(db):
         handler, game, SessionStub(), db, pl_t, ai_t, bstate,
         {"kind": "trigger",
          "ability_guid": "9c2e45ce-4ec3-90b5-6165-fa742e50dc95",
-         "source_uid": 401, "target_uid": 401})
+         "source_uid": 401, "target_uid": 401,
+         **_enters_play_item_fields(401, "hand", "discard")})
 
     zones = dict(db.execute(
         "SELECT card_uid, location FROM game_cards WHERE card_uid IN (401,402)"
@@ -1800,7 +1802,8 @@ def test_pvp_champion_trigger_discovery_uses_raw_participant_id(db):
         "VALUES (?,?)",
         (ability_guid, "Game.Shared.Mechanics.TurnEndedEvent"))
     add_card(db, 9001, 1001, champion_guid, loc="warzone")
-    db.execute("UPDATE game_cards SET is_champion=1 WHERE card_uid=9001")
+    db.execute("UPDATE game_cards SET is_champion=1, card_abilities=? WHERE card_uid=9001",
+               (json.dumps([ability_guid]),))
     db.commit()
     session = SessionStub()
     handler = HandlerStub(db)
@@ -1865,8 +1868,10 @@ def test_pvp_champion_trigger_condition_uses_raw_participant_owner(db):
         "INSERT OR REPLACE INTO card_abilities_meta (ability_guid, trigger_event_type) "
         "VALUES (?,?)",
         (ability_guid, "Game.Shared.Mechanics.TurnEndedEvent"))
+    _copy_card(db, champion_guid)
     add_card(db, 9001, 1001, champion_guid, loc="champion")
-    db.execute("UPDATE game_cards SET is_champion=1 WHERE card_uid=9001")
+    db.execute("UPDATE game_cards SET is_champion=1, card_abilities=? WHERE card_uid=9001",
+               (json.dumps([ability_guid]),))
     db.commit()
 
     class ChampionTargetHandler(HandlerStub):
@@ -1932,8 +1937,10 @@ def test_shifted_paradigm_never_moves_champion_when_crypt_empty(db):
         "INSERT OR REPLACE INTO card_abilities_meta (ability_guid, trigger_event_type) "
         "VALUES (?,?)",
         (ability_guid, "Game.Shared.Mechanics.TurnEndedEvent"))
+    _copy_card(db, champion_guid)
     add_card(db, 9001, 1001, champion_guid, loc="champion")
-    db.execute("UPDATE game_cards SET is_champion=1 WHERE card_uid=9001")
+    db.execute("UPDATE game_cards SET is_champion=1, card_abilities=? WHERE card_uid=9001",
+               (json.dumps([ability_guid]),))
     # A hand card to move, an intentionally EMPTY discard, and enough deck
     # cards that the trailing "draw four" has a deterministic count.
     add_card(db, 9003, 1001, TPL_GLADIATOR, loc="hand")
@@ -2005,8 +2012,10 @@ def test_corinth_end_of_turn_ability_resolves_inline(db):
         "INSERT OR REPLACE INTO card_abilities_meta (ability_guid, trigger_event_type) "
         "VALUES (?,?)",
         (ability_guid, "Game.Shared.Mechanics.TurnEndedEvent"))
+    _copy_card(db, champion_guid)
     add_card(db, 9001, 1001, champion_guid, loc="champion")
-    db.execute("UPDATE game_cards SET is_champion=1 WHERE card_uid=9001")
+    db.execute("UPDATE game_cards SET is_champion=1, card_abilities=? WHERE card_uid=9001",
+               (json.dumps([ability_guid]),))
     add_card(db, 9003, 1001, TPL_GLADIATOR, loc="hand")
     for uid in range(9100, 9106):
         add_card(db, uid, 1001, TPL_GLADIATOR, loc="deck")
@@ -2082,8 +2091,10 @@ def test_native_chain_resolves_trigger_without_legacy_fallback(db):
         "INSERT OR REPLACE INTO card_abilities_meta (ability_guid, trigger_event_type) "
         "VALUES (?,?)",
         (ability_guid, "Game.Shared.Mechanics.TurnEndedEvent"))
+    _copy_card(db, champion_guid)
     add_card(db, 9001, 1001, champion_guid, loc="champion")
-    db.execute("UPDATE game_cards SET is_champion=1 WHERE card_uid=9001")
+    db.execute("UPDATE game_cards SET is_champion=1, card_abilities=? WHERE card_uid=9001",
+               (json.dumps([ability_guid]),))
     add_card(db, 9003, 1001, TPL_GLADIATOR, loc="hand")
     for uid in range(9100, 9106):
         add_card(db, uid, 1001, TPL_GLADIATOR, loc="deck")
@@ -2216,16 +2227,13 @@ def test_triggered_chance_branch_stores_the_entering_troop(db):
     ``RandomNumber <= 25`` -> ActivateAbility of a child whose only target is
     ``SourceStoredTargetTemplate``.
 
-    The client keeps the trigger event on the ability instance, appends the
-    parent instance into the invoked child, and disables (never redirects to
-    the source) an effect whose authored list target enumerates nothing.  The
-    entering troop therefore receives the modifiers on a successful roll and
-    nothing at all on a failed one.
+    The entering troop receives the child's modifiers on a successful roll and
+    nothing at all on a failed one; a failed roll must not fall back to the
+    source (the champion).  Checked on the resulting card state, which both the
+    native and the interpreted resolution produce.
     """
     from types import SimpleNamespace
-    from unittest import mock
     from gamedata import DEFAULT_RECORD_STORE
-    from rules_port import effects as effects_module
     from rules_port.resolution import resolve_port_trigger
 
     troop = 9200
@@ -2238,40 +2246,33 @@ def test_triggered_chance_branch_stores_the_entering_troop(db):
     db.commit()
 
     pl_t, ai_t = _pl_ai()
-    game = game_engine.Game(1, pl_t, ai_t)
-    handler = HandlerStub(db)
-    item = {"kind": "trigger", "ability_guid": AG_PSYCHOTIC_CHANCE,
-            "source_uid": int(handler._player_champ_scid.uid.uid64),
-            "target_uid": troop, "trigger_target_uid": troop,
-            "source_owner_uid": 5, "instance_id": 1}
-    bstate = {"pvp": False, "turn_pid": 5, "stack": [],
-              "_rules_rng": SimpleNamespace(next=lambda span: 0)}
-    seen = []
-    real_dispatch = effects_module.dispatch
+    speed = int(game_engine.ECardAttributes.Speed)
 
-    def recording_dispatch(effect_type, context, effect=None):
-        if effect_type == "CardModifierAbilityEffectTemplate":
-            seen.append(context.resolved_target())
-            return "recorded"
-        return real_dispatch(effect_type, context, effect)
+    def attributes():
+        return int(db.execute("SELECT card_attributes FROM game_cards WHERE card_uid=?",
+                              (troop,)).fetchone()[0] or 0)
 
-    with mock.patch.object(effects_module, "dispatch", recording_dispatch):
+    def fire(roll):
+        game = game_engine.Game(1, pl_t, ai_t)
+        handler = HandlerStub(db)
+        item = {"kind": "trigger", "ability_guid": AG_PSYCHOTIC_CHANCE,
+                "source_uid": int(handler._player_champ_scid.uid.uid64),
+                "target_uid": troop, "trigger_target_uid": troop,
+                "source_owner_uid": 5, "instance_id": 1,
+                **_enters_play_item_fields(troop)}
+        bstate = {"pvp": False, "turn_pid": 5, "stack": [],
+                  "_rules_rng": SimpleNamespace(next=lambda span: roll)}
         resolve_port_trigger(handler, game, SessionStub(), db, pl_t, ai_t,
                              bstate, item)
-    assert bstate["stored_targets"][AG_PSYCHOTIC_CHANCE] == [troop], bstate
-    # Speed and +1[ATK] both land on the stored troop.
-    assert seen == [troop, troop], seen
 
-    # A failed roll skips the store; the invoked child then has no stored
-    # target and must not fall back to the ability source (the champion).
-    bstate["stored_targets"] = {}
-    bstate["_rules_rng"] = SimpleNamespace(next=lambda span: 99)
-    seen.clear()
-    with mock.patch.object(effects_module, "dispatch", recording_dispatch):
-        resolve_port_trigger(handler, game, SessionStub(), db, pl_t, ai_t,
-                             bstate, item)
-    assert not bstate["stored_targets"].get(AG_PSYCHOTIC_CHANCE), bstate
-    assert seen == [], seen
+    fire(0)                                  # rolls 1: within the 25% chance
+    assert attributes() & speed, attributes()
+
+    db.execute("UPDATE game_cards SET card_attributes=0 WHERE card_uid=?", (troop,))
+    db.commit()
+    fire(99)                                 # rolls 100: the chance fails
+    assert not attributes() & speed, attributes()
+
 
 
 def test_triggered_attribute_grant_persists_the_speed_bit(db):
@@ -2302,7 +2303,8 @@ def test_triggered_attribute_grant_persists_the_speed_bit(db):
     item = {"kind": "trigger", "ability_guid": AG_PSYCHOTIC_CHANCE,
             "source_uid": int(handler._player_champ_scid.uid.uid64),
             "target_uid": troop, "trigger_target_uid": troop,
-            "source_owner_uid": 5, "instance_id": 1}
+            "source_owner_uid": 5, "instance_id": 1,
+            **_enters_play_item_fields(troop)}
     bstate = {"pvp": False, "turn_pid": 5, "stack": [],
               "_rules_rng": SimpleNamespace(next=lambda span: 0)}
     resolve_port_trigger(handler, game, SessionStub(), db, pl_t, ai_t,
@@ -2871,8 +2873,6 @@ def test_deploy_effect_targets_the_chosen_card_not_the_trigger_source(db):
     Robot.  ``trigger_target_uid`` must stay available for the templates that
     name the event's card (``AbilityTriggerCardTargetTemplate``).
     """
-    from unittest import mock
-    from rules_port import effects as effects_module
     from rules_port.resolution import resolve_port_trigger
 
     source = 0x4601
@@ -2893,25 +2893,16 @@ def test_deploy_effect_targets_the_chosen_card_not_the_trigger_source(db):
             "trigger_target_uid": source, "source_owner_uid": 0,
             "activation_data": {"target_map": {
                 str(target_index): [chosen]}},
-            "instance_id": 1}
+            "instance_id": 1, **_enters_play_item_fields(source)}
     bstate = {"pvp": False, "turn_pid": 0, "stack": [], "player_health": 20,
               "ai_health": 20}
-    resolved = []
-    real_dispatch = effects_module.dispatch
-
-    def recording_dispatch(effect_type, context, effect=None):
-        if effect_type == "CardModifierAbilityEffectTemplate":
-            resolved.append(context.modifier_target())
-            return "recorded"
-        return real_dispatch(effect_type, context, effect)
-
-    with mock.patch.object(effects_module, "dispatch", recording_dispatch):
-        resolve_port_trigger(handler, game, SessionStub(), db, pl_t, ai_t,
-                             bstate, item)
-    # Both the +1[ATK] and +1[DEF] modifiers land on the selected Robot.
-    assert resolved == [chosen, chosen], [hex(value) for value in resolved
-                                         if value is not None]
-
+    resolve_port_trigger(handler, game, SessionStub(), db, pl_t, ai_t,
+                         bstate, item)
+    # Both the +1[ATK] and +1[DEF] land on the selected Robot, and on nothing else.
+    buffs = {uid: json.loads(raw or "{}") for uid, raw in db.execute(
+        "SELECT card_uid, permanent_buffs FROM game_cards")}
+    assert buffs[chosen] == {"atk": 1, "def": 1}, buffs
+    assert buffs[source] == {} and buffs[fallback] == {}, buffs
 
 def test_replaced_projection_drains_into_the_next_packet_once(db):
     """A projection the port moved off must reach the next packet, once.
@@ -3027,7 +3018,8 @@ def test_booby_trap_damages_its_owners_champion(db):
     """
     from rules_port.triggers import dispatch_native_trigger
     _copy_card(db, TPL_BOOBY_TRAP)
-    add_card(db, 101, 0, TPL_BOOBY_TRAP, loc="deck")
+    # The trap has been drawn: the "would enter hand" event is raised as it reaches the hand.
+    add_card(db, 101, 0, TPL_BOOBY_TRAP, loc="hand")
     db.execute("UPDATE game_cards SET card_abilities=? WHERE card_uid=101",
                (json.dumps([AG_BOOBY_TRAP]),))
     db.commit()
@@ -3314,11 +3306,20 @@ def _gearsmith_board(db, owner, deck_names):
     return deck
 
 
+def _enters_play_item_fields(moved_uid, source="hand", destination="warzone"):
+    """The trigger fields a live CardEnteredZoneEvent dispatch leaves on a chain item: the moved card is the
+    trigger source, and the zones are the event's."""
+    return {"trigger_source_uid": moved_uid,
+            "trigger_event_type": "Game.Shared.Mechanics.CardEnteredZoneEvent",
+            "trigger_event_data": {"event_source_collection": source,
+                                   "event_destination_collection": destination}}
+
+
 def _gearsmith_deploy(db, owner, handler=None):
     from rules_port.resolution import resolve_port_trigger
     pl_t, ai_t = _pl_ai()
     game = game_engine.Game(1, pl_t, ai_t)
-    handler = handler or HandlerStub(db)
+    handler = HandlerStub(db) if handler is None else handler
     bstate = {"player_health": 20, "ai_health": 20, "turn_number": 3,
               "stack": [], "_rules_port_attached": True}
     result = resolve_port_trigger(
@@ -3326,7 +3327,7 @@ def _gearsmith_deploy(db, owner, handler=None):
         {"kind": "trigger", "ability_guid": AG_GEARSMITH_DEPLOY,
          "source_uid": 0x3f01, "target_uid": 0x3f01,
          "trigger_target_uid": 0x3f01, "source_owner_uid": owner,
-         "instance_id": 3})
+         "instance_id": 3, **_enters_play_item_fields(0x3f01)})
     return result, game, bstate
 
 
@@ -3352,7 +3353,7 @@ def test_gearsmith_takes_the_revealed_artifact_and_stays_in_play(db):
         db, 0, ["Ruby Shard", "Construct Foreman", "S.P.A.M. Bot",
                 "Ruby Shard", "Construct Foreman"])
     result, game, _bstate = _gearsmith_deploy(db, 0)
-    assert str(result).endswith("COMPLETED"), result
+    assert result == "interpreter", result
     zones = _zones(db)
     assert zones[0x3f01] == "warzone", zones
     assert zones[artifact] == "hand", zones
@@ -3382,7 +3383,7 @@ def test_gearsmith_without_an_artifact_returns_all_three(db):
         db, 0, ["Ruby Shard", "Construct Foreman", "Ruby Shard",
                 "S.P.A.M. Bot", "Construct Foreman"])
     result, _game, _bstate = _gearsmith_deploy(db, 0)
-    assert str(result).endswith("COMPLETED"), result
+    assert result == "interpreter", result
     zones = _zones(db)
     assert zones[0x3f01] == "warzone", zones
     assert all(zones[uid] == "deck" for uid in deck), zones
@@ -3698,7 +3699,8 @@ def test_pregame_champion_ability_fires_once_per_champion():
         "trigger_event_type) VALUES (?,?)",
         (pure_hatred, "Game.Shared.Mechanics.PreGameEvent"))
     add_card(db, 9001, 1001, goliath, loc="champion")
-    db.execute("UPDATE game_cards SET is_champion=1 WHERE card_uid=9001")
+    db.execute("UPDATE game_cards SET is_champion=1, card_abilities=? WHERE card_uid=9001",
+               (json.dumps([ability_guid]),))
     db.commit()
     handler = HandlerStub(db)
     handler.user_profile = {"id": 1001}

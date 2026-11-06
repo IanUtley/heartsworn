@@ -1461,6 +1461,12 @@ def _run_effects(guid: str, root: MechanicsObject, scope: Scope, start: int) -> 
             index = int(_field(clause, "m_TargetTemplateIndex") or 0)
             if index not in scope.chosen and _needs_choice(root, index):
                 candidates, optional = _choice_candidates(root, index, scope)
+                # "Up to N" (a minimum of zero) lets the player take none, so a single candidate is still a choice.
+                # The AI (owner 0) never picks through the player's picker: it keeps the forced single candidate.
+                count_template = _load("AbilityTargetTemplate", _guid(root.m_AbilityTargetTemplateIds[index]))
+                if (not optional and int(scope.owner_uid) != 0 and
+                        ir_exec_targets.target_count(count_template.m_MinTargetCount, scope.variables) == 0):
+                    optional = True
                 if _is_sacrifice(clause):
                     candidates = [uid for uid in candidates if int(uid) != int(scope.source_uid)]
                 if len(candidates) == 1 and not optional:

@@ -2189,7 +2189,9 @@ def prompt_interpreted_reveal(handler, game, session, db, player_uid, ai_uid, ba
     continuation = pause.continuation
     # The AI chose this pick (its ability was cast by the AI in PvE), so it answers the pick itself and the
     # interpreter carries on. Only the player's own picks are shown to the player.
-    if pause.revealed and not battle_state.get("pvp") and int(continuation["owner_uid"]) != int(player_uid) \
+    # The player's uid is a UID whose instance is the user id; the continuation's owner is that user id.
+    player_id = player_uid.instance_id if hasattr(player_uid, "instance_id") else int(player_uid)
+    if pause.revealed and not battle_state.get("pvp") and int(continuation["owner_uid"]) != int(player_id) \
             and pause.candidates:
         from rules_port.context import EffectContext
         from . import ir_exec

@@ -225,6 +225,10 @@ def _run_sweep(all_cards=False):
     _src.backup(db)
     _src.close()
     handler = HandlerStub(db)
+    # A choice the player makes pauses the ability for its picker. The sweep checks that each ability reaches its
+    # choice cleanly, so the pickers only record the pause and the ability counts as resolved.
+    handler._prompt_revealed_choice = lambda *args, **kwargs: None
+    handler._prompt_deck_search = lambda *args, **kwargs: None
     session = SessionStub()
     pl_t = game_engine.UID.make(244, 5)
     ai_t = game_engine.UID.make(3, 1000)
