@@ -1869,7 +1869,7 @@ def test_pvp_champion_trigger_condition_uses_raw_participant_owner(db):
         "VALUES (?,?)",
         (ability_guid, "Game.Shared.Mechanics.TurnEndedEvent"))
     _copy_card(db, champion_guid)
-    add_card(db, 9001, 1001, champion_guid, loc="champion")
+    add_card(db, 9001, 1001, champion_guid, loc="champions")
     db.execute("UPDATE game_cards SET is_champion=1, card_abilities=? WHERE card_uid=9001",
                (json.dumps([ability_guid]),))
     db.commit()
@@ -1938,7 +1938,7 @@ def test_shifted_paradigm_never_moves_champion_when_crypt_empty(db):
         "VALUES (?,?)",
         (ability_guid, "Game.Shared.Mechanics.TurnEndedEvent"))
     _copy_card(db, champion_guid)
-    add_card(db, 9001, 1001, champion_guid, loc="champion")
+    add_card(db, 9001, 1001, champion_guid, loc="champions")
     db.execute("UPDATE game_cards SET is_champion=1, card_abilities=? WHERE card_uid=9001",
                (json.dumps([ability_guid]),))
     # A hand card to move, an intentionally EMPTY discard, and enough deck
@@ -1970,7 +1970,7 @@ def test_shifted_paradigm_never_moves_champion_when_crypt_empty(db):
                          bstate, item)
     locations = dict(db.execute(
         "SELECT card_uid, location FROM game_cards").fetchall())
-    assert locations[9001] == "champion", locations
+    assert locations[9001] == "champions", locations
     # The ability resolves: hand -> deck, (empty) crypt skipped, draw 4.
     updates = [(int(ev.session_card_id.uid.uid64), ev.collection)
                for ev in game.events
@@ -2013,7 +2013,7 @@ def test_corinth_end_of_turn_ability_resolves_inline(db):
         "VALUES (?,?)",
         (ability_guid, "Game.Shared.Mechanics.TurnEndedEvent"))
     _copy_card(db, champion_guid)
-    add_card(db, 9001, 1001, champion_guid, loc="champion")
+    add_card(db, 9001, 1001, champion_guid, loc="champions")
     db.execute("UPDATE game_cards SET is_champion=1, card_abilities=? WHERE card_uid=9001",
                (json.dumps([ability_guid]),))
     add_card(db, 9003, 1001, TPL_GLADIATOR, loc="hand")
@@ -2092,7 +2092,7 @@ def test_native_chain_resolves_trigger_without_legacy_fallback(db):
         "VALUES (?,?)",
         (ability_guid, "Game.Shared.Mechanics.TurnEndedEvent"))
     _copy_card(db, champion_guid)
-    add_card(db, 9001, 1001, champion_guid, loc="champion")
+    add_card(db, 9001, 1001, champion_guid, loc="champions")
     db.execute("UPDATE game_cards SET is_champion=1, card_abilities=? WHERE card_uid=9001",
                (json.dumps([ability_guid]),))
     add_card(db, 9003, 1001, TPL_GLADIATOR, loc="hand")
