@@ -366,7 +366,7 @@ def _is_subtype(wanted: str, card: Card) -> bool:
         return False
     if " " in wanted:
         return wanted in current
-    return wanted.lower() in {word for word in current.lower().split(" ")}
+    return wanted.lower() in set(current.lower().split(" "))
 
 
 def _has_card_type(card: Card, wanted: str) -> bool:
@@ -739,7 +739,7 @@ def _resolved_targets(root: MechanicsObject, index: int, scope: Scope) -> list[i
         # An automatic player target: the controller ("You") or the one opponent. Its champion stands for
         # the player, as the live resolver's player target does for damage and the summoned tokens' owner.
         player = str(template.m_PlayerFilter or "")
-        owners = sorted({owner for owner in _champion_owners(scope.context.bstate).values()})
+        owners = sorted(set(_champion_owners(scope.context.bstate).values()))
         if player == "Self":
             return [_player_champion(scope, int(scope.owner_uid))]
         if player == "SingleOpponent":

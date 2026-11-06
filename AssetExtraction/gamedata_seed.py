@@ -1179,7 +1179,7 @@ def _extract_chests(data: str) -> list[tuple[Any, ...]]:
                 int_value(record.get("m_PromotionalID")),
             )
         )
-    return sorted(set(row for row in rows if row[0]))
+    return sorted({row for row in rows if row[0]})
 
 
 # Inventory item types kept in ``inventory_item_templates``: the cosmetic
@@ -1201,7 +1201,7 @@ def _extract_inventory_item_templates(data: str) -> list[tuple[Any, ...]]:
             continue
         rows.append((nested_guid(record, "m_Id"), str(record.get("m_Name") or ""),
                      str(record.get("m_Description") or ""), item_type))
-    return sorted(set(row for row in rows if row[0]))
+    return sorted({row for row in rows if row[0]})
 
 
 def extract_inventory_item_templates(path: str | None = None) -> list[tuple[Any, ...]]:
@@ -1327,19 +1327,19 @@ def extract(path: str | None = None) -> dict[str, Any]:
     target_rows = _extract_targets(data)
     counter_records, _ = records(data, "CardCounterTemplate")
     counters = sorted(
-        set(
+        {
             (nested_guid(record, "m_CardCounterId"), record.get("m_Name") or "", record.get("m_Description") or "")
             for _, record in counter_records
             if nested_guid(record, "m_CardCounterId")
-        )
+        }
     )
     condition_records, _ = records(data, "AbilityEffectConditionTemplate")
     conditions = sorted(
-        set(
+        {
             (nested_guid(record, "m_TemplateId"), record.get("m_Name") or "", json_text(record.get("m_Condition"), {}))
             for _, record in condition_records
             if nested_guid(record, "m_TemplateId")
-        )
+        }
     )
 
     result = {

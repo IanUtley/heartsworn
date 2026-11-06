@@ -1037,7 +1037,7 @@ def summary(db, memo, state) -> dict[str, Any]:
     quests = state.get("quests") or {}
     wanted = memo.get("expected") or []
     final = bool(memo.get("done"))
-    finished = [s for s in memo["quests_done"]]
+    finished = list(memo["quests_done"])
     finished += [s for s, q in quests.items()
                  if q.get("status") == "finished" and s not in finished]
     open_ = []

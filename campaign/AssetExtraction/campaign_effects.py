@@ -52,7 +52,7 @@ def _props(material) -> dict[str, Any]:
         material.object_reader.read_typetree()
     saved = tree.get("m_SavedProperties") or {}
     return {
-        "tex": {k: v for k, v in saved.get("m_TexEnvs") or ()},
+        "tex": dict(saved.get("m_TexEnvs") or ()),
         "floats": {k: float(v) for k, v in saved.get("m_Floats") or ()},
         "colors": {k: [v["r"], v["g"], v["b"], v["a"]] for k, v in saved.get("m_Colors") or ()},
     }

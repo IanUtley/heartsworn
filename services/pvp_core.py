@@ -1738,7 +1738,7 @@ def _pvp_send_same_events(session, game, pl_t, ai_t):
             continue
         opp = pids[1] if pid == pids[0] else pids[0]
         g2 = _ge.Game(int(session.session_id), _ge.UID.make(244, pid), _ge.UID.make(244, opp))
-        g2.events = [ev for ev in evs]
+        g2.events = list(evs)
         g2.card_defs = dict(card_defs)
         g2._visibility_by_uid = dict(getattr(game, '_visibility_by_uid', {}) or {})
         g2.player_health = health

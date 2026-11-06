@@ -324,11 +324,11 @@ def ability_record(ability_guid, meta, effects, targets):
     for effect_guid in missing_effect_type:
         features.add(feature("effect:missing_type", effect_guid))
 
-    semantic_features = set(
+    semantic_features = {
         x for x in features
         if not x.startswith("ability:signature:")
         and not x.startswith("bom:leaf_signature:")
-        and not x.startswith("target:signature:"))
+        and not x.startswith("target:signature:")}
     for target in target_records:
         semantic_features.update(target["semantic_features"])
 

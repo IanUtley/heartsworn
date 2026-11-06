@@ -199,7 +199,7 @@ def inline_children(root: dict[str, Any], effect_of: Callable[[str], dict[str, A
             continue
         target_base = len(targets)
         targets.extend(child.get("m_AbilityTargetTemplateIds") or [])
-        bound = {child_name: parent_name for child_name, parent_name in clause_bindings}
+        bound = dict(clause_bindings)
         for child_var in child.get("m_Variables") or []:
             name = str(child_var.get("m_Name"))
             if name in bound:

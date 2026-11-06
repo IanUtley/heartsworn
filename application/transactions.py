@@ -1595,7 +1595,7 @@ class TransactionsMixin(_HostBase):
                             seq.append(int(v))
                     except Exception:
                         continue
-                blockers = {int(k): set(int(b) for b in (v or []))
+                blockers = {int(k): {int(b) for b in (v or [])}
                             for k, v in (bstate.get("ai_blockers") or {}).items()}
                 order_map = {}
                 for att, bset in blockers.items():

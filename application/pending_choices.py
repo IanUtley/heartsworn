@@ -229,7 +229,7 @@ class PendingChoicesMixin(_HostBase):
             chooser = game_engine.UID.make(244, chooser_pid)
             g2 = game_engine.Game(int(session.session_id), chooser,
                                   game_engine.UID.make(244, opp_pid))
-            g2.events = [ev for ev in game.events]
+            g2.events = list(game.events)
             # The prompt must NOT ride the shared event stream sent to both
             # players by _pvp_play_troop — strip it here so only the chooser
             # sees the option list / class-39 prompt.

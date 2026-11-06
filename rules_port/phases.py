@@ -50,8 +50,7 @@ _PERMITS: dict[str, frozenset[str]] = {
     "EndGame": frozenset({"EndGame", "NotPlaying"}),
 }
 
-_PHASE_BY_VALUE = {
-    index: name for index, name in enumerate((
+_PHASE_BY_VALUE = dict(enumerate((
         "Unknown", "NotPlaying", "PreGame", "PickGoesFirst", "Mulligan",
         "StartGame", "StartTurn", "Ready", "Prep", "Draw", "FirstMainPhase",
         "DeclareCombatPriorityWindow", "DeclareAttack",
@@ -59,8 +58,7 @@ _PHASE_BY_VALUE = {
         "DeclareDefensePriorityWindow", "AssignFirstStrikeDamage",
         "FirstStrikePriorityWindow", "AssignDamage", "SecondMainPhase",
         "EndPhase", "Discard", "EndTurn", "Checksum", "EndGame",
-    ))
-}
+    )))
 
 
 def phase_name(phase) -> str:

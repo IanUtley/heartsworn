@@ -1288,7 +1288,7 @@ def _pvp_declare_blockers(handler, session, inner_bytes, my_pid, declarations=No
     attackers = {int(k): int(v) for k, v in (state.get('attackers') or {}).items()}
     if not attackers:
         return False
-    my_wz = set((r[0] for r in _resolve('db_card_uids_in_zone')(session.session_id, my_pid, 'warzone', conn=_resolve('_db'))))
+    my_wz = {r[0] for r in _resolve('db_card_uids_in_zone')(session.session_id, my_pid, 'warzone', conn=_resolve('_db'))}
     all_uids = []
     blockers_map = {}
     if declarations is not None:
@@ -2907,7 +2907,7 @@ def attach_pvp_rules_port(handler, session, game, state):
             pass_pid = raw_player >> 8 if raw_player & 255 == 244 else raw_player
             responding_to_chain = getattr(native_priority_action, 'ability_responding_to', None) is not None
             pass_key = 'stack_passed' if responding_to_chain else 'passes'
-            passed = set((int(value) for value in live.get(pass_key) or ()))
+            passed = {int(value) for value in live.get(pass_key) or ()}
             passed.add(pass_pid)
             live[pass_key] = sorted(passed)
             if not port.pass_priority_and_drive(player_id):

@@ -509,7 +509,7 @@ class Game:
                 if 0 <= s < 6:
                     tv[s] += 1
             ev.threshold_values = tv
-            ev.thresholds = [s for s in cdef.shards]
+            ev.thresholds = list(cdef.shards)
         if cdef and cdef.abilities:
             ev.abilities = list(cdef.abilities)
         uses_per_game_counts = kwargs.get(

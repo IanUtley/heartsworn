@@ -246,8 +246,8 @@ def set_accepted(zone: str, where: str, text: str, accept: bool) -> dict[str, in
     """Accept (or un-accept) one Rules-check problem; ``{"accepted": count}``."""
     entry = {"zone": zone, "where": where, "text": text}
     with _EXCEPTIONS_LOCK:
-        entries = [e for e in (json.loads(EXCEPTIONS_PATH.read_text(encoding="utf-8"))["accepted"]
-                               if EXCEPTIONS_PATH.exists() else [])]
+        entries = list((json.loads(EXCEPTIONS_PATH.read_text(encoding="utf-8"))["accepted"]
+                               if EXCEPTIONS_PATH.exists() else []))
         entries = [e for e in entries if e != entry]
         if accept:
             entries.append(entry)

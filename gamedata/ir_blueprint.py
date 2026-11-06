@@ -113,7 +113,7 @@ def _tokenize(text: str) -> list[Token]:
 
 class _Parser:
     def __init__(self, tokens: list[Token]) -> None:
-        self.tokens = [t for t in tokens]
+        self.tokens = list(tokens)
         self.at = 0
 
     def peek(self) -> Token:

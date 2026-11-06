@@ -1334,7 +1334,7 @@ def _read_root(root: dict[str, Any], overlay: dict) -> dict[str, Any]:
             reasons += [f"clause {index + 1}: {reason}" for reason in error.reasons]
             continue
         slot = entry.get("m_TargetTemplateIndex", 0)
-        used = {i for i in latest.values()}
+        used = set(latest.values())
         if clause["target"] in latest and slot != latest[clause["target"]]:
             if slot in used:
                 reasons.append(f"clause {index + 1}: it reuses an older target slot")
