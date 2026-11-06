@@ -59,6 +59,8 @@ def card_collection_for_location(location):
         # view is hidden) and the wire projection nulls it; the Warzone
         # fallback below would put such a card on the battlefield on refresh.
         "mod": game_engine.ECardCollections.Mod,
+        # A champion's own zone; the Warzone fallback would put it on the battlefield on refresh.
+        "champions": game_engine.ECardCollections.Champions,
     }.get(str(location or "").lower(), game_engine.ECardCollections.Warzone)
 
 

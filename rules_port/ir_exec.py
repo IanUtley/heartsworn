@@ -1234,6 +1234,8 @@ def live_event(event_type: str, owner_uid: int, data: dict[str, Any], trigger_so
                                  event_type, trigger_source_uid, target_player_uid, data)}
     # The event TAC the live dispatch publishes (the native path reads it as the condition context's event_tac).
     event["event_tac"] = dict(data.get("event_tac") or {})
+    # A crypt troop that fires as though in play (Blessing the Fallen's yard inspire) is outside its trigger zones.
+    event["yard_inspire"] = bool(data.get("yard_inspire"))
     if event_type in ("CardWouldDealDamageEvent", "CardWouldBeDamagedEvent"):
         # The damage the event would deal, and whether it is combat damage (the event TAC the live dispatch publishes).
         event_tac = data.get("event_tac") or {}
@@ -1421,7 +1423,7 @@ def run_ability(guid: str, event_type: str | None, *, context: Any, source_uid: 
     if _field(root, "m_UsesPreviousState") and event.get("card") is not None \
             and int(event["card"]) == int(source_uid) and event.get("from"):
         zone = str(event["from"]).lower()
-    if event_type is not None and zones and zone not in zones:
+    if event_type is not None and zones and zone not in zones and not event.get("yard_inspire"):
         return False
     # An activation's own threshold is checked when the player activates (C# CanActivateAbilityBase), not again when
     # it resolves, so only a triggered ability re-checks it here.

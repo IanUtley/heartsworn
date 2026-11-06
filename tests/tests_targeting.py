@@ -356,8 +356,10 @@ def test_multi_target_trigger_prompt_advertises_every_target(db):
     # The continuation stores every template so the resume can forward both.
     assert bstate["pending_trigger"]["target_index"] == 0
     assert bstate["pending_trigger"]["target_entries"] == [
-        {"index": 0, "template_id": ROWDY_TPL_OWN, "minimum": 1, "maximum": 1},
-        {"index": 1, "template_id": ROWDY_TPL_OPP, "minimum": 0, "maximum": 1},
+        {"index": 0, "template_id": ROWDY_TPL_OWN, "uids": [0x201],
+         "minimum": 1, "maximum": 1},
+        {"index": 1, "template_id": ROWDY_TPL_OPP, "uids": [0x301],
+         "minimum": 0, "maximum": 1},
     ]
 
 

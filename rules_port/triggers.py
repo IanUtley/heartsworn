@@ -503,13 +503,17 @@ class NativeTriggerBackend:
                         event.data.get("event_destination_collection"))
                 # ``trigger_collection_allows`` mirrors the client collection
                 # check, including its None and Simulacrum exceptions.
+                # A crypt troop with Inspire fires as though in play while the yard-inspire flag is set (C#
+                # CheckAllowYardInspire); the interpreter is told so, since the source is outside its zones.
+                yard_inspire = False
                 if not trigger_collection_allows(
-                        graph.trigger_collection_flags, trigger_location) and \
-                        not yard_inspire_allows(
-                            db, session.session_id, battle_state, handler, game,
-                            source_uid, source_owner, trigger_location,
-                            event.source_card_id):
-                    continue
+                        graph.trigger_collection_flags, trigger_location):
+                    yard_inspire = yard_inspire_allows(
+                        db, session.session_id, battle_state, handler, game,
+                        source_uid, source_owner, trigger_location,
+                        event.source_card_id)
+                    if not yard_inspire:
+                        continue
                 source_card_owner = source_owner
                 context = ConditionContext(
                     db, session, battle_state, event_type=event_name,
@@ -702,7 +706,9 @@ class NativeTriggerBackend:
                             interpreted = run_interpreted_trigger(
                                 handler, game, session, db, player_uid, ai_uid,
                                 battle_state, trigger_key[1], source_uid, source_card_owner,
-                                event_name, event.source_card_id, dict(event.data or {}),
+                                event_name, event.source_card_id,
+                                {**(event.data or {}), "yard_inspire": True} if yard_inspire
+                                else dict(event.data or {}),
                                 target_player_uid=event.target_player_id,
                                 source_player_uid=event.source_player_id,
                                 instance_id=instance_id,
