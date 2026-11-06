@@ -242,8 +242,10 @@ def test_heal_chain(db):
     session = SessionStub()
     handler = HandlerStub()
     handler._db = db
-    triggers.resolve_enters_play_triggers(
-        db, handler, game, session, pl_t, ai_t, bstate, 100, 5, 1)
+    triggers.resolve_triggers(db, handler, game, session, pl_t, ai_t, bstate,
+                              "CardEnteredZoneEvent", 100, 5,
+                              event_source_collection="hand",
+                              event_destination_collection="warzone")
     drain_stack(db, handler, game, session, pl_t, ai_t, bstate)
     assert bstate["player_health"] == 21, bstate["player_health"]
     pal = db.execute(
@@ -840,8 +842,10 @@ def test_incantation_transform(db):
     session = SessionStub()
     handler = HandlerStub()
     handler._db = db
-    triggers.resolve_enters_play_triggers(
-        db, handler, game, session, pl_t, ai_t, bstate, 100, 5, 1)
+    triggers.resolve_triggers(db, handler, game, session, pl_t, ai_t, bstate,
+                              "CardEnteredZoneEvent", 100, 5,
+                              event_source_collection="hand",
+                              event_destination_collection="warzone")
     drain_stack(db, handler, game, session, pl_t, ai_t, bstate)
     tpl = db.execute(
         "SELECT template_guid FROM game_cards WHERE card_uid=102").fetchone()[0]
@@ -858,8 +862,10 @@ def test_incantation_gate_does_not_transform_below_five(db):
     session = SessionStub()
     handler = HandlerStub()
     handler._db = db
-    triggers.resolve_enters_play_triggers(
-        db, handler, game, session, pl_t, ai_t, bstate, 100, 5, 1)
+    triggers.resolve_triggers(db, handler, game, session, pl_t, ai_t, bstate,
+                              "CardEnteredZoneEvent", 100, 5,
+                              event_source_collection="hand",
+                              event_destination_collection="warzone")
     drain_stack(db, handler, game, session, pl_t, ai_t, bstate)
     row = db.execute(
         "SELECT template_guid, location FROM game_cards WHERE card_uid=102"
@@ -875,8 +881,10 @@ def test_kraken_inspire(db):
     session = SessionStub()
     handler = HandlerStub()
     handler._db = db
-    triggers.resolve_enters_play_triggers(
-        db, handler, game, session, pl_t, ai_t, bstate, 201, 5)
+    triggers.resolve_triggers(db, handler, game, session, pl_t, ai_t, bstate,
+                              "CardEnteredZoneEvent", 201, 5,
+                              event_source_collection="hand",
+                              event_destination_collection="warzone")
     attrs = db.execute(
         "SELECT card_attributes FROM game_cards WHERE card_uid=201").fetchone()[0]
     assert attrs & game_engine.ECardAttributes.Steadfast, attrs
