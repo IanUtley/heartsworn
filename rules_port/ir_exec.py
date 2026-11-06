@@ -1398,7 +1398,14 @@ def run_ability(guid: str, event_type: str | None, *, context: Any, source_uid: 
     if _field(root, "m_Threshold"):
         raise NotImplementedError("ability threshold requirement")
     trigger = _field(root, "m_TriggerEventType")
-    if event_type is not None and _short(_field(trigger, "m_InternalType")) != event_type:
+    # A continuous card aura (a permanent CardModifier with no trigger, such as "your non-Tamed Dire Toads are
+    # Untamed") is re-applied when a card enters play under its champion, as the native dispatch does.
+    continuous_aura = (event_type == "CardEnteredZoneEvent" and
+                       not _short(_field(trigger, "m_InternalType")) and
+                       any(_short(_stored("AbilityEffectTemplate", _guid(_field(clause, "m_EffectTemplateId")))[0])
+                           == "CardModifierAbilityEffectTemplate" for clause in root.m_AbilityEffectList))
+    if (event_type is not None and not continuous_aura and
+            _short(_field(trigger, "m_InternalType")) != event_type):
         return False
     event = {"player": owner_uid, **(event or {})}
     scope = Scope(context=context, source_uid=int(source_uid), owner_uid=int(owner_uid),
