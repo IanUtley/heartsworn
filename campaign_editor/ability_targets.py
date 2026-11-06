@@ -215,10 +215,9 @@ def build_filter(properties: Properties) -> dict[str, Any]:
         parts.append(_with_defaults("IsColor", {"m_ColorFlags": properties["colour"]}))
     if properties.get("name_contains"):
         parts.append(_with_defaults("NameContainsFilter", {"m_ContainsString": properties["name_contains"]}))
-    for attribute in properties.get("attributes") or []:
-        parts.append(_with_defaults("IntAttrFilter", {"m_Attribute": attribute["attribute"],
+    parts.extend(_with_defaults("IntAttrFilter", {"m_Attribute": attribute["attribute"],
                                                       "m_ComparisonOp": attribute["op"],
-                                                      "m_Value": attribute["value"]}))
+                                                      "m_Value": attribute["value"]}) for attribute in properties.get("attributes") or [])
     if properties.get("faction"):
         parts.append(_filter("InFaction", m_Faction=properties["faction"]))
     parts.extend((_filter("NotCardFilter", m_TargetFilter=build_filter(inner))) for inner in (properties.get("without") or []))

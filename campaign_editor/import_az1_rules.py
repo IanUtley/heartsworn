@@ -224,9 +224,8 @@ def build(db: sqlite3.Connection) -> dict:
                   "do": [{"set_flag": "gaal_fortune"}]})
     # campaign.py consume_fortune: the reading is used up when the next
     # campaign battle starts (won or lost).
-    for result in ("encounter_victory", "encounter_defeat"):
-        hooks.append({"id": f"gaal_fortune_used:{result}", "on": {"event": result},
-                      "do": [{"clear_flag": "gaal_fortune"}]})
+    hooks.extend({"id": f"gaal_fortune_used:{result}", "on": {"event": result},
+                      "do": [{"clear_flag": "gaal_fortune"}]} for result in ("encounter_victory", "encounter_defeat"))
     # The Brink Ridge blockade flag (blockade_cleared) is set by the Node 19
     # blockade scenes' own victory actions (set_flag(blockade_cleared)), which
     # the rules loader rebuilds as scene: hooks; no Smoldering Dead hook.

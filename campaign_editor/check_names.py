@@ -149,14 +149,10 @@ def flag_problems(rules: dict) -> list[dict[str, str]]:
                      if name in node_reads | node_writes), "flags")
 
     problems = []
-    for name in sorted(reads):
-        if not _covered(name, all_writes):
-            problems.append({"level": "warn", "where": where(name), "text":
-                             f"flag {name!r} is read but never set anywhere in the campaign"})
-    for name in sorted(writes):
-        if not _covered(name, all_reads):
-            problems.append({"level": "info", "where": where(name), "text":
-                             f"flag {name!r} is set but never read anywhere in the campaign"})
+    problems.extend({"level": "warn", "where": where(name), "text":
+                             f"flag {name!r} is read but never set anywhere in the campaign"} for name in sorted(reads) if not _covered(name, all_writes))
+    problems.extend({"level": "info", "where": where(name), "text":
+                             f"flag {name!r} is set but never read anywhere in the campaign"} for name in sorted(writes) if not _covered(name, all_reads))
     return problems
 
 
@@ -226,10 +222,8 @@ def zone_problems(rules: dict, template: str = "") -> list[dict[str, str]]:
     for node_id, spec in nodes.items():
         for entry in spec.get("entries") or ():
             where = f"{node_id}.{entry.get('id', '?')}"
-            for kind, name in sorted(set(_names_in(json.dumps(entry)))):
-                if (kind, name) in singles:
-                    problems.append({"level": "info", "where": where, "text":
-                                     f"{kind} {name!r} is used only once in the campaign (possible typo)"})
+            problems.extend({"level": "info", "where": where, "text":
+                                     f"{kind} {name!r} is used only once in the campaign (possible typo)"} for kind, name in sorted(set(_names_in(json.dumps(entry)))) if (kind, name) in singles)
     return problems + flag_problems(rules)
 
 

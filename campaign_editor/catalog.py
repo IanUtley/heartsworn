@@ -741,25 +741,20 @@ def _issues(layout, authored, catalog, node_conversations,
     layout_nodes = {node["id"] for node in layout["nodes"]}
     forks = {node["id"] for node in layout["nodes"]
              if node.get("fork") or node["id"].startswith("Fork")}
-    for node in sorted(layout_nodes - set(authored)):
-        if node not in forks:
-            issues.append({"level": "warn", "node": node,
-                           "text": "prefab node has no SceneData entry"})
-    for node in sorted(set(authored) - layout_nodes):
-        issues.append({"level": "info", "node": node,
-                       "text": "SceneData node is not placed in the prefab"})
+    issues.extend({"level": "warn", "node": node,
+                           "text": "prefab node has no SceneData entry"} for node in sorted(layout_nodes - set(authored)) if node not in forks)
+    issues.extend({"level": "info", "node": node,
+                       "text": "SceneData node is not placed in the prefab"} for node in sorted(set(authored) - layout_nodes))
     if catalog["edges"]:
         prefab_edges = {frozenset((p["from"], p["to"])) for p in layout["paths"]}
         db_edges = {frozenset((e["from_node"], e["to_node"]))
                     for e in catalog["edges"]}
-        for edge in sorted(db_edges - prefab_edges, key=sorted):
-            issues.append({"level": "warn", "node": sorted(edge)[0],
+        issues.extend({"level": "warn", "node": sorted(edge)[0],
                            "text": "server edge %s-%s is not a prefab path"
-                           % tuple(sorted(edge))})
-        for edge in sorted(prefab_edges - db_edges, key=sorted):
-            issues.append({"level": "warn", "node": sorted(edge)[0],
+                           % tuple(sorted(edge))} for edge in sorted(db_edges - prefab_edges, key=sorted))
+        issues.extend({"level": "warn", "node": sorted(edge)[0],
                            "text": "prefab path %s-%s is missing from "
-                           "campaign_node_edges" % tuple(sorted(edge))})
+                           "campaign_node_edges" % tuple(sorted(edge))} for edge in sorted(prefab_edges - db_edges, key=sorted))
     known = set(conversations())
     for node, entries in node_conversations.items():
         # A conversation on a panorama NPC plays inside that panorama.
@@ -767,22 +762,18 @@ def _issues(layout, authored, catalog, node_conversations,
             issues.append({"level": "warn", "node": node,
                            "text": "conversations are mapped to a node that "
                            "is not on the map"})
-        for entry in entries:
-            if entry["guid"] not in known:
-                issues.append({"level": "error", "node": node,
+        issues.extend({"level": "error", "node": node,
                                "text": f"conversation {entry['guid']} is not "
-                               "in Records"})
+                               "in Records"} for entry in entries if entry["guid"] not in known)
     for node, item in authored.items():
         has_rows = bool(node_conversations.get(node))
-        for event in item["visit_events"]:
-            if not event["name"]:
-                issues.append({
+        issues.extend({
                     "level": "info" if has_rows else "warn", "node": node,
                     "text": f"SceneData visit event {event['type']} "
                     f"{event['guid']} is a stale reference (not in Records)" +
                     (f"; the node's conversations come from its "
                      f"{len(node_conversations[node])} table rows"
-                     if has_rows else "")})
+                     if has_rows else "")} for event in item["visit_events"] if not event["name"])
     return issues
 
 
