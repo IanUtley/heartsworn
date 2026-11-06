@@ -432,13 +432,11 @@ def build_offers(zone: str, data: dict[str, Any],
                                  repeatable=conversation["trigger"].get(
                                      "visit") == "repeat")
                 node_entries.append(entry)
-        for race, battle in sorted(race_battles.items()):
-            if race not in raced:
-                node_entries.append({
+        node_entries.extend({
                     "id": f"battle:{battle['guid'][:8]}", "kind": "encounter",
                     "scene": battle["guid"], "label": battle["title"],
                     "when": [f"ChampionIsRace({race})"],
-                    "source": "encounter_scenes"})
+                    "source": "encounter_scenes"} for race, battle in sorted(race_battles.items()) if race not in raced)
         # Battles tagged for two or more factions each take their own intro and
         # results. A conversation that serves both (the entrance, a shared
         # defeat) is then offered to every faction, not only the first one.
@@ -515,13 +513,12 @@ def build_offers(zone: str, data: dict[str, Any],
         if split_factions:
             used.update(faction_used)
         if len(plain_battles) > 1:
-            for battle in plain_battles[1:]:
-                node_entries.append({
+            node_entries.extend({
                     "id": f"battle:{battle['guid'][:8]}", "kind": "encounter",
                     "scene": battle["guid"], "label": battle["title"],
                     "when": False, "source": "encounter_scenes",
                     "review": "alternative battle scene on this node; "
-                              "no table metadata selects it"})
+                              "no table metadata selects it"} for battle in plain_battles[1:])
         first_plain = True
         for conversation in conversations:
             if conversation["guid"] in used:

@@ -233,14 +233,12 @@ class Zone:
                              counters=self.campaign.get("counters") or {})
         self.quests_before = json.loads(json.dumps(self.campaign.get("quests") or {}))
         _campaign()._merge_applied(self.applied, synced["applied"])
-        for qid, script, qstate in synced["spawned"]:
-            self.after.append(lambda net, q=qid, s=script, st=qstate: _campaign().push_campspawn(
+        self.after.extend(lambda net, q=qid, s=script, st=qstate: _campaign().push_campspawn(
                 net["handler"], q, self.champ_id, s, st, self.camp_id,
-                self.template, *net["args"]))
-        for qstate in synced["progressed"]:
-            self.after.append(lambda net, st=qstate: _campaign().push_campupdate(
+                self.template, *net["args"]) for qid, script, qstate in synced["spawned"])
+        self.after.extend(lambda net, st=qstate: _campaign().push_campupdate(
                 net["handler"], self.db, st.get("CampID") or 0, self.champ_id,
-                "quest_progress", "QUEST", False, st, *net["args"]))
+                "quest_progress", "QUEST", False, st, *net["args"]) for qstate in synced["progressed"])
         state = self.project()
         pve_db.db_campaign_update_state(self.camp_id, json.dumps(state), self.db)
         self.db.commit()

@@ -254,10 +254,9 @@ def conversation_endings(found: dict[str, Any]) -> list[dict[str, Any]]:
         ending, visible = ending_id(aid, answer)
         if not visible and on_path.get(aid):
             # Ends by an event sent earlier on its path: that event is the ending the server sees.
-            for name in on_path[aid]:
-                endings.append({"answer": aid, "question": question_of.get(aid, ""),
+            endings.extend({"answer": aid, "question": question_of.get(aid, ""),
                                 "text": answer["text"], "ending": name,
-                                "event": True, "server_visible": True})
+                                "event": True, "server_visible": True} for name in on_path[aid])
             continue
         endings.append({"answer": aid, "question": question_of.get(aid, ""),
                         "text": answer["text"], "ending": ending,

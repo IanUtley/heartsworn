@@ -313,11 +313,10 @@ def load_node_details(database_path: Path, records_path: Path) -> dict[str, Node
                       key=lambda c: (str(c.get("node_id")), int(c.get("priority") or 0),
                                      str(c.get("conversation_guid") or ""))):
         matches = [q for q in quest_links if q.get("conversation_guid") == cnc.get("conversation_guid")]
-        for q in (matches or [None]):   # LEFT JOIN: keep the node row without a quest row
-            conversation_rows.append((cnc.get("node_id"), cnc.get("conversation_name"),
+        conversation_rows.extend((cnc.get("node_id"), cnc.get("conversation_name"),
                                       cnc.get("trigger_json"),
                                       q.get("quest_script") if q else None,
-                                      q.get("role") if q else None))
+                                      q.get("role") if q else None) for q in matches or [None])
 
     accumulated = {}
     for scene_name, scene_title, champion_guid in scene_rows:

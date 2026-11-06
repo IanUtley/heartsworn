@@ -309,13 +309,12 @@ def goanim(tree: dict[str, Any]) -> dict[str, Any] | None:
             entry["scale"] = [_v(a.get("ValueTexScale0"), 2), _v(a.get("ValueTexScale1"), 2)]
         materials.append(entry)
     transforms = []
-    for a in tree.get("AnimStack_Transform") or ():
-        transforms.append({**timing(a), "local": bool(a.get("IsLocal", True)),
+    transforms.extend({**timing(a), "local": bool(a.get("IsLocal", True)),
                            "random": bool(a.get("IsRandomRange")),
                            "random_type": int(a.get("RandomType", 0)),
                            "position": [_v(a.get("Position0")), _v(a.get("Position1"))],
                            "rotation": [_v(a.get("Rotation0")), _v(a.get("Rotation1"))],
-                           "scale": [_v(a.get("Scale0")), _v(a.get("Scale1"))]})
+                           "scale": [_v(a.get("Scale0")), _v(a.get("Scale1"))]} for a in tree.get("AnimStack_Transform") or ())
     if not materials and not transforms:
         return None
     return {"time_scale": float(tree.get("TimeScale", 1)),

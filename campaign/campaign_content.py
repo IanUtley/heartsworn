@@ -160,9 +160,8 @@ def _arena_deck_rows() -> list[dict[str, Any]]:
             elif slot[2]:
                 slot[1].extend([[] for _ in range(quantity)])
             slot[0] += quantity
-        for card, (quantity, gem_slots, _has) in sorted(agg.items()):
-            rows.append({"deck_guid": deck, "card_guid": card, "quantity": quantity,
-                         "gem_types_new_list_json": json_text(gem_slots, [])})
+        rows.extend({"deck_guid": deck, "card_guid": card, "quantity": quantity,
+                         "gem_types_new_list_json": json_text(gem_slots, [])} for card, (quantity, gem_slots, _has) in sorted(agg.items()))
     return rows
 
 
