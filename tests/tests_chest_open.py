@@ -107,8 +107,11 @@ def test_opening_store_pack_awards_campaign_contents_and_consumes_it():
             "WHERE user_id=? AND card_template_id=?",
             (user_id, guid)).fetchone()
         assert row and int(row[0]) >= 1
+    # Two equal rolls (the same equipment, or two Stardust of one rarity) are
+    # coalesced into one row by _grant_pack_inventory_rewards, so a row may
+    # carry quantity 2. The total above is the stable check.
     for _guid, _uid, quantity in summary["inventory_updates"]:
-        assert quantity == 1
+        assert quantity >= 1
 
 
 def test_stacked_store_pack_keeps_remaining_quantity():
