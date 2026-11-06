@@ -1015,10 +1015,9 @@ def handle_updatechampiontalents_2037(handler, target, instance, data_type, reqi
                 champ_id = None
         tpos = inner_bytes.find(b"Talents")
         if tpos >= 0:
-            for gm in _r.finditer(
+            talents.extend(gm.group(1).decode() for gm in _r.finditer(
                     rb"([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})",
-                    inner_bytes[tpos:]):
-                talents.append(gm.group(1).decode())
+                    inner_bytes[tpos:]))
     champ_name = ""
     race_val = 1; cls_val = 3; gender_val = 1; level_val = 1
     last_deck = 0

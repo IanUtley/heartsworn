@@ -105,10 +105,9 @@ def reload_runtime_modules():
             for prefix in prefixes)
         and module.__name__ not in NOT_RELOADED
     }
-    for module in sorted(loaded.values(),
+    groups.extend([module] for module in sorted(loaded.values(),
                          key=lambda item: item.__name__.count("."),
-                         reverse=True):
-        groups.append([module])
+                         reverse=True))
 
     reloaded = []
     seen = set()

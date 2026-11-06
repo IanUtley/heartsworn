@@ -613,20 +613,17 @@ def markdown_report(report):
                   "variant signatures retain parameterized forms for audit.",
                   "", "| BOM leaf type | Occurrences | Cards | Variants |",
                   "|---|---:|---:|---:|"])
-    for leaf in report["bom_leaf_catalog"]:
-        lines.append("| `%s` | %s | %s | %s |" % (
+    lines.extend("| `%s` | %s | %s | %s |" % (
             leaf["leaf_type"], leaf["occurrences"],
-            len(leaf["card_guids"]), len(leaf["variant_signatures"])))
+            len(leaf["card_guids"]), len(leaf["variant_signatures"])) for leaf in report["bom_leaf_catalog"])
 
     lines.extend(["", "## Representative cards", "",
                   "These cards form the greedy set-cover result. Every other "
                   "card remains in the inventory and receives smoke coverage.",
                   "", "| Card | Type | Abilities | Features |", "|---|---|---:|---:|"])
-    for card in report["cards"]:
-        if card["coverage_role"] == "representative":
-            lines.append("| %s | %s | %s | %s |" % (
+    lines.extend("| %s | %s | %s | %s |" % (
                 card["name"], card["card_type"], len(card["abilities"]),
-                card["covered_feature_count"]))
+                card["covered_feature_count"]) for card in report["cards"] if card["coverage_role"] == "representative")
 
     if report["missing_metadata"]:
         lines.extend(["", "## Missing ability metadata", ""])

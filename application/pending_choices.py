@@ -67,9 +67,8 @@ class PendingChoicesMixin(_HostBase):
         if threshold_colors:
             th = bstate.setdefault("ai_threshold", {})
             changes = []
-            for flag in threshold_colors:
-                changes.append(apply_resource_change(
-                    bstate, "ai", "threshold", 1, color=flag))
+            changes.extend(apply_resource_change(
+                    bstate, "ai", "threshold", 1, color=flag) for flag in threshold_colors)
             _be.save_state(session, bstate)
             game.ai_threshold = dict(th)
             for flag, change in zip(threshold_colors, changes):
@@ -1682,10 +1681,8 @@ class PendingChoicesMixin(_HostBase):
                          if isinstance(self.user_profile, dict) else 0)
         valid_legacy_uids = []
         from pvp_db import db_rules_port_hand_card
-        for uid in dict.fromkeys(legacy_uids):
-            if db_rules_port_hand_card(
-                    session.session_id, uid, hand_owner_id):
-                valid_legacy_uids.append(uid)
+        valid_legacy_uids.extend(uid for uid in dict.fromkeys(legacy_uids) if db_rules_port_hand_card(
+                    session.session_id, uid, hand_owner_id))
         if len(legacy_uids) == 1 and len(valid_legacy_uids) == 1:
             state["pending_discard_scid"] = valid_legacy_uids[0]
             _be.save_state(session, state)

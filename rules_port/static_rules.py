@@ -2297,10 +2297,9 @@ def player_int_attributes(db, session_id, battle_state, owner_id, *,
             continue
     champion_guids = state.get("champ_guid_map") or {}
     for source_owner in sorted(source_owners):
-        for source_uid, abilities in db_cards_in_zones_with_abilities(
-                session_id, source_owner, ("warzone",), conn=db):
-            sources.append((source_owner, int(source_uid), abilities,
-                            {"WhileCardInPlay"}))
+        sources.extend((source_owner, int(source_uid), abilities,
+                            {"WhileCardInPlay"}) for source_uid, abilities in db_cards_in_zones_with_abilities(
+                session_id, source_owner, ("warzone",), conn=db))
         champion_guid = champion_guids.get(
             source_owner, champion_guids.get(str(source_owner)))
         source_champion_uid = champion_map.get(

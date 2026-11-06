@@ -667,9 +667,8 @@ def db_randomly_insert_deck_cards(session_id, user_id, card_uids,
     remaining = [int(row[0]) for row in rows if int(row[0]) not in wanted]
     remaining_iter = iter(remaining)
     ordered = []
-    for rank in range(len(rows)):
-        ordered.append(selected_by_slot[rank] if rank in selected_by_slot
-                       else next(remaining_iter))
+    ordered.extend(selected_by_slot[rank] if rank in selected_by_slot
+                       else next(remaining_iter) for rank in range(len(rows)))
     # Assign the complete permutation in one set-based statement.  The CASE
     # expression gives each card its final position without issuing one UPDATE
     # per card through executemany().

@@ -218,10 +218,9 @@ def template_from_columns(row):
             key = (tuple(bool(copy_flags.get(n)) for n in FLAG_NAMES),
                    tuple(int(g) for g in copy_gems))
             descriptors[key] = descriptors.get(key, 0) + 1
-        for (flag_values, copy_gems), count in descriptors.items():
-            cards.append({"guid": card["card_guid"], "count": count,
+        cards.extend({"guid": card["card_guid"], "count": count,
                           **dict(zip(FLAG_NAMES, flag_values)),
-                          "gems": list(copy_gems)})
+                          "gems": list(copy_gems)} for (flag_values, copy_gems), count in descriptors.items())
     return {"name": row.get("name") or "",
             "champion_guid": row.get("champion_guid") or ZERO_GUID,
             "sleeve_guid": row.get("sleeve_guid") or ZERO_GUID,

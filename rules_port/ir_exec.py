@@ -295,12 +295,10 @@ def _battle_cards(scope: Scope) -> list[Card]:
         "FROM game_cards WHERE session_id=?", (context.session.session_id,)).fetchall()
     # A champion is a game_cards row too: it is listed once, as its row, and only a champion without one is synthetic.
     row_uids = {int(row[0]) for row in rows}
-    for uid, owner in _champion_owners_with_handler(context).items():
-        if uid not in row_uids:
-            cards.append(Card(uid=uid, owner=owner, zone="champions", is_champion=True,
+    cards.extend(Card(uid=uid, owner=owner, zone="champions", is_champion=True,
                               card_type="Champion",
                               counters={k: int(v) for k, v in (counters.get(str(uid)) or {}).items()},
-                              subtype=_champion_subtype(context, owner)))
+                              subtype=_champion_subtype(context, owner)) for uid, owner in _champion_owners_with_handler(context).items() if uid not in row_uids)
     from pvp_db import db_template_subtype
     for card_uid, user_id, location, is_champion, card_type, buffs_json, template, template_name, position in rows:
         buffs = json.loads(buffs_json or "{}")

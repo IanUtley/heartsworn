@@ -1108,12 +1108,11 @@ def db_claim_mail_for_user(user_id, email_id, conn=None):
         quantity = max(1, int(attachment.get("quantity", 1) or 1))
         if not db_reward_card_template(template_guid, conn=connection):
             continue
-        for _ in range(quantity):
-            cards.append({
+        cards.extend({
                 "template": template_guid,
                 "instance_id": db_grant_card_instance(
                     user_id, template_guid, conn=connection),
-            })
+            } for _ in range(quantity))
     connection.execute(
         "UPDATE users SET gold=gold+?, platinum=platinum+? WHERE id=?",
         (gold, platinum, user_id))

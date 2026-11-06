@@ -71,8 +71,7 @@ class AbilityOptionGroup:
                        else value.get("m_Options") if isinstance(value, Mapping)
                        else ()) or ()
         options = []
-        for option in raw_options:
-            options.append(AbilityOptionEntry(
+        options.extend(AbilityOptionEntry(
                 value=_int(option.field("m_Value", 0)
                            if isinstance(option, RecordObject)
                            else option.get("m_Value", 0)
@@ -81,7 +80,7 @@ class AbilityOptionGroup:
                           if isinstance(option, RecordObject)
                           else option.get("m_Label", "")
                           if isinstance(option, Mapping) else ""),
-            ))
+            ) for option in raw_options)
         return cls(target_property, label, tuple(options))
 
     def is_valid(self, index: int) -> bool:

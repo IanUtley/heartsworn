@@ -155,12 +155,11 @@ def normalize_party(party):
     """Return a ChampionParty dict with plain types for storage/encoding."""
     party = party or {}
     members = []
-    for member in party.get("Members") or []:
-        members.append({
+    members.extend({
             "Mercenary": _guid(member.get("Mercenary")),
             "DeckTemplate": int(member.get("DeckTemplate") or 0),
             "Upgrade": int(member.get("Upgrade") or 0),
-        })
+        } for member in party.get("Members") or [])
     return {"Id": int(party.get("Id") or 0),
             "ChampionID": int(party.get("ChampionID") or 0),
             "PlayerId": int(party.get("PlayerId") or 0),

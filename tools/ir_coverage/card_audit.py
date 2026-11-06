@@ -90,11 +90,9 @@ def _reference_text() -> str:
                         and isinstance(body[0].value, ast.Constant)
                         and isinstance(body[0].value.value, str)):
                     docstrings.add(id(body[0].value))
-        for node in ast.walk(tree):
-            if (isinstance(node, ast.Constant)
+        chunks.extend(node.value for node in ast.walk(tree) if isinstance(node, ast.Constant)
                     and isinstance(node.value, str)
-                    and id(node) not in docstrings):
-                chunks.append(node.value)
+                    and id(node) not in docstrings)
     return "\n".join(chunks)
 
 ZERO_GUID = "00000000-0000-0000-0000-000000000000"
@@ -273,13 +271,12 @@ def _field_parity(used: dict[str, int], data_fields: dict[str, set[str]],
     gaps = []
     for effect_type in used:
         csharp_fields, sources = _csharp_reads(effect_type)
-        for field in sorted((csharp_fields & data_fields.get(effect_type, set()))
-                            - python_fields):
-            gaps.append({
+        gaps.extend({
                 "effect_type": effect_type,
                 "field": field,
                 "csharp_sources": sources,
-            })
+            } for field in sorted((csharp_fields & data_fields.get(effect_type, set()))
+                            - python_fields))
     return gaps
 
 
@@ -394,20 +391,16 @@ def _graph_issues(store, graphs, gaps_by_type, reference_lower: str,
                         **base, "kind": "unmapped_card_modifier",
                         "detail": _short_type(template.get("m_Modifier"))
                         or "<none>"})
-            for gap in gaps_by_type.get(effect.concrete_type, ()):
-                if _field_is_active(template.get(gap)):
-                    issues.append({**base, "kind": "field_gap",
-                                   "detail": gap})
+            issues.extend({**base, "kind": "field_gap",
+                                   "detail": gap} for gap in gaps_by_type.get(effect.concrete_type, ()) if _field_is_active(template.get(gap)))
             issues.extend(_value_issues(
                 base, effect, template, reference_lower, csharp_intattrs))
         target_ids = list(getattr(graph.source, "target_template_guids", ()))
-        for index, target_guid in enumerate(target_ids):
-            if store.get("AbilityTargetTemplate", target_guid) is None:
-                issues.append({
+        issues.extend({
                     "ability_guid": graph.guid, "ability_name": graph.name,
                     "effect_order": -1, "effect_type": "",
                     "effect_guid": "", "kind": "missing_target_template",
-                    "detail": f"index={index} {target_guid}"})
+                    "detail": f"index={index} {target_guid}"} for index, target_guid in enumerate(target_ids) if store.get("AbilityTargetTemplate", target_guid) is None)
     return issues
 
 
