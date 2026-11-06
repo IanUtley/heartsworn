@@ -297,7 +297,6 @@ class NativeTriggerBackend:
         def chain_targets(uid):
             if uid is None:
                 return []
-            import game_engine
             return [game_engine.SessionCardId(game_engine.UID(int(uid)))]
 
         def push_source(uid, owner):
@@ -321,7 +320,6 @@ class NativeTriggerBackend:
             if not location or str(location).lower() == "champion":
                 return
             try:
-                import game_engine
                 scid = game_engine.SessionCardId(game_engine.UID(int(uid)))
                 from .runtime_helpers import (card_collection_for_location,
                                               owner_uid, raw_uid)
@@ -755,7 +753,6 @@ class NativeTriggerBackend:
                     if event_name == "ChampionWouldLoseEvent":
                         return "; ".join(logs)
                 else:
-                    import game_engine
                     from . import chain
                     activation_payload: dict[str, Any] = {}
                     if event_name == "CardActivatedEvent":
