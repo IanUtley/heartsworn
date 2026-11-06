@@ -1376,9 +1376,7 @@ def _read_entry(index: int, entry: dict[str, Any], target_guids: list[str],
             "m_ContingentEffectInstanceId")
     reasons = [f"{field} is not in the DSL" for field, value in sorted(entry.items())
                if value != defaults.get(field) and field not in said]
-    for field, value in (("m_EffectInstanceId", index), ("m_EffectGroupId", index + 1)):
-        if entry[field] != value:
-            reasons.append(f"{field} is {entry[field]}, not {value}")
+    reasons.extend(f"{field} is {entry[field]}, not {value}" for field, value in (("m_EffectInstanceId", index), ("m_EffectGroupId", index + 1)) if entry[field] != value)
     position = entry["m_TargetTemplateIndex"]
     if not 0 <= position < len(target_guids):
         raise Unsupported(reasons + ["the target index points at no target"])
@@ -1430,9 +1428,7 @@ def _read_entry(index: int, entry: dict[str, Any], target_guids: list[str],
             clause[slot] = str(raw["$" + slot]).lower() if slot == "shard" else raw["$" + slot]
     if "$event" in raw:
         clause["event"] = str(raw["$event"]).rsplit(".", 1)[-1]   # the event class, by short name
-    for slot, known in (("attribute", "attributes"), ("event", "events")):
-        if "$" + slot in raw and raw["$" + slot] not in cat[known]:
-            reasons.append(f"{slot} {raw['$' + slot]} is not one Records uses")
+    reasons.extend(f"{slot} {raw['$' + slot]} is not one Records uses" for slot, known in (("attribute", "attributes"), ("event", "events")) if "$" + slot in raw and raw["$" + slot] not in cat[known])
     duration = entry["m_EffectDuration"]
     if duration != _usual_durations().get(shape["id"], "Instant"):
         if duration not in DURATIONS:

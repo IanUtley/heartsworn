@@ -152,9 +152,7 @@ def build(card: dict[str, Any], abilities: list[dict[str, Any]]) -> dict[str, An
     rage = int(card.get("rage") or 0)
     if rage > 0 and not _take_shifted(f"Rage {rage}", shifted):
         bar.append("Rage")
-    for attr, label in (("Tunneling", "Tunneling"), ("Armor", "Armor"), ("Lethal", "Lethal")):
-        if ints.get(attr) and not _take_shifted(label, shifted):
-            bar.append(label)
+    bar.extend(label for attr, label in (("Tunneling", "Tunneling"), ("Armor", "Armor"), ("Lethal", "Lethal")) if ints.get(attr) and not _take_shifted(label, shifted))
     if "CantBeBlocked" in ints and not _take_shifted("Unblockable", shifted):
         bar.append("Unblockable")
     if "CantBeBlockedByBeasts" in ints:

@@ -991,9 +991,7 @@ def _offers_of(db, memo, needle):
     found = []
     for zone_id in zone_scope(memo["home"]):
         for node_id, spec in (_rules(db, zone_id).get("nodes") or {}).items():
-            for entry in spec.get("entries") or ():
-                if needle.lower() in json.dumps(entry).lower():
-                    found.append((zone_id, node_id, entry))
+            found.extend((zone_id, node_id, entry) for entry in spec.get("entries") or () if needle.lower() in json.dumps(entry).lower())
     return found
 
 

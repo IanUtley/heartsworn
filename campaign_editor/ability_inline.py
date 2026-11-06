@@ -157,9 +157,7 @@ def _binding_blockers(bindings: tuple[tuple[str, str], ...], parent: dict[str, A
         if child_name in writes:
             reasons.append(f"child changes {child_name}, which a binding can only read")
         # The client reads these names as attributes or static identifiers, not as the variable.
-        for name in (child_name, parent_name):
-            if name in INT_ATTR_NAMES or name.upper() in STATIC_IDENTIFIERS:
-                reasons.append(f"binding name {name} is read by the client as an attribute or static identifier")
+        reasons.extend(f"binding name {name} is read by the client as an attribute or static identifier" for name in (child_name, parent_name) if name in INT_ATTR_NAMES or name.upper() in STATIC_IDENTIFIERS)
     return reasons
 
 
