@@ -132,11 +132,7 @@ class ProfileStreamMixin(_HostBase):
         
         # Add every account inventory row from DB.
         purchased = db_get_inventory_items(p["id"])
-        for _row_id, tguid, qty, client_uid in purchased:
-            # Stardust is counted by the client as inventory instances. Keep
-            # one serialized inventory_bits item per persisted row, each with
-            # its own stable client UID, even when templates match.
-            inv_items.append((tguid, client_uid, qty))
+        inv_items.extend((tguid, client_uid, qty) for _row_id, tguid, qty, client_uid in purchased)
 
         # Add unopened chests as inventory items. The client expects the chest
         # to be BOTH a chest_bits entry (m_InventoryChests, via the chest

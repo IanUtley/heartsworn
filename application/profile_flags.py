@@ -16,7 +16,5 @@ def _profile_feature_flags():
     if raw is None:
         return ("allowcon",)
     flags = []
-    for flag in re.split(r"[,;\s]+", raw.strip()):
-        if flag and flag not in flags:
-            flags.append(flag)
+    flags.extend(flag for flag in re.split(r"[,;\s]+", raw.strip()) if flag and flag not in flags)
     return tuple(flags)

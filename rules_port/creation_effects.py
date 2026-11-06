@@ -85,9 +85,7 @@ def replacement_abilities(db, ability_guids):
                     for child in value:
                         walk(child)
                 elif isinstance(value, str):
-                    for match in _CARD_LINK.findall(value):
-                        if db_template_exists(match.lower(), conn=db):
-                            linked.append(match.lower())
+                    linked.extend(match.lower() for match in _CARD_LINK.findall(value) if db_template_exists(match.lower(), conn=db))
             walk(graph.source.to_dict())
             result.append((attr, tuple(dict.fromkeys(linked))))
     return result

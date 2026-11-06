@@ -1563,9 +1563,7 @@ def _record_revealed_chosen(root: MechanicsObject, index: int, scope: Scope) -> 
     if _short(template.type_name) != "SourceRevealedTargetTemplate":
         return
     chosen = scope.context.bstate.setdefault("source_revealed_chosen", [])
-    for uid in _targets(root, index, scope):
-        if int(uid) not in chosen:
-            chosen.append(int(uid))
+    chosen.extend(int(uid) for uid in _targets(root, index, scope) if int(uid) not in chosen)
 
 
 def _applies_to(root: MechanicsObject, index: int, scope: Scope) -> bool:
@@ -2255,9 +2253,7 @@ def coverage(guid: str) -> list[str]:
                 missing.append(f"variable target count ({bound})")
     # Paid costs and optional abilities are settled before the ability reaches the interpreter (ir_exec_costs).
     missing.extend(unsupported_costs(raw))
-    for operator in _comparison_ops(raw, []):
-        if operator not in _COMPARISONS:
-            missing.append(f"comparison {operator}")
+    missing.extend(f"comparison {operator}" for operator in _comparison_ops(raw, []) if operator not in _COMPARISONS)
     missing.extend(_unsupported_name_filters(raw, []))
     for clause in raw.get("m_AbilityEffectList") or []:
         condition_guid = _guid(clause.get("m_ConditionId"))
@@ -2310,9 +2306,7 @@ def coverage(guid: str) -> list[str]:
             missing.append(f"{kind} for {player}")
         if not _zones_of(variable.get("m_CollectionFlags")):
             missing.append(f"{kind} without collection flags")
-        for name in _tagged_classes(variable.get("m_CardFilter"), []):
-            if name not in SUPPORTED_FILTERS and not bridge.filter_accepted(name):
-                missing.append(f"filter {name}")
+        missing.extend(f"filter {name}" for name in _tagged_classes(variable.get("m_CardFilter"), []) if name not in SUPPORTED_FILTERS and not bridge.filter_accepted(name))
     missing.extend(ir_variables.expression_gaps(expressions, declared))
     for clause in raw.get("m_AbilityEffectList") or []:
         effect_type, effect = _stored("AbilityEffectTemplate", _guid(clause.get("m_EffectTemplateId")))

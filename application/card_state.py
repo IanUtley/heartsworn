@@ -323,9 +323,7 @@ class CardStateMixin(_HostBase):
                 if not merged:
                     merged = list(ability_guids)
                 else:
-                    for gem_guid in gem_guids:
-                        if str(gem_guid).lower() not in merged:
-                            merged.append(str(gem_guid).lower())
+                    merged.extend(str(gem_guid).lower() for gem_guid in gem_guids if str(gem_guid).lower() not in merged)
                 if merged != current:
                     db_set_card_abilities(
                     game.session_id.uid64, scid.uid.uid64,

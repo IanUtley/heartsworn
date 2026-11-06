@@ -78,13 +78,9 @@ def expression_gaps(expressions: dict[str, str], declared: set[str]) -> list[str
         if tree is None or not _supported(tree):
             gaps.append(f"expression {text}")
             continue
-        for used in _names(tree):
-            if used not in declared and used not in STATIC_NAMES:
-                gaps.append(f"expression name {used}")
+        gaps.extend(f"expression name {used}" for used in _names(tree) if used not in declared and used not in STATIC_NAMES)
         graph[name] = _names(tree) & set(expressions)
-    for name in graph:
-        if _leads_back(name, graph):
-            gaps.append(f"expression cycle on {name}")
+    gaps.extend(f"expression cycle on {name}" for name in graph if _leads_back(name, graph))
     return list(dict.fromkeys(gaps))
 
 

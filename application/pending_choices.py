@@ -1741,9 +1741,7 @@ class PendingChoicesMixin(_HostBase):
         if int(pend.get("maximum_picks", 1) or 1) > 1:
             offered = [int(u) for u in (pend.get("candidates") or [])]
             chosen_many = []
-            for uid in all_picks:
-                if uid in offered and uid not in chosen_many:
-                    chosen_many.append(uid)
+            chosen_many.extend(uid for uid in all_picks if uid in offered and uid not in chosen_many)
             chosen_many = chosen_many[:int(pend["maximum_picks"])]
             if chosen_many and len(chosen_many) >= int(pend.get("minimum_picks", 0) or 0):
                 picks = chosen_many
