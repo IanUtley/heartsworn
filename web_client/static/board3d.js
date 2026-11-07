@@ -7,6 +7,7 @@
 
 import * as THREE from "./vendor/three.module.min.js";
 import { SLEEVES, canvas, artImage, artImages, ellipsize, paintFace, paintSleeve } from "./card_face.js";
+import { HudLayer } from "./hud3d.js";
 
 const CARD_W = 1.2, CARD_H = 1.68, CARD_T = 0.03;
 // A hand card is 1/CARDS_ON_SCREEN of the screen height. The hand is HAND_DEPTH of the way from the camera
@@ -673,6 +674,8 @@ class Board3D {
     new ResizeObserver(() => this.resize()).observe(container);
     this.resize();
     this.buildArena();
+    // The HUD panels move into the scene with the board's camera (hud3d.js).
+    this.hud = new HudLayer(container);
     renderer.setAnimationLoop(() => this.frame());
   }
 
@@ -1113,6 +1116,7 @@ class Board3D {
     this.renderer.clearDepth();
     this.renderer.render(this.handScene, this.camera);
     this.drawArcs(t);
+    this.hud.update();
   }
 }
 
