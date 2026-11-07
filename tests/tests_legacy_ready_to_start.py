@@ -19,7 +19,13 @@ from tests.test_db import fresh_database  # noqa: E402
 
 fresh_database()
 
-from services.legacy_handlers import LEGACY_HANDLERS  # noqa: E402
+from services.ready_to_start import handle_readytostartgame_22031  # noqa: E402
+
+
+def _ready_to_start(handler):
+    handle_readytostartgame_22031(handler, "target", 3, 9000, False, "session-x",
+                                  "conh-1", {}, b"", SERVICE_MAIL_UID=252,
+                                  log_req=lambda *_a, **_k: None, data_type=22031)
 
 PLAYER_ID = 67890
 # Pinned from the current handler: issuer and body sha256 of the acknowledgement.
@@ -56,10 +62,9 @@ class _StubHandler:
 
 def _run(session):
     handler = _StubHandler()
-    with mock.patch("services.legacy_loadbalancer.game_session.find_session_by_player",
+    with mock.patch("services.ready_to_start.game_session.find_session_by_player",
                     return_value=session):
-        LEGACY_HANDLERS[22031](handler, "target", 3, 22031, 9000, False, "session-x",
-                               "conh-1", {}, b"", b"")
+        _ready_to_start(handler)
     return handler.sent
 
 
@@ -88,10 +93,9 @@ def _campaign_run():
     real_time = time.time
     time.time = lambda: 1700000000.0  # the gzip header stamps the clock
     try:
-        with mock.patch("services.legacy_loadbalancer.game_session.find_session_by_player",
+        with mock.patch("services.ready_to_start.game_session.find_session_by_player",
                         return_value=session):
-            LEGACY_HANDLERS[22031](handler, "target", 3, 22031, 9000, False, "session-x",
-                                   "conh-1", {}, b"", b"")
+            _ready_to_start(handler)
     finally:
         time.time = real_time
         shared._db, hconnect_server._db = previous_db, previous_hcs

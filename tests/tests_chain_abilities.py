@@ -3710,7 +3710,7 @@ def test_pregame_champion_ability_fires_once_per_champion():
     bstate = {"pvp": True, "pids": [1001, 1002],
               "champ_map": {"1001": 9001, "1002": 9002},
               "stack": [], "turn_pid": 1001}
-    # Mirrors services/legacy_loadbalancer: one dispatch per owner.
+    # Mirrors services/ready_to_start (ReadyToStartGame): one dispatch per owner.
     for owner in (1001, 0):
         dispatch_native_trigger(
             db=db, handler=handler, game=game, session=SessionStub(),

@@ -250,7 +250,7 @@ The service registry is the first dispatch path. Unsupported or not-yet-
 converted service types may use the compatibility path in HConnect until their
 handler is extracted.
 
-Families extracted so far that are registry-only: decks (`services/deck_editing.py`), chests and packs (`services/chest_requests.py`), profile (`services/profile_requests.py`), campaign and siege (`services/campaign_requests.py`), and the mail ping (`services/mail.py`). `services/legacy_*.py` still holds the shadowed copies of already-registered types that act as the fallback when a registry handler raises, plus the loadbalancer, tournament and session families not yet extracted. Remove a legacy file once its request types are registry-only and the fallback is retired. New service types belong in the registry and a service
+Families extracted so far that are registry-only: decks (`services/deck_editing.py`), chests and packs (`services/chest_requests.py`), profile (`services/profile_requests.py`), campaign and siege (`services/campaign_requests.py`), and the mail ping (`services/mail.py`). The `services/legacy_*.py` fallback tables are gone: every request type they served is in the registry. A request type with no registry entry is logged as unhandled by `hconnect_server._handle_service_request_legacy`. New service types belong in the registry and a service
 module; do not grow another dispatch dictionary in `hconnect_server.py`.
 Several older extracted handlers still contain direct SQL; that is migration
 debt covered by the same rule in the database section below.

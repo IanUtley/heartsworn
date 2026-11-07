@@ -146,10 +146,6 @@ def reload_runtime_modules():
                     if not name.startswith("__") and callable(value):
                         setattr(handler_cls, name, value)
                         rebound += 1
-    legacy_table = importlib.import_module("services.legacy_handlers").LEGACY_HANDLERS
-    live_table = getattr(hc, "LEGACY_HANDLERS", None)
-    if live_table is not None:
-        live_table.update(legacy_table)
     for name, value in {
         "tournament_server": ts,
         "campaign": campaign,

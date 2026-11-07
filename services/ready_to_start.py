@@ -1,13 +1,7 @@
-"""ReadyToStartGame (22031): the client's go-ahead that starts a game's setup.
-
-Moved out of services/legacy_loadbalancer.py. Module-level names it shares with
-the legacy loadbalancer are read through ``_legacy`` at call time, so patches on
-that module keep applying.
-"""
+"""ReadyToStartGame (22031): the client's go-ahead that starts a game's setup."""
 
 from __future__ import annotations
 
-import services.legacy_loadbalancer as _legacy
 from binascii import hexlify
 import io
 import json
@@ -64,13 +58,19 @@ import encoder
 from pve_db import db_campaign_owner_user_id
 
 
+# Armies of Myth (AZ1 Node 66): the AI starts with the campaign's army level,
+# the counter the conversation sets from the difficulty picked (0-6).
+ARMY_OF_MYTH_SCENE = "0b1d5244-e9f6-46ec-bb06-73c36801f5ef"
+ARMY_LEVEL_COUNTER = "fight_army_at_level"
+
+
 def _army_of_myth_ai_resources(session):
     """The AI's starting resources for the Army of Myth battle, else None."""
     import hconnect_server as _hc
     from campaign_runtime import progress
     session_name = str(session.session_name or "")
     scene = campaign._last_encounter_scene.get(session_name)
-    if str(scene or "").lower() != _legacy.ARMY_OF_MYTH_SCENE:
+    if str(scene or "").lower() != ARMY_OF_MYTH_SCENE:
         return None
     identity = _hc.db_campaign_identity_state(
         int(session_name.split("_")[-1] or 0), conn=db._db)
@@ -78,11 +78,12 @@ def _army_of_myth_ai_resources(session):
         return 0
     loaded = progress.load(db._db, int(identity[0]))
     counters = (loaded[0] if loaded else {}).get("counters") or {}
-    return int(counters.get(_legacy.ARMY_LEVEL_COUNTER, 0) or 0)
+    return int(counters.get(ARMY_LEVEL_COUNTER, 0) or 0)
 
 
-def handle_readytostartgame_22031(handler, target, instance, data_type, reqid, comp, session_id,
-                                  conh, inner_obj, inner_bytes, raw_data_wrapper_bytes):
+def handle_readytostartgame_22031(handler, target, instance, reqid, comp, session_id,
+                                  conh, inner_obj, inner_bytes, *, SERVICE_MAIL_UID,
+                                  log_req, data_type, raw_data_wrapper_bytes=b"", **_kw):
     import hconnect_server as _hc
     player_uid = make_uid(UID_TYPE["ServicePlayer"], int(handler.client_reck_id))
     log_req(f"    Player UID: reck={handler.client_reck_id}, uid={player_uid:#x}")

@@ -2,9 +2,7 @@
 
 The reply is an empty response, pinned by hash. The handler also records a
 waiting room in the store the tournament module owns; the check reads that
-store wherever it lives, so the same test holds before and after the state
-moves out of the hub. Resolved through the services registry, falling back to
-the legacy table until the handler is ported.
+store wherever it lives. Resolved through the services registry.
 """
 
 import hashlib
@@ -18,12 +16,10 @@ from tests.test_db import fresh_database  # noqa: E402
 
 fresh_database()
 
-import hconnect_server as hc  # noqa: E402
 from services import dispatch as service_dispatch  # noqa: E402
-from services import legacy_tournaments  # noqa: E402
 
 ISSUER = "0.0.0.0.ServiceTournaments.252.ServicePlayer.5.9001"
-# Pinned from the legacy handler: body sha256 of the empty CreateWaitingRoom reply.
+# Pinned from the handler: body sha256 of the empty CreateWaitingRoom reply.
 EXPECTED_BODY = "d51d2ba3dae2b77dd149e97a53ec0bae931095caa62b9a7980ad9ea5a567e5cf"
 REQUEST_ID = 9000
 
@@ -43,27 +39,18 @@ class _StubHandler:
 
 
 def _store():
-    """The waiting-room store, wherever the tournament module keeps it now."""
-    entry = service_dispatch(25019)
-    if entry:
-        module = importlib.import_module(entry[0])
-        return module._waiting_rooms
-    return hc._waiting_rooms
+    """The waiting-room store, wherever the tournament module keeps it."""
+    module_name, _fn_name, _extra = service_dispatch(25019)
+    return importlib.import_module(module_name)._waiting_rooms
 
 
 def _run(inner):
-    entry = service_dispatch(25019)
     handler = _StubHandler()
-    if entry:
-        module_name, fn_name, extra = entry
-        fn = getattr(importlib.import_module(module_name), fn_name)
-        fn(handler, "target", 3, REQUEST_ID, False, "session-x", "conh-1",
-           inner_obj=inner, inner_bytes=b"", SERVICE_MAIL_UID=252,
-           SERVICE_PROFILE_UID=0, log_req=lambda *_a, **_k: True, **extra)
-    else:
-        legacy_tournaments.LEGACY_HANDLERS[25019](
-            handler, "target", 3, 25019, REQUEST_ID, False, "session-x", "conh-1",
-            inner, b"", b"")
+    module_name, fn_name, extra = service_dispatch(25019)
+    fn = getattr(importlib.import_module(module_name), fn_name)
+    fn(handler, "target", 3, REQUEST_ID, False, "session-x", "conh-1",
+       inner_obj=inner, inner_bytes=b"", SERVICE_MAIL_UID=252,
+       SERVICE_PROFILE_UID=0, log_req=lambda *_a, **_k: True, **extra)
     return handler
 
 

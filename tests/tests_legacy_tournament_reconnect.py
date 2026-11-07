@@ -21,7 +21,6 @@ from tests.test_db import fresh_database  # noqa: E402
 fresh_database()
 
 from services import dispatch as service_dispatch  # noqa: E402
-from services import legacy_tournaments  # noqa: E402
 
 ISSUER = "0.0.0.0.ServiceTournaments.252.ServicePlayer.5.9001"
 REQUEST_ID = 9000
@@ -61,18 +60,11 @@ def _run(authenticated, room, signup, live, pool):
             return ret
         return record
 
-    entry = service_dispatch(25021)
     handler = _StubHandler(authenticated)
     inner = {"forceReconnectToAsynch": 4}
-    if entry:
-        module_name, fn_name, extra = entry
-        fn = getattr(importlib.import_module(module_name), fn_name)
-        module = importlib.import_module(module_name)
-        registry = True
-    else:
-        module = legacy_tournaments
-        registry = False
-    handlers_registry = {}
+    module_name, fn_name, extra = service_dispatch(25021)
+    fn = getattr(importlib.import_module(module_name), fn_name)
+    module = importlib.import_module(module_name)
     patches = [
         mock.patch.object(module, "db_tournament_room_for_game",
                           side_effect=recorder("db_tournament_room_for_game", room)),
@@ -95,14 +87,9 @@ def _run(authenticated, room, signup, live, pool):
     for p in patches:
         p.start()
     try:
-        if registry:
-            fn(handler, "target", 3, REQUEST_ID, False, "session-x", "conh-1",
-               inner_obj=inner, inner_bytes=b"", SERVICE_MAIL_UID=252,
-               SERVICE_PROFILE_UID=0, log_req=lambda *_a, **_k: True, **extra)
-        else:
-            legacy_tournaments.LEGACY_HANDLERS[25021](
-                handler, "target", 3, 25021, REQUEST_ID, False, "session-x", "conh-1",
-                inner, b"", b"")
+        fn(handler, "target", 3, REQUEST_ID, False, "session-x", "conh-1",
+           inner_obj=inner, inner_bytes=b"", SERVICE_MAIL_UID=252,
+           SERVICE_PROFILE_UID=0, log_req=lambda *_a, **_k: True, **extra)
     finally:
         for p in patches:
             p.stop()

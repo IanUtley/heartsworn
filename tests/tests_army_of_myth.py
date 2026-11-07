@@ -13,7 +13,7 @@ fresh_database()
 
 import hconnect_server as hc  # noqa: E402
 from campaign_runtime import progress  # noqa: E402
-from services import legacy_loadbalancer as lb  # noqa: E402
+from services import ready_to_start as lb  # noqa: E402
 
 
 def _ai_resources(scene, counters):

@@ -319,7 +319,7 @@ materialized in the `mod` zone for a plain (untargeted) scene mod; its granted
 ability is applied as a scene-wide passive. Any client refresh of a card in
 the `mod` zone is published in the hidden `ECardCollections.Mod` collection
 (`card_collection_for_location`), never Warzone, so the card never shows on the
-board. Implemented in `services/legacy_loadbalancer.py` (scene setup) and
+board. Implemented in `services/ready_to_start.py` (scene setup) and
 `rules_port/token_effects.py` (summon); PvP has no scene mods.
 
 ## PVE, PVP, AI, and tournaments

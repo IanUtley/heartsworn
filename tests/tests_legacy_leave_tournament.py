@@ -21,7 +21,6 @@ fresh_database()
 
 import gamemodes.tournament_server as tournament_server  # noqa: E402
 from services import dispatch as service_dispatch  # noqa: E402
-from services import legacy_tournaments  # noqa: E402
 
 ISSUER = "0.0.0.0.ServiceTournaments.252.ServicePlayer.5.9001"
 REPLY_SHA256 = "8abd2874d84a0db03a61b03b741babd0fb2c855c5ca031ac6b35d099b47e8ded"
@@ -66,16 +65,10 @@ def _run(forfeit, status, session):
             return ret
         return record
 
-    entry = service_dispatch(25031)
+    module_name, fn_name, extra = service_dispatch(25031)
     handler = _StubHandler()
-    if entry:
-        module_name, fn_name, extra = entry
-        fn = getattr(importlib.import_module(module_name), fn_name)
-        module = importlib.import_module(module_name)
-        env = {"kind": "registry", "fn": fn, "extra": extra, "module": module}
-    else:
-        env = {"kind": "legacy", "module": legacy_tournaments}
-    module = env["module"]
+    fn = getattr(importlib.import_module(module_name), fn_name)
+    module = importlib.import_module(module_name)
     patches = [
         mock.patch.object(module, "db_tournament_match_session",
                           side_effect=recorder("db_tournament_match_session", session)),
@@ -93,15 +86,10 @@ def _run(forfeit, status, session):
     for p in patches:
         p.start()
     try:
-        if env["kind"] == "registry":
-            env["fn"](handler, "target", 3, REQUEST_ID, False, "session-x", "conh-1",
-                      inner_obj={"TournamentID": 4}, inner_bytes=b"",
-                      SERVICE_MAIL_UID=252, SERVICE_PROFILE_UID=0,
-                      log_req=lambda *_a, **_k: True, **env["extra"])
-        else:
-            legacy_tournaments.LEGACY_HANDLERS[25031](
-                handler, "target", 3, 25031, REQUEST_ID, False, "session-x", "conh-1",
-                {"TournamentID": 4}, b"", b"")
+        fn(handler, "target", 3, REQUEST_ID, False, "session-x", "conh-1",
+           inner_obj={"TournamentID": 4}, inner_bytes=b"",
+           SERVICE_MAIL_UID=252, SERVICE_PROFILE_UID=0,
+           log_req=lambda *_a, **_k: True, **extra)
     finally:
         for p in patches:
             p.stop()

@@ -1,8 +1,8 @@
 """Characterization of six simple tournament request handlers.
 
 Each handler answers with a fixed response shape. The check resolves a request
-through the services registry, falling back to the legacy table until the
-handler is ported, and compares the issuer and body hash of the packet sent.
+through the services registry and compares the issuer and body hash of the
+packet sent.
 """
 
 import hashlib
@@ -17,10 +17,9 @@ from tests.test_db import fresh_database  # noqa: E402
 fresh_database()
 
 from services import dispatch as service_dispatch  # noqa: E402
-from services import legacy_tournaments  # noqa: E402
 
 ISSUER = "0.0.0.0.ServiceTournaments.252.ServicePlayer.5.9001"
-# Pinned from the legacy handlers. Each entry: body sha256.
+# Pinned from the handlers. Each entry: body sha256.
 EXPECTED = {
     25005: "6c226f1aecfe29e6b8bd1977bf8dd2998fcb5df06686a7025509ba763676dd7c",
     25007: "2a089c20e0c7c74722f2130db070d5640aeaa7cdc564849bada46324e9e6454d",
@@ -46,25 +45,14 @@ class _StubHandler:
         self.sent.append((headers, body))
 
 
-def _resolve(reqid):
-    entry = service_dispatch(reqid)
-    if entry:
-        module_name, fn_name, extra = entry
-        return getattr(importlib.import_module(module_name), fn_name), extra, True
-    return legacy_tournaments.LEGACY_HANDLERS[reqid], {}, False
-
-
 def _packet(reqid):
-    fn, extra, ported = _resolve(reqid)
+    module_name, fn_name, extra = service_dispatch(reqid)
+    fn = getattr(importlib.import_module(module_name), fn_name)
     handler = _StubHandler()
     request_id = 9000  # the id the pinned packets were captured with
-    if ported:
-        fn(handler, "target", 3, request_id, False, "session-x", "conh-1",
-           inner_obj={"TournamentID": 4}, inner_bytes=b"", SERVICE_MAIL_UID=252,
-           SERVICE_PROFILE_UID=0, log_req=lambda *_a, **_k: True, **extra)
-    else:
-        fn(handler, "target", 3, reqid, request_id, False, "session-x", "conh-1",
-           {"TournamentID": 4}, b"", b"")
+    fn(handler, "target", 3, request_id, False, "session-x", "conh-1",
+       inner_obj={"TournamentID": 4}, inner_bytes=b"", SERVICE_MAIL_UID=252,
+       SERVICE_PROFILE_UID=0, log_req=lambda *_a, **_k: True, **extra)
     headers, body = handler.sent[-1]
     return headers["issuer"], hashlib.sha256(body).hexdigest()
 

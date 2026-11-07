@@ -71,6 +71,7 @@ _SERVICE_TABLE = {
     160000: ("services.replay", "handle_replay_fetch_request", {"data_type": 160000}),
     3029: ("services.transactions", "handle_player_transaction", {"data_type": 3029}),
     22013: ("services.loadbalancer", "handle_try_reconnection", {"data_type": 22013}),
+    22031: ("services.ready_to_start", "handle_readytostartgame_22031", {"data_type": 22031}),
 
     # Matchmaking and direct challenges
     4001: ("services.matchmaking", "handle_ping_matchmaking", {}),

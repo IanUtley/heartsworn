@@ -110,8 +110,6 @@ from services.chests import (
 )
 from application.rules_port_timing import _rules_port_timing
 
-from services.legacy_handlers import LEGACY_HANDLERS
-
 from application.card_play import CardPlayMixin
 from application.card_state import CardStateMixin
 from application.combat import CombatMixin
@@ -2477,11 +2475,6 @@ class HCPHandler(RulesPortProjectionMixin, ProfileStreamMixin, CardPlayMixin, Ca
                             f"{response_error}")
             return
 
-        handler_fn = LEGACY_HANDLERS.get(data_type)
-        if handler_fn is not None:
-            return handler_fn(self, target, instance, data_type, reqid, comp,
-                              session_id, conh, inner_obj, inner_bytes,
-                              raw_data_wrapper_bytes)
         log_req(f">>> Unhandled DataType={data_type}")
         log_req(f"    target={target} instance={instance} inner_keys={list(inner_obj.keys()) if isinstance(inner_obj, dict) else '?'}")
         if inner_obj:

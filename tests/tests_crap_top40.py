@@ -311,11 +311,11 @@ def test_pvp_spell_refuses_an_unknown_card():
 
 
 def test_ready_to_start_with_an_empty_packet_is_a_no_op():
-    import services.legacy_loadbalancer as lb
+    import services.ready_to_start as lb
     from tests.tests_combat import HandlerStub
     db = make_db()
     assert lb.handle_readytostartgame_22031(
-        HandlerStub(db), 0, 0, 0, 0, None, 1, None, None, b"", b"") is None
+        HandlerStub(db), 0, 0, 0, None, 1, None, None, b"", SERVICE_MAIL_UID=252, log_req=lambda *_a, **_k: None, data_type=0) is None
 
 
 def test_starter_playthrough_reaches_the_second_zone():
@@ -698,7 +698,7 @@ def test_csharp_fallback_takes_control_of_the_opposing_troop():
 def test_ready_to_start_in_a_pvp_session_acknowledges_the_client():
     import game_session as gs
     import hconnect_server
-    from services.legacy_loadbalancer import handle_readytostartgame_22031
+    from services.ready_to_start import handle_readytostartgame_22031
     make_db()
     reck = 5
     session = gs.GameSession(7001, 7001 * 1000, "pvp-7001", reck)
@@ -709,8 +709,8 @@ def test_ready_to_start_in_a_pvp_session_acknowledges_the_client():
     handler.client_reck_id = reck
     sent = []
     handler.send = lambda header, body: sent.append((header, body))
-    handle_readytostartgame_22031(handler, 0, 0, 22031, 40, False, 0, 0,
-                                  None, b"", b"")
+    handle_readytostartgame_22031(handler, 0, 0, 40, False, 0, 0,
+                                  None, b"", SERVICE_MAIL_UID=252, log_req=lambda *_a, **_k: None, data_type=22031)
     assert len(sent) == 1
     assert sent[0][0]["reqid"] == 41, sent[0][0]
 
@@ -1118,7 +1118,7 @@ def test_ready_to_start_in_a_practice_game_sends_the_opening_setup():
     import db as shared
     import game_session as gs
     import hconnect_server
-    from services.legacy_loadbalancer import handle_readytostartgame_22031
+    from services.ready_to_start import handle_readytostartgame_22031
     db = make_db()
     previous = shared._db
     shared._db = db
@@ -1135,7 +1135,7 @@ def test_ready_to_start_in_a_practice_game_sends_the_opening_setup():
         handler.client_reck_id = reck
         sent = []
         handler.send = lambda header, body: sent.append(header)
-        handle_readytostartgame_22031(handler, 0, 0, 22031, 40, False, 0, 0, None, b"", b"")
+        handle_readytostartgame_22031(handler, 0, 0, 40, False, 0, 0, None, b"", SERVICE_MAIL_UID=252, log_req=lambda *_a, **_k: None, data_type=22031)
         assert sent, "the practice game setup should be sent to the client"
         assert sent[0]["reqid"] == 41, sent[0]
     finally:

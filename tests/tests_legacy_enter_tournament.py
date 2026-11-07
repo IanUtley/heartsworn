@@ -21,11 +21,10 @@ fresh_database()
 
 import gamemodes.tournament_server as tournament_server  # noqa: E402
 from services import dispatch as service_dispatch  # noqa: E402
-from services import legacy_tournaments  # noqa: E402
 
 ISSUER = "0.0.0.0.ServiceTournaments.252.ServicePlayer.5.9001"
 REQUEST_ID = 9000
-# Pinned from the legacy handler: reply body sha256 per outcome.
+# Pinned from the handler: reply body sha256 per outcome.
 EXPECTED_REPLY = {
     "joined": "ddacb975d82ccae97ee63804a59ee7c4c81cf14f0c531c5d5e8aed3e43a306a6",
     "refused": "44a6e373d2231ab910f4c0a14ad9a5b5e85ad8c3e90da1caa48a25d8bd43a774",
@@ -60,17 +59,11 @@ def _run(room, joined, corinth, signup):
             return ret
         return record
 
-    entry = service_dispatch(25029)
+    module_name, fn_name, extra = service_dispatch(25029)
     handler = _StubHandler()
     inner = {"TournamentID": 4, "EntryGroup": 0}
-    if entry:
-        module_name, fn_name, extra = entry
-        fn = getattr(importlib.import_module(module_name), fn_name)
-        module = importlib.import_module(module_name)
-        registry = True
-    else:
-        module = legacy_tournaments
-        registry = False
+    fn = getattr(importlib.import_module(module_name), fn_name)
+    module = importlib.import_module(module_name)
     patches = [
         mock.patch.object(module, "db_tournament_room_for_game",
                           side_effect=recorder("db_tournament_room_for_game", room)),
@@ -97,14 +90,9 @@ def _run(room, joined, corinth, signup):
     for p in patches:
         p.start()
     try:
-        if registry:
-            fn(handler, "target", 3, REQUEST_ID, False, "session-x", "conh-1",
-               inner_obj=inner, inner_bytes=b"", SERVICE_MAIL_UID=252,
-               SERVICE_PROFILE_UID=0, log_req=lambda *_a, **_k: True, **extra)
-        else:
-            legacy_tournaments.LEGACY_HANDLERS[25029](
-                handler, "target", 3, 25029, REQUEST_ID, False, "session-x", "conh-1",
-                inner, b"", b"")
+        fn(handler, "target", 3, REQUEST_ID, False, "session-x", "conh-1",
+           inner_obj=inner, inner_bytes=b"", SERVICE_MAIL_UID=252,
+           SERVICE_PROFILE_UID=0, log_req=lambda *_a, **_k: True, **extra)
     finally:
         for p in patches:
             p.stop()
