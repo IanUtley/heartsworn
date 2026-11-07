@@ -15,7 +15,7 @@ in place because each needs a design decision or a larger change.
       `TransformCardAbilityEffectTemplate.Apply` also falls through to
       MercenaryTemplate, which the port does not resolve.
 - [ ] **CreateAndCastSpell resolves the copy inline and ignores locks.**
-      `rules_port/effects.py:436` resolves the created spell synchronously
+      `rules_port/ir_event_effects.py` (`create_and_cast_spell`) resolves the created spell synchronously
       instead of pushing it onto the chain, has no `CantCreateCopies` check,
       and clamps a typed amount of 0 up to 1; C#
       `CreateAndCastSpellAbilityEffectTemplate.Apply` -> `CopyCardAndPutOnChain`
@@ -27,7 +27,7 @@ in place because each needs a design decision or a larger change.
 
 - [ ] `GrantAbilityEffectTemplate`'s random-Inspire pool is not format/rarity
       filtered (C# `GetRandomInspirePower` uses `setsValidInFormat`;
-      `rules_port/effects.py` ~243).
+      `rules_port/ir_event_effects.py` (`grant_ability`)).
 - [ ] `RegisterTriggerAbilityEffectTemplate` writes
       `bstate["registered_triggers"]` but nothing reads it, so registered
       triggers never fire (C# `Session.RegisterTriggerEventHandler`).

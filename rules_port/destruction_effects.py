@@ -1,6 +1,7 @@
 """RulesPort-owned mass-destruction effect operations."""
 
 from __future__ import annotations
+import rules_port.leaves_zones as _leaves_zones
 
 
 def destroy_by_defense(context):
@@ -20,6 +21,6 @@ def destroy_by_defense(context):
         if rng_below(context.bstate, 10) >= defense:
             # The decision (candidate set, effective defense, and random roll)
             # is port-owned; destroy() is the host mutation/event boundary.
-            context.destroy(int(uid))
+            _leaves_zones.destroy(context, int(uid))
             destroyed += 1
     return f"destroyed {destroyed}/{len(rows)}"

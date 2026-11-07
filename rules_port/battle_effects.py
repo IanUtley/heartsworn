@@ -1,6 +1,8 @@
 """RulesPort-owned authored card-battle effect."""
 
 from __future__ import annotations
+import rules_port.leaves_abilities as _leaves_abilities
+import rules_port.leaves_players as _leaves_players
 
 
 def _first_target(values):
@@ -103,19 +105,19 @@ def fight_cards(context, attacker, defender):
     attacker_attack = attack(attacker)
     defender_attack = attack(defender)
     result = as_source(
-        attacker, lambda: context.damage(defender, attacker_attack))
+        attacker, lambda: _leaves_players.damage(context, defender, attacker_attack))
     logs = [f"{hex(attacker)} deals {attacker_attack} to "
             f"{hex(defender)} -> {result}"]
     # Battle2Cards carries the reciprocal-damage rule in the typed Records
     # template; never infer it from the ability's display text.
     if bool(context.template_value("m_FightBack", 0)):
-        as_source(attacker, lambda: context._emit_authored_event(
+        as_source(attacker, lambda: _leaves_abilities._emit_authored_event(context,
             "CardBattledEvent", defender))
         if attacker != defender:
             reverse = as_source(
                 defender,
-                lambda: context.damage(attacker, defender_attack))
-            as_source(defender, lambda: context._emit_authored_event(
+                lambda: _leaves_players.damage(context, attacker, defender_attack))
+            as_source(defender, lambda: _leaves_abilities._emit_authored_event(context,
                 "CardBattledEvent", attacker))
             logs.append(
                 f"{hex(defender)} deals {defender_attack} to "

@@ -1,6 +1,6 @@
 """Granted abilities for the interpreter: GrantAbility, RevokeAbility and RevertPermanentModifications.
 
-Each effect runs the live leaf the native path runs for it (``rules_port.effects.grant_ability``, and the
+Each effect runs the live leaf the native path runs for it (``rules_port.ir_event_effects.grant_ability``, and the
 ``EffectContext`` revoke and revert methods), once per target as the native resolver does. The leaf reads the
 authored template and its explicit target from the context, so the interpreter sets those for one call and
 restores them after. The grant's lifetime (``m_EffectDuration``) is recorded and expired by
@@ -9,6 +9,8 @@ restores them after. The grant's lifetime (``m_EffectDuration``) is recorded and
 
 from __future__ import annotations
 
+import rules_port.leaves_abilities as _leaves_abilities
+import rules_port.leaves_zones as _leaves_zones
 from typing import Any
 
 ZERO_GUID = "00000000-0000-0000-0000-000000000000"
@@ -89,16 +91,16 @@ def run(kind: str, effect: dict[str, Any], duration: str, targets: list[int], co
         context.effect_template_override = effect
         context.effect_duration_override = duration
         if kind == "GrantAbilityEffectTemplate":
-            from rules_port.effects import grant_ability
+            from rules_port.ir_event_effects import grant_ability
             context.param = _typed(effect.get("m_GrantedAbilityTemplateId"))
         for target in targets:
             bstate["resolving_target_uid"] = int(target)
             if kind == "GrantAbilityEffectTemplate":
                 grant_ability(context)
             elif kind == "RevokeAbilityEffectTemplate":
-                context.revoke_ability()
+                _leaves_abilities.revoke_ability(context)
             else:
-                context.revert_modifications()
+                _leaves_zones.revert_modifications(context)
     finally:
         context.effect_template_override, context.effect_duration_override, context.param = saved_context
         for key in _TARGET_ALIASES:

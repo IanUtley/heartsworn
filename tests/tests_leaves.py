@@ -22,7 +22,7 @@ class _NativeLeafs:
     """Legacy-shaped leaf lookup backed by the native RulesPort dispatcher.
 
     Focused leaf tests keep their historical call signature; the executor is
-    ``rules_port.effects.dispatch`` with a native ``EffectContext`` and no
+    ``rules_port.native_leaves.dispatch`` with a native ``EffectContext`` and no
     effect instance, so compatibility leaves use their source-target path.
     """
 
@@ -33,7 +33,7 @@ class _NativeLeafs:
     def __getitem__(self, effect_type):
         def call(game, session, db, handler, pl_t, ai_t, bstate,
                  effect_guid="", param=None, **kwargs):
-            from rules_port import effects as native_effects
+            from rules_port import native_leaves as native_effects
             from rules_port.context import EffectContext
 
             if bstate is None:
@@ -109,7 +109,7 @@ def new_game(db):
 def _native_dispatch(effect_type, game, session, db, handler, pl_t, ai_t,
                      bstate, param=None):
     """Run one leaf through the native RulesPort dispatcher."""
-    from rules_port import effects as native_effects
+    from rules_port import native_leaves as native_effects
     from rules_port.context import EffectContext
 
     bstate["_rules_port_native_effect"] = True
@@ -359,7 +359,7 @@ def test_battle_damage(db):
     bstate["resolving_target_uid"] = 200
     # The Records effect row (secondary_target_index names the attacker), as
     # the live dispatcher receives it.
-    from rules_port import effects as native_effects
+    from rules_port import native_leaves as native_effects
     from rules_port.context import EffectContext
     bstate["_rules_port_native_effect"] = True
     context = EffectContext.from_rules_port(

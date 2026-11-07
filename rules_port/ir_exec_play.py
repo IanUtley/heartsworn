@@ -7,6 +7,7 @@ A free play queues the card on the chain, exactly as the live path does, so the 
 
 from __future__ import annotations
 
+import rules_port.leaves_abilities as _leaves_abilities
 from typing import Any
 
 
@@ -23,7 +24,7 @@ def play_for_free(context: Any, targets: list[int], effect_raw: dict[str, Any]) 
     try:
         for target in targets:
             bstate["resolving_target_uid"] = int(target)
-            context.play_card()
+            _leaves_abilities.play_card(context)
     finally:
         context.effect_template_override = previous_template
         bstate.update(overriding)

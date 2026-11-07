@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import rules_port.leaves_abilities as _leaves_abilities
+import rules_port.leaves_modifiers as _leaves_modifiers
 import json
 from collections.abc import Iterable
 from typing import Any
@@ -782,7 +784,7 @@ def summon_token(context, payload=None, *, target=None, owner=None):
     if payload.get("conscript_event"):
         source_uid = context.bstate.get("resolving_source_uid")
         if source_uid is not None:
-            conscript_thresholds = context._card_thresholds(int(source_uid))
+            conscript_thresholds = _leaves_modifiers._card_thresholds(context, int(source_uid))
     copy_gems = context.template_value("m_CopyGems", False)
     try:
         copy_gems = bool(int(copy_gems or 0))
@@ -881,7 +883,7 @@ def summon_token(context, payload=None, *, target=None, owner=None):
                 buffs = {}
             if not isinstance(buffs, dict):
                 buffs = {}
-            previous_thresholds = context._card_thresholds(int(uid))
+            previous_thresholds = _leaves_modifiers._card_thresholds(context, int(uid))
             buffs["thresholds"] = [int(value)
                                    for value in conscript_thresholds]
             db_set_card_mutation_field(
@@ -943,14 +945,14 @@ def summon_token(context, payload=None, *, target=None, owner=None):
             state=int(db_card_state_value(
                 context.session.session_id, uid, conn=context.db) or 0))
         if conscript_thresholds is not None:
-            context._push_modifier_card(
+            _leaves_modifiers._push_modifier_card(context,
                 int(uid), thresholds=[int(value)
                                      for value in conscript_thresholds])
         dispatch_trigger(context, "CardEnteredZoneEvent", uid, owner,
                          data={"event_destination_collection": location})
         for attribute, previous, current in conscript_gained_attributes.get(
                 int(uid), ()):
-            context.emit_int_attribute_gained(
+            _leaves_modifiers.emit_int_attribute_gained(context,
                 int(uid), attribute, previous, current)
     if payload.get("conscript_event"):
         faction = str(payload.get("conscript_faction") or "None")
@@ -1101,7 +1103,7 @@ def create_token_copy(context, count=None, target=None):
             conn=context.db, gems=source_gem)
         # C# checks a card that would enter a zone before it enters: a "would enter ... instead" replacement (such as
         # the opposing-deck void) handles the copy, and it does not enter.
-        if context._emit_trigger(
+        if _leaves_abilities._emit_trigger(context,
                 "CardWouldEnterZoneEvent", uid, owner_id,
                 event_source_collection="None",
                 event_destination_collection=location):

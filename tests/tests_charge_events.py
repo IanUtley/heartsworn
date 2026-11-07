@@ -6,6 +6,10 @@ from types import SimpleNamespace
 from unittest import mock
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+from tests.leaf_routing import install_leaf_routes as _install_leaf_routes
+_install_leaf_routes()
+import rules_port.leaves_abilities as _leaves_abilities
+import rules_port.leaves_modifiers as _leaves_modifiers
 
 
 def test_charge_gain_emits_one_trigger_per_point():
@@ -22,12 +26,12 @@ def test_charge_gain_emits_one_trigger_per_point():
         player_uid=None, ai_uid=None, bstate={"champ_map": {5: 12345}},
         effect_guid="charge-test")
 
-    with mock.patch.object(context, "_emit_trigger",
+    with mock.patch.object(_leaves_abilities, "_emit_trigger",
                            return_value="queued") as emit:
-        assert context.emit_gain_charge_triggers(2, owner_id=5) == [
+        assert _leaves_modifiers.emit_gain_charge_triggers(context, 2, owner_id=5) == [
             "queued", "queued"]
     assert emit.call_count == 2
-    assert all(call.args[:3] == ("GainChargeEvent", 12345, 5)
+    assert all(call.args[1:4] == ("GainChargeEvent", 12345, 5)
                for call in emit.call_args_list)
 
 

@@ -45,6 +45,7 @@ class DamageOutcome:
 
 
 def _consume_shields(context, target, dealer, amount, combat):
+    import rules_port.leaves_abilities as _leaves_abilities
     from pvp_db import db_card_damage_shield_fields, db_set_card_mutation_field
     row = db_card_damage_shield_fields(
         context.session.session_id, int(target), conn=context.db)
@@ -132,7 +133,7 @@ def _consume_shields(context, target, dealer, amount, combat):
     # Persist consumption before trigger discovery can inspect/re-enter it.
     for blocked in prevented:
         if dealer is not None:
-            context._emit_trigger(
+            _leaves_abilities._emit_trigger(context,
                 "DamagePreventedEvent", int(dealer),
                 context.target_owner(dealer, default=None), target_card_id=int(target),
                 event_tac={"DamagePrevented": blocked})
@@ -386,6 +387,7 @@ def _int_attr_optional(context, uid, name):
 
 def _set_int_attr(context, target, name, value):
     """Persist one intattr in the store that owns the card identity."""
+    import rules_port.leaves_modifiers as _leaves_modifiers
     champion_owner = context._champion_owner(int(target))
     if champion_owner is not None:
         attrs = context.bstate.setdefault(
@@ -394,7 +396,7 @@ def _set_int_attr(context, target, name, value):
             attrs[name] = int(value)
         else:
             attrs.pop(name, None)
-        context._push_champion_intattrs(champion_owner, int(target))
+        _leaves_modifiers._push_champion_intattrs(context, champion_owner, int(target))
         return
     from pvp_db import db_card_mutation_field, db_set_card_mutation_field
     raw = db_card_mutation_field(
@@ -413,7 +415,7 @@ def _set_int_attr(context, target, name, value):
         context.session.session_id, int(target), "permanent_buffs",
         json.dumps(buffs), conn=context.db)
     context.db.commit()
-    context._push_modifier_card(int(target), int_attrs=attrs)
+    _leaves_modifiers._push_modifier_card(context, int(target), int_attrs=attrs)
 
 
 def _additive_adjustment(context, target, dealer, combat, is_champion):
@@ -531,6 +533,7 @@ def _champion_damage_multiplier(context, dealer):
 
 def _consume_armor(context, target, dealer, amount):
     """C# armor pass: spend Armor - ArmorUsed before replacement events."""
+    import rules_port.leaves_abilities as _leaves_abilities
     armor = _int_attr(context, target, "Armor")
     if armor <= 0:
         return 0
@@ -544,7 +547,7 @@ def _consume_armor(context, target, dealer, amount):
         return 0
     _set_int_attr(context, target, "ArmorUsed", new_used)
     if dealer is not None:
-        context._emit_trigger(
+        _leaves_abilities._emit_trigger(context,
             "DamagePreventedEvent", int(dealer),
             context.target_owner(dealer, default=None),
             target_card_id=int(target),
@@ -570,6 +573,10 @@ def _source_is_lethal(context, dealer):
 
 @serialized_damage
 def deal_damage(context, target, amount, *, outcome=None, only_minimum=False):
+    import rules_port.leaves_abilities as _leaves_abilities
+    import rules_port.leaves_modifiers as _leaves_modifiers
+    import rules_port.leaves_players as _leaves_players
+    import rules_port.leaves_variables as _leaves_variables
     from pvp_db import db_add_card_damage, db_card_source_info
 
     target = int(target)
@@ -607,7 +614,7 @@ def deal_damage(context, target, amount, *, outcome=None, only_minimum=False):
     if _chance_prevention(context, target, combat):
         outcome.absorbed = amount
         if dealer is not None:
-            context._emit_trigger(
+            _leaves_abilities._emit_trigger(context,
                 "DamagePreventedEvent", int(dealer),
                 context.target_owner(dealer, default=None),
                 target_card_id=int(target),
@@ -654,7 +661,7 @@ def deal_damage(context, target, amount, *, outcome=None, only_minimum=False):
     if dealer is not None and not context.bstate.get("_resolving_would_deal"):
         context.bstate["_resolving_would_deal"] = True
         try:
-            replaced = context._emit_trigger(
+            replaced = _leaves_abilities._emit_trigger(context,
                 "CardWouldDealDamageEvent", int(dealer), int(dealer_owner),
                 target_card_id=target,
                 event_tac={"damage": amount,
@@ -663,7 +670,7 @@ def deal_damage(context, target, amount, *, outcome=None, only_minimum=False):
             context.bstate.pop("_resolving_would_deal", None)
         if replaced:
             return "replaced"
-    if context._emit_trigger(
+    if _leaves_abilities._emit_trigger(context,
             "CardWouldBeDamagedEvent", target, int(owner),
             event_tac={"damage": amount, "is_combat_damage": int(combat)}):
         return "replaced"
@@ -682,7 +689,7 @@ def deal_damage(context, target, amount, *, outcome=None, only_minimum=False):
         attributes = effective_stats(
             context.db, context.session.session_id, context.bstate, int(dealer))[2]
         if int(attributes or 0) & int(game_engine.ECardAttributes.SpiritDrain):
-            context.gain_health(int(dealer_owner), amount)
+            _leaves_players.gain_health(context, int(dealer_owner), amount)
 
     def emit_dealt_damage():
         # The client raises CardDealtDamageEvent after damage has actually
@@ -728,13 +735,13 @@ def deal_damage(context, target, amount, *, outcome=None, only_minimum=False):
             # (Session.cs: targetCard.m_ControllingPlayer). Champion abilities
             # such as "When you are dealt damage" read it through
             # TriggerPlayerControlsTarget.
-            context._emit_trigger(
+            _leaves_abilities._emit_trigger(context,
                 "CardDealtDamageEvent", int(dealer), int(dealer_owner),
                 target_card_id=target, target_player_id=int(owner),
                 event_tac={"damage": int(amount),
                            "DamageDealt": int(amount),
                            "is_combat_damage": int(combat)})
-        context._emit_trigger(
+        _leaves_abilities._emit_trigger(context,
             "CardDamagedEvent", target, int(owner),
             event_tac={"damage": int(amount), "is_combat_damage": int(combat)})
 
@@ -767,7 +774,7 @@ def deal_damage(context, target, amount, *, outcome=None, only_minimum=False):
         expire_grants(
             context.db, context.session.session_id, context.bstate,
             damaged_uid=target, handler=context.handler)
-        context._push_champion_intattrs(owner, target)
+        _leaves_modifiers._push_champion_intattrs(context, owner, target)
         emit_dealt_damage()
         return f"champion {current}->{new}"
 
@@ -788,7 +795,7 @@ def deal_damage(context, target, amount, *, outcome=None, only_minimum=False):
         damaged_uid=target, handler=context.handler)
     # update_card_state provides the complete card projection; no state bits
     # are changed, so this is an intentional projection-only call.
-    context.update_card_state(target, commit=False)
+    _leaves_variables.update_card_state(context, target, commit=False)
     emit_dealt_damage()
     remaining = int(effective_stats(
         context.db, context.session.session_id, context.bstate, target)[1] or 0)

@@ -571,9 +571,9 @@ class NativeEffectBackend:
                  battle_state, ability, resume_from_order=None,
                  native_effect=None, effect_groups=None, event_tac=None):
         if native_effect is None:
-            from .effects import dispatch
+            from .native_leaves import dispatch
             native_effect = dispatch
-        from .effects import SELF_TARGETED_EFFECTS
+        from .native_leaves import SELF_TARGETED_EFFECTS
         from rules_port.context import EffectContext
         from rules_port.conditions import ConditionContext, evaluate_effect_condition
         # Opt-in resolver trace: per-leaf card/event deltas for audits.
@@ -1564,7 +1564,7 @@ class PortAbilityResolver:
                 continue
         self.effect_backend = NativeEffectBackend()
         if native_effect is None:
-            from .effects import dispatch
+            from .native_leaves import dispatch
             native_effect = dispatch
         self.native_effect = native_effect
 

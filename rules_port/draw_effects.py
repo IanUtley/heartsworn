@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import rules_port.leaves_abilities as _leaves_abilities
 import game_engine
 
 
@@ -76,8 +77,8 @@ def draw_cards(context, count, owner=None):
                      context.player_uid, context.ai_uid, context.bstate)
             break
         card_uid = int(row[1])
-        if context._emit_trigger(
-                "CardWouldBeDrawnEvent", None, owner) or context._emit_trigger(
+        if _leaves_abilities._emit_trigger(context,
+                "CardWouldBeDrawnEvent", None, owner) or _leaves_abilities._emit_trigger(context,
                 "CardWouldEnterZoneEvent", card_uid, owner,
                 event_source_collection="deck",
                 event_destination_collection="hand"):
@@ -100,12 +101,12 @@ def draw_cards(context, count, owner=None):
         # from this CardUpdated when Collection changes. Sending class 50 as
         # well would make Unity process the same move twice.
         context.game.push_card_drawn(scid, recipient, 1)
-        context._emit_trigger(
+        _leaves_abilities._emit_trigger(context,
             "CardEnteredZoneEvent", card_uid, owner,
             event_source_collection="deck",
             event_destination_collection="hand")
         nth_draw = _record_draw(context, owner)
-        context._emit_trigger(
+        _leaves_abilities._emit_trigger(context,
             "CardDrawnEvent", _champion_uid(context, owner), owner,
             target_card_id=card_uid,
             nth_card_drawn_this_turn_by_this_player=nth_draw)

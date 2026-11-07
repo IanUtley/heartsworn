@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import rules_port.leaves_modifiers as _leaves_modifiers
 import json
 
 
@@ -28,7 +29,7 @@ def apply_rage(context, card_uid):
         context.session.session_id, uid, "permanent_buffs",
         json.dumps(buffs, separators=(",", ":"), sort_keys=True), conn=context.db)
     context.db.commit()
-    context._push_modifier_card(uid)
+    _leaves_modifiers._push_modifier_card(context, uid)
     return rage
 
 

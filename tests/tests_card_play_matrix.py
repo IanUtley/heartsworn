@@ -48,6 +48,7 @@ import threading
 import traceback
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+import rules_port.leaves_abilities as _leaves_abilities
 
 from tests.test_db import fresh_database
 
@@ -1047,7 +1048,7 @@ def _resolve_contract_child_choice(context, child_guid, source_uid, owner_id,
     if child is None:
         return original_resolver(
             context, child_guid, source_uid, owner_id, target_map)
-    context.inherit_child_lists(child_guid)
+    _leaves_abilities.inherit_child_lists(context, child_guid)
     selected = _contract_child_target_map(
         context.db, child, source_uid, int(owner_id or 0),
         context.bstate, context.handler)
@@ -6574,7 +6575,7 @@ def _run_static_modifier_contract(db, card_guid, graph):
                     if (projected and
                             attribute == "cantbeexhaustedbyopponent"):
                         from types import SimpleNamespace
-                        from rules_port.effects import _tap
+                        from rules_port.ir_modifiers import _tap
 
                         class TapContext:
                             def __init__(self, responsible_owner):

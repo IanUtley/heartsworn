@@ -9,6 +9,9 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from tests.leaf_routing import install_leaf_routes as _install_leaf_routes
+_install_leaf_routes()
+import rules_port.leaves_modifiers as _leaves_modifiers
 from tests.test_db import fresh_database
 fresh_database()
 import game_engine
@@ -120,7 +123,7 @@ class DamageRules(unittest.TestCase):
         self.buffs(1025, {"damage_shields": [
             {"amount": 3, "one_shot": True,
              "lasts_indefinitely": False}]}, "temporary_buffs")
-        effect_context.damage_shield(
+        _leaves_modifiers.damage_shield(effect_context,
             1025, 5, {"lastsindefinitely": True})
         temporary = json.loads(self.db.execute(
             'SELECT temporary_buffs FROM game_cards WHERE card_uid=1025'

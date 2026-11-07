@@ -7,6 +7,8 @@ resolve targets and owners live in rules_port.ir_exec; they are imported inside 
 
 from __future__ import annotations
 
+import rules_port.leaves_players as _leaves_players
+import rules_port.leaves_zones as _leaves_zones
 from typing import Any
 
 # The effect templates this module runs, by class name.
@@ -91,7 +93,7 @@ def run_zone_effect(kind: str, root: Any, clause: Any, effect_raw: dict[str, Any
             if kind == "DestroyCardByDefenseAbilityEffectTemplate":
                 # The live leaf rolls for every warzone troop, so it runs once per target, as the resolver calls it.
                 for _target in _targets(root, index, scope):
-                    context.destroy_by_defense()
+                    _leaves_zones.destroy_by_defense(context)
             elif kind == "DrawNCardsAbilityEffectTemplate":
                 # The live leaf draws once per target, for that target's controller (a player target's champion
                 # stands for the player). A target with no controller draws nothing.
@@ -99,7 +101,7 @@ def run_zone_effect(kind: str, root: Any, clause: Any, effect_raw: dict[str, Any
                 for target in _targets(root, index, scope):
                     owner = context.target_owner(int(target), default=None)
                     if owner is not None:
-                        context.draw(count, owner=owner)
+                        _leaves_players.draw(context, count, owner=owner)
             elif kind == "DiscardOrSacrificeCardAbilityEffectTemplate":
                 # C# DiscardOrSacrificeCardAbilityEffectTemplate.Apply: a card in the warzone is sacrificed, a card in
                 # hand is discarded, and any other zone is left alone.
@@ -111,7 +113,7 @@ def run_zone_effect(kind: str, root: Any, clause: Any, effect_raw: dict[str, Any
                     if location == "warzone":
                         kill_troop(context, int(target), cause="sacrifice")
                     elif location == "hand":
-                        context.discard(target=int(target))
+                        _leaves_zones.discard(context, target=int(target))
             else:
                 for target in _targets(root, index, scope):
                     _LEAF[kind](context, int(target))
@@ -121,9 +123,9 @@ def run_zone_effect(kind: str, root: Any, clause: Any, effect_raw: dict[str, Any
 
 # The live leaf each per-target effect calls, with its target passed explicitly.
 _LEAF = {
-    "DiscardCardAbilityEffectTemplate": lambda context, target: context.discard(target=target),
-    "DestroyCardAbilityEffectTemplate": lambda context, target: context.destroy(target=target),
-    "VoidCardAbilityEffectTemplate": lambda context, target: context.void_card(target=target),
-    "BuryCardAbilityEffectTemplate": lambda context, target: context.bury(target=target),
-    "PutTopOfDeckIntoHandAbilityEffectTemplate": lambda context, target: context.put_top_into_hand(target=target),
+    "DiscardCardAbilityEffectTemplate": lambda context, target: _leaves_zones.discard(context, target=target),
+    "DestroyCardAbilityEffectTemplate": lambda context, target: _leaves_zones.destroy(context, target=target),
+    "VoidCardAbilityEffectTemplate": lambda context, target: _leaves_zones.void_card(context, target=target),
+    "BuryCardAbilityEffectTemplate": lambda context, target: _leaves_zones.bury(context, target=target),
+    "PutTopOfDeckIntoHandAbilityEffectTemplate": lambda context, target: _leaves_zones.put_top_into_hand(context, target=target),
 }

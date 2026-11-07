@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import rules_port.leaves_abilities as _leaves_abilities
 import json
 import game_engine
 
@@ -19,7 +20,7 @@ def kill_troop(context, target, *, cause="effect"):
     # The would-enter event carries the zone the troop is about to enter, so a
     # "would die -> void it instead" replacement (Pyre Strike) can match its
     # destination; the card itself still sits in the warzone at this point.
-    if context._emit_trigger(
+    if _leaves_abilities._emit_trigger(context,
             "CardWouldEnterZoneEvent", target, owner,
             event_source_collection="warzone",
             event_destination_collection="discard"):
@@ -54,11 +55,11 @@ def kill_troop(context, target, *, cause="effect"):
     # C# MoveCardWithDispatch enqueues the exit with both collections (CardExitedZoneEvent is an IZoneChange), so the
     # "when this leaves play" conditions can test warzone->discard.  The exit carried neither before, which made the
     # move invisible to any trigger that names a zone.
-    context._emit_trigger(
+    _leaves_abilities._emit_trigger(context,
         "CardExitedZoneEvent", target, owner,
         event_source_collection="warzone",
         event_destination_collection="discard")
-    context._emit_trigger(
+    _leaves_abilities._emit_trigger(context,
         "CardEnteredZoneEvent", target, owner,
         event_source_collection="warzone",
         event_destination_collection="discard",
@@ -67,11 +68,11 @@ def kill_troop(context, target, *, cause="effect"):
         # Session.DestroyCard enqueues CardDestroyedEvent after MoveCard has
         # published the exit/entry transition. GraveyardCard (state-based
         # lethal cleanup) and SacrificeCard use distinct event contracts.
-        context._emit_trigger(
+        _leaves_abilities._emit_trigger(context,
             "CardDestroyedEvent", target,
             int(context.bstate.get("resolving_owner_id", owner) or 0))
     if cause == "sacrifice":
-        context._emit_trigger("CardSacrificedEvent", target, owner)
+        _leaves_abilities._emit_trigger(context, "CardSacrificedEvent", target, owner)
     from .statistics import record_ability_card_list
     if cause == "sacrifice":
         record_ability_card_list(context.bstate, "SacrificedCards", target)
@@ -173,7 +174,7 @@ def champion_would_lose(context, owner_id, *, deduplicate=True):
     context.bstate[replacement_key] = False
     context.bstate["_rules_port_native_effect"] = True
     try:
-        result = context._emit_trigger(
+        result = _leaves_abilities._emit_trigger(context,
             "ChampionWouldLoseEvent", int(champion_uid), owner_id)
         return (result if context.bstate.get(replacement_key) else "")
     finally:

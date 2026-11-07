@@ -220,7 +220,7 @@ def test_twisted_fate_buries_on_player_draw(db):
 def test_native_resource_modifier_maps_pvp_owner_to_effect_view_side(db):
     """A PvP owner ID is not an AI sentinel; map it through the view pids."""
     from types import SimpleNamespace
-    from rules_port.effects import _resource_modifier
+    from rules_port.ir_exec_resources import _resource_modifier
     from rules_port import resources
 
     calls = []

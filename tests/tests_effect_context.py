@@ -6,6 +6,14 @@ from types import SimpleNamespace
 from unittest import mock
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+from tests.leaf_routing import install_leaf_routes as _install_leaf_routes
+_install_leaf_routes()
+import rules_port.leaves_abilities as _leaves_abilities
+import rules_port.leaves_modifiers as _leaves_modifiers
+import rules_port.leaves_players as _leaves_players
+import rules_port.leaves_transforms as _leaves_transforms
+import rules_port.leaves_variables as _leaves_variables
+import rules_port.leaves_zones as _leaves_zones
 
 from tests.test_db import fresh_database
 
@@ -84,8 +92,8 @@ def test_native_grant_ability_can_target_a_champion():
 
     with mock.patch("pvp_db.db_card_grant_info", return_value=None), \
             mock.patch("pvp_db.db_ability_metadata_exists", return_value=True):
-        result = context.grant_ability()
-        opponent_result = opponent_context.grant_ability()
+        result = _leaves_abilities.grant_ability(context)
+        opponent_result = _leaves_abilities.grant_ability(opponent_context)
 
     assert result == f"granted 1 champion ability(s) to {hex(player.uid.uid64)}"
     assert opponent_result == f"granted 1 champion ability(s) to {hex(ai.uid.uid64)}"
@@ -101,7 +109,7 @@ def test_native_grant_ability_can_target_a_champion():
     with mock.patch("pvp_db.db_card_grant_info", return_value=None), \
             mock.patch("pvp_db.db_ability_metadata_exists", return_value=True), \
             mock.patch("rules_port.resolution.resolve_port_ability") as resolve:
-        game_started_context.grant_ability()
+        _leaves_abilities.grant_ability(game_started_context)
     resolve.assert_called_once_with(
         handler, game_started_context.game, game_started_context.session,
         game_started_context.db, game_started_context.player_uid,
@@ -168,7 +176,7 @@ def test_native_discard_creates_parent_continuation_for_hand_picker():
     context = EffectContext.from_rules_port(
         SimpleNamespace(events=[]), _Session(), None, Handler(), 1, 2,
         state, "effect", ability=Ability())
-    assert context.discard() == "prompted"
+    assert _leaves_zones.discard(context) == "prompted"
     assert state["pending_discard_continuation"]["instance_id"] == 7
     assert state["pending_discard_continuation"]["resume_effect_order"] == 3
     assert state["resolution_paused"] is True
@@ -205,7 +213,7 @@ def test_tunnel_moves_source_to_underground_and_emits_zone_triggers():
             mock.patch(
                 "rules_port.creation_effects.activate_creation_replacements"
             ) as replacements:
-        assert context.tunnel() == "tunneled 0x7b"
+        assert _leaves_zones.tunnel(context) == "tunneled 0x7b"
     # Reese's replacement is granted by Underground -> CastSpells, not by
     # entering Underground. It must remain inactive while the card is buried.
     replacements.assert_not_called()
@@ -921,7 +929,7 @@ def test_context_activate_ability_uses_typed_child_resolver():
     from rules_port.context import EffectContext as _Ctx
     with mock.patch.object(_Ctx, "_resolve_child_ability",
                            return_value="child") as run:
-        assert context.activate_ability() == "child"
+        assert _leaves_abilities.activate_ability(context) == "child"
     assert run.call_args.args[:3] == ("child-guid", 123, 5), run.call_args
     assert run.call_args.args[3] == {}, run.call_args
 
@@ -948,7 +956,7 @@ def test_activate_hand_target_prompts_the_player_instead_of_auto_picking():
         object(), _Session(), _DB(), Handler(), "player", "ai", state,
         "effect", child)
     with mock.patch.object(targeting, "legal_targets", return_value=[101, 102]):
-        assert context.activate_ability() == "activate ability: awaiting target from hand"
+        assert _leaves_abilities.activate_ability(context) == "activate ability: awaiting target from hand"
     assert prompts == [(child, ("4c516c4a-0ba9-2b93-dc3e-f037338b9a2a",),
                         [101, 102], 5)], prompts
     assert state.get("resolution_paused") is True
@@ -1052,7 +1060,7 @@ def test_context_draw_preserves_owner_and_handler_boundary():
 
     with mock.patch("rules_port.draw_effects.draw_cards",
                     return_value="draw 2 for owner 5") as draw:
-        assert context.draw(2) == "draw 2 for owner 5"
+        assert _leaves_players.draw(context, 2) == "draw 2 for owner 5"
     draw.assert_called_once_with(context, 2, owner=5)
 
 
@@ -1069,7 +1077,7 @@ def test_context_conversation_uses_typed_id_and_pauses_at_handler_boundary():
          mock.patch.object(
              context, "template_value",
              return_value="11111111-2222-3333-4444-555555555555"):
-        assert context.conversation() == "queued"
+        assert _leaves_abilities.conversation(context) == "queued"
     assert context.bstate["queued_conversation"] == \
         "11111111-2222-3333-4444-555555555555"
     assert context.bstate["resolution_paused"] is True
@@ -1104,7 +1112,7 @@ def test_context_authored_events_use_typed_event_names():
             }.get(name, default)), mock.patch.object(
                 context, "_emit_trigger",
                 return_value="triggered") as emit:
-        assert context.fire_event() == "fired FateweavedEvent: triggered"
+        assert _leaves_abilities.fire_event(context) == "fired FateweavedEvent: triggered"
     assert emit.call_args.args[:3] == ("FateweavedEvent", 123, 5)
 
 
@@ -1128,7 +1136,7 @@ def test_native_transform_uses_typed_stored_target_copy():
                        return_value=("target-template", "Troop", "warzone", 5)), \
             mock.patch("rules_port.transform_effects.transform_instance",
                        return_value=100) as transform:
-        result = context.transform_card()
+        result = _leaves_transforms.transform_card(context)
 
     assert result == "transformed 1 stored card(s) -> target-t"
     transform.assert_called_once_with(
@@ -1502,7 +1510,7 @@ def test_native_transform_to_target_preserves_source_collection():
                     return_value=("target-template",)), \
             mock.patch("rules_port.transform_effects.transform_instance",
                        return_value=100) as transform:
-        result = context.transform_card_to_target()
+        result = _leaves_transforms.transform_card_to_target(context)
 
     assert result == "transformed 0x64 to target copy", result
     transform.assert_called_once_with(
@@ -1526,7 +1534,7 @@ def test_context_draw_effect_uses_typed_or_fixture_count():
 
     with mock.patch("rules_port.draw_effects.draw_cards",
                     return_value="draw 2 for owner 5") as draw:
-        assert context.draw_effect() == "draw 2 for owner 5"
+        assert _leaves_players.draw_effect(context) == "draw 2 for owner 5"
     draw.assert_called_once_with(context, 2, owner=5)
 
 
@@ -1671,7 +1679,7 @@ def test_context_randomize_variable_uses_typed_bounds():
                     "m_MaxValue": 5,
                 }.get(name, default)), mock.patch(
                     "random.randint", return_value=4) as randint:
-        assert context.randomize_variable() == "randomized RandomNumber=4"
+        assert _leaves_variables.randomize_variable(context) == "randomized RandomNumber=4"
     assert context.bstate["ability_variables"]["RandomNumber"] == 4
     randint.assert_called_once_with(2, 5)
 
@@ -1682,7 +1690,7 @@ def test_context_stat_mod_uses_shared_operation_boundary():
         "stat-effect", "")
     with mock.patch(
             "rules_port.stat_effects.apply_stat_mod", return_value=4) as apply:
-        assert context.stat_mod(123, 2, 3, this_turn=True) == 4
+        assert _leaves_modifiers.stat_mod(context, 123, 2, 3, this_turn=True) == 4
     assert apply.call_args.args[1:4] == (123, 2, 3)
     assert apply.call_args.kwargs == {"this_turn": True}
 
@@ -1698,7 +1706,7 @@ def test_context_damage_modifier_resolves_typed_input_and_target():
         },
         "796ff24c-d468-68c1-8636-82d26a149c8b", "")
     with mock.patch.object(context, "damage", return_value="damaged") as damage:
-        assert context.damage_modifier(
+        assert _leaves_modifiers.damage_modifier(context,
             {"text": "Deal 2 damage", "amount": 0},
             {"input_variable": "2"}) == "damaged"
     damage.assert_called_once_with(123, 2)
@@ -1715,7 +1723,7 @@ def test_context_stat_modifier_resolves_typed_input_and_duration():
         },
         "796ff24c-d468-68c1-8636-82d26a149c8b", "")
     with mock.patch.object(context, "stat_mod", return_value=4) as stat_mod:
-        assert context.stat_modifier(
+        assert _leaves_modifiers.stat_modifier(context,
             {"property": "attack", "amount": 0,
              "input_variable": "2", "duration": "EndOfTurn"},
             {"property": "attack", "input_variable": "2"}) == \
@@ -1730,7 +1738,7 @@ def test_context_counter_hides_card_persistence_and_projection():
     with mock.patch(
             "rules_port.counter_effects.change_counter",
             return_value=(3, 1)) as change:
-        assert context.counter(123, "roar", amount=2,
+        assert _leaves_variables.counter(context, 123, "roar", amount=2,
                                operation="remove") == (3, 1)
     change.assert_called_once()
     assert change.call_args.args[1:3] == (123, "roar")
@@ -1744,7 +1752,7 @@ def test_context_counter_uses_champion_state_and_event_projection():
     with mock.patch(
             "rules_port.counter_effects.change_counter",
             return_value=(1, 4)) as change:
-        assert context.counter(123, "roar", "counter-guid", 3) == (1, 4)
+        assert _leaves_variables.counter(context, 123, "roar", "counter-guid", 3) == (1, 4)
     change.assert_called_once()
     assert change.call_args.args[1:4] == (123, "roar", "counter-guid")
 
@@ -1800,7 +1808,7 @@ def test_context_remove_from_combat_preserves_state_event_boundary():
         _Game(), _Session(), _DB(), object(), "player", "ai",
         {"resolving_target_uid": 123}, "combat-effect", "")
     with mock.patch("rules_port.card_projection.push_card_state") as push:
-        assert context.remove_from_combat() == "removed 0x7b from combat"
+        assert _leaves_zones.remove_from_combat(context) == "removed 0x7b from combat"
     push.assert_called_once()
 
 
@@ -1811,7 +1819,7 @@ def test_context_card_state_owns_projection_and_tap_trigger():
     with mock.patch("rules_port.card_projection.push_card_state") as push, \
             mock.patch.object(
                 context, "_emit_trigger", return_value=False) as emit:
-        assert context.update_card_state(
+        assert _leaves_variables.update_card_state(context,
             123, add=1, trigger="CardTappedEvent") == 5
     push.assert_called_once()
     assert emit.call_args.args[:2] == ("CardTappedEvent", 123)
@@ -1824,7 +1832,7 @@ def test_context_lose_thresholds_preserves_state_and_event_operation():
         game, _Session(), _DB(), object(), "player", "ai", bstate,
         "threshold-effect", "")
 
-    assert context.lose_thresholds(["Blood"]) == "lost 2 threshold(s)"
+    assert _leaves_modifiers.lose_thresholds(context, ["Blood"]) == "lost 2 threshold(s)"
     assert bstate["player_threshold"][4] == 0
     assert len(game.events) == 1
     assert game.events[0].operation == 2
@@ -1844,8 +1852,8 @@ def test_context_typed_hero_health_and_spell_points_share_owner_projection():
         game, _Session(), _DB(), object(), "player", "ai", bstate,
         "typed-modifier", "")
 
-    assert context.set_hero_health(123, 25) == "set health 20->25"
-    assert context.spell_points(123, 2) == "spell points 1->3"
+    assert _leaves_players.set_hero_health(context, 123, 25) == "set health 20->25"
+    assert _leaves_players.spell_points(context, 123, 2) == "spell points 1->3"
     assert bstate["player_health"] == 25
     assert bstate["player_spell_points"] == 3
     assert isinstance(game.events[0],
@@ -1862,7 +1870,7 @@ def test_context_typed_card_threshold_and_subtype_preserve_metadata_values():
             mock.patch.object(context, "_card_buffs", return_value={}), \
             mock.patch.object(context, "_save_card_buffs") as save, \
             mock.patch.object(context, "_push_modifier_card") as push:
-        assert context.card_threshold(
+        assert _leaves_modifiers.card_threshold(context,
             123, {"shard": "Ruby", "setthresholds": False}) == \
             "thresholds 0x7b -> [8, 8]"
         save.assert_called_once()
@@ -1872,7 +1880,7 @@ def test_context_typed_card_threshold_and_subtype_preserve_metadata_values():
                            return_value={"subtype": "Orc"}), \
             mock.patch.object(context, "_save_card_buffs") as save, \
             mock.patch.object(context, "_push_modifier_card") as push:
-        assert context.subtype_modifier(
+        assert _leaves_modifiers.subtype_modifier(context,
             123, {"subtype": "Robot", "operation": "Add"}) == \
             "subtype 0x7b -> Orc Robot"
         assert save.call_args.args[1]["subtype"] == "Orc Robot"
@@ -1898,7 +1906,7 @@ def test_context_modifier_keeps_deck_cards_nulled():
         game, _Session(), _DB(), Handler(), "player", "ai", {}, "effect")
     with mock.patch("pvp_db.db_card_zone_details",
                     return_value=("template-guid", 0, 0, "deck")):
-        context._push_modifier_card(123, int_attrs={"Prophesied": -2})
+        _leaves_modifiers._push_modifier_card(context, 123, int_attrs={"Prophesied": -2})
 
     assert game.updated[0][1]["nulling"] is True
     assert game.updated[0][1]["int_attrs"] == {"Prophesied": -2}
@@ -1911,7 +1919,7 @@ def test_context_typed_damage_shield_uses_client_flags():
     with mock.patch.object(context, "_card_buffs", return_value={}) as buffs, \
             mock.patch.object(context, "_save_card_buffs") as save, \
             mock.patch.object(context, "_push_modifier_card") as push:
-        assert context.damage_shield(
+        assert _leaves_modifiers.damage_shield(context,
             123, 3, {"onlycombatdamage": True, "oneshot": True,
                      "lastsindefinitely": False}) == \
             "damage shield 0x7b +3"
@@ -2084,7 +2092,7 @@ def test_builder_target_and_cost_candidates_delegate_to_shared_legality():
 
 def test_battle2cards_uses_authored_secondary_effect_target():
     """The referenced effect target wins over older stored targets."""
-    from rules_port.effects import dispatch
+    from rules_port.native_leaves import dispatch
 
     ability_guid = "shared-battle-ability"
     first_source, first_target = 0x801, 0x4701

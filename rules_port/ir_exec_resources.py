@@ -7,6 +7,9 @@ ability is refused before it runs."""
 
 from __future__ import annotations
 
+import rules_port.leaves_modifiers as _leaves_modifiers
+import rules_port.leaves_players as _leaves_players
+import rules_port.leaves_variables as _leaves_variables
 import json
 from contextlib import contextmanager
 from typing import Any, Iterator
@@ -135,7 +138,7 @@ def run_modifier(kind: str, modifier: MechanicsObject, root: MechanicsObject, cl
         return
     if kind == CARD_THRESHOLD_MODIFIER:
         for target in ix._targets(root, index, scope):
-            context.card_threshold(int(target), {
+            _leaves_modifiers.card_threshold(context, int(target), {
                 "shard": str(modifier.m_Shard),
                 "setthresholds": bool(modifier.m_SetThresholds),
                 "copysourcecard": bool(modifier.m_CopySourceCard),
@@ -144,7 +147,7 @@ def run_modifier(kind: str, modifier: MechanicsObject, root: MechanicsObject, cl
     if kind == "LoseLifeModifier" and getattr(modifier, "m_LoseHalfHealth", False):
         # C# LoseHalfHealth: the champion loses half its current health, rounded down (context.lose_life halves it).
         for target in ix._targets(root, index, scope):
-            context.lose_life(int(target), 0, {"lose_half_health": True})
+            _leaves_players.lose_life(context, int(target), 0, {"lose_half_health": True})
         return
     if kind == "ChargePointsModifier" and modifier.m_RemoveAllCharges:
         # C# ChargePoints removal: the champion loses every charge it has (the leaf takes the count to zero).
@@ -166,7 +169,6 @@ def run_modifier(kind: str, modifier: MechanicsObject, root: MechanicsObject, cl
 def _apply_to_target(kind: str, modifier: MechanicsObject, target: int, amount: int, context: Any) -> None:
     """One resource or life change on one target, through the live leaf for its kind."""
     if kind in RESOURCE_PROPERTIES:
-        from rules_port.effects import _resource_modifier
         param: dict[str, Any] = {"property": RESOURCE_PROPERTIES[kind], "amount": amount,
                                  "set": bool(getattr(modifier, "m_Set", False))}
         if kind == "ThresholdModifier":
@@ -178,9 +180,9 @@ def _apply_to_target(kind: str, modifier: MechanicsObject, target: int, amount: 
         with _bridge_target(context.bstate, target):
             _resource_modifier(context, {"param": json.dumps(param)})
     elif kind == "LoseLifeModifier":
-        context.lose_life(target, amount, {"lose_half_health": False})
+        _leaves_players.lose_life(context, target, amount, {"lose_half_health": False})
     elif kind == "SpellPointsModifier":
-        context.spell_points(target, amount)
+        _leaves_players.spell_points(context, target, amount)
     else:
         raise NotImplementedError(f"modifier {kind}")
 
@@ -208,10 +210,10 @@ def run_effect(kind: str, effect_raw: dict[str, Any], root: MechanicsObject, cla
     champion = _player_champion(root, index, scope)
     if kind == "ReplenishResourcesAbilityEffectTemplate":
         # The pool refilled is the caster's (the owner the interpreter bridges for the run).
-        context.replenish_resources()
+        _leaves_players.replenish_resources(context)
     elif kind == "LoseThresholdAbilityEffectTemplate":
         with _bridge_target(context.bstate, champion):
-            context.lose_thresholds(list(effect_raw.get("m_Thresholds") or []))
+            _leaves_modifiers.lose_thresholds(context, list(effect_raw.get("m_Thresholds") or []))
     else:
         raise NotImplementedError(f"effect {kind}")
 
@@ -228,7 +230,7 @@ def _lose_threshold(context, effect):
             names = []
     if not isinstance(names, (list, tuple)):
         names = []
-    return context.lose_thresholds(names)
+    return _leaves_modifiers.lose_thresholds(context, names)
 
 
 def _resource_modifier(context, effect):
@@ -252,7 +254,7 @@ def _resource_modifier(context, effect):
     # A set (CurrentResourceModifier/TotalResourceModifier with Set) makes the pool the value, not a change of it.
     is_set = bool(param.get("set")) and property_name in {"currentresource", "totalresource"}
     if amount == 0 and not is_set:
-        amount = context.modifier_value(param, {}, property_name)
+        amount = _leaves_modifiers.modifier_value(context, param, {}, property_name)
     target = context.resolved_target()
     owner = context.target_owner(target, default=None)
     if owner is None:
@@ -265,7 +267,7 @@ def _resource_modifier(context, effect):
         # their own "when you gain a charge" ability indefinitely.
         from .runtime_helpers import champion_owner_id
         if champion_owner_id(context.handler, context.bstate, target) is None:
-            old, new = context.counter(
+            old, new = _leaves_variables.counter(context,
                 int(target), "charge",
                 counter_guid=param.get("counter_template_guid"),
                 amount=amount, operation="add")
@@ -333,7 +335,7 @@ def _resource_modifier(context, effect):
         # Session.AddChargePoints queues one singular GainChargeEvent for
         # every actual point gained, including ChargePointBonus. The counter
         # projection above remains one aggregate UI event.
-        context.emit_gain_charge_triggers(
+        _leaves_modifiers.emit_gain_charge_triggers(context,
             int(change.new_value) - int(change.old_value), owner_id=owner)
     # The C# resource modifiers keep per-effect-instance accounting alongside
     # the player pool mutation. These values back shipped IntAttr operands such

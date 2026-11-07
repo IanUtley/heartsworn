@@ -9,6 +9,8 @@ from types import SimpleNamespace
 from collections.abc import Mapping
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+from tests.leaf_routing import install_leaf_routes as _install_leaf_routes
+_install_leaf_routes()
 
 from tests.test_db import fresh_database
 
@@ -3377,8 +3379,13 @@ def test_death_exit_event_carries_both_collections_before_the_entry():
                            _data.get("event_destination_collection")))
         return None
 
-    context._emit_trigger = recording
+    from unittest import mock
+    from rules_port import leaves_abilities as _leaves_abilities
+    emit_patch = mock.patch.object(_leaves_abilities, "_emit_trigger",
+                                   side_effect=lambda _ctx, *a, **k: recording(*a, **k))
+    emit_patch.start()
     assert kill_troop(context, 902).startswith("killed")
+    emit_patch.stop()
     names = [entry[0] for entry in dispatched]
     exit_event = next(entry for entry in dispatched if entry[0] == "CardExitedZoneEvent")
     assert exit_event == ("CardExitedZoneEvent", 902, 5, "warzone", "discard"), dispatched
@@ -5766,7 +5773,7 @@ def test_fight_and_block_use_the_referenced_instances_first_card():
 def test_every_granted_power_source_is_covered():
     """A grant that takes its abilities from sockets, payments, remembered powers or a random pick now runs.
 
-    ``rules_port.effects.grant_ability`` (the leaf the interpreter calls) already resolves every one of those
+    ``rules_port.ir_event_effects.grant_ability`` (the leaf the interpreter calls) already resolves every one of those
     sources from the battle: a card's socketed gems, its manual powers, the powers the resolving ability remembered,
     and the Inspire / champion-charge pools for a random pick. The interpreter refused all of them as constructs it
     did not model, which kept 62 abilities ("gets all socketed powers of this" and friends) from ever running.
@@ -5839,7 +5846,7 @@ def test_granted_random_power_is_picked_once_per_activation():
     import copy
     import json
     import pvp_db
-    from rules_port import effects, ir_exec
+    from rules_port import ir_event_effects as effects, ir_exec
     from tests.tests_builtin_counter_rules import _context, _setup
     from tests.tests_combat import TPL_GLADIATOR, add_card, make_db
 

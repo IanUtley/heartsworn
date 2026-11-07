@@ -15,12 +15,6 @@ from dataclasses import dataclass, replace
 from typing import Any
 from .damage_effects import assign_damage_shield_order, serialized_damage
 from rules_port.card_view import CardView
-from rules_port.context_zones import ZoneEffectsMixin
-from rules_port.context_transforms import TransformEffectsMixin
-from rules_port.context_modifiers import ModifierEffectsMixin
-from rules_port.context_variables import VariableEffectsMixin
-from rules_port.context_players import PlayerEffectsMixin
-from rules_port.context_abilities import AbilityEffectsMixin
 
 
 def _opposing_owner_in(state, owner, handler):
@@ -46,7 +40,7 @@ def _opposing_owner_in(state, owner, handler):
 
 
 @dataclass
-class EffectContext(ZoneEffectsMixin, TransformEffectsMixin, ModifierEffectsMixin, VariableEffectsMixin, PlayerEffectsMixin, AbilityEffectsMixin):
+class EffectContext:
     """Execution context for one resolved effect target.
 
     ``bstate`` remains the authoritative short-lived resolver state.  This
@@ -276,39 +270,6 @@ class EffectContext(ZoneEffectsMixin, TransformEffectsMixin, ModifierEffectsMixi
             return tuple(getattr(self.handler, "_player_talent_guids", ()))
         return tuple(getattr(self.handler, "_ai_talent_guids", ()))
 
-
-    def conversation(self) -> str:
-        """Queue the typed encounter conversation and pause this BOM.
-
-        ConversationAbilityEffectTemplate is a protocol boundary: the
-        original client opens a UI animation and sends a transaction before
-        the remaining effects may resolve.  The battle handler owns the
-        persisted continuation and wire event; this context only supplies the
-        typed conversation ID and current ability state.
-        """
-        conversation_id = self.template_value("m_ConversationId", "")
-        if isinstance(conversation_id, dict):
-            conversation_id = conversation_id.get("m_Guid", "")
-        conversation_id = str(conversation_id or "").lower()
-        if not conversation_id or conversation_id == "0" * 8 + "-" + "0" * 4 + "-" + "0" * 4 + "-" + "0" * 4 + "-" + "0" * 12:
-            return "conversation: invalid id"
-        queue = getattr(self.handler, "_queue_conversation_prompt", None)
-        if callable(queue):
-            result = queue(
-                self.game, self.session, self.player_uid, self.ai_uid,
-                self.bstate, conversation_id)
-            return str(result or "")
-        # Headless adapters may not expose a wire handler. Preserve the same
-        # continuation marker so tests can assert that the effect pauses
-        # instead of silently succeeding.
-        pending = self.continuation()
-        pending.update({"kind": "conversation", "conversation_id": conversation_id})
-        if self.bstate.get("_interpreter_continuation"):
-            pending["interpreter"] = self.bstate["_interpreter_continuation"]
-        self.bstate["pending_conversation"] = pending
-        self.bstate["resolution_paused"] = True
-        return f"conversation: awaiting {conversation_id}"
-
     def continuation(self, *, resume_effect_order: int | None = None,
                      **overrides) -> dict[str, Any]:
         """Return a JSON-safe snapshot for an authored pause/resume point."""
@@ -431,93 +392,5 @@ class EffectContext(ZoneEffectsMixin, TransformEffectsMixin, ModifierEffectsMixi
             return int(value)
         return int(game_engine.SHARD_TO_FLAG.get(
             str(value or "").lower(), 0) or 0)
-
-
-    def zombie_plague(self) -> str:
-        """Void a zero-defense troop and create the typed zombie token."""
-        target = self.resolved_target()
-        if target is None:
-            return "zombie plague: no target"
-        from pvp_db import db_card_type_effective_defense
-        row = db_card_type_effective_defense(
-            self.session.session_id, int(target), conn=self.db)
-        if not row or "troop" not in str(row[0] or "").lower():
-            return "zombie plague: target is not a troop"
-        if int(row[1] or 0) + int(row[2] or 0) > 0:
-            return "zombie plague: defense remains"
-        self.void_card()
-        guid = self.template_value("m_CardTemplateId", "")
-        if not guid:
-            return "zombie plague: voided (token metadata missing)"
-        from rules_port.token_effects import summon_token
-        return summon_token(self, {"token_guid": str(guid).lower(),
-                                    "amount": 1, "collection": "Warzone"})
-
-    def xarlox(self) -> str:
-        """Mill three typed deck cards, summoning one token per milled troop."""
-        owner = self.target_owner(self.resolved_target(), default=
-                                  self.bstate.get("resolving_owner_id", 0))
-        if owner is None:
-            return "xarlox: no owner"
-        token_guid = self.template_value("m_CardTemplateId", "")
-        milled = troops = 0
-
-        def summon(guid):
-            payload = {"token_guid": str(guid).lower(), "amount": 1,
-                       "collection": "Warzone"}
-            from rules_port.token_effects import summon_token
-            return summon_token(self, payload)
-        from pvp_db import db_deck_top_card_type, db_move_card_to_discard_reset
-        for _ in range(3):
-            row = db_deck_top_card_type(
-                self.session.session_id, int(owner), conn=self.db)
-            if not row:
-                break
-            uid, card_type = int(row[0]), str(row[1] or "")
-            db_move_card_to_discard_reset(
-                self.session.session_id, uid, conn=self.db)
-            self.db.commit()
-            from rules_port.zone_effects import project_card
-            project_card(self, uid, "discard")
-            milled += 1
-            if "troop" in card_type.lower():
-                troops += 1
-                if token_guid:
-                    summon(token_guid)
-        return f"xarlox milled {milled}, summoned {troops}"
-
-    def plan_c(self) -> str:
-        """Execute the temporary client Plan C resource-to-token effect."""
-        owner = self.target_owner(self.resolved_target(), default=
-                                  self.bstate.get("resolving_owner_id", 0))
-        if owner is None:
-            return "plan c: no owner"
-        side = "player" if int(owner) else "ai"
-        total_key, current_key = f"{side}_total_resources", f"{side}_resources"
-        total = int(self.bstate.get(total_key, 0) or 0)
-        amount = total // 2
-        self.bstate[total_key] = 0
-        self.bstate[current_key] = 0
-        setattr(self.game, total_key, 0)
-        setattr(self.game, current_key, 0)
-        guid = self.template_value("m_CardTemplateId", "")
-        if not guid or amount <= 0:
-            return f"plan c: spent {total}, created 0"
-        collection = self.template_value("m_CardCollection", "Warzone")
-        payload = {"token_guid": str(guid).lower(), "amount": amount,
-                   "collection": str(collection).rsplit(".", 1)[-1]}
-        from rules_port.token_effects import summon_token
-        return summon_token(self, payload)
-
-
-    def reveal_cards(self) -> str:
-        """Run the metadata reveal through RulesPort."""
-        from rules_port.reveal_effects import reveal_cards
-        return reveal_cards(self)
-
-    def battle_cards(self, effect=None) -> str:
-        """Resolve the metadata Battle2Cards operation through RulesPort."""
-        from rules_port.battle_effects import battle_cards
-        return battle_cards(self, effect)
 
 

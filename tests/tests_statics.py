@@ -342,7 +342,7 @@ def test_ember_cant_gain_health_reaches_the_native_heal_path(db):
     health" charge power healed while she was in play.
     """
     from rules_port.context import EffectContext
-    from rules_port.effects import _heal_hero
+    from rules_port.ir_modifiers import heal_hero_modifier as _heal_hero
     from rules_port.static_rules import global_flags
     from tests.tests_combat import HandlerStub, SessionStub
 
@@ -620,7 +620,7 @@ def test_end_of_turn_cleanup_clears_damage_before_buffs(db):
 def test_beginning_of_owners_turn_uses_source_controller(db):
     """A native attribute effect expires on its source controller's turn."""
     from rules_port.context import EffectContext
-    from rules_port.effects import _card_modifier
+    from rules_port.ir_modifiers import _card_modifier
     from rules_port.lifecycle import clear_expired_temporary_attributes
 
     class H:

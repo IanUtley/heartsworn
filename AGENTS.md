@@ -28,7 +28,7 @@ Key files:
 - `game_session.py` — Session state management
 - `static.py` — ALL DB DDL + seeded tables (fresh DBs; single source of truth)
 - `db.py` — Shared SQLite connection (`db._db`), transactions and logging context; domain `db_*` helpers live in `pvp_db.py`, `profile_db.py`, `pve_db.py`, `tournament_db.py`, `replay_db.py` and `chat_db.py`
-- `rules_port/resolution.py` / `rules_port/effects.py` - ability resolution and effect dispatch
+- `rules_port/resolution.py` / `rules_port/native_leaves.py` - ability resolution and the native effect leaf table; leaf bodies live in `rules_port/leaves_*.py`
 - `AssetExtraction/extract_talents.py` — regenerates talent/ability-BOM seed snapshot
 - `migration.py` — run-and-delete one-off migrations (restart.sh)
 - `hconnect.db` — SQLite database

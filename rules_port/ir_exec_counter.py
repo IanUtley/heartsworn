@@ -7,6 +7,7 @@ that is no longer on the chain, or one that cannot be interrupted.
 
 from __future__ import annotations
 
+import rules_port.leaves_abilities as _leaves_abilities
 from typing import Any
 
 import game_engine
@@ -21,7 +22,7 @@ def counter_targets(context: Any, targets: list[int], effect_raw: dict[str, Any]
     try:
         for target in targets:
             bstate["resolving_target_uid"] = int(target)
-            context.counter_spell()
+            _leaves_abilities.counter_spell(context)
     finally:
         context.effect_template_override = previous_template
         if previous_target is None:
@@ -101,7 +102,7 @@ def counter_spell(context):
         context.game.push_card_updated(
             scid, owner, game_engine.ECardCollections.Discard,
             game_engine.ECardTypes.Unknown, nulling=True)
-    context._emit_trigger(
+    _leaves_abilities._emit_trigger(context,
         "CardCounteredEvent", target,
         context.bstate.get("resolving_owner_id", 0),
         event_source_collection="CastSpells",

@@ -1,13 +1,15 @@
 """Interpreter leaves for the TAC, event-firing and bookkeeping effects (gap area N).
 
 ``FireEventEffectTemplate`` and ``TACAbilityEffectTemplate`` run through the native RulesPort leaves
-(``rules_port.effects.dispatch``), so the interpreter does what the resolver does: the same event is fired and the
+(``rules_port.native_leaves.dispatch``), so the interpreter does what the resolver does: the same event is fired and the
 same TAC operation runs. The resolver calls a card-scoped leaf once per target, and once with no target when there
 is none. This module does the same, and restores the target aliases the leaves read once it is done.
 """
 
 from __future__ import annotations
 
+import rules_port.leaves_modifiers as _leaves_modifiers
+import rules_port.leaves_variables as _leaves_variables
 import json
 from typing import Any, cast
 
@@ -21,23 +23,23 @@ NATIVE_LEAF_EFFECTS = frozenset({
     "FireEventEffectTemplate", "TACAbilityEffectTemplate",
     "StoreNameAbilityEffectTemplate", "RememberKeywordPowersEffectTemplate",
     "RegisterTriggerAbilityEffectTemplate", "ActivateTriggeredAbilityEffectTemplate",
-    # Copies the played spell and resolves the copy's authored abilities (rules_port.effects.create_and_cast_spell).
+    # Copies the played spell and resolves the copy's authored abilities (rules_port.ir_event_effects.create_and_cast_spell).
     "CreateAndCastSpellAbilityEffectTemplate",
-    # Presentation only: pushes the client animation for a talent or power (rules_port.effects._animation_trigger).
+    # Presentation only: pushes the client animation for a talent or power (rules_port.ir_event_effects._animation_trigger).
     "AnimationTriggerEffectTemplate",
-    # Records one typed entry in a named list of the ability (a shard pick's ChosenShards; rules_port.effects).
+    # Records one typed entry in a named list of the ability (a shard pick's ChosenShards; rules_port.native_leaves).
     "StoreListAttrAbilityEffectTemplate",
     # Loads the authored deck template for the controller and shuffles it (rules_port.deck_effects.load_player_deck).
     "LoadPlayerDeckAbilityEffectTemplate",
-    # Queues a copy of the activated ability (the one in battle state's card_activated_item), rules_port.effects._copy_ability.
+    # Queues a copy of the activated ability (the one in battle state's card_activated_item), rules_port.ir_event_effects._copy_ability.
     "CopyAbilityEffectTemplate",
     # Offers the choice cards for an AI (chosen at once) or a player (the interpreter pauses for the player's answer,
     # see rules_port.ir_exec._pause_for_double_choice). rules_port.choice_effects.double_choice.
     "DoubleChoiceAbilityEffectTemplate",
-    # Finishes a card's move into the warzone (the card's entry bookkeeping; rules_port.effects dispatch).
+    # Finishes a card's move into the warzone (the card's entry bookkeeping; rules_port.native_leaves dispatch).
     "FinishMovingCardToWarzoneEffectTemplate",
     # The card-play template's two effects: play the card (the native play machinery queues it on the chain) and finish
-    # its resolution (rules_port.effects.play_card, and the finish leaf).
+    # its resolution (rules_port.leaves_abilities.play_card, and the finish leaf).
     "BuiltInPlayCardAbilityEffectTemplate", "FinishResolvingCardAbilityEffectTemplate",
 })
 
@@ -64,7 +66,7 @@ def tac_function_of(effect: Any) -> str:
 
 def run_native_leaf(context: Any, effect_type: str, effect_raw: dict[str, Any], targets: list[int]) -> None:
     """Run one effect template through its native leaf, once per target (or once with no target)."""
-    from rules_port.effects import dispatch
+    from rules_port.native_leaves import dispatch
     bstate = context.bstate
     previous = {key: bstate.get(key) for key in _TARGET_KEYS}
     try:
@@ -378,7 +380,7 @@ def grant_ability(context):
             context.session.session_id, int(target), "permanent_buffs",
             json.dumps(buffs), conn=context.db)
         context.db.commit()
-        context.emit_int_attribute_gained(
+        _leaves_modifiers.emit_int_attribute_gained(context,
             int(target), "Inspire", previous_inspire, 1)
     scid = game_engine.SessionCardId(game_engine.UID(int(destination)))
     from .runtime_helpers import card_collection_for_location, owner_uid
@@ -477,7 +479,7 @@ def _store_list_attr(context):
     list_name = str(context.template_value("m_ListAttrName", "") or "")
     attr_name = str(context.template_value("m_IntAttrName", "") or "")
     value = int(context.template_value("m_IntAttrValue", 0) or 0)
-    return context.store_list_attr(
+    return _leaves_variables.store_list_attr(context,
         list_name, attr_name, value,
         set_list=bool(context.template_value("m_Set", False)),
         until_end_of_turn=bool(

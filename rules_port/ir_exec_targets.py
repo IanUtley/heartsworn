@@ -11,6 +11,7 @@ into ``ir_exec`` only inside functions, so the two import cleanly.
 
 from __future__ import annotations
 
+import rules_port.leaves_variables as _leaves_variables
 from types import SimpleNamespace
 from typing import Any
 
@@ -200,7 +201,7 @@ def store_targets(scope: Any, root_guid: str, effect_raw: dict[str, Any], target
     bstate["resolving_ability"] = root_guid
     try:
         for target in targets:
-            context.store_target(target=int(target))
+            _leaves_variables.store_target(context, target=int(target))
     finally:
         context.effect_template_override = previous_template
         if previous_ability is None:

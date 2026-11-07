@@ -280,8 +280,8 @@ concrete operations derive from `CardAbilityEffectTemplate` (most) or directly.
 
 Read `_t` (or the last `_v` entry), take the final `.`-segment as the class
 name, and look up an executor keyed by that name. That class name is exactly
-what `ability_effects.effect_type` stores and what the dispatch table in
-`rules_port/effects.py` is keyed on.
+what `ability_effects.effect_type` stores and what the native leaf table in
+`rules_port/native_leaves.py` is keyed on.
 
 ### Per-operation parameters (most common 60 of ~120 effect classes)
 
@@ -736,7 +736,7 @@ complete modifier semantics.
 The Python layer is a **work in progress**. This table shows what is genuinely
 data-driven today vs. what is inferred from game text vs. what is missing.
 
-### Implemented effect types (`rules_port/effects.py` dispatch → `EffectContext`)
+### Implemented effect types (`rules_port/native_leaves.py` table → `leaves_*` functions taking `EffectContext`)
 
 | `effect_type` (class name) | Status | Notes |
 |----------------------------|--------|-------|

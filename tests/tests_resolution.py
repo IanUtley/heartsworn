@@ -14,6 +14,7 @@ from types import SimpleNamespace
 from unittest import mock
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+import rules_port.leaves_abilities as _leaves_abilities
 
 from tests.test_db import fresh_database
 
@@ -580,7 +581,7 @@ def test_native_choice_target_opens_one_picker_for_all_options(db):
     with mock.patch("gamedata.ability_graph", return_value=child), \
             mock.patch("rules_port.targeting.legal_targets",
                        return_value=[101, 102]):
-        result = context.activate_ability()
+        result = _leaves_abilities.activate_ability(context)
     assert "awaiting choice of 2" in result, result
     assert len(prompts) == 1
     assert prompts[0]["kind"] == "choice_zone_target"
@@ -762,7 +763,7 @@ def test_native_deck_target_opens_the_deck_search_picker(db):
     with mock.patch("gamedata.ability_graph", return_value=child), \
             mock.patch("rules_port.targeting.legal_targets",
                        return_value=[101, 102]):
-        result = context.activate_ability()
+        result = _leaves_abilities.activate_ability(context)
     assert "awaiting choice of 2" in result, result
     assert context.bstate.get("resolution_paused") is True
     assert len(prompts) == 1
@@ -810,7 +811,7 @@ def test_native_deck_target_ai_auto_selects_without_a_picker(db):
                        return_value=[101, 102]), \
             mock.patch.object(port_resolution, "resolve_port_ability",
                               fake_resolve):
-        assert context.activate_ability() == "resolved"
+        assert _leaves_abilities.activate_ability(context) == "resolved"
     assert calls == {"guid": _ag("child"), "owner": 0,
                      "target_map": {0: (101,)}}, calls
 

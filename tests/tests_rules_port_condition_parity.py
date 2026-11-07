@@ -6,6 +6,7 @@ from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(
     os.path.abspath(__file__))))
+import rules_port.leaves_zones as _leaves_zones
 
 # Several focused assertions import the tournament boundary, which imports
 # ``db`` lazily. Bind it to a disposable metadata database before that can
@@ -237,7 +238,7 @@ def test_native_pvp_champion_destroy_uses_persisted_participant_owner():
             mock.patch("rules_port.death_effects.champion_would_lose",
                        return_value=""), \
             mock.patch("services.tournament_game._pvp_end_game") as end_game:
-        result = context.destroy(900)
+        result = _leaves_zones.destroy(context, 900)
 
     assert result == f"destroyed champion {hex(900)}"
     end_game.assert_called_once_with(
@@ -251,7 +252,7 @@ def test_native_pvp_champion_destroy_honors_loss_replacement():
             mock.patch("rules_port.death_effects.champion_would_lose",
                        return_value="replacement resolved") as replacement, \
             mock.patch("services.tournament_game._pvp_end_game") as end_game:
-        result = context.destroy(900)
+        result = _leaves_zones.destroy(context, 900)
 
     assert result == f"champion defeat replaced {hex(900)}"
     replacement.assert_called_once_with(context, 202, deduplicate=False)
@@ -260,6 +261,8 @@ def test_native_pvp_champion_destroy_honors_loss_replacement():
 
 def test_champion_loss_only_reports_an_accepted_replacement():
     from rules_port.death_effects import champion_would_lose
+
+    from rules_port import leaves_abilities as _leaves_abilities
 
     class Context:
         bstate = {
@@ -279,6 +282,9 @@ def test_champion_loss_only_reports_an_accepted_replacement():
             # A diagnostic string by itself must not count as a replacement.
             return "trigger diagnostic"
 
+    emit = mock.patch.object(_leaves_abilities, "_emit_trigger",
+                             side_effect=lambda ctx, *a, **k: ctx._emit_trigger(*a))
+    emit.start()
     accepted = Context(True)
     assert champion_would_lose(accepted, 202, deduplicate=False)
     assert accepted.bstate["_champion_would_lose_seen"] == [202]
@@ -287,6 +293,7 @@ def test_champion_loss_only_reports_an_accepted_replacement():
     diagnostic_only = Context(False)
     assert champion_would_lose(
         diagnostic_only, 202, deduplicate=False) == ""
+    emit.stop()
 
 
 _CONDITIONS = "Game.Shared.Mechanics.Abilities.Conditions."

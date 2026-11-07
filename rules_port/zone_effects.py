@@ -6,6 +6,7 @@ Unity card representation without calling the legacy BOM utility.
 
 from __future__ import annotations
 
+import rules_port.leaves_abilities as _leaves_abilities
 import json
 
 import game_engine
@@ -147,7 +148,7 @@ def lifebound(context, owner_id):
             clear_bits=int(game_engine.ECardStates.Dead), conn=context.db)
         context.db.commit()
         project_card(context, uid, "warzone")
-        context._emit_trigger(
+        _leaves_abilities._emit_trigger(context,
             "CardEnteredZoneEvent", uid, owner,
             event_source_collection="discard",
             event_destination_collection="warzone",

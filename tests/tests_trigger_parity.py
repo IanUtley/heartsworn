@@ -8,6 +8,8 @@ from types import SimpleNamespace
 from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from tests.leaf_routing import install_leaf_routes as _install_leaf_routes
+_install_leaf_routes()
 
 from tests.test_db import fresh_database
 
@@ -15,7 +17,9 @@ from tests.test_db import fresh_database
 fresh_database()
 
 import game_engine
-from rules_port.effects import _int_attribute
+from rules_port import leaves_abilities as _leaves_abilities
+from rules_port import leaves_modifiers as _leaves_modifiers
+from rules_port.ir_modifiers import int_attr_modifier as _int_attribute
 from rules_port.session import AuthoritativeSession
 from rules_port.token_effects import summon_token
 from tests.tests_combat import (HandlerStub, SessionStub, TPL_GLADIATOR,
@@ -155,6 +159,12 @@ class _SummonContext:
 
 
 def _conscript_is_filtered_repeatable_and_publishes_faction_in_both_modes(shared_db):
+    # The summon stub overrides these moved leaves; route the module calls back to its methods.
+    _routes = [mock.patch.object(_leaves_modifiers, _name, side_effect=(
+        lambda _n: lambda ctx, *a, **k: getattr(ctx, _n)(*a, **k))(_name))
+        for _name in ("emit_int_attribute_gained", "_push_modifier_card", "_card_thresholds")]
+    for _route in _routes:
+        _route.start()
     # Work on a copy: this test removes the other troops so its one Aria candidate is the only match.
     db = sqlite3.connect(":memory:")
     shared_db.backup(db)
@@ -229,6 +239,9 @@ def _conscript_is_filtered_repeatable_and_publishes_faction_in_both_modes(shared
                    for event in conscripts)
         assert [event[0] for event in context._modifier_updates] == created
 
+    for _route in _routes:
+        _route.stop()
+
 
 def _int_attribute_gained_is_a_zero_to_positive_edge(db):
     from rules_port.context import EffectContext
@@ -247,8 +260,9 @@ def _int_attribute_gained_is_a_zero_to_positive_edge(db):
         context.target_owner = lambda _target, default=None: owner
         context._push_modifier_card = lambda *_args, **_kwargs: None
         events = []
-        context._emit_trigger = lambda *args, **kwargs: (
-            events.append((args, kwargs)) or "published")
+        emit = mock.patch.object(_leaves_abilities, "_emit_trigger", side_effect=lambda _ctx, *args, **kwargs: (
+            events.append((args, kwargs)) or "published"))
+        emit.start()
 
         assert _int_attribute(context, uid, {
             "attribute": "Valorous", "amount": 1, "operation": "add"})
@@ -259,6 +273,7 @@ def _int_attribute_gained_is_a_zero_to_positive_edge(db):
         assert _int_attribute(context, uid, {
             "attribute": "Valorous", "amount": 1, "operation": "add"})
         assert len(events) == 1, events
+        emit.stop()
 
 
 def _int_attr_modifier_matches_client_operations(db):
@@ -275,7 +290,8 @@ def _int_attr_modifier_matches_client_operations(db):
         {"resolving_owner_id": 5}, "int-attribute")
     context.target_owner = lambda _target, default=None: 5
     context._push_modifier_card = lambda *_args, **_kwargs: None
-    context._emit_trigger = lambda *args, **kwargs: "published"
+    emit = mock.patch.object(_leaves_abilities, "_emit_trigger", return_value="published")
+    emit.start()
 
     def stored():
         row = db.execute(
@@ -298,6 +314,7 @@ def _int_attr_modifier_matches_client_operations(db):
     assert _int_attribute(context, uid, {
         "attribute": "Gladiator", "amount": 5, "operation": "unknown"})
     assert stored() == before
+    emit.stop()
 
 
 def _deploy_keyword_matches_as_enters_play_abilities():

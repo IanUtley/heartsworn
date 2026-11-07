@@ -4,6 +4,8 @@ import os
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+import rules_port.leaves_abilities as _leaves_abilities
+import rules_port.leaves_variables as _leaves_variables
 
 from tests.test_db import fresh_database  # noqa: E402
 
@@ -203,7 +205,7 @@ def test_tac_without_an_operation_is_rejected_in_native_play():
         game_engine.UID.make(244, 5), game_engine.UID.make(3, 1000),
         {"_rules_port_native_effect": True}, "effect", "")
     with pytest.raises(RuntimeError, match="no native handler"):
-        context.tac()
+        _leaves_abilities.tac(context)
 
 
 def test_unknown_chat_command_gets_the_help_hint():
@@ -812,7 +814,7 @@ def test_tac_append_to_list_records_the_entry_for_this_turn():
         SimpleNamespace(events=[]), SimpleNamespace(session_id=1), make_db(), handler,
         game_engine.UID.make(244, 5), game_engine.UID.make(3, 1000),
         bstate, "effect", param)
-    context.tac()
+    _leaves_abilities.tac(context)
     entries = bstate["list_attrs"][context.ability_guid]["ExtraCombatsThisTurn"]
     assert entries and entries[0]["where"] == "ThisTurnsData", entries
 
@@ -2017,7 +2019,7 @@ def test_card_count_variable_counts_the_owners_cards_in_the_default_zones():
         game_engine.UID.make(244, 5), game_engine.UID.make(3, 1000), bstate, "effect",
         json.dumps({"variable": "Cards"}))
     # The owner has two troops in the warzone; the opponent's troop is not counted.
-    assert context.set_card_count_variable() == "counted Cards=2"
+    assert _leaves_variables.set_card_count_variable(context) == "counted Cards=2"
     assert bstate["ability_variables"] == {"Cards": 2}, bstate
 
 

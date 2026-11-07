@@ -1,13 +1,16 @@
 """Combat, tap and turn effects for the IR interpreter (rules_port/ir_exec.py).
 
 Each effect runs through the live primitive the native resolver uses, with the cards it acts on passed
-explicitly: tap and untap (rules_port/effects.py), remove from combat (rules_port/context.py), the bonus turn
-(rules_port/context.py) and the fight (rules_port/battle_effects.py). The interpreter's caster bridge supplies the
+explicitly: tap and untap (rules_port/ir_modifiers.py), remove from combat (rules_port/leaves_zones.py), the bonus turn
+(rules_port/leaves_abilities.py) and the fight (rules_port/battle_effects.py). The interpreter's caster bridge supplies the
 controller, so no effect logic is forked here.
 """
 
 from __future__ import annotations
 
+import rules_port.leaves_abilities as _leaves_abilities
+import rules_port.leaves_players as _leaves_players
+import rules_port.leaves_zones as _leaves_zones
 from contextlib import contextmanager
 from typing import Any, Iterator
 
@@ -65,17 +68,17 @@ def run_clause(effect_type: str, root: Any, clause: Any, effect_raw: dict[str, A
     try:
         with ir_exec._bridge_caster(context.bstate, owner=scope.owner_uid):
             if effect_type == "TapCardAbilityEffectTemplate":
-                from rules_port.effects import _tap
+                from rules_port.ir_modifiers import _tap
                 _tap(context, targets=targets)
             elif effect_type == "UntapCardAbilityEffectTemplate":
-                from rules_port.effects import _untap
+                from rules_port.ir_modifiers import _untap
                 _untap(context, targets=targets)
             elif effect_type == "RemoveCardFromCombatAbilityEffectTemplate":
                 for target in targets:
-                    context.remove_from_combat(target=int(target))
+                    _leaves_zones.remove_from_combat(context, target=int(target))
             elif effect_type == "GiveBonusTurnAbilityEffectTemplate":
                 # The native leaf queues the caster's next turn, whatever card the effect names.
-                context.queue_bonus_turn()
+                _leaves_abilities.queue_bonus_turn(context)
             elif effect_type == "Battle2CardsAbilityEffectTemplate":
                 _fight(root, clause, scope, targets)
             elif effect_type == "BlockEffectTemplate":
@@ -83,12 +86,12 @@ def run_clause(effect_type: str, root: Any, clause: Any, effect_raw: dict[str, A
             elif effect_type == "SwapHealthAbilityEffectTemplate":
                 # The native leaf swaps the controller's health with the champion it is targeting, if any.
                 with _target_set(context.bstate, resolving_target_uid=targets[0] if targets else None):
-                    context.swap_health()
+                    _leaves_players.swap_health(context)
             elif effect_type == "VerdictAbilityEffectTemplate":
                 # The live verdict leaf resolves once for each card it is given, as the native path does.
                 for target in targets:
                     with _target_set(context.bstate, resolving_target_uid=int(target)):
-                        context.verdict()
+                        _leaves_abilities.verdict(context)
             else:
                 raise NotImplementedError(f"effect {effect_type}")
     finally:

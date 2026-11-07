@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import rules_port.leaves_abilities as _leaves_abilities
 import json
 import game_engine
 
@@ -183,7 +184,7 @@ def _emit_counter_added(context, target, name, old, new, owner):
     if new <= old:
         return
     from rules_port.tac import _tac_attr_hash
-    context._emit_trigger(
+    _leaves_abilities._emit_trigger(context,
         "CounterAddedToCardEvent", target, owner,
         event_tac={_tac_attr_hash("GainedCounterType"): name})
 

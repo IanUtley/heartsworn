@@ -1360,12 +1360,12 @@ those C# rows are not emitted with a `new EventType()` expression.
 | `CardDrawnEvent` | `AuthoritativeSessionBase.cs:3225` | `rules_port/draw_effects.py`; HConnect/PvP draw adapters |
 | `CardEnteredZoneEvent` | `Session.cs:3920` | `rules_port/context.py`, `death_effects.py`, `token_effects.py`, and mode card-transition adapters |
 | `CardExitedZoneEvent` | `Session.cs:3910` | `rules_port/death_effects.py`, `context.py`, `chain_items.py` |
-| `CardGainedIntAttrEvent` | `Mechanics/Card.cs:681-687`, when current value becomes positive from zero | `EffectContext.emit_int_attribute_gained`; typed int-attribute and Inspire mutations in `rules_port/effects.py` |
+| `CardGainedIntAttrEvent` | `Mechanics/Card.cs:681-687`, when current value becomes positive from zero | `leaves_modifiers.emit_int_attribute_gained`; typed int-attribute and Inspire mutations in `rules_port/leaves_modifiers.py` |
 | `CardInspiredEvent` | `Session.cs:2898` | `rules_port/triggers.py` after authored Inspire and valid-target checks |
 | `CardReadiedEvent` | `Session.cs:4019` | `rules_port/context.py:update_card_state` |
 | `CardSacrificedEvent` | `Session.cs:3632` | `rules_port/death_effects.py` |
 | `CardScroungedEvent` | `Session.cs:1198`, via `FireEvent` | HConnect cost mutation; RulesPort scrounge event publication |
-| `CardTappedEvent` | `Session.cs:3972` | `rules_port/effects.py`; HConnect/PvP card-state adapters |
+| `CardTappedEvent` | `Session.cs:3972` | `rules_port/ir_modifiers.py`; HConnect/PvP card-state adapters |
 | `CardTransformedEvent` | `Session.cs:5428,5486` | `rules_port/transform_effects.py` |
 | `CardTransformsEvent` | `Session.cs:5392,5442` | `rules_port/transform_effects.py` |
 | `CardWouldBeDamagedEvent` | `Session.cs:7106,7324` | `rules_port/damage_effects.py` |
@@ -1373,24 +1373,24 @@ those C# rows are not emitted with a `new EventType()` expression.
 | `CardWouldDealDamageEvent` | `Session.cs:7087,7305` | `rules_port/damage_effects.py` |
 | `CardWouldEnterZoneEvent` | `AuthoritativeSessionBase.cs:3047,3757` | `rules_port/death_effects.py`, `draw_effects.py`; HConnect/PvP zone adapters |
 | `CardsAttackedEvent` | `Mechanics/DeclareAttackState.cs:69` | HConnect/PvP attack declaration adapters |
-| `ChampionHealedEvent` | `Session.cs:7434` | `EffectContext.emit_champion_healed` in `rules_port/context.py` |
+| `ChampionHealedEvent` | `Session.cs:7434` | `leaves_players.emit_champion_healed` in `rules_port/context.py` |
 | `ChampionWouldLoseEvent` | `Session.cs:2807` | `rules_port/death_effects.py`; PvP lethal-state adapter |
 | `CombatEndedEvent` | `Mechanics/FirstStrikePriorityWindowState.cs:37`; `AssignDamageState.cs:27` | Native phase-exit callback in `rules_port/turn_states.py`, HConnect and PvP adapters |
 | `ConscriptEvent` | `Mechanics/Abilities/ConscriptAbilityEffectTemplate.cs:129` | `rules_port/token_effects.py` after generated cards and copied thresholds |
 | `CounterAddedToCardEvent` | `AuthoritativeSessionBase.cs:4849` | `EffectContext` counter mutation in `rules_port/context.py` |
-| `FateweavedEvent` | `Mechanics/Abilities/FireEventEffectTemplate.cs:29`, Records `m_EventType` | `EffectContext.fire_event` -> `rules_port.triggers.dispatch_trigger` |
+| `FateweavedEvent` | `Mechanics/Abilities/FireEventEffectTemplate.cs:29`, Records `m_EventType` | `leaves_abilities.fire_event` -> `rules_port.triggers.dispatch_trigger` |
 | `GainChargeEvent` | `Session.cs:4556` | HConnect/PvP resource mutation adapters -> `dispatch_native_trigger` |
 | `GainThresholdEvent` | `Session.cs:4293` | HConnect/PvP threshold mutation adapters -> `dispatch_native_trigger` |
 | `GameStartedEvent` | `Mechanics/StartTurnState.cs:56` | HConnect/PvP setup adapters -> `dispatch_native_trigger` |
 | `HiddenCardEnteredZoneEvent` | `Session.cs:3928` | `rules_port/chain_items.py` and HConnect hidden-zone adapter |
-| `IlluminatedEvent` | `Mechanics/Abilities/FireEventEffectTemplate.cs:29`, Records `m_EventType` | `EffectContext.fire_event` -> `rules_port.triggers.dispatch_trigger` |
+| `IlluminatedEvent` | `Mechanics/Abilities/FireEventEffectTemplate.cs:29`, Records `m_EventType` | `leaves_abilities.fire_event` -> `rules_port.triggers.dispatch_trigger` |
 | `OtherCardCreatedEvent` | `AuthoritativeSessionBase.cs:395,655` | `rules_port/token_effects.py:_publish_created_card` |
 | `PowerShiftedEvent` | `Session.cs:5606` | `rules_port/ability_mutations.py`; HConnect/PvP projection adapters |
 | `PreGameEvent` | `Mechanics/PreGameState.cs:30` | HConnect/PvP setup adapters -> `dispatch_native_trigger` |
 | `TurnEndedEvent` | `Mechanics/EndPhaseState.cs:19` | Native EndPhase entry adapter in HConnect/PvP |
 | `TurnPhaseEvent` | `Mechanics/TurnPhaseState.cs:61` | Native phase-entry callback in HConnect/PvP |
 | `TurnStartedEvent` | `Mechanics/StartTurnState.cs:63` | Native start-turn lifecycle in HConnect/PvP |
-| `VerdictEvent` | `Mechanics/Abilities/FireEventEffectTemplate.cs:29`, Records `m_EventType` | `EffectContext.fire_event` -> `rules_port.triggers.dispatch_trigger` |
+| `VerdictEvent` | `Mechanics/Abilities/FireEventEffectTemplate.cs:29`, Records `m_EventType` | `leaves_abilities.fire_event` -> `rules_port.triggers.dispatch_trigger` |
 
 For each publication, `dispatch_trigger` or `dispatch_native_trigger` enters
 `NativeTriggerBackend`; `RecordsTriggerDiscovery` resolves candidates on both
@@ -1473,7 +1473,7 @@ No card-name branches or card-text inference were added.
 
 Effect damage follows classified activation -> authoritative transaction
 requirements -> native chain/ability resolution -> CardModifier damage ->
-`EffectContext.damage` -> `damage_effects.deal_damage` -> `pvp_db` or champion
+`leaves_players.damage` -> `damage_effects.deal_damage` -> `pvp_db` or champion
 checkpoint mutation -> card/health wire event -> `UIBattle` handler.
 Combat follows declarations/priority -> `combat_damage.resolve` ->
 `CombatResolver` -> the same damage function -> state-based death pass.

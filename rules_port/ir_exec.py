@@ -13,6 +13,9 @@ and the session's cards in ``game_cards``. A construct the interpreter does not 
 
 from __future__ import annotations
 
+import rules_port.leaves_abilities as _leaves_abilities
+import rules_port.leaves_players as _leaves_players
+import rules_port.leaves_zones as _leaves_zones
 import functools
 import json
 import re
@@ -1066,7 +1069,7 @@ def _run_clause(root: MechanicsObject, clause: Any, scope: Scope) -> None:
         # CantGainHealth applies).
         amount = _input_value(modifier, scope)
         for owner in _target_owners(root, index, scope):
-            scope.context.gain_health(int(owner), amount)
+            _leaves_players.gain_health(scope.context, int(owner), amount)
         return
     if kind == "SetHeroHealthModifier":
         # C# SetHeroHealthModifier: each player it lands on has health equal to the amount, through the typed leaf.
@@ -1074,7 +1077,7 @@ def _run_clause(root: MechanicsObject, clause: Any, scope: Scope) -> None:
         for owner in _target_owners(root, index, scope):
             champion = scope.context.champion_card_uid(int(owner))
             if champion is not None:
-                scope.context.set_hero_health(champion, amount)
+                _leaves_players.set_hero_health(scope.context, champion, amount)
         return
     # Damage is dealt to the cards in last-in-first-out order: the client pushes the matching cards on a stack and
     # pops them (a Deathcry's troops are hit before the champion that is listed first).
@@ -1704,7 +1707,7 @@ def _move_cards(root: MechanicsObject, clause: Any, effect_raw: dict[str, Any], 
     try:
         with _bridge_caster(context.bstate, owner=scope.owner_uid):
             for target in targets:
-                context.move_card_to_zone(target=int(target))
+                _leaves_zones.move_card_to_zone(context, target=int(target))
     finally:
         context.effect_template_override = previous_template
 
@@ -1836,7 +1839,7 @@ def _invoke(parent_guid: str, position: int, effect_raw: dict[str, Any], scope: 
         # C# ActivateAbilityEffectTemplate with m_RandomlyLuckyOrUnlucky invokes a random Lucky (or, on an Unlucky card,
         # Unlucky) ability, and its authored invoke is ignored. The native pool picks it (context._random_sack_ability).
         with _bridge_caster(scope.context.bstate, owner=scope.owner_uid, source=scope.source_uid):
-            child_guid = scope.context._random_sack_ability() or ZERO_GUID
+            child_guid = _leaves_abilities._random_sack_ability(scope.context) or ZERO_GUID
     if not child_guid or child_guid == ZERO_GUID:
         return
     child_root = _load("AbilityTemplate", child_guid)
@@ -1848,7 +1851,7 @@ def _invoke(parent_guid: str, position: int, effect_raw: dict[str, Any], scope: 
         # The child starts from the lists the parent recorded so far (C# Session.CreateAbility appends the parent), so
         # a stored-targets read in the child finds the parent's stored cards.
         with _bridge_caster(scope.context.bstate, ability=parent_guid):
-            scope.context.inherit_child_lists(child_guid)
+            _leaves_abilities.inherit_child_lists(scope.context, child_guid)
         try:
             _run_effects(child_guid, child_root, child_scope, start=0)
         except (NeedsChoice, NeedsConversation) as pause:

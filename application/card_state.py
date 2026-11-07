@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import rules_port.leaves_players as _leaves_players
 from typing import TYPE_CHECKING
 import json
 from dataclasses import replace
@@ -769,7 +770,7 @@ class CardStateMixin(_HostBase):
             context = EffectContext.from_rules_port(
                 game, session, db._db, self, game.player_uid, ai_t,
                 battle_state, "", ability=None)
-            context.draw(1, owner=0)
+            _leaves_players.draw(context, 1, owner=0)
             from rules_port.persistence import save_state
             save_state(session, battle_state)
             return bool(battle_state.pop("_rules_port_deck_out_owner", None))
@@ -829,7 +830,7 @@ class CardStateMixin(_HostBase):
             context = EffectContext.from_rules_port(
                 game, session, db._db, self, draw_pl_t, ai_t, bstate,
                 "", ability=None)
-            context.draw(1, owner=owner_id)
+            _leaves_players.draw(context, 1, owner=owner_id)
             if is_pvp:
                 from services.tournament_game import pvp_save_state
                 pvp_save_state(session, bstate)

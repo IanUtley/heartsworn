@@ -7,6 +7,8 @@ target is bridged there for one call and restored after it. The effect's own tem
 """
 from __future__ import annotations
 
+import rules_port.leaves_transforms as _leaves_transforms
+import rules_port.leaves_zones as _leaves_zones
 from contextlib import contextmanager
 from typing import Any, Callable, Iterator
 
@@ -128,7 +130,7 @@ def _resolving_target(bstate: dict[str, Any], target: int) -> Iterator[None]:
 
 def _tunnel(context: Any, target: int, count: int | None) -> None:
     # C# TunnelAbilityEffectTemplate: the target goes underground through the live zone move.
-    context.tunnel()
+    _leaves_zones.tunnel(context)
 
 
 def _transform(context: Any, target: int, count: int | None) -> None:
@@ -143,7 +145,7 @@ def _transform(context: Any, target: int, count: int | None) -> None:
         transform_into_stored_copy(context, serialized)
         return
     if context.template_value("m_Portal", False):
-        new_template = context._portal_template_for(target)
+        new_template = _leaves_transforms._portal_template_for(context, target)
         if not new_template:
             return
     else:
@@ -163,19 +165,19 @@ def _transform_at_random(context: Any, target: int, count: int | None) -> None:
 def _transform_self(context: Any, target: int, count: int | None) -> None:
     # C# TransformSelfAbilityEffectTemplate: the source becomes a copy of the target (a replica when authored), or a
     # garden plant at random. The leaf reads the source and the target from the battle state (both bridged).
-    context.transform_self()
+    _leaves_transforms.transform_self(context)
 
 
 def _transform_replica(context: Any, target: int, count: int | None) -> None:
     # C# TransformCardIntoReplicaAbilityEffectTemplate: the target becomes a replica of itself, keeping its zone. The
     # native leaf reads the target from the resolving-target alias the runner names.
-    context.transform_replica()
+    _leaves_transforms.transform_replica(context)
 
 
 def _conscript(context: Any, target: int, count: int | None) -> None:
     # C# ConscriptAbilityEffectTemplate: cards from the deck for the player (the target is the player's champion).
     # The leaf reads its amount from the bridged ability variables, and the owner from the target.
-    context.conscript()
+    _leaves_transforms.conscript(context)
 
 
 def _copy_token(context: Any, target: int, count: int | None) -> None:

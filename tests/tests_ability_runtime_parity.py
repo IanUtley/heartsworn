@@ -14,7 +14,7 @@ SRC = fresh_database()
 
 import game_engine
 from gamedata.semantics import EffectSpec
-from rules_port.effects import dispatch
+from rules_port.native_leaves import dispatch
 from rules_port.effect_lifetimes import _expired, _intattr_expired
 from rules_port.resolution import NativeEffectBackend
 from tests.tests_combat import (TPL_GLADIATOR, HandlerStub, SessionStub,

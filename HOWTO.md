@@ -321,7 +321,7 @@ Dazed, Vulnerable) from the cached `CardRepresentation` counters, and only a
 never reaches the portrait. Champion IntAttrs (`battle_state["champion_int_attrs"]`)
 follow the same rule: `GoChampionEffects` maps the `Toxified` IntAttr (not a
 counter; Records has no Toxic counter template) to the Toxify HUD icon, so
-`EffectContext._push_champion_intattrs` publishes a champion `CardUpdated`
+`leaves_modifiers._push_champion_intattrs` publishes a champion `CardUpdated`
 carrying `int_attrs`, and `_push_champions_warm` copies them onto the rebuilt
 champion CardDefs so later champion re-pushes keep them. `SessionCardId`
 hashes by identity: look up a champion CardDef by its raw UID, not by a

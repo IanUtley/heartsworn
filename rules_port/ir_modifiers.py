@@ -7,6 +7,10 @@ here; lasting durations belong to area H.
 
 from __future__ import annotations
 
+import rules_port.leaves_abilities as _leaves_abilities
+import rules_port.leaves_modifiers as _leaves_modifiers
+import rules_port.leaves_players as _leaves_players
+import rules_port.leaves_variables as _leaves_variables
 import json
 from typing import Any, Iterable
 
@@ -174,33 +178,33 @@ def run_modifier(modifier: MechanicsObject, effect_guid: str, duration: str,
                   "damagedealeradditionaltarget": int(modifier.m_DamageDealerAdditionalTarget or 0)}
         amount = _input_value(modifier, scope)
         for target in targets:
-            context.damage_shield(int(target), amount, params)
+            _leaves_modifiers.damage_shield(context, int(target), amount, params)
         return
     if kind == "SubTypeModifier":
         # The native subtype leaf sets, adds or removes the subtype the card carries.
         metadata = {"subtype": modifier.m_Subtype, "operation": modifier.m_Operation}
         for target in targets:
-            context.subtype_modifier(int(target), metadata)
+            _leaves_modifiers.subtype_modifier(context, int(target), metadata)
         return
     # Protection modifiers persist as typed rules on the card, through the leaf the native path uses.
     from rules_port.metadata import modifier_metadata
     metadata = modifier_metadata(effect_guid) or {}
     param = {**metadata, "duration": duration}
     for target in targets:
-        context.rule_modifier(int(target), param, metadata)
+        _leaves_modifiers.rule_modifier(context, int(target), param, metadata)
 
 
-# The three modifier operations below are the bodies the native CardModifier dispatch (rules_port.effects)
+# The three modifier operations below are the bodies the native CardModifier dispatch (rules_port.native_leaves)
 # delegates to; each lives with the IR operation it implements.
 
 
 def heal_hero_modifier(context, target, param):
     owner = context.target_owner(
         target, default=context.bstate.get("resolving_owner_id", 0))
-    amount = context.modifier_value(param, param, "healhero")
+    amount = _leaves_modifiers.modifier_value(context, param, param, "healhero")
     if not amount:
         amount = int(param.get("amount") or 0)
-    return context.gain_health(int(owner or 0), amount)
+    return _leaves_players.gain_health(context, int(owner or 0), amount)
 
 
 def card_cost_modifier(context, target, param):
@@ -212,7 +216,7 @@ def card_cost_modifier(context, target, param):
                         db_card_mutation_field, db_set_card_mutation_field)
     amount = int(param.get("amount") or 0)
     if not amount:
-        amount = context.modifier_value(param, param, "cardcost")
+        amount = _leaves_modifiers.modifier_value(context, param, param, "cardcost")
     replace = bool(param.get("replaceexistingvalue"))
     # A replace modifier can legitimately assign 0 ("... become cost [(0)]"),
     # so only an additive modifier falls back to the game-text operand.
@@ -289,7 +293,7 @@ def card_cost_modifier(context, target, param):
     row = db_card_zone_details(
         context.session.session_id, int(target), conn=context.db)
     if row:
-        context._push_modifier_card(int(target))
+        _leaves_modifiers._push_modifier_card(context, int(target))
     if replace:
         return f"cost -> {assigned_cost} on {hex(int(target))}"
     return f"cost {amount:+} on {hex(int(target))}"
@@ -303,7 +307,7 @@ def int_attr_modifier(context, target, param):
         return "intattr: missing attribute"
     amount = int(param.get("amount") or 0)
     if not amount:
-        amount = context.modifier_value(param, param, "intattr")
+        amount = _leaves_modifiers.modifier_value(context, param, param, "intattr")
     operation = str(param.get("operation") or "set").lower()
     double = bool(param.get("double") or param.get("doubled") or False)
     duration = str(param.get("duration") or context.effect_duration)
@@ -373,10 +377,10 @@ def int_attr_modifier(context, target, param):
                 target_owner_id=champion_owner,
                 source_uid=context.bstate.get("resolving_source_uid"),
                 expiration_owner_id=expiration_owner)
-        context._push_champion_intattrs(
+        _leaves_modifiers._push_champion_intattrs(context,
             champion_owner, int(target),
             cleared=() if value else (attr,))
-        context.emit_int_attribute_gained(target, attr, previous, value)
+        _leaves_modifiers.emit_int_attribute_gained(context, target, attr, previous, value)
         return f"intattr {attr}={value} champion={hex(int(target))}"
 
     from pvp_db import db_card_mutation_field, db_set_card_mutation_field
@@ -425,7 +429,6 @@ def int_attr_modifier(context, target, param):
         context.session.session_id, int(target), column,
         json.dumps(buffs), conn=context.db)
     context.db.commit()
-    from .effects import _capture_tamed_card  # the capture leaf stays with the Taming Sphere's effect in effects
     if tamed and _capture_tamed_card(context, int(target), buffs):
         return f"intattr {attr}={value} target={hex(int(target))} (captured)"
     if duration in temporary_durations:
@@ -437,8 +440,8 @@ def int_attr_modifier(context, target, param):
             target_owner_id=context.target_owner(int(target), default=None),
             source_uid=context.bstate.get("resolving_source_uid"),
             expiration_owner_id=expiration_owner)
-    context._push_modifier_card(int(target), int_attrs=attrs)
-    context.emit_int_attribute_gained(target, attr, old, value)
+    _leaves_modifiers._push_modifier_card(context, int(target), int_attrs=attrs)
+    _leaves_modifiers.emit_int_attribute_gained(context, target, attr, old, value)
     return f"intattr {attr}={value} target={hex(int(target))}"
 
 
@@ -475,25 +478,25 @@ def _card_modifier(context, effect):
             context, {"param": json.dumps(param)})
     target = context.resolved_target()
     if property_name == "damage":
-        return context.damage_modifier(param, param)
+        return _leaves_modifiers.damage_modifier(context, param, param)
     if property_name == "loselife":
-        amount = context.modifier_value(param, {}, property_name)
-        return context.lose_life(target, amount, param)
+        amount = _leaves_modifiers.modifier_value(context, param, {}, property_name)
+        return _leaves_players.lose_life(context, target, amount, param)
     if property_name == "setherohealth":
-        amount = context.modifier_value(param, {}, property_name)
-        return context.set_hero_health(target, amount)
+        amount = _leaves_modifiers.modifier_value(context, param, {}, property_name)
+        return _leaves_players.set_hero_health(context, target, amount)
     if property_name == "spellpoints":
-        amount = context.modifier_value(param, {}, property_name)
-        return context.spell_points(target, amount)
+        amount = _leaves_modifiers.modifier_value(context, param, {}, property_name)
+        return _leaves_players.spell_points(context, target, amount)
     if property_name == "cardthreshold":
-        return context.card_threshold(target, param)
+        return _leaves_modifiers.card_threshold(context, target, param)
     if property_name == "subtype":
-        return context.subtype_modifier(target, param)
+        return _leaves_modifiers.subtype_modifier(context, target, param)
     if property_name == "damageshield":
-        amount = context.modifier_value(param, {}, property_name)
-        return context.damage_shield(target, amount, param)
+        amount = _leaves_modifiers.modifier_value(context, param, {}, property_name)
+        return _leaves_modifiers.damage_shield(context, target, amount, param)
     if property_name in {"attack", "defense"}:
-        return context.stat_modifier(param, param)
+        return _leaves_modifiers.stat_modifier(context, param, param)
     if property_name == "healhero":
         return heal_hero_modifier(context, target, param)
     if property_name == "cardcost":
@@ -525,21 +528,21 @@ def _card_modifier(context, effect):
             return "counter: no target"
         amount = int(param.get("amount") or 0)
         if not amount:
-            amount = context.modifier_value(param, param, property_name)
+            amount = _leaves_modifiers.modifier_value(context, param, param, property_name)
         operation = str(param.get("operation") or "add").lower()
         counter_guid = param.get("counter_template_guid")
         name = str(param.get("counter_name") or "counter")
         if counter_guid:
             from pvp_db import db_counter_template_name
             name = db_counter_template_name(counter_guid, conn=context.db) or name
-        old, new = context.counter(
+        old, new = _leaves_variables.counter(context,
             target, name, counter_guid, amount, operation)
         return f"counter {name} {old}->{new} target={hex(int(target))}"
     if property_name in {"damagemultiplier", "damageimmunity",
                           "blockimmunity", "blockimmunityexception",
                           "blockrestriction", "targetingimmunity",
                           "attackimmunity"}:
-        return context.rule_modifier(target, param, param)
+        return _leaves_modifiers.rule_modifier(context, target, param, param)
     # Native resolution must not silently accept an unported CardModifier
     # property. Records drift is safer as an explicit failed operation than
     # as a second implementation mutating a different state projection.
@@ -558,7 +561,7 @@ def _card_tag(context, target, param):
         return "tag: missing tag"
     amount = int(param.get("amount") or 0)
     if not amount:
-        amount = context.modifier_value(param, param, "tag")
+        amount = _leaves_modifiers.modifier_value(context, param, param, "tag")
     amount = int(amount or 0)
     operation = str(param.get("operation") or "add").lower()
     duration = str(param.get("duration") or context.effect_duration)
@@ -603,7 +606,7 @@ def _card_tag(context, target, param):
         context.session.session_id, int(target), column,
         json.dumps(buffs), conn=context.db)
     context.db.commit()
-    context._push_modifier_card(int(target))
+    _leaves_modifiers._push_modifier_card(context, int(target))
     return f"tag {key}={int(tags.get(key, 0) or 0)} target={hex(int(target))}"
 
 
@@ -636,7 +639,7 @@ def _capture_tamed_card(context, target, buffs):
         scid, owner, game_engine.ECardCollections.Void, ct,
         template_id=row[0], cost=cost, attack=attack, defense=defense,
         state=state, gems=gems)
-    context._emit_trigger(
+    _leaves_abilities._emit_trigger(context,
         "CardExitedZoneEvent", target, int(row[1] or 0),
         event_source_collection=str(row[2] or "").lower(),
         event_destination_collection="void")
@@ -694,7 +697,7 @@ def _untap(context, targets=None):
     if targets is None:
         return None
     for target in targets:
-        context.update_card_state(
+        _leaves_variables.update_card_state(context,
             target, remove=game_engine.ECardStates.Tapped, commit=False)
     context.db.commit()
     return f"readied {len(targets)}"
@@ -719,7 +722,7 @@ def _tap(context, targets=None):
                 context.session.session_id, int(target), conn=context.db)
             if owner is not None and int(owner) != resolving:
                 continue
-        context.update_card_state(
+        _leaves_variables.update_card_state(context,
             target, add=game_engine.ECardStates.Tapped,
             trigger="CardTappedEvent", commit=False)
         tapped += 1
