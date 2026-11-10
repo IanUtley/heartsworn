@@ -202,6 +202,9 @@ class Card:
     name: str | None = None
     # The card's position in its zone (the deck's top is the lowest).
     position: int = 0
+    # The card template the card was made from ("" for a synthetic champion); its cost is the fallback for a card that has
+    # no game_cards row yet (a card a template makes, before it is placed).
+    template: str = ""
 
 
 @dataclass
@@ -246,12 +249,45 @@ class NeedsConversation(Exception):
         self.continuation = continuation
 
 
+PICKER_WIRED_ZONES: frozenset[str] = frozenset({"choosing"})
+
+
+def _effective_zone(raw_target: Any) -> str:
+    """The zone a pick is from: its authored ``InZone`` collection, or, when the filter names none, the one zone its
+    collection flags name (a warzone troop pick). Flags naming more than one zone (a visibility union) give "". The
+    candidates of such a flags-only pick match the native picker's (checked in tests_ir_choice_zone's census)."""
+    zone = _authored_zone(raw_target)
+    if zone:
+        # A collection naming several zones is a union: the pick is from any of them.
+        return "any" if "|" in zone else zone
+    if not isinstance(raw_target, dict):
+        return ""
+    flags = {part.strip().lower() for part in str(raw_target.get("m_CollectionFlags") or "").split("|")
+             if part.strip() and part.strip() != "None"}
+    if len(flags) == 1:
+        return next(iter(flags))
+    # Several flags and no InZone: the card may sit in any of them (the native picker offers them all).
+    return "any" if len(flags) > 1 else ""
+
+
+def _picker_wired(raw_target: Any) -> bool:
+    """Whether a pick authored by this target template has its picker wired: a Choosing pick, or a single-zone pick
+    (hand, discard, underground, warzone) whose card count is a constant (rules_port/picks.py ``ZONE_PICK_ZONES``)."""
+    from rules_port import picks
+    zone = _effective_zone(raw_target)
+    if not picks.has_countable_maximum(raw_target):
+        return False
+    # A deck pick takes the deck-search prompt, and a choosing or single-zone pick takes its own prompt.
+    return zone in PICKER_WIRED_ZONES or zone == "deck" or zone in picks.ZONE_PICK_ZONES
+
+
 class NeedsChoice(Exception):
     """The ability reached a target the player chooses. Its continuation (JSON-serialisable) resumes it with
     ``resume_ability`` once the player answers; ``candidates`` are the cards the answer may name."""
 
     def __init__(self, continuation: dict[str, Any], candidates: list[int], optional: bool, revealed: bool = False,
-                 minimum: int = 1, maximum: int = 1, match: bool = False, zone: str = "Deck"):
+                 minimum: int = 1, maximum: int = 1, match: bool = False, zone: str = "Deck",
+                 authored_zone: str = ""):
         super().__init__(f"choice of target {continuation['target_index']} for {continuation['ability_guid']}")
         self.continuation = continuation
         self.candidates = candidates
@@ -266,6 +302,9 @@ class NeedsChoice(Exception):
         self.match = match
         # The zone a chosen match is picked from (its collection flags: "Deck" or "Discard").
         self.zone = zone
+        # The zone the authored InZone filter restricts the pick to ("choosing", "deck", ...), or "". The picker kind
+        # is chosen from this (rules_port/picks.py), not from the collection flags.
+        self.authored_zone = authored_zone
 
 
 def _champion_owners(bstate: dict[str, Any]) -> dict[int, int]:
@@ -317,8 +356,23 @@ def _battle_cards(scope: Scope) -> list[Card]:
                           counters={str(names[name]).lower(): int(count)
                                     for name, count in values.items() if name in names},
                           subtype=str(subtype or ""), name=str(template_name or ""),
-                          position=int(position or 0)))
+                          position=int(position or 0), template=str(template or "").lower()))
     return cards
+
+
+def _effective_cost(context: Any, card_uid: int, template_guid: str = "") -> int:
+    """The card's current payable cost. A card with a game_cards row has the cost the payment path uses: the template's
+    printed cost, the instance's cost modifier (card_cost_mod) and the static cost modifiers. It changes during a battle,
+    so it is read when a filter needs it rather than when the battle is loaded. A card with no row yet (one a template
+    makes, before it is placed) costs its template's cost."""
+    from rules_port.static_rules import effective_cost
+    db, session_id = context.db, context.session.session_id
+    placed = db.execute("SELECT 1 FROM game_cards WHERE session_id=? AND card_uid=?",
+                        (session_id, int(card_uid))).fetchone()
+    if placed is None:
+        row = db.execute("SELECT cost FROM card_templates WHERE guid=?", (str(template_guid or "").lower(),)).fetchone()
+        return max(0, int(row[0] or 0)) if row else 0
+    return max(0, int(effective_cost(db, session_id, context.bstate, int(card_uid))))
 
 
 def _champion_subtype(context: Any, owner: int) -> str | None:
@@ -401,7 +455,10 @@ def _filter_holds(card_filter: Any, card: Card, scope: Scope) -> bool:
     if cls == "IntAttrFilter":
         from rules_port.ir_exec_parity import int_attr_value
         actual = int_attr_value(scope.context, card.uid, scope.owner_uid, typed.m_Attribute)
-        return _COMPARISONS[typed.m_ComparisonOp](actual, int(typed.m_Value))
+        # m_CompareToCost compares the attribute with the card's current cost, not the authored value.
+        bound = (_effective_cost(scope.context, card.uid, card.template) if _field(typed, "m_CompareToCost")
+                 else int(typed.m_Value))
+        return _COMPARISONS[typed.m_ComparisonOp](actual, bound)
     if cls == "IsTroop":
         return _has_card_type(card, "Troop") and not card.is_champion
     if cls == "IsHero":
@@ -438,6 +495,25 @@ def _has_counters(card: Card, spec: dict[str, Any]) -> bool:
     guid = _guid(spec.get("m_CounterType")) or str(spec.get("m_CounterType") or "").lower()
     compare = _COMPARISONS[spec["m_ComparisonOp"]]
     return compare(card.counters.get(guid, 0), int(spec.get("m_Amount", 1)))
+
+
+def _authored_zone(raw: Any) -> str:
+    """The zone an authored target template restricts its cards to: the first ``InZone`` collection in its card filter
+    ("choosing", "deck", ...), or "" when the filter names none. The template's collection flags are a visibility union
+    and are not used for this (see targeting.filter_restricts_to_zone)."""
+    if isinstance(raw, dict):
+        if str(raw.get("_t") or "").rsplit(".", 1)[-1] == "InZone":
+            return str(raw.get("m_Collection") or "").lower()
+        for value in raw.values():
+            found = _authored_zone(value)
+            if found:
+                return found
+    elif isinstance(raw, list):
+        for value in raw:
+            found = _authored_zone(value)
+            if found:
+                return found
+    return ""
 
 
 def _zones_of(flags: Any) -> set[str]:
@@ -1145,12 +1221,25 @@ NATIVE_OWNED_TEMPLATES: frozenset[str] = frozenset({
 })
 
 
+@functools.lru_cache(maxsize=None)
+def _refused_by_coverage(guid: str) -> bool:
+    """Whether coverage refuses the ability (memoised: the Records do not change while the server runs). A coverage
+    error is a refusal too, so the ability stays on the native path rather than raising in the interpreter."""
+    try:
+        return bool(coverage(guid))
+    except Exception:
+        return True
+
+
 def engine_runs(guid: str, source_uid: Any, owner_uid: Any, answers: dict[int, Any] | None = None) -> bool:
     """Whether the interpreter resolves this ability. Every ability does except two: the card-play template the native
     card-play machinery owns (NATIVE_OWNED_TEMPLATES), and an ability whose invoked choice is picked from a zone the
     interpreter has no picker for (the choice zone). A player's choice that has no answer yet pauses the interpreter,
     and its picker takes the answer."""
     if str(guid).lower() in NATIVE_OWNED_TEMPLATES:
+        return False
+    # An ability coverage refuses is not run by the interpreter, whatever its picks (run_ability would raise for it).
+    if _refused_by_coverage(str(guid).lower()):
         return False
     return not _invoked_non_revealed_choice(_load("AbilityTemplate", guid), set())
 
@@ -1200,10 +1289,13 @@ def _invoked_non_revealed_choice(root: MechanicsObject, seen: set[str]) -> bool:
         for index in range(len(child_root.m_AbilityTargetTemplateIds or [])):
             if _needs_choice(child_root, index):
                 template = _load("AbilityTargetTemplate", _guid(child_root.m_AbilityTargetTemplateIds[index]))
+                authored_raw = _stored("AbilityTargetTemplate", _guid(child_root.m_AbilityTargetTemplateIds[index]))[1]
                 if _short(template.type_name) != "SourceRevealedTargetTemplate" and \
-                        _zones_of(template.m_CollectionFlags) != {"deck"}:
-                    # Only a pick restricted to the deck has its picker wired (the deck-search prompt). A pick from a
-                    # wider set (the choice zone, the hand) has no wired picker and stays on the native path.
+                        _zones_of(template.m_CollectionFlags) != {"deck"} and \
+                        not _picker_wired(authored_raw):
+                    # Only a pick whose picker is wired runs in the interpreter: the deck-search prompt (a deck pick,
+                    # by collection flags as before), the choice-zone prompt (an authored Choosing pick) and the hand
+                    # prompt (an authored single-card Hand pick). Any other pick stays on the native path.
                     return True
         if _invoked_non_revealed_choice(child_root, seen | {child}):
             return True
@@ -1515,8 +1607,11 @@ def _run_effects(guid: str, root: MechanicsObject, scope: Scope, start: int) -> 
                     minimum, maximum = _pick_bounds(template, candidates, optional, scope)
                     match = _short(template.type_name) == "MatchSecondaryTargetTemplate"
                     zone = str(template.m_CollectionFlags or "Deck")
+                    authored = _effective_zone(_stored("AbilityTargetTemplate", _guid(
+                        root.m_AbilityTargetTemplateIds[index]))[1])
                     raise NeedsChoice(continuation, candidates, optional, revealed=revealed,
-                                      minimum=minimum, maximum=maximum, match=match, zone=zone)
+                                      minimum=minimum, maximum=maximum, match=match, zone=zone,
+                                      authored_zone=authored)
             effect_type, effect_raw = _stored("AbilityEffectTemplate", _guid(_field(clause, "m_EffectTemplateId")))
             # The targets of an effect a later clause names as its secondary target, as they are when it runs.
             instance = int(_field(clause, "m_EffectInstanceId") or 0)

@@ -642,7 +642,8 @@ def resolve_ability_item(host, session, db, game, state, item, player_uid,
     state["resolving_owner_id"] = owner_id
     if target_uid is not None:
         state["player_mod_target"] = int(target_uid)
-    from .resolution import _answers_from_target_map, resolve_port_ability
+    from .resolution import resolve_port_ability
+    from .target_values import _answers_from_target_map
     if graph is not None and not graph.trigger_event_type and source_uid is not None:
         # A spell or activated ability (no trigger): the interpreter runs it, with the player's answers from the item.
         from . import ir_exec
@@ -658,7 +659,7 @@ def resolve_ability_item(host, session, db, game, state, item, player_uid,
                     answers=answers)
                 return
             except ir_exec.NeedsChoice as pause:
-                from .resolution import prompt_interpreted_reveal
+                from .interpreted_prompts import prompt_interpreted_reveal
                 prompt_interpreted_reveal(host, game, session, db, player_uid, ai_uid, state, pause)
                 return
             except ir_exec.NeedsConversation:

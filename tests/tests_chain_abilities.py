@@ -3162,7 +3162,8 @@ def test_two_troop_exhaust_activation_keeps_both_troops(db):
     from application.objfmt_wire import parse_datawrapper
     from application.player_transactions import (
         classify_player_transaction, typed_payload_from_decoded)
-    from rules_port.resolution import build_port_ability, _exhausted_cost_cards
+    from rules_port.resolution import build_port_ability
+    from rules_port.cost_cards import _exhausted_cost_cards
     raw = _TWO_TROOP_EXHAUST_ACTIVATION
     decoded = parse_datawrapper(raw, preserve_complex=True)
     decoded.setdefault("__raw__", raw)

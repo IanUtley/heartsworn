@@ -262,7 +262,7 @@ def test_match_secondary_target_uses_effect_instance_reference(db):
     Herofall stores its selected troop in target slot 0 on effect instance 1;
     resolving the field as target slot 1 silently produced no same-name cards.
     """
-    from rules_port.resolution import _match_secondary_values
+    from rules_port.target_values import _match_secondary_values
 
     target_guid = _ag("match-secondary-target")
     record = SimpleNamespace(
@@ -291,7 +291,7 @@ def test_match_secondary_target_uses_effect_instance_reference(db):
     with mock.patch("gamedata.DEFAULT_RECORD_STORE.get", return_value=record), \
             mock.patch("rules_port.targeting.legal_targets",
                        return_value=(101, 102)), \
-            mock.patch("rules_port.resolution._current_match_card",
+            mock.patch("rules_port.target_values._current_match_card",
                        side_effect=lambda *_args: views.get(_args[2])):
         matched = _match_secondary_values(
             db, 1, ability, effect, target_spec, {},

@@ -127,7 +127,7 @@ def _ability_shim(root_guid: str, scope: Any) -> SimpleNamespace:
 
 def follow_up_targets(template: Any, template_guid: str, root_guid: str, scope: Any) -> list[int]:
     """The cards a follow-up target names, from the bookkeeping the live path keeps for them."""
-    from rules_port import resolution
+    from rules_port import target_values
     from rules_port.ir_exec import _card_by_uid, _filter_holds
     context = scope.context
     bstate = context.bstate
@@ -152,13 +152,13 @@ def follow_up_targets(template: Any, template_guid: str, root_guid: str, scope: 
     ability = _ability_shim(root_guid, scope)
     target_spec = SimpleNamespace(guid=template_guid)
     if kind in LIST_TARGET_KINDS:
-        return [int(uid) for uid in resolution._list_target_values(
+        return [int(uid) for uid in target_values._list_target_values(
             bstate, ability, kind, scope.source_uid, target_spec, db, session_id)]
     # The contingent effect's targets are the ones the interpreter resolved for that effect instance.
     effect = {"secondary_target_index": instance_ref(_get(scope.clause, "m_SecondaryTargetIndex"))}
     if kind == "SecondaryTargetTemplate":
         from rules_port.targeting import filter_resolved_targets
-        raw = (resolution._resolved_effect_target_values(
+        raw = (target_values._resolved_effect_target_values(
             ability, effect["secondary_target_index"], bstate, scope.resolved_by_instance)
             if effect["secondary_target_index"] >= 0 else ())
         return [int(uid) for uid in filter_resolved_targets(
@@ -167,14 +167,14 @@ def follow_up_targets(template: Any, template_guid: str, root_guid: str, scope: 
     # The live resolver's random sample, or its truncation to the maximum count, for an automatic match.
     maximum = constant_count(template, "m_MaxTargetCount")
     if template.m_IsRandomTarget:
-        return [int(uid) for uid in resolution._random_target_sample(values, maximum, bstate)]
+        return [int(uid) for uid in target_values._random_target_sample(values, maximum, bstate)]
     return [int(uid) for uid in (values[:maximum] if maximum > 0 else values)]
 
 
 def match_values(template: Any, template_guid: str, root_guid: str, scope: Any) -> list[int]:
     """Every card a match target finds from the secondary effect it names, before any count is applied (an automatic
     match is truncated by follow_up_targets; a chosen one lets the player pick among all of them)."""
-    from rules_port import resolution
+    from rules_port import target_values
     context = scope.context
     bstate = context.bstate
     db = context.db
@@ -183,7 +183,7 @@ def match_values(template: Any, template_guid: str, root_guid: str, scope: Any) 
     target_spec = SimpleNamespace(guid=template_guid)
     effect = {"secondary_target_index": instance_ref(_get(scope.clause, "m_SecondaryTargetIndex"))}
     champions: list[Any] = getattr(context.handler, "_champion_targets", lambda: [])() or []
-    return [int(uid) for uid in resolution._match_secondary_values(
+    return [int(uid) for uid in target_values._match_secondary_values(
         db, session_id, ability, effect, target_spec, bstate, champions=champions,
         resolved_by_instance=scope.resolved_by_instance)]
 
@@ -248,5 +248,5 @@ def capped(candidates: list[int], count: int) -> list[int]:
 def random_picks(candidates: list[int], count: int, bstate: dict[str, Any]) -> list[int]:
     """The cards of a random automatic target: up to ``count`` of the candidates, drawn with the session RNG as the
     live resolver draws them (AbilityTargetTemplate.FilterRandomTargets)."""
-    from rules_port import resolution
-    return [int(uid) for uid in resolution._random_target_sample(candidates, count, bstate)]
+    from rules_port import target_values
+    return [int(uid) for uid in target_values._random_target_sample(candidates, count, bstate)]

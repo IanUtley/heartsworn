@@ -592,6 +592,63 @@ def _pvp_reassign_priority_after_disconnect(session, disconnected_pid, survivor_
     return True
 
 
+def _pvp_resume_interpreted_pick(handler, session, state, pend, answer, my_pid):
+    """Resume the interpreter with the answer to an authored hand pick (rules_port/resolution.py) on the PvP view, then
+    save and push the same priority the choice answer does. ``answer`` is a UID, a list of UIDs for a multi-card pick, or
+    None for a declined optional single pick. The native chain push is not used."""
+    from rules_port import ir_exec
+    from rules_port.context import EffectContext
+    from rules_port.interpreted_prompts import prompt_interpreted_reveal
+    pids = _resolve('db_game_session_pids')(session.session_id)
+    owner_id = int(pend.get('owner_id', my_pid))
+    opp_pid = pids[0] if pids[1] == owner_id else pids[1]
+    pl_t = _ge.UID.make(244, owner_id)
+    ai_t = _ge.UID.make(244, opp_pid)
+    state.pop('pending_trigger', None)
+    view = _resolve('_pvp_fra_view')(state, owner_id, opp_pid)
+    view.pop('pending_trigger', None)
+    view.pop('resolution_paused', None)
+    view['resolving_owner_id'] = owner_id
+    g = _ge.Game(int(session.session_id), pl_t, ai_t)
+    _resolve('_pvp_populate_game_state')(g, state, owner_id, opp_pid)
+    context = EffectContext.from_rules_port(g, session, _resolve('_db'), handler, pl_t, ai_t, view, 'trigger', ability=None)
+    try:
+        if isinstance(answer, list):
+            answer = [int(uid) for uid in answer]
+        else:
+            answer = None if answer is None else int(answer)
+        ir_exec.resume_ability(pend['interpreter'], answer, context=context)
+    except ir_exec.NeedsChoice as pause:
+        prompt_interpreted_reveal(handler, g, session, _resolve('_db'), pl_t, ai_t, view, pause)
+    except ir_exec.NeedsConversation:
+        pass  # the leaf saved the pause; the client's answer resumes the interpreter
+    else:
+        completed = int(state.pop('paused_chain_instance_id', 0) or 0)
+        if completed:
+            state['completed_chain_instance_id'] = completed
+    _resolve('_pvp_sync_view_to_state')(state, view, owner_id, opp_pid)
+    _resolve('pvp_save_state')(session, state)
+    _resolve('_pvp_send_same_events')(session, g, pl_t, ai_t)
+    if any(state.get(key) for key in ('pending_choice', 'pending_trigger', 'pending_deck_search',
+                                      'pending_conversation', 'resolution_paused')):
+        return True
+    _resolve('_pvp_push_waiting_on')(session, None)
+    g2 = _ge.Game(int(session.session_id), pl_t, ai_t)
+    g2.push_chain_empty()
+    state['priority_pid'] = int(state.get('turn_pid') or owner_id)
+    _resolve('pvp_save_state')(session, state)
+    turn_handler = _resolve('player_handlers').get(int(state['priority_pid']))
+    if turn_handler is not None:
+        turn_uid = _ge.UID.make(244, int(state['priority_pid']))
+        other_uid = _ge.UID.make(244, opp_pid if int(state['priority_pid']) == owner_id else owner_id)
+        g2 = _ge.Game(int(session.session_id), turn_uid, other_uid)
+        g2.push_green_light(turn_uid, _ge.EPriorityContext.Normal)
+        _resolve('_send_pvp_packet')(turn_handler, session, g2, turn_uid, 'greenlight-after-trigger-pick')
+    if state.get('phase') in (_ge.ETurnPhases.FirstMainPhase, _ge.ETurnPhases.SecondMainPhase):
+        _resolve('pvp_push_main_phase_options')(session, state)
+    return True
+
+
 def _pvp_resolve_trigger_target(handler, session, inner_bytes, my_pid, typed_payload=None):
     """Resolve a PvP triggered-ability continuation.
 
@@ -653,6 +710,34 @@ def _pvp_resolve_trigger_target(handler, session, inner_bytes, my_pid, typed_pay
         if isinstance(raw_activation, dict):
             activation_data.update(raw_activation)
             activation_data['target_map'] = dict(raw_activation.get('target_map') or activation_data.get('target_map') or {})
+    if isinstance(pend.get('interpreter'), dict):
+        # An authored hand pick the interpreter paused for (rules_port/resolution.py). Every card the client named is an
+        # answer (a multi-card pick names several); the interpreter takes the answer, not the native chain push.
+        from rules_port import picks
+        raw_uids = []
+        if isinstance(pending_target_map, dict):
+            selected = pending_target_map.get(target_index, pending_target_map.get(str(target_index)))
+            values = selected if isinstance(selected, (list, tuple, set)) else (selected,) if selected is not None else ()
+            raw_uids.extend(int(getattr(value, 'uid64', value)) for value in values
+                            if isinstance(getattr(value, 'uid64', value), int))
+        if isinstance(inner_bytes, bytes):
+            for m_du in _re.finditer(b'm_UID64;[^;]*;[^;]*;[^;]*;([0-9A-Fa-f]{16});', inner_bytes):
+                try:
+                    uid64 = _st.unpack('<Q', bytes.fromhex(m_du.group(1).decode()))[0]
+                except Exception:
+                    continue
+                if uid64 & 255 == 1:
+                    raw_uids.append(int(uid64))
+        if chosen_uid is not None:
+            raw_uids.append(int(chosen_uid))
+        entry = (pend.get('target_entries') or [{}])[0]
+        answer, complete = picks.hand_answer(
+            raw_uids, entry.get('uids') or [], minimum=int(entry.get('minimum', 1)),
+            maximum=int(entry.get('maximum', 1)), optional=bool(pend.get('optional')))
+        if not complete:
+            log_req('    PvP interpreted hand pick: too few cards chosen; the prompt stays open')
+            return True
+        return _pvp_resume_interpreted_pick(handler, session, state, pend, answer, my_pid)
     state.pop('pending_trigger', None)
     _resolve('pvp_save_state')(session, state)
     ag = str(pend['ability_guid'])
@@ -670,7 +755,8 @@ def _pvp_resolve_trigger_target(handler, session, inner_bytes, my_pid, typed_pay
     g = _ge.Game(int(session.session_id), pl_t, ai_t)
     _resolve('_pvp_populate_game_state')(g, state, owner_id, opp_pid)
     try:
-        from rules_port.resolution import resolve_port_trigger, trigger_event_fields
+        from rules_port.resolution import resolve_port_trigger
+        from rules_port.interpreted_prompts import trigger_event_fields
         resolve_port_trigger(handler, g, session, _resolve('_db'), pl_t, ai_t, view, {'kind': 'trigger', 'ability_guid': ag, 'source_uid': src, 'source_owner_uid': owner_id, 'target_uid': chosen_uid, 'trigger_target_uid': pend.get('trigger_target_uid'), **trigger_event_fields(pend), 'activation_data': activation_data, 'instance_id': int(pend.get('instance_id', 1))})
     except Exception as e:
         import traceback
@@ -2260,7 +2346,19 @@ def _pvp_resolve_choice(handler, session, inner_bytes, my_pid, typed_payload=Non
     _resolve('_pvp_populate_game_state')(g, state, owner_id, opponent_id)
     from rules_port.context import EffectContext
     choice_context = EffectContext.from_rules_port(g, session, _resolve('_db'), handler, pl_t, ai_t, view, 'choice', ability=None)
-    if choice_zone_target:
+    interpreted_pick = pending.get('kind') == 'interpreted_choice_zone' and isinstance(pending.get('interpreter'), dict)
+    if interpreted_pick:
+        # An authored Choosing pick the interpreter paused for (rules_port/resolution.py): the chosen card is its target.
+        # Nothing is played; resume the interpreter on the PvP view, which is saved below.
+        from rules_port import ir_exec
+        from rules_port.interpreted_prompts import prompt_interpreted_reveal
+        try:
+            ir_exec.resume_ability(pending['interpreter'], int(chosen_uid), context=choice_context)
+        except ir_exec.NeedsChoice as pause:
+            prompt_interpreted_reveal(handler, g, session, _resolve('_db'), pl_t, ai_t, view, pause)
+        except ir_exec.NeedsConversation:
+            pass  # the leaf saved the pause; the client's answer resumes the interpreter
+    elif choice_zone_target:
         continuation = pending.get('continuation') or {}
         child_guid = str(continuation.get('ability_guid') or pending.get('ability_guid') or '').lower()
         child_source = int(continuation.get('source_uid', pending.get('source_uid', 0)) or 0)

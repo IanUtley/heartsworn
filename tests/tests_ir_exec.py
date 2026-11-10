@@ -620,13 +620,14 @@ def test_a_trigger_target_selector_is_covered():
 DILIGENCE_CHOOSE_ONE_ABILITY_GUID = "8a93c185-744b-2d28-a6ce-0b104910577f"
 
 
-def test_a_choice_from_the_choice_zone_keeps_its_ability_on_the_native_path():
-    """An invoked pick from the choice zone has no wired picker, so the engine gate sends the ability to the native
-    path. Only a pick restricted to the deck runs in the interpreter."""
+def test_a_choice_from_the_choice_zone_runs_in_the_interpreter():
+    """An invoked pick from the Choosing zone has its choice-zone picker wired (rules_port/picks.py), so the ability runs
+    in the interpreter rather than on the native path."""
     from rules_port import ir_exec
 
-    assert ir_exec._invoked_non_revealed_choice(ir_exec._load("AbilityTemplate", DILIGENCE_CHOOSE_ONE_ABILITY_GUID),
-                                                set())
+    root = ir_exec._load("AbilityTemplate", DILIGENCE_CHOOSE_ONE_ABILITY_GUID)
+    assert not ir_exec._invoked_non_revealed_choice(root, set())
+    assert ir_exec.engine_runs(DILIGENCE_CHOOSE_ONE_ABILITY_GUID, 900, 5)
 
 
 REVEAL_THEN_STORE_ABILITY_GUID = "3532ed8c-2e0f-7a65-d972-4ea301f7e757"

@@ -1311,7 +1311,7 @@ def test_random_target_sample_bounds_the_pool():
     previously resolved to the whole legal pool, moving the entire deck into
     hand.  ``_random_target_sample`` bounds it to the target's maximum.
     """
-    from rules_port.resolution import _random_target_sample
+    from rules_port.target_values import _random_target_sample
 
     class _Rng:
         def next(self, bound):

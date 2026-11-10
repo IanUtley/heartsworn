@@ -119,7 +119,7 @@ class PendingChoicesMixin(_HostBase):
                                 source_uid, ability_guid, target_template_ids,
                                 candidates, owner_id=None,
                                 trigger_target_uid=None, optional=False,
-                                trigger_event=None):
+                                trigger_event=None, interpreter=None, bounds=None):
         """Prompt for an optional trigger and/or its explicit targets.
 
         Mirrors the client's WaitForTriggeredAbilitiesAction: a
@@ -190,6 +190,11 @@ class PendingChoicesMixin(_HostBase):
                     uids = []
             minimum, maximum = self._plan_target_bounds(tid)
             entries.append((index, tid, uids, int(minimum), int(maximum)))
+        if bounds is not None and entries:
+            # The interpreter's own count (a variable maximum, say) replaces the template's, for the option list and the
+            # answer alike.
+            entries = [(index, tid, uids, int(bounds[0]), int(bounds[1]))
+                       for index, tid, uids, _minimum, _maximum in entries[:1]] + entries[1:]
         target_index = entries[0][0] if entries else 0
         bstate["pending_trigger"] = {
             "ability_guid": ability_guid,
@@ -209,6 +214,10 @@ class PendingChoicesMixin(_HostBase):
             "trigger_event": trigger_event,
             "optional": bool(optional),
         }
+        if interpreter is not None:
+            # The interpreter paused for this pick (rules_port/resolution.py): its answer resumes the interpreter, not
+            # the native chain push. Set before the record is copied to the PvP state below.
+            bstate["pending_trigger"]["interpreter"] = interpreter
         # PvP: the trigger choice lives in the PvP state (not the battle
         # state), and the prompt goes only to the choosing player via the
         # tournament packet path — same pattern as _prompt_deck_search.
@@ -391,7 +400,7 @@ class PendingChoicesMixin(_HostBase):
         import hconnect_server as _hc
         from rules_port import ir_exec
         from rules_port.context import EffectContext
-        from rules_port.resolution import prompt_interpreted_reveal
+        from rules_port.interpreted_prompts import prompt_interpreted_reveal
         _be = self._checkpoint_engine(session)
         log_req("    Conversation answered: resuming the interpreter "
                 f"{continuation['ability_guid'][:8]}")
@@ -779,6 +788,7 @@ class PendingChoicesMixin(_HostBase):
             _resolve_choice_card_abilities as resolve_choice_card_abilities)
         from rules_port.resolution import (
             resolve_port_ability)
+        from rules_port.picks import INTERPRETED_CHOICE_ZONE
         bstate = _be.load_state(session)
         pending = bstate.get("pending_choice")
         if not pending:
@@ -818,12 +828,16 @@ class PendingChoicesMixin(_HostBase):
         bstate.pop("pending_choice", None)
         bstate.pop("resolution_paused", None)
         g = self._fresh_game(session, pl_t, ai_t, bstate)
+        if pending.get("kind") == INTERPRETED_CHOICE_ZONE and isinstance(pending.get("interpreter"), dict):
+            # An authored pick from the Choosing zone (rules_port/resolution.py): the chosen card is the target the
+            # interpreter paused for. Nothing is played.
+            return self._resume_interpreted_pick(session, pl_t, ai_t, bstate, pending["interpreter"], chosen_uid, g)
         if pending.get("kind") == "double_choice" and isinstance(pending.get("interpreter"), dict):
             # The interpreter paused for this choice (rules_port/ir_exec.py). Play the chosen card and resolve its
             # abilities as the native branch does, then resume the interpreter after the double-choice clause.
             from rules_port import ir_exec
             from rules_port.context import EffectContext
-            from rules_port.resolution import prompt_interpreted_reveal
+            from rules_port.interpreted_prompts import prompt_interpreted_reveal
             bstate["_rules_port_attached"] = True
             choice_context = EffectContext.from_rules_port(
                 g, session, db._db, self, pl_t, ai_t, bstate, "", ability=None)
@@ -1154,6 +1168,48 @@ class PendingChoicesMixin(_HostBase):
             f"source={hex(source_uid)} candidates={len(candidates or [])}")
         return "revealed choice: awaiting player"
 
+    def _resume_interpreted_pick(self, session, pl_t, ai_t, bstate, continuation, answer, g=None):
+        """Resume the interpreter with the player's answer to an authored pick (a Choosing card or a hand pick), then
+        finish the chain item as the other interpreter prompts do. ``answer`` is a card UID, a list of UIDs for a
+        multi-card pick, or None for a declined optional single pick. The transaction is acknowledged here, and True is
+        returned."""
+        from rules_port import ir_exec
+        from rules_port.context import EffectContext
+        from rules_port.interpreted_prompts import prompt_interpreted_reveal
+        _be = self._checkpoint_engine(session)
+        if g is None:
+            g = self._fresh_game(session, pl_t, ai_t, bstate)
+        if isinstance(answer, list):
+            answer = [int(uid) for uid in answer]
+            shown = ", ".join(hex(uid) for uid in answer) or "none"
+        else:
+            answer = None if answer is None else int(answer)
+            shown = "declined" if answer is None else hex(answer)
+        log_req(f"    Interpreted pick answer {shown}: resuming the interpreter")
+        bstate.pop("resolution_paused", None)
+        try:
+            ir_exec.resume_ability(
+                continuation, answer,
+                context=EffectContext.from_rules_port(g, session, db._db, self, pl_t, ai_t, bstate, ""))
+        except ir_exec.NeedsChoice as pause:
+            prompt_interpreted_reveal(self, g, session, db._db, pl_t, ai_t, bstate, pause)
+            _be.save_state(session, bstate)
+            self._send_battle_events(session, g, pl_t)
+            self._push_transaction_ack(session)
+            return True
+        except ir_exec.NeedsConversation:
+            pass  # the next pause is saved; the client's answer resumes the interpreter
+        else:
+            self._mark_interpreted_chain_item_done(bstate)
+        _be.save_state(session, bstate)
+        self._send_battle_events(session, g, pl_t)
+        if self._resume_completed_rules_port_chain(session, bstate):
+            if not self._advance_rules_port_to_priority(session, pl_t, ai_t, bstate):
+                self._push_transaction_ack(session)
+        else:
+            self._push_transaction_ack(session)
+        return True
+
     def _resolve_pending_trigger_target(self, session, pl_t, ai_t, inner_bytes,
                                         ability_guid=None):
         """Handle the player's target choice for a triggered ability with
@@ -1187,6 +1243,35 @@ class PendingChoicesMixin(_HostBase):
                         chosen_uid = int(uid64)
                 except Exception:
                     continue
+        if isinstance(pend.get("interpreter"), dict):
+            # An authored hand pick the interpreter paused for (rules_port/resolution.py). Every card the client named is
+            # an answer (a multi-card pick names several). The interpreter resumes; the native chain push is not used.
+            from rules_port import picks
+            raw_uids = []
+            if isinstance(inner_bytes, bytes):
+                for m_du in re.finditer(rb'm_UID64;[^;]*;[^;]*;[^;]*;([0-9A-Fa-f]{16});', inner_bytes):
+                    try:
+                        uid64 = struct.unpack('<Q', bytes.fromhex(m_du.group(1).decode()))[0]
+                    except Exception:
+                        continue
+                    if uid64 & 0xFF == 1:
+                        raw_uids.append(int(uid64))
+            if chosen_uid is not None:
+                raw_uids.append(int(chosen_uid))
+            entry = (pend.get("target_entries") or [{}])[0]
+            answer, complete = picks.hand_answer(
+                raw_uids, entry.get("uids") or [], minimum=int(entry.get("minimum", 1)),
+                maximum=int(entry.get("maximum", 1)), optional=bool(pend.get("optional")))
+            if not complete:
+                log_req("    Interpreted hand pick: too few cards chosen; the prompt stays open")
+                self._push_transaction_ack(session)
+                return True
+            bstate.pop("pending_trigger")
+            _port = getattr(session, "_rules_port_session", None)
+            if _port is not None:
+                _port.trigger_prompt_open = False
+            return self._resume_interpreted_pick(
+                session, pl_t, ai_t, bstate, pend["interpreter"], answer)
         bstate.pop("pending_trigger")
         _port = getattr(session, "_rules_port_session", None)
         if _port is not None:
@@ -1261,7 +1346,7 @@ class PendingChoicesMixin(_HostBase):
                              for uid in uids]
             # The event that raised the trigger: the interpreter's trigger conditions (TriggerCardEnteredZone, say) read
             # it when the chain item resolves, so the descriptor must carry it as the dispatch's chain item does.
-            from rules_port.resolution import trigger_event_fields
+            from rules_port.interpreted_prompts import trigger_event_fields
             descriptor = {
                 "kind": "trigger",
                 "ability_guid": ag,
@@ -1310,7 +1395,7 @@ class PendingChoicesMixin(_HostBase):
             log_req(f"    RulesPort trigger target chosen: {ag[:8]} "
                 f"target={hex(chosen_uid) if chosen_uid else 'none'}")
             return True
-        from rules_port.resolution import trigger_event_fields
+        from rules_port.interpreted_prompts import trigger_event_fields
         _be.stack_push(bstate, {
             "kind": "trigger", "ability_guid": ag,
             "source_uid": src, "target_uid": chosen_uid,
@@ -1770,7 +1855,7 @@ class PendingChoicesMixin(_HostBase):
             # itself; resume it from the continuation with the pick, then finish the chain as the revealed branch does.
             from rules_port import ir_exec
             from rules_port.context import EffectContext
-            from rules_port.resolution import prompt_interpreted_reveal
+            from rules_port.interpreted_prompts import prompt_interpreted_reveal
             if picks:
                 answer: int | list[int] = list(picks)
                 taken = set(picks)
@@ -1891,7 +1976,7 @@ class PendingChoicesMixin(_HostBase):
             # the chain as the deck-search branch does.
             from rules_port import ir_exec
             from rules_port.context import EffectContext
-            from rules_port.resolution import prompt_interpreted_reveal
+            from rules_port.interpreted_prompts import prompt_interpreted_reveal
             answer = list(picks) if picks else int(chosen_uid)
             log_req(f"    Matching-target choice {answer}: resuming the interpreter")
             bstate.pop("pending_deck_search", None)
@@ -1996,7 +2081,7 @@ class PendingChoicesMixin(_HostBase):
                 # the deck projection, then resume the interpreter from the continuation with the chosen card(s).
                 from rules_port import ir_exec
                 from rules_port.context import EffectContext
-                from rules_port.resolution import prompt_interpreted_reveal
+                from rules_port.interpreted_prompts import prompt_interpreted_reveal
                 answer = list(picks) if picks else int(chosen_uid)
                 log_req(f"    Revealed choice {answer}: resuming the interpreter")
                 self._hide_candidates_to_deck(g, session, pl_t, ai_t, revealed)

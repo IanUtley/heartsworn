@@ -1149,7 +1149,7 @@ class TransactionsMixin(_HostBase):
             ag = pend["ability_guid"]
             src = int(pend["source_uid"])
             inst_id = int(pend["instance_id"])
-            from rules_port.resolution import trigger_event_fields
+            from rules_port.interpreted_prompts import trigger_event_fields
             _be.stack_push(bstate, {
                 "kind": "trigger", "ability_guid": ag,
                 "source_uid": src, "target_uid": chosen_uid,

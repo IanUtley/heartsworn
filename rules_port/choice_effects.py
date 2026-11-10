@@ -28,7 +28,7 @@ def choice_prompt_ability(pending):
     DoubleChoiceAbilityEffectTemplate does in C#.
     """
     pending = pending or {}
-    if pending.get("kind") == "choice_zone_target":
+    if pending.get("kind") in ("choice_zone_target", "interpreted_choice_zone"):
         child = str((pending.get("continuation") or {}).get("ability_guid")
                     or pending.get("ability_guid") or "").lower()
         if child:

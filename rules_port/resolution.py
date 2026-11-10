@@ -2,6 +2,12 @@
 
 from __future__ import annotations
 
+from .picks import INTERPRETED_CHOICE_ZONE
+from .cost_cards import _cost_card_lists
+from .interpreted_prompts import prompt_interpreted_reveal
+from .target_values import (
+    _answers_from_target_map, _list_target_values, _match_secondary_values, _random_target_sample,
+    _referenced_effect_target_index, _resolved_effect_target_values)
 from .runtime_helpers import as_int, raw_uid
 
 import json
@@ -36,423 +42,24 @@ def _log_ability_start(handler, db, ability_guid, source_uid, owner_id,
         f"owner={owner_id} targets={targets}")
 
 
-def _random_target_sample(candidates, count, battle_state):
-    """Port of ``AbilityTargetTemplate.FilterRandomTargets``.
-
-    A random auto-target resolves from the full legal pool but the effect
-    applies to at most ``count`` cards chosen with the session RNG.  ``count``
-    of 0 or less means "unlimited" (C# ``GetMaximumTargetCount`` returns
-    ``int.MaxValue`` when unset).  The C# client does a partial Fisher-Yates:
-    for ``i`` from ``n`` down to ``n - count + 1`` it picks ``rng.Next(i)``,
-    swaps that slot with slot ``i-1`` and keeps the picked card.  The loop
-    always runs (even when it consumes the whole pool), so the RNG call
-    sequence matches the client for replay parity.
-    """
-    pool = list(candidates)
-    total = len(pool)
-    if total == 0:
-        return ()
-    count = int(count or 0)
-    wanted = total if count <= 0 else min(total, count)
-    rng = (battle_state or {}).get("_rules_rng")
-    if rng is None or not hasattr(rng, "next"):
-        import random
-        return tuple(random.sample(pool, wanted))
-    picked = []
-    for i in range(total, total - wanted, -1):
-        index = int(rng.next(i)) % i
-        picked.append(pool[index])
-        pool[index] = pool[i - 1]
-    return tuple(picked)
 
 
-_LIST_ATTR_BY_KIND = {
-    "SourceDrawnTargetTemplate": "DrawnCards",
-    "SourceBuriedTargetTemplate": "BuriedCards",
-    "AbilityCreatedTargetTemplate": "CreatedCards",
-    "VoidedTargetTemplate": "VoidedCards",
-}
 
 
-def _uids(values):
-    out = []
-    for value in values or ():
-        try:
-            if value is not None:
-                out.append(int(value))
-        except (TypeError, ValueError):
-            continue
-    return tuple(out)
 
 
-def _list_target_values(battle_state, ability, kind, source_uid, target_spec,
-                        db, session_id):
-    """Resolve the per-ability stored/drawn/buried/voided/created card lists.
-
-    C# SourceStored/Drawn/Buried/Created/VoidedTargetTemplate enumerate the
-    authored ``ListAttrs`` recorded on the ability instance (or the card).
-    The port previously left these kinds empty, so "the card you stored /
-    voided / created" resolved to no target.
-    """
-    state = battle_state or {}
-    raw_guid = str(getattr(ability, "ability_template_id", "") or "")
-    guid = raw_guid.lower()
-    from gamedata import DEFAULT_RECORD_STORE
-    record = DEFAULT_RECORD_STORE.get(
-        "AbilityTargetTemplate", str(target_spec.guid).lower())
-
-    def field(name, default=None):
-        return record.field(name, default) if record is not None else default
-
-    if kind == "SourceStoredTargetTemplate":
-        values: list[Any] = []
-        if bool(field("m_StoredInAbility", True)):
-            for key in ("stored_targets", "stored_targets_this_turn"):
-                store = state.get(key) or {}
-                values.extend(store.get(guid, store.get(raw_guid, ())) or ())
-            values.extend((state.get("ability_lists") or {}).get(
-                "StoredTargets", ()) or ())
-            values.extend(((state.get("list_attrs") or {}).get(guid) or {}).get(
-                "StoredTargets", ()) or ())
-        if bool(field("m_StoredInCard", True)):
-            for key in ("stored_targets_by_card",
-                        "stored_targets_by_card_this_turn"):
-                store = state.get(key) or {}
-                values.extend(store.get(str(int(source_uid or 0)),
-                                        store.get(int(source_uid or 0), ())) or ())
-            from .statistics import tac_list
-            for scope in ("PermanentData", "ThisTurnsData"):
-                values.extend(tac_list(
-                    state, "cards", int(source_uid or 0), scope,
-                    "StoredTargets"))
-        return _uids(values)
-
-    list_name = (str(field("m_ListAttrName", "BuriedCards") or
-                     "BuriedCards")
-                 if kind == "SourceBuriedTargetTemplate" else
-                 _LIST_ATTR_BY_KIND.get(kind, ""))
-    lists = state.get("list_attrs") or {}
-    entries = (lists.get(guid) or {}).get(list_name) or []
-    out = list(_uids((state.get("ability_lists") or {}).get(list_name, ())))
-    for entry in entries:
-        uid = (entry.get("source_uid", entry.get("Id", entry.get("id")))
-               if isinstance(entry, dict) else entry)
-        try:
-            if uid is not None:
-                out.append(int(uid))
-        except (TypeError, ValueError):
-            continue
-
-    if (kind == "VoidedTargetTemplate" and field("m_VoidedBy") is None
-            and source_uid is not None):
-        # "put each card voided by it into play": the source card's own void
-        # ledger, mirroring the legacy resolver's ``voided_by`` fallback.
-        out.extend(_uids((state.get("voided_by") or {}).get(
-            str(int(source_uid)))))
-
-    if kind == "VoidedTargetTemplate" and field("m_VoidedBy") is not None:
-        from .targeting import _source_card
-        from .filters import records_filter_matches
-        source = _source_card(db, session_id, source_uid,
-                              ability.responsible_player_id)
-        voided_by_filter = field("m_VoidedBy")
-        card_filter = field("m_CardFilter")
-        out = []
-        voided_by_kind = str(
-            getattr(voided_by_filter, "type_name", "")
-            or (voided_by_filter.get("_t", "")
-                if isinstance(voided_by_filter, dict) else "")
-        ).rsplit(".", 1)[-1]
-        for voider_uid, targets in (state.get("voided_by") or {}).items():
-            try:
-                voider = _source_card(
-                    db, session_id, int(voider_uid),
-                    ability.responsible_player_id)
-                # ``IsAbilitySource`` is an identity predicate: the voider must
-                # be the ability's own source card.  Evaluating it through the
-                # generic filter context picked up a stale event source and
-                # matched every voider.
-                if voided_by_kind == "IsAbilitySource":
-                    matched = int(voider_uid) == int(source_uid or 0)
-                else:
-                    matched = bool(voider and records_filter_matches(
-                        voider, voided_by_filter, source=source,
-                        context=state))
-                if matched:
-                    for uid in _uids(targets):
-                        target = _source_card(
-                            db, session_id, uid,
-                            ability.responsible_player_id)
-                        if (not target or str(target.get("location") or "")
-                                .lower() != "void"):
-                            continue
-                        if card_filter and not records_filter_matches(
-                                target, card_filter, source=source,
-                                context=state,
-                                player=int(ability.responsible_player_id or 0)):
-                            continue
-                        out.append(uid)
-            except (TypeError, ValueError):
-                continue
-
-    # These special list templates still inherit CardFilter and collection
-    # semantics.  The VoidedBy form instead filters the card which caused the
-    # void and the client does not apply CollectionFlags in that branch.
-    if kind != "VoidedTargetTemplate" or field("m_VoidedBy") is None:
-        from .targeting import _source_card, template_zones
-        from .filters import records_filter_matches
-        zones = {zone.lower() for zone in template_zones({
-            "collection_flags": str(field("m_CollectionFlags", "None") or "")})}
-        source = _source_card(db, session_id, source_uid,
-                              ability.responsible_player_id)
-        card_filter = field("m_CardFilter")
-        filtered = []
-        for uid in dict.fromkeys(out):
-            card = _source_card(db, session_id, uid,
-                                ability.responsible_player_id)
-            if not card:
-                continue
-            if zones and str(card.get("location") or "").lower() not in zones:
-                continue
-            if card_filter and not records_filter_matches(
-                    card, card_filter, source=source, context=state,
-                    player=int(ability.responsible_player_id or 0)):
-                continue
-            filtered.append(int(uid))
-        out = filtered
-    return tuple(dict.fromkeys(out))
 
 
-def _shares_subtype(left, right):
-    left = {part.strip().lower() for part in str(left or "").split()
-            if part.strip() and part.strip().lower() != "of"}
-    right = {part.strip().lower() for part in str(right or "").split()
-             if part.strip() and part.strip().lower() != "of"}
-    return bool(left & right)
 
 
-def _current_match_card(db, session_id, uid, owner_id, battle_state):
-    """Project the properties used by C# Card.SharesSubtype/Cost."""
-    from .targeting import _source_card
-    card = _source_card(db, session_id, int(uid), owner_id)
-    if not card:
-        return None
-    try:
-        from .static_rules import effective_card_properties, effective_cost
-        thresholds, subtype = effective_card_properties(
-            db, session_id, battle_state or {}, int(uid))
-        card["thresholds"] = thresholds
-        card["shards"] = thresholds
-        card["subtype"] = subtype
-        card["cost"] = effective_cost(
-            db, session_id, battle_state or {}, int(uid))
-    except (AttributeError, TypeError, ValueError, RuntimeError):
-        # Basic card rows are still usable in compact test/older schemas; the
-        # native live path supplies the current effective values above.
-        pass
-    return card
 
 
-def _match_secondary_values(db, session_id, ability, effect, target_spec,
-                            battle_state, champions=None,
-                            resolved_by_instance=None):
-    """Port of ``MatchSecondaryTargetTemplate.EnumerateLegalTargets``.
-
-    Emits the legal cards that are related to the contingent effect's resolved
-    target under the authored SameCost/SameOwner/SharesRace/DoesntShareRace/
-    SameName/CantBePreviousTarget flags.  The port previously resolved this
-    template as "every card in the collection".
-    """
-    from gamedata import DEFAULT_RECORD_STORE
-    rec = DEFAULT_RECORD_STORE.get("AbilityTargetTemplate", target_spec.guid)
-    if rec is None:
-        return ()
-
-    def flag(name):
-        try:
-            return bool(rec.field(name))
-        except (AttributeError, TypeError, ValueError):
-            return False
-
-    same_cost = flag("m_SameCost")
-    same_owner = flag("m_SameOwner")
-    shares_race = flag("m_SharesRace")
-    doesnt_share_race = flag("m_DoesntShareRace")
-    same_name = flag("m_SameName")
-    cant_be_prev = flag("m_CantBePreviousTarget")
-    sec_value = (effect.get("secondary_target_index", -1)
-                 if isinstance(effect, dict)
-                 else getattr(effect, "secondary_target_index", -1))
-    sec = -1 if sec_value is None else int(sec_value)
-    if sec < 0:
-        return ()
-
-    def fix_champion_owner(card, uid):
-        """Give synthetic champion targets their persisted controller ID.
-
-        Champions have no ``game_cards`` row.  The generic source-card
-        projection therefore falls back to the resolving player's ID, which
-        can make a MatchSecondary ``m_SameOwner`` target match the wrong
-        player's cards (for example, a Vampire's "their hand" reveal).
-        """
-        if not card:
-            return card
-        owner = None
-        for raw_owner, raw_uid in (battle_state.get("champ_map") or {}).items():
-            try:
-                if int(raw_uid) == int(uid):
-                    owner = int(raw_owner)
-                    break
-            except (TypeError, ValueError):
-                continue
-        if owner is None:
-            for row in champions or ():
-                try:
-                    if int(row[0]) == int(uid):
-                        owner = int(row[1])
-                        break
-                except (IndexError, TypeError, ValueError):
-                    continue
-        if owner is not None:
-            card["user_id"] = owner
-            card["owner_id"] = owner
-            card["controller_id"] = owner
-        return card
-
-    raw = _resolved_effect_target_values(
-        ability, sec, battle_state, resolved_by_instance)
-    from .targeting import legal_targets
-    secondary = []
-    for value in raw:
-        if value is None:
-            continue
-        view = _current_match_card(
-            db, session_id, int(value), ability.responsible_player_id,
-            battle_state)
-        if view:
-            fix_champion_owner(view, value)
-            secondary.append((int(value), view))
-    if not secondary:
-        return ()
-    candidates = legal_targets(
-        db, session_id, ability.responsible_player_id, target_spec.guid,
-        ability.source_uid, both_players=True, champions=champions,
-        battle_state=battle_state)
-    out = []
-    for uid in candidates:
-        view = _current_match_card(
-            db, session_id, int(uid), ability.responsible_player_id,
-            battle_state)
-        if not view:
-            continue
-        fix_champion_owner(view, uid)
-        for other_uid, other in secondary:
-            if cant_be_prev and int(uid) == other_uid:
-                continue
-            if same_cost and int(view.get("cost") or 0) != int(
-                    other.get("cost") or 0):
-                continue
-            if same_owner and int(view.get("user_id") or 0) != int(
-                    other.get("user_id") or 0):
-                continue
-            if same_name and str(view.get("name") or "").lower() != str(
-                    other.get("name") or "").lower():
-                continue
-            if shares_race and not _shares_subtype(
-                    view.get("subtype"), other.get("subtype")):
-                continue
-            if doesnt_share_race and _shares_subtype(
-                    view.get("subtype"), other.get("subtype")):
-                continue
-            out.append(int(uid))
-            break
-    return tuple(out)
 
 
-def _resolved_target_values(ability, index, battle_state=None):
-    """Return the cards already resolved for one activation mapping index.
-
-    ``ActivateAbility``/``MoveCardToZone`` effects can reference a previous
-    effect's target ("the remaining cards", ``m_SecondaryTargetIndex``).  The
-    client resolves those from the *target instance* of that mapping, so the
-    resolver must read the activation map instead of re-enumerating that
-    template's whole legal pool.
-    """
-    if index is None:
-        return ()
-    try:
-        key = int(index)
-    except (TypeError, ValueError):
-        return ()
-    if key < 0:
-        return ()
-    maps = (
-        getattr(getattr(ability, "activation", None), "target_map", {}) or {},
-        (battle_state or {}).get("ability_target_map") or {},
-    )
-    for mapping in maps:
-        value = mapping.get(key, mapping.get(str(key)))
-        if value is None:
-            continue
-        if isinstance(value, (tuple, list, set)):
-            return tuple(int(item) for item in value if item is not None)
-        return (int(value),)
-    return ()
 
 
-def _referenced_effect_target_index(ability, instance_id):
-    """Return the activation target slot for an effect instance reference."""
-    try:
-        wanted = int(instance_id)
-    except (TypeError, ValueError):
-        return None
-    if wanted < 0:
-        return None
-    for candidate in getattr(ability, "ordered_effects", ()) or ():
-        if isinstance(candidate, dict):
-            candidate_id = candidate.get(
-                "effect_instance_id", candidate.get("instance_id", -1))
-            target_index = candidate.get("target_index", -1)
-        else:
-            candidate_id = getattr(
-                candidate, "effect_instance_id",
-                getattr(candidate, "instance_id", -1))
-            target_index = getattr(candidate, "target_index", -1)
-        try:
-            if as_int(candidate_id) != wanted:
-                continue
-            target_index = int(target_index)
-        except (TypeError, ValueError):
-            continue
-        return target_index if target_index >= 0 else None
-    return None
 
 
-def _resolved_effect_target_values(ability, instance_id, battle_state=None,
-                                  resolved_by_instance=None):
-    """Resolve ``m_SecondaryTargetIndex`` through an effect instance.
-
-    The authored field is an effect-instance id, not an activation target-map
-    slot. Most abilities happen to use the same numbers for both, which hid
-    this distinction until an effect such as Herofall stored its first target
-    in instance 1 while using target slot 0.
-    """
-    try:
-        wanted = int(instance_id)
-    except (TypeError, ValueError):
-        return ()
-    if wanted < 0:
-        return ()
-    if resolved_by_instance is not None:
-        value = resolved_by_instance.get(wanted)
-        if value is None:
-            value = resolved_by_instance.get(str(wanted))
-        if value is not None:
-            return _uids(value)
-    target_index = _referenced_effect_target_index(ability, wanted)
-    if target_index is None:
-        return ()
-    return _resolved_target_values(ability, target_index, battle_state)
 
 
 def _choose_ai_explicit_target_map(handler, session, battle_state,
@@ -503,65 +110,10 @@ def _choose_ai_explicit_target_map(handler, session, battle_state,
         # Target selection must not make an otherwise resolvable ability fail
         # because a legacy/incomplete AI snapshot is unavailable.
         return None
-# C# PayCardActionCost appends each paid card to the ability instance list
-# that list-attr variables read ("for each troop exhausted this way",
-# "equal to the voided troop's [ATK]").
-_COST_LIST_NAMES = {
-    "exhaust": "ExhaustedCards",
-    "void": "VoidedCards",
-    "sacrifice": "SacrificedCards",
-    "discard": "DiscardedCards",
-}
 
 
-def _cost_card_lists(ability):
-    """Return ``{list_name: [uid, ...]}`` for every paid card-cost kind."""
-    out = {}
-    for kind, list_name in _COST_LIST_NAMES.items():
-        uids = _exhausted_cost_cards(ability, kind=kind)
-        if uids:
-            out[list_name] = uids
-    return out
 
 
-def _exhausted_cost_cards(ability, kind="exhaust"):
-    """Cards paid for one kind of ``ability``'s additional costs.
-
-    C# records exhausted cards in the ability instance's ``ExhaustedCards``
-    list, which CountListAttr variables read ("for each troop exhausted this
-    way" on the Construction Plans); other card costs have their own lists
-    (``_COST_LIST_NAMES``).  The activation keeps each cost's selection by its
-    index in the graph's additional cost targets.
-    """
-    metadata = getattr(ability, "metadata", None)
-    graph = getattr(metadata, "graph", None)
-    activation = getattr(ability, "activation", None)
-    costs = tuple(getattr(graph, "additional_cost_targets", ()) or ())
-    if not costs or activation is None:
-        return []
-    cost_map = getattr(activation, "cost_target_map", {}) or {}
-    target_map = getattr(activation, "target_map", {}) or {}
-    out = []
-    for index, (cost_kind, _guid) in enumerate(costs):
-        if str(cost_kind).lower() != kind:
-            continue
-        selected = cost_map.get(index, cost_map.get(str(index)))
-        if not selected and kind == "exhaust":
-            # Mono flattens exhaust selections into TargetMap; other kinds
-            # are only trusted from the dedicated cost map.
-            selected = target_map.get(index, target_map.get(str(index)))
-        if selected is None:
-            continue
-        if not isinstance(selected, (list, tuple, set)):
-            selected = (selected,)
-        for value in selected:
-            try:
-                uid = raw_uid(value)
-            except (TypeError, ValueError):
-                continue
-            if uid not in out:
-                out.append(uid)
-    return out
 
 
 class NativeEffectBackend:
@@ -2158,96 +1710,16 @@ def resolve_port_played_permanent(game, session, db, handler, player_uid,
     return result
 
 
-def _answers_from_target_map(target_map: dict[Any, Any]) -> dict[int, int | list[int] | None]:
-    """A chain item's target map as the interpreter's answers: each target index to the card chosen, the list of cards
-    when several were chosen, or None."""
-    answers: dict[int, int | list[int] | None] = {}
-    for index, value in (target_map or {}).items():
-        values = value if isinstance(value, (list, tuple, set)) else (value,)
-        chosen = [int(item) for item in values if item is not None and str(item).lstrip("-").isdigit()]
-        answers[int(index)] = chosen if len(chosen) > 1 else (chosen[0] if chosen else None)
-    return answers
 
 
-def _ai_revealed_pick(handler, session, battle_state, ai_uid, player_uid, candidates):
-    """The card the AI picks from a reveal: its most valuable card by the AI's card evaluation, then cost, then uid
-    (the order the AI uses to rank cards elsewhere). Falls back to the first candidate the evaluator cannot read."""
-    from ai_eval import build_evaluator
-    evaluator = build_evaluator(handler, session, battle_state, ai_uid, player_uid)
-    cards = [card for card in (evaluator.card_for_uid(int(uid)) for uid in candidates) if card is not None]
-    if not cards:
-        return int(candidates[0])
-    best = max(cards, key=lambda card: (evaluator.get_card_value(card), int(card.cost or 0), int(card.card_uid)))
-    return int(best.card_uid)
 
 
-def prompt_interpreted_reveal(handler, game, session, db, player_uid, ai_uid, battle_state, pause):
-    """Show the player an interpreted ability's pick: among the cards a reveal showed, through the client's
-    revealed-card picker; or, from the deck, through the deck-search picker (Darkspire Priestess's search). The
-    interpreter's continuation is kept with the prompt. The answer resumes the interpreter (see
-    application/pending_choices.py). Returns "waiting"."""
-    continuation = pause.continuation
-    # The AI chose this pick (its ability was cast by the AI in PvE), so it answers the pick itself and the
-    # interpreter carries on. Only the player's own picks are shown to the player.
-    # The player's uid is a UID whose instance is the user id; the continuation's owner is that user id.
-    player_id = player_uid.instance_id if hasattr(player_uid, "instance_id") else int(player_uid)
-    if pause.revealed and not battle_state.get("pvp") and int(continuation["owner_uid"]) != int(player_id) \
-            and pause.candidates:
-        from rules_port.context import EffectContext
-        from . import ir_exec
-        pick = _ai_revealed_pick(handler, session, battle_state, ai_uid, player_uid, pause.candidates)
-        battle_state.pop("resolution_paused", None)
-        try:
-            ir_exec.resume_ability(
-                continuation, pick,
-                context=EffectContext.from_rules_port(game, session, db, handler, player_uid, ai_uid,
-                                                      battle_state, ""))
-        except ir_exec.NeedsChoice as next_pause:
-            return prompt_interpreted_reveal(handler, game, session, db, player_uid, ai_uid, battle_state,
-                                             next_pause)
-        return "interpreter"
-    target_index = int(continuation["target_index"])
-    native_shape = {
-        "ability_guid": continuation["ability_guid"], "source_uid": continuation["source_uid"],
-        "owner_id": continuation["owner_uid"], "target_index": target_index, "target_map": {},
-        "variables": {}, "resume_effect_order": int(continuation["position"]), "ability_instance_id": 1,
-        "interpreter": continuation,
-    }
-    if pause.revealed:
-        prompt = getattr(handler, "_prompt_revealed_choice", None)
-        if not callable(prompt):
-            raise RuntimeError("the interpreter paused for a revealed choice, with no picker to show it")
-        prompt(game, session, player_uid, ai_uid, battle_state, continuation["ability_guid"],
-               int(continuation["source_uid"]), int(continuation["owner_uid"]),
-               list(pause.candidates), [int(uid) for uid in (battle_state.get("revealed_cards") or [])],
-               optional=bool(pause.optional), continuation=native_shape,
-               minimum=pause.minimum, maximum=pause.maximum)
-    else:
-        prompt = getattr(handler, "_prompt_deck_search", None)
-        if not callable(prompt):
-            raise RuntimeError("the interpreter paused for a deck choice, with no deck-search picker to show it")
-        # A chosen deck match uses the matching-target mode (the child's own target, as the native path shows it).
-        prompt(game, session, player_uid, ai_uid, battle_state, continuation["ability_guid"],
-               int(continuation["source_uid"]), int(continuation["owner_uid"]),
-               list(pause.candidates), kind="matching_target" if pause.match else "search",
-               continuation=native_shape, minimum=pause.minimum, maximum=pause.maximum,
-               **({"zone": pause.zone} if pause.match else {}))
-    battle_state["resolution_paused"] = True
-    return "waiting"
 
 
-def trigger_event_fields(pending):
-    """The event fields a chain descriptor for a chosen trigger carries, from the pending trigger that kept the event
-    the dispatch raised. The interpreter reads them when it resolves the ability, so every descriptor for a chosen
-    trigger must include them; an empty set means the pending trigger kept no event."""
-    event = (pending or {}).get("trigger_event") or {}
-    return {
-        "trigger_event_type": event.get("event_type"),
-        "trigger_event_data": dict(event.get("data") or {}),
-        "trigger_source_uid": event.get("source_card_id"),
-        "trigger_source_player_uid": event.get("source_player_id"),
-        "trigger_target_player_uid": event.get("target_player_id"),
-    }
+
+
+
+
 
 
 def run_interpreted_trigger(handler, game, session, db, player_uid, ai_uid, battle_state, guid,
