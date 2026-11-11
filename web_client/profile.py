@@ -1,59 +1,95 @@
 """The browser's collection and deck templates, read and written through ``profile_db``.
 
 These are the Unity client's own tables (``collections`` for owned cards, ``player_deck_templates`` for decks), so a deck
-saved here is the same deck the client shows. The profile is ``HEX_WEB_PROFILE_ID`` when set, else the account that owns
-the most collection rows.
+saved here is stored in the same tables the client reads for its mercenary decks. The profile is ``HEX_WEB_PROFILE_ID``
+when set, else the account that owns the most collection rows.
+
+Profile data always goes to the live database: the web server plays matches on a disposable snapshot, and
+``HEX_LIVE_DB_PATH`` names the live file it saved in ``use_snapshot_database``. Without that variable (tests, or a server
+started with ``--live-db``) the shared connection is used.
 """
 
 from __future__ import annotations
 
+import json
 import os
+from contextlib import contextmanager
 
+import db as dbmod
 import profile_db
-from db import _db
 
 MINIMUM_DECK_SIZE = 60   # the client's c_MinimumDeckSize (UIPlayerDeckContentsViewModel)
 NAME_LIMIT = 40
 
 
-def profile_user_id():
-    configured = os.environ.get("HEX_WEB_PROFILE_ID", "").strip()
-    if configured.isdigit():
-        return int(configured)
-    row = _db.execute(
+@contextmanager
+def _connection():
+    """Yield the connection profile data is read and written on."""
+    live = os.environ.get("HEX_LIVE_DB_PATH")
+    if not live:
+        yield dbmod._db
+        return
+    connection = dbmod.connect(live)
+    try:
+        yield connection
+    finally:
+        connection.close()
+
+
+def _richest_collection_user(connection):
+    row = connection.execute(
         "SELECT user_id FROM collections GROUP BY user_id "
         "ORDER BY COUNT(*) DESC, user_id LIMIT 1").fetchone()
     return int(row[0]) if row else None
 
 
+def profile_user_id(conn=None):
+    configured = os.environ.get("HEX_WEB_PROFILE_ID", "").strip()
+    if configured.isdigit():
+        return int(configured)
+    if conn is not None:
+        return _richest_collection_user(conn)
+    with _connection() as own:
+        return _richest_collection_user(own)
+
+
 def profile_summary() -> dict:
-    user_id = profile_user_id()
-    row = _db.execute("SELECT name FROM users WHERE id=?", (user_id,)).fetchone() if user_id else None
+    with _connection() as conn:
+        user_id = profile_user_id(conn)
+        row = conn.execute("SELECT name FROM users WHERE id=?", (user_id,)).fetchone() if user_id else None
     return {"user_id": user_id, "name": str(row[0]) if row and row[0] else "", "minimum_deck_size": MINIMUM_DECK_SIZE}
 
 
-def collection() -> list[dict]:
-    """Owned cards, one entry per template, with the copies owned."""
-    user_id = profile_user_id()
-    if user_id is None:
-        return []
-    rows = profile_db.db_collection_card_list(user_id)
+def _owned_cards(user_id, conn) -> list[dict]:
+    rows = profile_db.db_collection_card_list(user_id, conn=conn)
     return [{"guid": str(guid).lower(), "name": str(name or ""), "cost": cost, "attack": attack,
              "defense": defense, "quantity": int(quantity or 0)}
             for guid, name, cost, attack, defense, quantity in rows if int(quantity or 0) > 0]
 
 
+def collection() -> list[dict]:
+    """Owned cards, one entry per template, with the copies owned."""
+    with _connection() as conn:
+        user_id = profile_user_id(conn)
+        if user_id is None:
+            return []
+        return _owned_cards(user_id, conn)
+
+
 def champions() -> list[dict]:
     """Every champion template, as card GUIDs (the catalog names them)."""
-    return [{"guid": str(row[0]).lower()} for row in _db.execute(
-        "SELECT guid FROM champion_templates ORDER BY guid").fetchall()]
+    with _connection() as conn:
+        return [{"guid": str(row[0]).lower()} for row in conn.execute(
+            "SELECT guid FROM champion_templates ORDER BY guid").fetchall()]
 
 
 def decks() -> list[dict]:
-    user_id = profile_user_id()
-    if user_id is None:
-        return []
-    return [_deck_view(template) for template in profile_db.db_profile_deck_templates(user_id)]
+    with _connection() as conn:
+        user_id = profile_user_id(conn)
+        if user_id is None:
+            return []
+        return [_deck_view(template)
+                for template in profile_db.db_profile_deck_templates(user_id, conn=conn)]
 
 
 def _deck_view(template: dict) -> dict:
@@ -65,44 +101,94 @@ def _deck_view(template: dict) -> dict:
                       for card in template.get("cards") or []]}
 
 
-def save_deck(body: dict) -> dict:
-    """Create or update a deck from ``{id?, name, champion_guid, gameboard_guid, sleeve_guid, cards}``.
+def _resized_gems(gems_json: str, quantity: int) -> str:
+    """Per-copy gem lists, one per copy: keep the first ``quantity`` and pad with empty lists."""
+    gems = json.loads(gems_json or "[]")
+    if not gems:
+        return "[]"
+    return json.dumps(gems[:quantity] + [[] for _ in range(quantity - len(gems))])
 
-    Each card's copies must be owned. A deck below the minimum size is saved as a draft; the page warns about it.
+
+def _resized_flags(flags_json: str, quantity: int) -> str:
+    """Copy flags: the top-level flags apply to every copy; a ``copies`` list (one entry per copy) is resized."""
+    flags = json.loads(flags_json or "{}")
+    copies = flags.get("copies")
+    if isinstance(copies, list):
+        base = {key: value for key, value in flags.items() if key != "copies"}
+        resized = copies[:quantity] + [dict(base) for _ in range(quantity - len(copies))]
+        flags["copies"] = resized
+    return json.dumps(flags)
+
+
+def _card_state(previous: dict | None, quantity: int) -> tuple[str, str]:
+    """The stored gem and flag JSON for one card row. An unchanged quantity keeps the stored data exactly; a changed
+    quantity resizes its per-copy lists; a card the deck did not hold starts with no gems and no flags."""
+    if previous is None:
+        return "[]", "{}"
+    if int(previous["quantity"]) == quantity:
+        return previous["gem_types_list_json"], previous["flags_json"]
+    return (_resized_gems(previous["gem_types_list_json"], quantity),
+            _resized_flags(previous["flags_json"], quantity))
+
+
+def _keep_or_set(body: dict, existing: dict | None, key: str) -> str:
+    """A top-level deck field: the request's value when it sent one, else the stored value (never a default)."""
+    if key in body:
+        return str(body.get(key) or "")
+    return str((existing or {}).get(key) or "")
+
+
+def save_deck(body: dict) -> dict:
+    """Create or update a deck from ``{id?, name, champion_guid?, gameboard_guid?, sleeve_guid?, cards}``.
+
+    A field the request omits keeps its stored value, and so do a card's gems and flags when its quantity is unchanged;
+    saving from the browser therefore never discards what the Unity client wrote. Each card's copies must be owned. A
+    deck below the minimum size is saved as a draft; the page warns about it.
     """
-    user_id = profile_user_id()
-    if user_id is None:
-        raise ValueError("no profile to save the deck to")
-    owned = {card["guid"]: card["quantity"] for card in collection()}
-    wanted: dict[str, int] = {}
-    for card in body.get("cards") or []:
-        guid = str(card.get("guid") or "").lower()
-        quantity = int(card.get("quantity") or 0)
-        if quantity <= 0:
-            continue
-        wanted[guid] = wanted.get(guid, 0) + quantity
-    for guid, quantity in wanted.items():
-        if quantity > owned.get(guid, 0):
-            raise ValueError(f"only {owned.get(guid, 0)} copies of {guid} are owned, not {quantity}")
-    champion = str(body.get("champion_guid") or "").lower()
-    if champion and not _db.execute("SELECT 1 FROM champion_templates WHERE guid=?", (champion,)).fetchone():
-        raise ValueError("that champion is not in the game data")
-    columns = {"name": str(body.get("name") or "").strip()[:NAME_LIMIT] or "New deck",
-               "champion_guid": champion,
-               "sleeve_guid": str(body.get("sleeve_guid") or ""),
-               "gameboard_guid": str(body.get("gameboard_guid") or "")}
-    template_id = profile_db.db_save_profile_deck_template(
-        user_id, body.get("id"), columns,
-        [(guid, quantity, "[]", "{}") for guid, quantity in sorted(wanted.items())])
+    with _connection() as conn:
+        user_id = profile_user_id(conn)
+        if user_id is None:
+            raise ValueError("no profile to save the deck to")
+        owned = {card["guid"]: card["quantity"] for card in _owned_cards(user_id, conn)}
+        wanted: dict[str, int] = {}
+        for card in body.get("cards") or []:
+            guid = str(card.get("guid") or "").lower()
+            quantity = int(card.get("quantity") or 0)
+            if quantity <= 0:
+                continue
+            wanted[guid] = wanted.get(guid, 0) + quantity
+        for guid, quantity in wanted.items():
+            if quantity > owned.get(guid, 0):
+                raise ValueError(f"only {owned.get(guid, 0)} copies of {guid} are owned, not {quantity}")
+        champion = _keep_or_set(body, None, "champion_guid").lower()
+        if champion and not conn.execute("SELECT 1 FROM champion_templates WHERE guid=?", (champion,)).fetchone():
+            raise ValueError("that champion is not in the game data")
+        template_id = body.get("id")
+        existing = (profile_db.db_profile_deck_template(user_id, template_id, conn=conn)
+                    if template_id else None)
+        previous_cards = {str(card["card_guid"]).lower(): card for card in (existing or {}).get("cards") or []}
+        columns = {"name": str(body.get("name") or "").strip()[:NAME_LIMIT] or "New deck",
+                   "champion_guid": champion if "champion_guid" in body else _keep_or_set({}, existing, "champion_guid"),
+                   "sleeve_guid": _keep_or_set(body, existing, "sleeve_guid"),
+                   "gameboard_guid": _keep_or_set(body, existing, "gameboard_guid"),
+                   "personality": _keep_or_set({}, existing, "personality"),
+                   "equipment_json": _keep_or_set({}, existing, "equipment_json") or "{}"}
+        card_rows = []
+        for guid, quantity in sorted(wanted.items()):
+            gems, flags = _card_state(previous_cards.get(guid), quantity)
+            card_rows.append((guid, quantity, gems, flags))
+        template_id = profile_db.db_save_profile_deck_template(
+            user_id, template_id, columns, card_rows, conn=conn)
     return {"id": int(template_id), "cards": sum(wanted.values()),
             "valid": sum(wanted.values()) >= MINIMUM_DECK_SIZE}
 
 
 def delete_deck(template_id: int) -> bool:
-    user_id = profile_user_id()
-    if user_id is None:
-        return False
-    if profile_db.db_profile_deck_template(user_id, template_id) is None:
-        return False
-    profile_db.db_delete_profile_deck_template(user_id, template_id)
-    return True
+    with _connection() as conn:
+        user_id = profile_user_id(conn)
+        if user_id is None:
+            return False
+        if profile_db.db_profile_deck_template(user_id, template_id, conn=conn) is None:
+            return False
+        profile_db.db_delete_profile_deck_template(user_id, template_id, conn=conn)
+        return True

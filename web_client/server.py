@@ -63,6 +63,8 @@ def use_snapshot_database():
         dst.close()
         src.close()
     os.environ["HEX_DB_PATH"] = copy
+    # Profile data (decks, collection) is saved to the live file, not to this disposable copy.
+    os.environ["HEX_LIVE_DB_PATH"] = os.path.abspath(source)
     return copy
 
 
