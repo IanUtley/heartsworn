@@ -401,9 +401,28 @@ def play_spec(template_id) -> dict:
             "cards": cards, "ai_deck_personality": "Default"}
 
 
+# The client's packed socket value: bit 62 marks the new gem format, and each socket holds one ten-bit gem type, socket 1
+# in the lowest bits (GemHelper.cs, EGemTypesNew.cs). A socketed card with no gems is the marker alone, which is how the
+# client reads its empty sockets (pvp_db.EMPTY_SOCKET_GEMS).
+_GEM_FORMAT_BIT = 1 << 62
+_SOCKET_BITS = 10
+_MAX_SOCKETS = 6
+
+
+def pack_socket_gems(gem_types) -> int:
+    """The Unity packed value for one card copy's gem types, in socket order (0 is an empty socket)."""
+    value = _GEM_FORMAT_BIT
+    for index, gem_type in enumerate(list(gem_types)[:_MAX_SOCKETS]):
+        value |= (int(gem_type or 0) & ((1 << _SOCKET_BITS) - 1)) << (_SOCKET_BITS * index)
+    return value
+
+
 def export_deck(template_id) -> dict:
-    """Write a saved deck to the Unity deck store (decks): each main-deck copy is one of the owner's card instances,
-    the lowest ids first. Re-exporting updates the same Unity deck. Reserves and gems are not exported."""
+    """Write a saved deck to the Unity deck store (decks), in the client's own format: each main-deck copy is one of
+    the owner's card instance ids (the lowest first), each socketed copy's gems are packed into active_gems, and the
+    gem abilities of those copies go to gem_abilities. Re-exporting updates the same Unity deck. Reserves are not
+    exported."""
+    from pvp_db import db_gem_ability_guids   # pvp_db re-exports it; importing pvp_db_ability first is circular
     with _connection() as conn:
         user_id = profile_user_id(conn)
         template = (profile_db.db_profile_deck_template(user_id, template_id, conn=conn)
@@ -411,31 +430,49 @@ def export_deck(template_id) -> dict:
         if template is None:
             raise ValueError("no such saved deck")
         view = _deck_view(template)
+        gem_types = {str(name): int(gem_type or 0) for name, gem_type in conn.execute(
+            "SELECT name, gem_type FROM gem_templates").fetchall()}
+        active: dict[str, int] = {}
+        abilities: dict[str, list] = {}
         card_ids: list[int] = []
-        for card in view["cards"]:
-            main = card["quantity"] - card["reserves"]
-            if main <= 0:
-                continue
-            owned = profile_db.db_card_instance_ids(user_id, card["guid"], conn=conn)
+        for guid, main, gems_json in _main_deck_rows(template):
+            owned = profile_db.db_card_instance_ids(user_id, guid, conn=conn)
             if len(owned) < main:
-                raise ValueError(f"the deck needs {main} copies of {card['guid']} in its main deck; "
+                raise ValueError(f"the deck needs {main} copies of {guid} in its main deck; "
                                  f"the owner has {len(owned)}")
-            card_ids.extend(owned[:main])
+            sockets = int(conn.execute("SELECT COALESCE(socket_count, 0) FROM card_templates WHERE LOWER(guid)=?",
+                                       (guid,)).fetchone()[0] or 0)
+            copies = _gems_per_copy(gems_json)
+            for index, instance in enumerate(owned[:main]):
+                card_ids.append(instance)
+                if not sockets:
+                    continue
+                names = copies[index] if index < len(copies) else []
+                packed = pack_socket_gems([gem_types.get(name, 0) for name in names])
+                active[str(instance)] = packed
+                found = db_gem_ability_guids(packed, conn=conn)
+                if found:
+                    abilities[str(instance)] = found
         cards_json = json.dumps(card_ids)
+        active_json = json.dumps(active)
+        abilities_json = json.dumps(abilities)
         unity_id = int(template.get("exported_deck_id") or 0)
         if unity_id and conn.execute("SELECT 1 FROM decks WHERE id=? AND user_id=?",
                                      (unity_id, user_id)).fetchone():
             profile_db.db_update_deck(unity_id, user_id, deck_name=view["name"], cards_json=cards_json,
                                       pve_champion_id=view["pve_champion_id"] or None,
-                                      pvp_champion_guid=view["champion_guid"], conn=conn)
+                                      pvp_champion_guid=view["champion_guid"], active_gems_json=active_json,
+                                      gem_abilities_json=abilities_json, conn=conn)
         else:
             unity_id = profile_db.db_save_deck(user_id, view["name"], cards_json,
                                                pve_champion_id=view["pve_champion_id"] or None,
                                                pvp_champion_guid=view["champion_guid"],
+                                               active_gems_json=active_json,
+                                               gem_abilities_json=abilities_json,
                                                deck_sleeve_guid=view["sleeve_guid"] or None,
                                                gameboard_guid=view["gameboard_guid"] or None, conn=conn)
             profile_db.db_set_exported_deck(template_id, unity_id, conn=conn)
-    return {"deck_id": unity_id, "cards": len(card_ids)}
+    return {"deck_id": unity_id, "cards": len(card_ids), "gems": len(active)}
 
 
 def delete_deck(template_id: int) -> bool:

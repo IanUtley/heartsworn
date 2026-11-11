@@ -249,6 +249,35 @@ def test_a_saved_deck_exports_to_the_unity_deck_store(monkeypatch):
         profile.export_deck(saved["id"])
 
 
+@isolated_db
+def test_export_packs_socket_gems_the_way_the_client_reads_them(monkeypatch):
+    """A socketed copy's gems go into active_gems as the client's packed value: the format bit, one ten-bit gem type
+    per socket from the lowest bits, and an empty socket as zero bits."""
+    import json
+    owner = _dbmod._db.execute("INSERT INTO users (name) VALUES ('gem exporter')").lastrowid
+    socketed = _dbmod._db.execute("SELECT guid FROM card_templates WHERE socket_count>=2 AND is_pve=0 LIMIT 1").fetchone()[0]
+    gem_name, gem_type = _dbmod._db.execute(
+        "SELECT name, gem_type FROM gem_templates WHERE gem_type>0 ORDER BY gem_type LIMIT 1").fetchone()
+    champion = _playable_champion()
+    _dbmod._db.execute("INSERT INTO card_instances (user_id, instance_id, template_guid) VALUES (?, 7001, ?)",
+                       (owner, socketed))
+    _dbmod._db.execute("INSERT INTO collections (user_id, card_template_id, quantity) VALUES (?, ?, 1)",
+                       (owner, socketed))
+    _dbmod._db.commit()
+    monkeypatch.setenv("HEX_WEB_PROFILE_ID", str(owner))
+    saved = profile.save_deck({"name": "Gems", "format": "immortal", "champion_guid": champion, "cards": [
+        {"guid": socketed, "quantity": 1, "reserve": False, "gems": [[gem_name]]}]})
+    result = profile.export_deck(saved["id"])
+    assert result["gems"] == 1
+    active = json.loads(_dbmod._db.execute("SELECT active_gems FROM decks WHERE id=?",
+                                           (result["deck_id"],)).fetchone()[0])
+    value = active["7001"]
+    assert value & (1 << 62)
+    assert value & 0x3FF == gem_type          # socket 1
+    assert (value >> 10) & 0x3FF == 0         # socket 2 is empty
+    assert value == profile.pack_socket_gems([gem_type])
+
+
 if __name__ == "__main__":
     # Written in pytest style: run through pytest so each test executes and failures
     # set the exit status. A missing pytest fails loudly.
