@@ -5,7 +5,19 @@ binds it to ``db._db`` (the same steps its ``run()`` helper performs when the
 file is executed as a script).  This fixture repeats those steps for pytest.
 """
 
+import os
+import sys
+
 import pytest
+
+_ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+sys.path.insert(0, _ROOT)
+
+# Bind the scratch test database before any test module can import ``db``: a lazy import during a test would otherwise
+# open the live hconnect.db (tests_hexai reaches db only inside its tests, so the import audit cannot see it).
+from tests.test_db import fresh_database  # noqa: E402
+
+fresh_database()
 
 # Opt-in catalogue audit: run it directly, not as part of the full suite.
 collect_ignore = ["tests_card_play_matrix.py","tests_set1_pvp_sweep.py","tests_core_sets_sweep.py"]

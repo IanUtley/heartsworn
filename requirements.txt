@@ -8,3 +8,6 @@ debugpy>=1.8,<2
 
 # Test runner for the pytest-style test files (tests/*.py with a pytest entry point).
 pytest==9.2.0
+
+# Numeric backend for the hexai policy trainer (hexai/train.py) and its tests.
+numpy==2.5.4
