@@ -22,6 +22,8 @@ import types
 ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 sys.path[:0] = [ROOT, os.path.join(ROOT, "tests"),
                 os.path.join(ROOT, "campaign")]
+from tests.test_db import fresh_database  # noqa: E402
+fresh_database()   # bind the scratch test database before any module imports db
 
 import tests_card_play_matrix as matrix  # noqa: E402
 from rules_port.context import EffectContext  # noqa: E402

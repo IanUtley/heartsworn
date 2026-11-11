@@ -8,6 +8,8 @@ import tempfile
 from datetime import datetime
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+from tests.test_db import fresh_database  # noqa: E402
+fresh_database()   # bind the scratch test database before any module imports db
 
 from tests.test_db import fresh_database
 import db as dbmod

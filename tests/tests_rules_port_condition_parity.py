@@ -6,6 +6,8 @@ from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(
     os.path.abspath(__file__))))
+from tests.test_db import fresh_database  # noqa: E402
+fresh_database()   # bind the scratch test database before any module imports db
 import rules_port.leaves_zones as _leaves_zones
 
 # Several focused assertions import the tournament boundary, which imports

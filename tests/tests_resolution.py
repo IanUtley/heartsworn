@@ -14,6 +14,8 @@ from types import SimpleNamespace
 from unittest import mock
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+from tests.test_db import fresh_database  # noqa: E402
+fresh_database()   # bind the scratch test database before any module imports db
 import rules_port.leaves_abilities as _leaves_abilities
 
 from tests.test_db import fresh_database

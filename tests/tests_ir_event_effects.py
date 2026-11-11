@@ -6,6 +6,8 @@ import struct
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+from tests.test_db import fresh_database  # noqa: E402
+fresh_database()   # bind the scratch test database before any module imports db
 
 from rules_port.ir_event_effects import NATIVE_LEAF_EFFECTS, TAC_FUNCTIONS, coverage_of  # noqa: E402
 from rules_port.tac import _tac_attr_hash  # noqa: E402

@@ -9,6 +9,8 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from tests.test_db import fresh_database  # noqa: E402
+fresh_database()   # bind the scratch test database before any module imports db
 from tests.leaf_routing import install_leaf_routes as _install_leaf_routes
 _install_leaf_routes()
 import rules_port.leaves_modifiers as _leaves_modifiers
