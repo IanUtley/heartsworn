@@ -197,6 +197,9 @@ class Handler(BaseHTTPRequestHandler):
             body = self._body()
             if path == "/api/matches":
                 return self._send(200, {"id": MATCHES.create(body)})
+            if path == "/api/profile/decks/validate":
+                from web_client import profile
+                return self._send(200, profile.validate_deck(body))
             if path == "/api/profile/decks":
                 from web_client import profile
                 return self._send(200, profile.save_deck(body))

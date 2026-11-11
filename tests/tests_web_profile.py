@@ -123,6 +123,22 @@ def test_decks_are_listed_by_format_and_only_player_champions_are_offered(monkey
     assert index is not None
 
 
+@isolated_db
+def test_validate_reads_the_owners_copies_and_the_card_rules(monkeypatch):
+    user_id = _dbmod._db.execute("INSERT INTO users (name) VALUES ('validator')").lastrowid
+    card = _dbmod._db.execute("SELECT guid FROM card_templates WHERE is_pve=0 LIMIT 1").fetchone()[0]
+    champion = _dbmod._db.execute("SELECT guid FROM champion_templates WHERE is_player=1 LIMIT 1").fetchone()[0]
+    _dbmod._db.execute("INSERT INTO collections (user_id, card_template_id, quantity) VALUES (?, ?, 2)",
+                       (user_id, card))
+    _dbmod._db.commit()
+    monkeypatch.setenv("HEX_WEB_PROFILE_ID", str(user_id))
+    result = profile.validate_deck({"format": "pve", "champion_guid": champion,
+                                    "cards": [{"guid": card, "quantity": 3}]})
+    codes = {error["code"] for error in result["errors"]}
+    assert result["valid"] is False
+    assert {"TooFewCards", "NotOwned"} <= codes, result
+
+
 if __name__ == "__main__":
     # Written in pytest style: run through pytest so each test executes and failures
     # set the exit status. A missing pytest fails loudly.

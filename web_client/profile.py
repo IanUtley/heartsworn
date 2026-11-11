@@ -221,6 +221,24 @@ def save_deck(body: dict) -> dict:
             "valid": sum(wanted.values()) >= MINIMUM_DECK_SIZE}
 
 
+def validate_deck(body: dict) -> dict:
+    """Check a deck against the rules without saving it (``services/deck_validation``). The copies counted are the
+    owner's; the card rules come from the game data the catalog reads."""
+    from services import deck_validation
+    from web_client import catalog
+    with _connection() as conn:
+        user_id = profile_user_id(conn)
+        owned = ({card["guid"]: card["quantity"] for card in _owned_cards(user_id, conn)}
+                 if user_id is not None else {})
+        guids = [card.get("guid") for card in body.get("cards") or []]
+        rules = deck_validation.load_card_rules(
+            conn, guids, catalog.STANDARD_SETS,
+            lambda guid: bool((catalog.card(guid) or {}).get("unlimited")))
+        champion = str(body.get("champion_guid") or "").lower()
+        playable = bool(champion) and conn.execute(_PLAYABLE_CHAMPION, (champion,)).fetchone() is not None
+    return deck_validation.validate_deck(body, rules, owned, playable)
+
+
 def delete_deck(template_id: int) -> bool:
     with _connection() as conn:
         user_id = profile_user_id(conn)
