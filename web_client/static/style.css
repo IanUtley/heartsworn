@@ -507,3 +507,7 @@ body.targeting, body.targeting * {
 .deck-stats { font-size: 13px; color: var(--ink-dim); display: grid; gap: 2px; }
 .deck-stats p { margin: 0; }
 
+
+/* Replay bar (?replay=<match id>): step controls over a captured match. */
+.replay-bar { display: flex; gap: 8px; align-items: center; padding: 6px 10px; position: relative; z-index: 5; background: rgba(0, 0, 0, 0.6); }
+.replay-bar input[type=range] { flex: 1; }

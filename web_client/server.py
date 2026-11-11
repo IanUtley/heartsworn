@@ -10,6 +10,7 @@ Serves ``web_client/static`` and a JSON API:
 * ``GET  /api/matches/<id>?after=N``  event packets after ``N`` plus the prompt
                                       (long-polls for up to ``wait`` seconds)
 * ``POST /api/matches/<id>/action``   one browser decision
+* ``GET  /api/matches/<id>/capture``  the seed, packets and actions, for replay
 * ``DELETE /api/matches/<id>``        drop the match and its session rows
 * ``POST /api/catalog``               card/ability descriptions by GUID
 * ``GET  /art/<a0000000>.jpg``        card art, when a client install is mounted
@@ -185,6 +186,12 @@ class Handler(BaseHTTPRequestHandler):
                 if found is None:
                     return self._send(404, {"error": "no art"})
                 return self._send(200, found.read_bytes(), "image/jpeg")
+            captured = re.fullmatch(r"/api/matches/(m\d+)/capture", path)
+            if captured:
+                match = MATCHES.get(captured.group(1))
+                if match is None:
+                    return self._send(404, {"error": "no such match"})
+                return self._send(200, match.export_capture())
             matched = re.fullmatch(r"/api/matches/(m\d+)", path)
             if matched:
                 match = MATCHES.get(matched.group(1))

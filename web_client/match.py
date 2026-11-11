@@ -117,6 +117,8 @@ class WebMatch:
             self.specs = [player_spec, _opponent_spec(opponent_deck_guid)]
         self.capture = PacketCapture(self.human_pid).start()
         self.log: list[dict] = []
+        # Each browser action with the packet count when it was sent, so a capture shows what was done when.
+        self.actions: list[dict] = []
         self.cond = threading.Condition()
         self.error = None
         self.ended = False
@@ -225,6 +227,14 @@ class WebMatch:
             if extra is not None:
                 self.log.append({"seq": len(self.log) + 1, **extra})
             self.cond.notify_all()
+
+    def export_capture(self) -> dict:
+        """What is needed to replay this match: the seed, the seats, every packet the browser was sent, and every
+        action with the packet count it was sent after."""
+        with self.cond:
+            packets = list(self.log)
+            actions = list(self.actions)
+        return {"version": 1, "seed": self.seed, "match": self.info(), "packets": packets, "actions": actions}
 
     def snapshot(self, after=0, wait=0.0):
         """Packets after ``after`` plus the current prompt."""
@@ -424,6 +434,7 @@ class WebMatch:
             if self.busy:
                 raise ActionError("the server is still resolving")
             self.busy = True
+            self.actions.append({"after": len(self.log), "action": dict(action)})
         if self.threaded:
             self._actions.put(action)
         else:

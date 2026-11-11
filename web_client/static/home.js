@@ -398,4 +398,51 @@ $("#deck-champion").addEventListener("change", (e) => { deckPage.draft.champion_
 $("#deck-save").addEventListener("click", saveDeck);
 $("#deck-delete").addEventListener("click", deleteDeck);
 
-showView("home");
+/* ------------------------------------------------------------------ */
+/* Replay: a captured match run back through the battle reducer        */
+/* ------------------------------------------------------------------ */
+
+// ?replay=<match id> opens a match's capture. Each step rebuilds the battle state from the first packets, so the
+// scrubber can go backwards as well as forwards.
+const replay = { capture: null, step: 0 };
+
+async function openReplay(matchId) {
+  try {
+    replay.capture = await api(`/api/matches/${matchId}/capture`);
+  } catch (err) {
+    toast(`Could not load the capture: ${err.message}`);
+    return showView("home");
+  }
+  showView("battle");
+  $("#replay-bar").classList.remove("hidden");
+  $("#replay-step").max = replay.capture.packets.length;
+  replayTo(replay.capture.packets.length);
+}
+
+function replayTo(step) {
+  const capture = replay.capture;
+  step = Math.max(0, Math.min(step, capture.packets.length));
+  resetState();
+  S.me = capture.match.player_uid;
+  S.opp = capture.match.opponent_uid;
+  S.info = capture.match;
+  S.names[S.me] = "You";
+  S.busy = false;
+  for (const packet of capture.packets.slice(0, step)) {
+    S.after = packet.seq;
+    (packet.events || []).forEach(applyEvent);
+  }
+  replay.step = step;
+  $("#replay-step").value = step;
+  $("#replay-label").textContent = `Packet ${step} of ${capture.packets.length}`;
+  loadCatalog().then(render).catch((err) => toast(err.message));
+}
+
+$("#replay-step").addEventListener("input", (e) => replayTo(Number(e.target.value)));
+$("#replay-prev").addEventListener("click", () => replayTo(replay.step - 1));
+$("#replay-next").addEventListener("click", () => replayTo(replay.step + 1));
+$("#replay-exit").addEventListener("click", () => { $("#replay-bar").classList.add("hidden"); showView("home"); });
+
+const replayId = new URLSearchParams(location.search).get("replay");
+if (replayId && /^m\d+$/.test(replayId)) openReplay(replayId);
+else showView("home");

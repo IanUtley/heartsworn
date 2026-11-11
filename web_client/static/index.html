@@ -101,6 +101,13 @@
   </section>
 
   <section id="battle" class="screen hidden">
+    <div id="replay-bar" class="replay-bar hidden">
+      <button id="replay-prev" class="secondary" aria-label="Previous packet">&#9664;</button>
+      <input id="replay-step" type="range" min="0" max="0" value="0" aria-label="Replay position">
+      <button id="replay-next" class="secondary" aria-label="Next packet">&#9654;</button>
+      <span id="replay-label"></span>
+      <button id="replay-exit" class="secondary">Exit replay</button>
+    </div>
     <div id="board">
       <div id="board3d"></div>
       <div id="table">
@@ -144,6 +151,7 @@
 </div>
 <script type="module" src="/static/hex_assets.js"></script>
 <script type="module" src="/static/board3d.js"></script>
+<script src="/static/battle_state.js"></script>
 <script src="/static/app.js"></script>
 <script src="/static/home.js"></script>
 </body>

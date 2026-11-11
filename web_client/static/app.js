@@ -62,17 +62,16 @@ const S = {
   phase: {}, greenlight: {}, chain: [], options: new Map(), combats: new Map(), decks: {},
   prompt: null, busy: true, error: null, ended: false,
   ui: { mode: null }, catalog: { cards: {}, abilities: {} }, wanted: { cards: new Set(), abilities: new Set() },
-  log: [], prevLife: {}, rendered: new Set(), flying: new Set(), lastChain: 0,
+  log: [], pendingSounds: new Set(), prevLife: {}, rendered: new Set(), flying: new Set(), lastChain: 0,
 };
 
 function resetState() {
   Object.assign(S, {
     after: 0, cards: new Map(), players: {}, champions: {}, championTemplates: {}, names: {},
     phase: {}, greenlight: {}, chain: [], options: new Map(), combats: new Map(), decks: {},
-    prompt: null, busy: true, error: null, ended: false, ui: { mode: null }, log: [], prevLife: {},
-    rendered: new Set(), flying: new Set(), lastChain: 0,
+    prompt: null, busy: true, error: null, ended: false, ui: { mode: null }, log: [], pendingSounds: new Set(),
+    prevLife: {}, rendered: new Set(), flying: new Set(), lastChain: 0,
   });
-  pendingSounds.clear();
 }
 
 function want(section, guid) {
@@ -81,106 +80,21 @@ function want(section, guid) {
   if (!(guid in S.catalog[section])) S.wanted[section].add(guid);
 }
 
+// The battle state changes in battle_state.js (pure); the effects it returns are performed here.
 function applyEvent(ev) {
-  switch (ev.type) {
-    case "GameStarted":
-      sfx("Aud_FX_Game_Start", "game");
-      ev.turn_order.forEach((pid, i) => {
-        S.championTemplates[pid] = ev.champion_template_ids[i];
-        if (!S.names[pid]) S.names[pid] = ev.champion_names[i];
-        want("cards", ev.champion_template_ids[i]);
-      });
-      break;
-    case "PlayerUpdated":
-      S.players[ev.player_id] = ev;
-      if (ev.champion_id) S.champions[ev.player_id] = ev.champion_id;
-      break;
-    case "ChampionCardPlayed":
-      S.champions[ev.player_id] = ev.session_card_id;
-      if (ev.player_name && !S.names[ev.player_id]) S.names[ev.player_id] = ev.player_name;
-      break;
-    case "CardUpdated": {
-      const prev = S.cards.get(ev.session_card_id);
-      const card = { ...ev, uid: ev.session_card_id };
-      if (prev && card.card_id === NO_GUID && prev.card_id !== NO_GUID &&
-          card.collection === prev.collection) {
-        card.card_id = prev.card_id;   // a hidden refresh of a card we saw
-      }
-      S.cards.set(card.uid, card);
-      want("cards", card.card_id);
-      (card.abilities || []).forEach((a) => want("abilities", a));
-      flushCardSounds();
-      break;
+  runEffects(BattleState.reduceEvent(S, ev));
+}
+
+function runEffects(effects) {
+  for (const fx of effects) {
+    switch (fx.type) {
+      case "sfx": sfx(fx.name, fx.group); break;
+      case "phase": phaseSound(fx.phase, fx.active); break;
+      case "float": floatAtChampion(fx.player, fx.text, fx.kind); break;
+      case "want": want(fx.section, fx.guid); break;
+      case "flush_sounds": flushCardSounds(); break;
+      default: break;
     }
-    case "DeckCreated":
-      S.decks[ev.player_id] = { sleeve: ev.deck_sleeve_id, board: ev.gameboard_id, coin: ev.coin_id };
-      break;
-    case "TurnPhaseUpdated": {
-      const was = S.phase.turn_phase;
-      S.phase = ev;
-      if (ev.turn_phase !== was) phaseSound(ev.turn_phase, ev.active_player_id);
-      break;
-    }
-    case "GreenLight":
-      S.greenlight[ev.player_id] = ev.context;
-      break;
-    case "PlayerOptionList":
-      if (ev.player_id === S.me) {
-        S.options = new Map(ev.options.map((o) => [o.card, o]));
-        ev.options.forEach((o) => o.instances.forEach((i) => want("abilities", i.opt_id)));
-      }
-      break;
-    case "AbilityPushedOnChain":
-      if (!ev.ignores_chain) {
-        S.chain.push({ id: ev.ability_instance_id, source: ev.source_card_id,
-          ability: ev.ability_template_id, targets: ev.target_card_ids });
-        want("abilities", ev.ability_template_id);
-      }
-      break;
-    case "TopOfChainResolved":
-    case "RemovedTopOfChain":
-    case "AbilityCancelled":
-      S.chain = S.chain.filter((c) => c.id !== ev.ability_instance_id);
-      break;
-    case "ChainEmpty":
-      S.chain = [];
-      break;
-    case "AttackDeclared":
-      S.combats.set(ev.attacking_card_id, { attacker: ev.attacking_card_id, defender: ev.defending_card_id, blockers: [] });
-      break;
-    case "CombatListing":
-      S.combats = new Map(ev.combats.map((c) => [c.attacker, { attacker: c.attacker, blockers: c.blockers || [] }]));
-      break;
-    case "BlockersAssigned": {
-      const combat = S.combats.get(ev.attacker_id) || { attacker: ev.attacker_id };
-      combat.blockers = ev.blocking_card_ids || [];
-      sfx("Aud_FX_Card_Declare_Block", "combat");
-      S.combats.set(ev.attacker_id, combat);
-      break;
-    }
-    case "EndCombatResolution":
-      S.combats.clear();
-      break;
-    case "ChampionHealthChanged": {
-      const delta = ev.new_damage_value - ev.old_damage_value;
-      if (delta > 0) sfx("Aud_FX_Card_Single_Melee_Damage_Medium_01", "combat");
-      if (delta < 0) sfx("Aud_FX_Champion_Life_Up", "combat");
-      if (delta) floatAtChampion(ev.player_id, delta > 0 ? `-${delta}` : `+${-delta}`, delta > 0 ? "damage" : "heal");
-      break;
-    }
-    case "TroopCardPlayed": case "SpellCardPlayed": case "ArtifactCardPlayed": case "ResourceCardPlayed":
-      logLine((names) => `${who(ev.player_id)} played ${names(ev.session_card_id)}`);
-      pendingSounds.add(ev.session_card_id);
-      flushCardSounds();
-      break;
-    case "CardDestroyed":
-      logLine((names) => `${names(ev.session_card_id)} was destroyed`);
-      break;
-    case "GameEnded":
-      S.ended = true;
-      break;
-    default:
-      break;
   }
 }
 
@@ -190,11 +104,11 @@ function cardName(uid) {
   const t = c && S.catalog.cards[(c.card_id || "").toLowerCase()];
   return t ? t.name : "a card";
 }
-function logLine(line) {
-  // Lines name cards when rendered: the card's identity often arrives in a
-  // CardUpdated later in the same packet.
-  S.log.unshift(line);
-  S.log.length = Math.min(S.log.length, 12);
+// A log entry (from battle_state.js) as text; cards are named when rendered.
+function logText(entry) {
+  if (entry.kind === "played") return `${who(entry.player)} played ${cardName(entry.card)}`;
+  if (entry.kind === "destroyed") return `${cardName(entry.card)} was destroyed`;
+  return "";
 }
 
 /* ------------------------------------------------------------------ */
@@ -493,14 +407,13 @@ function combatPlan() {
 // Card-play sounds. The gamedata names each card's clip (catalog `sound`). An
 // opponent's card may still be hidden when it is played, so its sound waits for
 // the identity the server sends once the card leaves the hand.
-const pendingSounds = new Set();
 function flushCardSounds() {
-  for (const uid of [...pendingSounds]) {
+  for (const uid of [...S.pendingSounds]) {
     const card = S.cards.get(uid);
     if (!card || card.card_id === NO_GUID) continue;
     const tpl = S.catalog.cards[card.card_id];
     if (tpl === undefined) continue;               // the catalog entry is still on its way
-    pendingSounds.delete(uid);
+    S.pendingSounds.delete(uid);
     if (tpl && tpl.sound && window.HexAssets) HexAssets.playClip(tpl.art, tpl.sound);
   }
 }
@@ -610,7 +523,7 @@ function render() {
   renderModal();
   markChainTargets();
   if (b) renderBoard3d(b);
-  $("#log").innerHTML = S.log.map((l) => `<div>${esc(l(cardName))}</div>`).join("");
+  $("#log").innerHTML = S.log.map((entry) => `<div>${esc(logText(entry))}</div>`).join("");
   animateMoves(before);
   cardSounds();
   if (S.prompt && S.prompt.kind === "ended" && !S.endSounded) {
