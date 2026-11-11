@@ -10,7 +10,7 @@ from unittest import mock
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 
-from tests.test_db import fresh_database
+from tests.test_db import fresh_database, isolated_db
 
 fresh_database()   # bind this process's database before ``db`` is imported
 
@@ -601,6 +601,7 @@ def test_completed_result_publishes_final_full_snapshot_synchronously():
     timer.assert_not_called()
 
 
+@isolated_db
 def test_tournament_champion_setup_publishes_the_charge_power_catalog():
     """Corinth's charge power is a synthetic champion card.
 
@@ -838,6 +839,7 @@ def test_pvp_chain_item_uses_the_shared_seam_and_its_picker_marker():
     assert state["priority_pid"] == 1001, state
 
 
+@isolated_db
 def test_pvp_chain_warzone_entry_stamps_arrival_and_resolve_order():
     """The PvP chain host preserves shared permanent-arrival bookkeeping."""
     from pvp_db import db_insert_game_card
@@ -862,7 +864,9 @@ def test_pvp_chain_warzone_entry_stamps_arrival_and_resolve_order():
     session = SimpleNamespace(session_id=session_id)
     host = tournament_game._PvpChainHost(
         SimpleNamespace(), session, state, 1001, 1002)
-    host.chain_mark_warzone_entry(session, card_uid)
+    # The chain host writes through the tournament module's own connection, which the module captured at import.
+    with mock.patch.object(tournament_game, "_db", db._db):
+        host.chain_mark_warzone_entry(session, card_uid)
 
     row = db._db.execute(
         "SELECT location, card_state, resolved_at FROM game_cards "

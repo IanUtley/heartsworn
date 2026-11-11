@@ -512,14 +512,13 @@ def test_queued_trigger_retains_its_event_payload_for_ability_resolution():
         state = {}
         observed = {}
 
-        def resolve(_handler, _game, _session, _db, _player, _ai,
-                    battle_state, _guid, _source, _owner, **_kwargs):
-            observed["type"] = battle_state.get(
+        def run(_guid, _event_type, *, context, **_kwargs):
+            # The interpreter reads the trigger's event from the battle state while the ability resolves.
+            observed["type"] = context.bstate.get(
                 "resolving_trigger_event_type")
-            observed["data"] = battle_state.get(
+            observed["data"] = context.bstate.get(
                 "resolving_trigger_event_data")
-            battle_state["resolution_paused"] = True
-            return "resolved"
+            return True
 
         item = {
             "ability_guid": "2c502e7e-48e9-fa9d-e947-8b0bf9ef3703",
@@ -527,11 +526,11 @@ def test_queued_trigger_retains_its_event_payload_for_ability_resolution():
             "trigger_event_type": "CardDealtDamageEvent",
             "trigger_event_data": {"event_tac": {"damage": 6}},
         }
-        with mock.patch("rules_port.resolution.resolve_port_ability", resolve):
+        with mock.patch("rules_port.ir_exec.run_ability", run):
             result = resolve_port_trigger(
                 HandlerStub(db), None, SessionStub(), db, None, None,
                 state, item)
-        assert result == "resolved"
+        assert result == "interpreter", result
         assert observed == {
             "type": "CardDealtDamageEvent",
             "data": {"event_tac": {"damage": 6}},

@@ -74,7 +74,9 @@ def champion_target_is_spellshielded(battle_state, card, db=None, session_id=Non
     from . import ir_exec
     if ir_exec.STEALTH_SPELLSHIELD_ABILITY_GUID in ir_exec.ENABLED:
         view = _interpreted_view(db, session_id, battle_state)
-        return ir_exec.static_flag_set(view, int(card.get("card_uid") or 0), "SpellShield")
+        if ir_exec.static_flag_set(view, int(card.get("card_uid") or 0), "SpellShield"):
+            return True
+        # Not shielded by the projected keyword: a stealth counter on the champion still shields it.
     return is_stealthed(battle_state, (card or {}).get("card_uid"))
 
 
@@ -127,7 +129,9 @@ def defending_champion_is_stealthed(adapter, attacker, defender):
             attacker_uid = raw_uid(getattr(attacker, "session_card_id", attacker))
         except (TypeError, ValueError):
             return False
-        return ir_exec.static_flag_set(view, attacker_uid, "CantAttack")
+        if ir_exec.static_flag_set(view, attacker_uid, "CantAttack"):
+            return True
+        # Not refused by the projected keyword: the champion's stealth counter still refuses the attack below.
     champions = champion_uids_by_owner(adapter, battle_state)
     if not champions:
         return False

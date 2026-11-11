@@ -111,12 +111,10 @@ def _scenario(ability_guid, opposing_troops, moved=None, extra=(), champion=Fals
     """A fresh battle with the ability's troop in play for its owner, and the opposing troops.
     ``extra`` places more cards: (uid, owner, zone, permanent_buffs)."""
     import zlib
-    # The previous scenario's database is closed, so a long run does not keep every copy in memory.
-    previous = dbmod._db
+    # The previous binding may be the shared server connection (the first scenario of a run), so it is not closed
+    # here; the fixture that owns it restores it after the test.
     dbmod._db = make_db()
     db = dbmod._db
-    if previous is not None and previous is not db:
-        previous.close()
     pl_t, ai_t, game, handler, bstate, player_champ, ai_champ = scenarios._setup(db)
     LAST_HANDLER[0] = handler
     bstate["_rules_rng"] = _SeededRng(zlib.crc32(ability_guid.encode()))

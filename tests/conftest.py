@@ -61,3 +61,23 @@ def db(request):
             if getattr(module, "_db", None) is connection:
                 module._db = dbmod._db
         connection.close()
+
+
+@pytest.fixture(autouse=True)
+def _restore_shared_database():
+    """Put back the shared database binding after every test.
+
+    Some helpers (``ir_equivalence._scenario``) point ``db._db`` at a fresh
+    in-memory copy and never restore it, so every later test in the run would
+    otherwise read that copy instead of the live test database.
+    """
+    import sys
+    import db as dbmod
+
+    previous = dbmod._db
+    holders = [(module, module._db) for module in list(sys.modules.values())
+               if getattr(module, "_db", None) is previous]
+    yield
+    for module, held in holders:
+        module._db = held
+    dbmod._db = previous

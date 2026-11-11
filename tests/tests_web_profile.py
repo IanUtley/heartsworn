@@ -7,21 +7,22 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 
-from tests.test_db import fresh_database
+from tests.test_db import fresh_database, isolated_db
 
 fresh_database()   # bind this process's database before ``db`` is imported
 
-from db import _db  # noqa: E402
+import db as _dbmod  # noqa: E402
 from web_client import profile  # noqa: E402
 
 
+@isolated_db
 def test_deck_saves_only_owned_copies_and_round_trips(monkeypatch):
-    user_id = _db.execute(
+    user_id = _dbmod._db.execute(
         "INSERT INTO users (name) VALUES ('deck tester')").lastrowid
-    card = _db.execute("SELECT guid FROM card_templates LIMIT 1").fetchone()[0]
-    _db.execute("INSERT INTO collections (user_id, card_template_id, quantity) VALUES (?, ?, 3)",
+    card = _dbmod._db.execute("SELECT guid FROM card_templates LIMIT 1").fetchone()[0]
+    _dbmod._db.execute("INSERT INTO collections (user_id, card_template_id, quantity) VALUES (?, ?, 3)",
                 (user_id, card))
-    _db.commit()
+    _dbmod._db.commit()
     monkeypatch.setenv("HEX_WEB_PROFILE_ID", str(user_id))
 
     saved = profile.save_deck({"name": "Probe", "cards": [{"guid": card, "quantity": 2}]})

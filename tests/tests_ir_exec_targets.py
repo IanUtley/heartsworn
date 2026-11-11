@@ -55,24 +55,27 @@ def test_trigger_card_is_stored_when_some_ability_stored_the_moved_card():
 
 
 class _StoreContext:
-    """Records the store leaf's calls, with the template and the ability it saw."""
+    """The store leaf's context: the template's flags (its effect template), and the battle state the leaf writes to."""
 
     def __init__(self):
-        self.bstate = {"resolving_ability": "outer-guid"}
+        self.bstate = {"resolving_ability": "outer-guid", "resolving_source_uid": 900}
         self.effect_template_override = None
-        self.effect_targets = ()
-        self.calls = []
+        self.ability_guid = "outer-guid"
 
-    def store_target(self, target=None):
-        self.calls.append((int(target), self.effect_template_override, self.bstate["resolving_ability"]))
+    def template_value(self, name, default=None):
+        return (self.effect_template_override or {}).get(name, default)
+
+    def resolved_target(self):
+        return None
 
 
 def test_store_targets_stores_each_target_for_this_ability_and_restores_the_state():
     context = _StoreContext()
     scope = SimpleNamespace(context=context)
-    effect_raw = {"m_OnlyUntilEndOfTurn": False}
+    effect_raw = {"m_OnlyUntilEndOfTurn": False, "m_SetTargets": False}
     ir_exec_targets.store_targets(scope, "root-guid", effect_raw, [4, 6])
-    assert context.calls == [(4, effect_raw, "root-guid"), (6, effect_raw, "root-guid")]
+    # The targets are kept on the source card (no StoreInAbility), in the order they were stored.
+    assert context.bstate["stored_targets_by_card"]["900"] == [4, 6]
     assert context.bstate["resolving_ability"] == "outer-guid"
     assert context.effect_template_override is None
 

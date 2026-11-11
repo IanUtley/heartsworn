@@ -6,7 +6,7 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 
-from tests.test_db import fresh_database  # noqa: E402
+from tests.test_db import fresh_database, isolated_db  # noqa: E402
 
 SRC = fresh_database()
 
@@ -17,10 +17,13 @@ def make_db():
     return db
 
 
+@isolated_db
 def test_playtest_champion_is_the_last_played_not_the_newest():
     from profile_db import (db_last_played_champion_for_user,
                             db_mark_champion_played)
     db = make_db()
+    # The shared baseline file can carry champion rows that earlier tests wrote; this test needs its own.
+    db.execute("DELETE FROM champions")
     for cid, deck in ((1, 10), (2, 20), (3, 30)):
         db.execute("INSERT INTO champions (id, user_id, champion_name, "
                    "last_deck_id) VALUES (?, 900, 'c', ?)", (cid, deck))

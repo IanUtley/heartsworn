@@ -12,7 +12,7 @@ from unittest import mock
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 
-from tests.test_db import fresh_database
+from tests.test_db import fresh_database, isolated_db
 
 fresh_database()   # bind this process's database before ``db`` is imported
 
@@ -37,37 +37,17 @@ TPL_BLK = "22222222-2222-2222-2222-222222222222"
 
 
 def make_db(att_owner, blk_owner):
-    db = sqlite3.connect(":memory:")
-    db.execute("""CREATE TABLE game_cards (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        session_id INTEGER, user_id INTEGER, card_uid INTEGER,
-        template_guid TEXT, card_template_id TEXT, location TEXT,
-        position INTEGER, card_state INTEGER, card_abilities TEXT,
-        card_type TEXT, card_attributes INTEGER, temporary_attributes INTEGER,
-        card_attack_mod INTEGER DEFAULT 0, card_defense_mod INTEGER DEFAULT 0,
-        card_cost_mod INTEGER DEFAULT 0,
-        cost_mod_json TEXT DEFAULT '[]', card_damage INTEGER DEFAULT 0,
-        permanent_buffs TEXT DEFAULT '{}', temporary_buffs TEXT DEFAULT '{}',
-        card_uses TEXT DEFAULT '{}', resolved_at INTEGER DEFAULT 0,
-        original_template_guid TEXT DEFAULT '')""")
-    db.execute("""CREATE TABLE IF NOT EXISTS card_templates (
-        guid TEXT, name TEXT, card_type TEXT, cost INTEGER, attack INTEGER,
-        defense INTEGER, attributes INTEGER, abilities_json TEXT,
-        threshold_json TEXT, subtype TEXT)""")
-    db.execute("""CREATE TABLE IF NOT EXISTS card_abilities_meta (
-        ability_guid TEXT, is_triggered INTEGER, trigger_event_type TEXT,
-        game_text TEXT, raw_json TEXT, casting_behavior INTEGER,
-        is_manual INTEGER, activation_cost INTEGER, uses_per_game INTEGER,
-        uses_per_turn INTEGER, target_template_ids TEXT,
-        exhausts_on_use INTEGER DEFAULT 0)""")
-    db.execute("""CREATE TABLE card_counter_templates (
-        template_id TEXT PRIMARY KEY, name TEXT, description TEXT)""")
+    """The production schema (a copy of the baseline), with the two test troop templates and their two cards."""
+    from tests.tests_combat import make_db as baseline_db
+    db = baseline_db()
     db.execute(
-        "INSERT OR REPLACE INTO card_templates VALUES (?,?,?,?,?,?,?,?,?,?)",
+        "INSERT OR REPLACE INTO card_templates (guid, name, card_type, cost, attack, defense, attributes, "
+        "abilities_json, threshold_json, subtype) VALUES (?,?,?,?,?,?,?,?,?,?)",
         (TPL_ATT, "Lifestealer", "Troop", 3, 3, 3,
          int(game_engine.ECardAttributes.SpiritDrain), "[]", "[]", ""))
     db.execute(
-        "INSERT OR REPLACE INTO card_templates VALUES (?,?,?,?,?,?,?,?,?,?)",
+        "INSERT OR REPLACE INTO card_templates (guid, name, card_type, cost, attack, defense, attributes, "
+        "abilities_json, threshold_json, subtype) VALUES (?,?,?,?,?,?,?,?,?,?)",
         (TPL_BLK, "Wall Troop", "Troop", 3, 3, 3, 0, "[]", "[]", ""))
     for uid, owner, tpl in ((101, att_owner, TPL_ATT),
                             (102, blk_owner, TPL_BLK)):
@@ -191,6 +171,7 @@ def resolve(owner_a, owner_d, pvp):
     return loc_a, loc_b, bstate, owner_uids
 
 
+@isolated_db
 def test_parity():
     fra = resolve(5, 0, pvp=False)
     pvp = resolve(1001, 1002, pvp=True)
@@ -209,6 +190,7 @@ def test_parity():
     print("PASS PvP combat parity with FRA")
 
 
+@isolated_db
 def test_pvp_combat_trigger_stays_on_authoritative_stack():
     """PvP combat must leave chain triggers for the PvP resolve loop.
 
@@ -321,7 +303,7 @@ def test_pvp_main_options_offer_resource_until_turn_played():
     resource_tpl = "33333333-3333-3333-3333-333333333333"
     artifact_tpl = "44444444-4444-4444-4444-444444444444"
     db.executemany(
-        "INSERT OR REPLACE INTO card_templates VALUES (?,?,?,?,?,?,?,?,?,?)",
+        "INSERT OR REPLACE INTO card_templates (guid, name, card_type, cost, attack, defense, attributes, abilities_json, threshold_json, subtype) VALUES (?,?,?,?,?,?,?,?,?,?)",
         [(resource_tpl, "Sapphire Shard", "Resource", 0, 0, 0, 0,
           "[]", "[]", ""),
          (artifact_tpl, "Zero Artifact", "Artifact", 0, 0, 0, 0,
@@ -459,24 +441,24 @@ def test_pvp_champion_options_exclude_triggers_and_basic_on_chain():
     champion_tpl = "77777777-7777-7777-7777-777777777777"
     triggered = "88888888-8888-8888-8888-888888888888"
     manual = "99999999-9999-9999-9999-999999999999"
-    db.execute(
-        "CREATE TABLE champion_templates_extended ("
+    db.executescript(
+        "DROP TABLE IF EXISTS champion_templates_extended; CREATE TABLE champion_templates_extended ("
         "guid TEXT PRIMARY KEY, name TEXT, race TEXT, champion_class TEXT, "
         "gender TEXT, is_selectable INTEGER, starting_health INTEGER, "
         "faction TEXT)"
     )
-    db.execute(
-        "CREATE TABLE champion_templates (guid TEXT PRIMARY KEY)"
+    db.executescript(
+        "DROP TABLE IF EXISTS champion_templates; CREATE TABLE champion_templates (guid TEXT PRIMARY KEY)"
     )
-    db.execute(
-        "CREATE TABLE IF NOT EXISTS champion_abilities ("
+    db.executescript(
+        "DROP TABLE IF EXISTS champion_abilities; CREATE TABLE champion_abilities ("
         "champion_guid TEXT, champion_name TEXT, ability_guid TEXT, "
         "ability_name TEXT, charge_cost INTEGER, spell_cost INTEGER, "
         "threshold_colors TEXT, game_text TEXT, casting_behavior INTEGER, "
         "thresholds_json TEXT, target_template_ids TEXT)"
     )
     db.execute(
-        "INSERT OR REPLACE INTO card_templates VALUES (?,?,?,?,?,?,?,?,?,?)",
+        "INSERT OR REPLACE INTO card_templates (guid, name, card_type, cost, attack, defense, attributes, abilities_json, threshold_json, subtype) VALUES (?,?,?,?,?,?,?,?,?,?)",
         (champion_tpl, "Wind Whisperer", "Troop", 0, 0, 0, 0,
          "[]", "[]", "")
     )
@@ -569,13 +551,13 @@ def test_pvp_activation_summoning_sickness_only_applies_to_troops():
     artifact_tpl = "55555555-5555-5555-5555-555555555555"
     troop_tpl = "66666666-6666-6666-6666-666666666666"
     db.executemany(
-        "INSERT OR REPLACE INTO card_templates VALUES (?,?,?,?,?,?,?,?,?,?)",
+        "INSERT OR REPLACE INTO card_templates (guid, name, card_type, cost, attack, defense, attributes, abilities_json, threshold_json, subtype) VALUES (?,?,?,?,?,?,?,?,?,?)",
         [(artifact_tpl, "Test Engine", "Artifact", 4, 0, 0, 0,
           json.dumps([ability]), "[]", "Engine"),
          (troop_tpl, "Test Troop", "Troop", 4, 2, 2, 0,
           json.dumps([ability]), "[]", "")])
     db.execute(
-        "INSERT OR REPLACE INTO card_abilities_meta VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+        "INSERT OR REPLACE INTO card_abilities_meta (ability_guid, is_triggered, trigger_event_type, game_text, raw_json, casting_behavior, is_manual, activation_cost, uses_per_game, uses_per_turn, target_template_ids, exhausts_on_use) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
         (ability, 0, None, "[ACT] Gain 2.", "{}", 64, 1, 0, 0, 0,
          "[]", 1))
     for uid, template, card_type in ((301, artifact_tpl, "Artifact"),
@@ -629,7 +611,7 @@ def test_pvp_hand_refresh_pushes_current_dynamic_cost():
     ptero_tpl = "55555555-5555-5555-5555-555555555555"
     robot_tpl = "66666666-6666-6666-6666-666666666666"
     db.executemany(
-        "INSERT OR REPLACE INTO card_templates VALUES (?,?,?,?,?,?,?,?,?,?)",
+        "INSERT OR REPLACE INTO card_templates (guid, name, card_type, cost, attack, defense, attributes, abilities_json, threshold_json, subtype) VALUES (?,?,?,?,?,?,?,?,?,?)",
         [(ptero_tpl, "Pterobot", "Troop", 7, 4, 4, 0, "[]", "[]", "Robot Dinosaur"),
          (robot_tpl, "Worker Bot", "Troop|Artifact", 1, 1, 1, 0, "[]", "[]", "Robot")])
     db.execute(
@@ -926,7 +908,7 @@ def test_constant_is_not_offered_as_pvp_attacker():
     """PvP attack options must contain troops only, not Constants."""
     db = make_db(1001, 1002)
     db.execute(
-        "INSERT OR REPLACE INTO card_templates VALUES (?,?,?,?,?,?,?,?,?,?)",
+        "INSERT OR REPLACE INTO card_templates (guid, name, card_type, cost, attack, defense, attributes, abilities_json, threshold_json, subtype) VALUES (?,?,?,?,?,?,?,?,?,?)",
         ("33333333-3333-3333-3333-333333333333", "Incantation", "Constant",
          2, 0, 0, 0, "[]", "[]", ""))
     db.execute(

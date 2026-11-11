@@ -8,6 +8,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 
 import tests.ir_equivalence as H  # noqa: E402
 from tests.tests_combat import SessionStub  # noqa: E402
+from tests.test_db import isolated_db  # noqa: E402
 
 # An ability whose invoked child picks a card from the Choosing zone (the native path ran it before this change). The
 # parent summons the Choosing cards on a damage trigger; the child is run here on the cards the test places.
@@ -40,6 +41,7 @@ def _choosing_battle():
     return db, pl_t, ai_t, game, handler, bstate
 
 
+@isolated_db
 def test_choosing_pick_is_run_by_the_interpreter_and_pauses_with_its_zone():
     from rules_port import interpreted_prompts
     from rules_port import ir_exec
@@ -80,6 +82,7 @@ HAND_PARENT = "55a6024b-1d23-f18f-0ebf-615d0b7c5273"
 HAND_CHILD = "06570445-27e3-fc87-2e17-a7b5e1de693d"
 
 
+@isolated_db
 def test_single_hand_pick_is_run_by_the_interpreter_and_prompts_through_the_trigger_targets():
     from rules_port import interpreted_prompts, ir_exec
     from rules_port.context import EffectContext
@@ -117,6 +120,7 @@ MULTI_PARENT = "df41fd00-65c3-c619-d105-ed49e4961026"
 MULTI_CHILD = "2f1a7aca-a70c-ab25-faca-84ac4047de5c"
 
 
+@isolated_db
 def test_multi_card_hand_pick_takes_a_set_answer():
     from rules_port import interpreted_prompts
     from rules_port import ir_exec, picks, resolution
@@ -158,6 +162,7 @@ DISCARD_PARENT = "32f42e74-0318-bf6d-2949-6e6a7c54562b"
 DISCARD_CHILD = "60f051ff-fcab-9166-9ab8-b16383ef3300"
 
 
+@isolated_db
 def test_discard_pick_is_run_by_the_interpreter_and_prompts_through_the_zone_picker():
     from rules_port import interpreted_prompts, ir_exec
     from rules_port.context import EffectContext
@@ -194,6 +199,7 @@ WARZONE_PARENT = "639deae6-1a56-dbc1-1247-db64aeb587a6"
 WARZONE_CHILD = "83fc0da9-caad-71c5-751a-007ff3a23db1"
 
 
+@isolated_db
 def test_warzone_troop_pick_is_run_by_the_interpreter_and_prompts_through_the_zone_picker():
     from rules_port import interpreted_prompts, ir_exec
     from rules_port.context import EffectContext
@@ -229,6 +235,7 @@ COST_COMPARE_PARENT = "00d452f1-0a56-1045-751f-11278a7840c8"
 COST_COMPARE_CHILD = "f0fc538d-7bff-87af-cadb-a203e5ddec74"
 
 
+@isolated_db
 def test_cost_comparing_deck_pick_reads_the_current_cost_from_game_cards():
     from rules_port import ir_exec, targeting
     from rules_port.context import EffectContext
@@ -264,3 +271,15 @@ def test_cost_comparing_deck_pick_reads_the_current_cost_from_game_cards():
     assert candidates() == {CASTER_DECK_CARD}
     # A card a template makes but that has no game_cards row yet costs its template's cost.
     assert ir_exec._effective_cost(context, 0x999, H.scenarios.TPL_GLADIATOR) == 2
+
+
+# An ability that invokes a random Lucky pool ability (its authored invoke is null). Its gate used to raise KeyError on the
+# null child; it now checks the pool, and the interpreter runs it.
+RANDOM_INVOKE_NULL_CHILD = "9b36aabc-dffc-edf3-eaf9-cd514adf3d6a"
+
+
+def test_random_invoke_with_a_null_authored_child_runs_in_the_interpreter():
+    from rules_port import ir_exec
+
+    assert ir_exec.coverage(RANDOM_INVOKE_NULL_CHILD) == []
+    assert ir_exec.engine_runs(RANDOM_INVOKE_NULL_CHILD, 900, 5)

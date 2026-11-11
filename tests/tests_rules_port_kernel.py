@@ -12,7 +12,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from tests.leaf_routing import install_leaf_routes as _install_leaf_routes
 _install_leaf_routes()
 
-from tests.test_db import fresh_database
+from tests.test_db import fresh_database, isolated_db
 
 fresh_database()   # bind this process's database before ``db`` is imported
 
@@ -2017,6 +2017,7 @@ def test_type_and_print_variant_filters_use_runtime_flags():
     assert IsPromo().matches(card)
 
 
+@isolated_db
 def test_socket_filters_use_socket_counts_and_comparison_metadata():
     from rules_port import IsSocketable, IsSocketed
     from rules_port.filters import _gem_minor_types, _gem_rows
@@ -2040,6 +2041,7 @@ def test_socket_filters_use_socket_counts_and_comparison_metadata():
         {"gems": major})
 
 
+@isolated_db
 def test_generated_socketable_cards_use_empty_socket_format():
     """Generated socketable cards must retain the client's empty-socket bit."""
     import db
@@ -2519,6 +2521,7 @@ def test_players_who_control_matching_filter_counts_controller_cards():
     assert filt.matches(card, session=session)
 
 
+@isolated_db
 def test_pack_raptors_count_other_controlled_copies_for_their_stats():
     """Their authored self-buff counts friendly Raptors, excluding itself."""
     import db
@@ -2548,6 +2551,7 @@ def test_pack_raptors_count_other_controlled_copies_for_their_stats():
         db._db.commit()
 
 
+@isolated_db
 def test_gladiator_projects_by_side_and_gladiatorboth():
     """Card.Current*Value adds Gladiator to attack/defense by active side."""
     import db
@@ -2586,6 +2590,7 @@ def test_gladiator_projects_by_side_and_gladiatorboth():
         db._db.commit()
 
 
+@isolated_db
 def test_owner_can_play_for_free_and_champion_flag_zero_the_cost():
     import db
     import pvp_db
@@ -2660,6 +2665,7 @@ def test_start_of_turn_ready_honors_cantready_intattrs():
         db._db.commit()
 
 
+@isolated_db
 def test_mobilize_reduces_payment_from_ready_troops():
     import db
     import pvp_db
@@ -2956,7 +2962,8 @@ def test_rules_port_chain_dispatch_skips_legacy_trigger_hook():
     assert hcp_result == "native"
     assert calls == []
     assert native_dispatch.call_count == 2
-    assert native_dispatch.call_args_list[0].kwargs["db"] is dbmod._db
+    # dispatch uses the host's own connection when it has one (chain_items.dispatch).
+    assert native_dispatch.call_args_list[0].kwargs["db"] is host._db
     assert native_dispatch.call_args_list[0].kwargs["target_card_id"] == 902
     assert native_dispatch.call_args_list[1].kwargs["handler"] is hcp_host
 
@@ -3005,6 +3012,7 @@ def test_lifebound_returns_marked_discard_cards():
         db._db.commit()
 
 
+@isolated_db
 def test_verdict_creates_pool_tokens_and_activates_choose():
     import db
     import pvp_db
@@ -3044,7 +3052,8 @@ def test_verdict_creates_pool_tokens_and_activates_choose():
         calls = []
         with mock.patch("rules_port.resolution.resolve_port_ability",
                         side_effect=lambda *a, **k: calls.append((a, k))):
-            result = context_mod.EffectContext.verdict(ctx)
+            from rules_port import leaves_abilities
+            result = leaves_abilities.verdict(ctx)
         assert "verdict" in result, result
         assert calls, "the choose ability was not activated"
         chosen = db._db.execute(
@@ -3068,6 +3077,7 @@ def test_verdict_creates_pool_tokens_and_activates_choose():
         db._db.commit()
 
 
+@isolated_db
 def test_resource_cast_activates_momentum_and_expires_at_owner_start_turn():
     import db
     import pvp_db
@@ -3124,6 +3134,7 @@ def test_resource_cast_activates_momentum_and_expires_at_owner_start_turn():
         db._db.commit()
 
 
+@isolated_db
 def test_while_in_play_stat_expires_when_the_source_loses_the_ability():
     """A linked WhileCardInPlay effect dies with the source ability, not just with the source card.
 
@@ -3175,6 +3186,7 @@ def test_while_in_play_stat_expires_when_the_source_loses_the_ability():
         db._db.commit()
 
 
+@isolated_db
 def test_while_in_play_clause_is_projected_not_executed():
     """A triggerless WhileCardInPlay clause is the scan's to project; a triggered one is a linked effect the
     interpreter applies and records."""
@@ -3215,6 +3227,7 @@ def test_while_in_play_clause_is_projected_not_executed():
         effect_guid=_guid(linked_clause.get("m_EffectTemplateId")))
 
 
+@isolated_db
 def test_while_in_play_grant_is_recorded_and_expires_with_its_source():
     """A linked while-in-play stat or keyword is applied, recorded against its source, and dropped when the source
     leaves play.
@@ -3392,6 +3405,7 @@ def test_death_exit_event_carries_both_collections_before_the_entry():
     assert names.index("CardExitedZoneEvent") < names.index("CardEnteredZoneEvent"), names
 
 
+@isolated_db
 def test_replica_projection_carries_artifact_type_and_subtype():
     import db
     import pvp_db

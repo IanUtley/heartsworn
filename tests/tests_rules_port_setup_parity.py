@@ -7,7 +7,7 @@ from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from tests.test_db import fresh_database
+from tests.test_db import fresh_database, isolated_db
 
 # The RulesPort session imports shared runtime modules, which bind the active
 # SQLite connection during import. Keep this focused check isolated.
@@ -165,9 +165,10 @@ def test_pvp_setup_coin_winner_is_persisted_and_shared_by_both_players():
     assert set(ready[5199]["handlers"]) == set(player_ids)
 
 
+@isolated_db
 def test_pvp_reconnect_uses_valid_champion_ids_before_phase_projection():
     """Reconnect recovers champions from rows before Unity resolves the IDs."""
-    from services import tournament_game
+    from services import pvp_flow, tournament_game
 
     player_id, opponent_id = 5151, 5152
     player_card = game_engine.UID.make(1, 9151).uid64
@@ -229,7 +230,7 @@ def test_pvp_reconnect_uses_valid_champion_ids_before_phase_projection():
                 mock.patch.object(tournament_game, "db_tournament_player_name_for_session",
                                   side_effect=lambda _sid, owner:
                                   f"Player {owner}"), \
-                mock.patch.object(tournament_game, "db_game_cards_at_location",
+                mock.patch.object(pvp_flow, "db_game_cards_at_location",
                                   side_effect=cards_at), \
                 mock.patch.object(tournament_game, "pvp_push_warzone_updates"), \
                 mock.patch.object(tournament_game, "_pvp_push_reconnect_underground"), \

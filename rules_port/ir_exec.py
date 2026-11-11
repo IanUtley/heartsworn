@@ -767,6 +767,11 @@ def _targets(root: MechanicsObject, index: int, scope: Scope) -> list[int]:
     return [uid for uid in targets if scope.gate(uid)]
 
 
+def _is_reveal_target(template: MechanicsObject) -> bool:
+    """Whether a target template picks from a reveal (its own AI choice is kept)."""
+    return _short(template.type_name) in ("SourceRevealedTargetTemplate", "SecondaryTargetTemplate")
+
+
 def _pick_bounds(template: MechanicsObject, candidates: list[int], optional: bool, scope: Scope) -> tuple[int, int]:
     """How many cards a chosen target takes: the template's minimum and maximum counts (C# target counts), with an
     unset maximum meaning every candidate. A single-card target is (1, 1); an optional one may take none."""
@@ -1277,28 +1282,35 @@ def _repeat_gaps(effect: dict[str, Any]) -> list[str]:
 
 def _invoked_non_revealed_choice(root: MechanicsObject, seen: set[str]) -> bool:
     """Whether an invoked ability (at any depth) picks a card other than from a reveal. A reveal's pick is shown
-    through the revealed-card picker, which the engine wires; any other pick is not."""
+    through the revealed-card picker, which the engine wires; any other pick is not. A random invoke runs one ability
+    of the random pool (its authored invoke is ignored), so every pool ability is checked; an invoke with no ability
+    runs nothing and is skipped."""
     for clause in root.m_AbilityEffectList:
         effect_type, effect_raw = _stored("AbilityEffectTemplate", _guid(_field(clause, "m_EffectTemplateId")))
         if _short(effect_type) != "ActivateAbilityEffectTemplate":
             continue
-        child = _guid(effect_raw.get("m_AbilityToInvoke"))
-        if child in seen:
-            continue
-        child_root = _load("AbilityTemplate", child)
-        for index in range(len(child_root.m_AbilityTargetTemplateIds or [])):
-            if _needs_choice(child_root, index):
-                template = _load("AbilityTargetTemplate", _guid(child_root.m_AbilityTargetTemplateIds[index]))
-                authored_raw = _stored("AbilityTargetTemplate", _guid(child_root.m_AbilityTargetTemplateIds[index]))[1]
-                if _short(template.type_name) != "SourceRevealedTargetTemplate" and \
-                        _zones_of(template.m_CollectionFlags) != {"deck"} and \
-                        not _picker_wired(authored_raw):
-                    # Only a pick whose picker is wired runs in the interpreter: the deck-search prompt (a deck pick,
-                    # by collection flags as before), the choice-zone prompt (an authored Choosing pick) and the hand
-                    # prompt (an authored single-card Hand pick). Any other pick stays on the native path.
-                    return True
-        if _invoked_non_revealed_choice(child_root, seen | {child}):
-            return True
+        if effect_raw.get("m_RandomlyLuckyOrUnlucky"):
+            children = sack_pool(True) + sack_pool(False)
+        else:
+            children = [_guid(effect_raw.get("m_AbilityToInvoke"))]
+        for child in children:
+            if not child or child == ZERO_GUID or child in seen:
+                continue
+            child_root = _load("AbilityTemplate", child)
+            for index in range(len(child_root.m_AbilityTargetTemplateIds or [])):
+                if _needs_choice(child_root, index):
+                    template = _load("AbilityTargetTemplate", _guid(child_root.m_AbilityTargetTemplateIds[index]))
+                    authored_raw = _stored("AbilityTargetTemplate", _guid(child_root.m_AbilityTargetTemplateIds[index]))[1]
+                    if _short(template.type_name) != "SourceRevealedTargetTemplate" and \
+                            _zones_of(template.m_CollectionFlags) != {"deck"} and \
+                            not _picker_wired(authored_raw):
+                        # Only a pick whose picker is wired runs in the interpreter: the deck-search prompt (a deck
+                        # pick, by collection flags as before), the choice-zone prompt (an authored Choosing pick) and
+                        # the zone prompt (an authored single-zone pick with a constant count). Any other pick stays
+                        # on the native path.
+                        return True
+            if _invoked_non_revealed_choice(child_root, seen | {child}):
+                return True
     return False
 
 
@@ -1589,6 +1601,15 @@ def _run_effects(guid: str, root: MechanicsObject, scope: Scope, start: int) -> 
                     scope.chosen[index] = candidates[0]
                 elif not candidates:
                     scope.chosen[index] = None
+                elif int(scope.owner_uid) == 0 and not _is_reveal_target(_load(
+                        "AbilityTargetTemplate", _guid(root.m_AbilityTargetTemplateIds[index]))):
+                    # The AI never answers a prompt. It takes the first candidates, up to the count the target asks
+                    # for, as the native resolver's AI does (its first legal card). A reveal keeps its own AI choice
+                    # (interpreted_prompts._ai_revealed_pick). The choice is deterministic: it draws no random number.
+                    count = max(1, _pick_bounds(_load("AbilityTargetTemplate", _guid(
+                        root.m_AbilityTargetTemplateIds[index])), candidates, optional, scope)[1])
+                    taken = [int(uid) for uid in candidates[:count]]
+                    scope.chosen[index] = taken if count > 1 else taken[0]
                 else:
                     continuation = {"ability_guid": guid, "event": dict(scope.event),
                                     "source_uid": int(scope.source_uid), "owner_uid": int(scope.owner_uid),
@@ -1844,9 +1865,15 @@ def _randomize_variable(effect_raw: dict[str, Any], scope: Scope) -> None:
         minimum, maximum = maximum, minimum
     span = max(0, maximum - minimum) + 1
     bstate = scope.context.bstate
+    session_rng = bstate.get("_rules_rng")
 
     def roll() -> int:
-        return minimum + int(rng_below(bstate, span)) % span
+        # The same draw as the shared leaf (leaves_variables.randomize): the session RNG when there is one, else the
+        # module's randint over the bounds.
+        if session_rng is not None and hasattr(session_rng, "next"):
+            return minimum + int(session_rng.next(span)) % span
+        import random
+        return random.randint(minimum, maximum)
 
     name = str(effect_raw.get("m_VariableName") or "RandomNumber")
     value = roll()

@@ -39,7 +39,8 @@ AG_DEATHCRY = "9853659b-89f4-1e16-f940-67bdb37f5729"
 def make_db():
     """A disposable copy of the metadata baseline (production schema)."""
     src = sqlite3.connect(SRC)
-    db = sqlite3.connect(":memory:")
+    # The server's connection is shared across threads (web matches run on a worker), so the copy is too.
+    db = sqlite3.connect(":memory:", check_same_thread=False)
     # Production connections read rows by column name too (db.py's named row factory).
     from db import _named_row_factory
     db.row_factory = _named_row_factory
@@ -88,6 +89,14 @@ class SessionStub:
 
 
 class HandlerStub:
+    # The trigger target picker's request builder, as the live handler provides it.
+    from application.pending_choices import PendingChoicesMixin as _Pending
+    _trigger_pick_request = staticmethod(_Pending._trigger_pick_request)
+    from application.card_play import CardPlayMixin as _CardPlay
+    _ability_x_cost_metadata = staticmethod(_CardPlay._ability_x_cost_metadata)
+    from application.card_state import CardStateMixin as _CardState
+    _card_uses = _CardState._card_uses
+    _ability_requires_discard = _CardPlay._ability_requires_discard
     user_profile = {"id": 5}
     client_reck_id = 5
     scnt = 0
@@ -209,7 +218,7 @@ class HandlerStub:
         self._db.commit()
         return None, ai_t
 
-    def _card_full_data(self, game, scid, template_guid, instance_id=None):
+    def _card_full_data(self, game, scid, template_guid, instance_id=None, instance_projection=None):
         row = self._db.execute(
             "SELECT card_type, name, cost, attack, defense, attributes "
             "FROM card_templates WHERE guid=?",

@@ -16,6 +16,7 @@ from tests.test_db import fresh_database
 fresh_database()   # bind this process's database before ``db`` is imported
 
 from web_client import match as web_match  # noqa: E402
+from tests.test_db import isolated_db  # noqa: E402
 
 HAND = 2
 NO_GUID = "00000000-0000-0000-0000-000000000000"
@@ -67,13 +68,66 @@ def _settle(match, after=0):
             return snap, packets, after
 
 
+def _bound_to_current_db(test):
+    """Run a web test with the match module bound to the current test database (it captures ``_db`` at import, and an
+    earlier test may have left it pointing at another database)."""
+    import functools
+    import db as dbmod
+
+    @functools.wraps(test)
+    def run(*args, **kwargs):
+        import sqlite3
+        import sys
+        current = dbmod._db
+        # Every module that captured ``_db`` at import (the match and the autoplay module use it) points at the
+        # current database for the test, and goes back afterwards.
+        rebound = [(module, module._db) for module in list(sys.modules.values())
+                   if isinstance(getattr(module, "_db", None), sqlite3.Connection) and module._db is not current]
+        for module, _held in rebound:
+            module._db = current
+        try:
+            return test(*args, **kwargs)
+        finally:
+            for module, held in rebound:
+                module._db = held
+
+    return run
+
+
+def _new_human_first_match(decks, attempts=5):
+    """A web match whose human seat takes the first turn. The server's coin flip depends on the session, so the match is
+    created, its first prompt read, and it is replaced by the next slot's match when the AI would go first."""
+    for _ in range(attempts):
+        match = web_match.WebMatch(decks[0]["deck_guid"], decks[1]["deck_guid"], seed=11, ai_delay=0)
+        snap, packets, after = _settle(match)
+        if snap["prompt"]["kind"] == "goes_first":
+            return match, snap, packets, after
+        match.close()
+    raise AssertionError("no slot gave the human seat the first turn")
+
+
+def _with_human_first(test):
+    """Run a web test on a match whose human seat takes the first turn (the coin flip depends on the session)."""
+    import functools
+
+    @functools.wraps(test)
+    def run(*args, **kwargs):
+        previous_slots = web_match._slots
+        web_match._slots = _human_goes_first_slots()
+        try:
+            return test(*args, **kwargs)
+        finally:
+            web_match._slots = previous_slots
+
+    return run
+
+
+@_bound_to_current_db
 def test_web_seat_gets_its_options_and_never_the_opponents_hand():
     decks = _ensure_two_decks()
     assert len(decks) >= 2, "no complete encounter decks to play"
-    match = web_match.WebMatch(decks[0]["deck_guid"], decks[1]["deck_guid"],
-                               seed=11, ai_delay=0)
+    match, snap, packets, after = _new_human_first_match(decks)
     try:
-        snap, packets, after = _settle(match)
         for _ in range(6):
             kind = snap["prompt"]["kind"]
             if kind not in ("goes_first", "mulligan"):
@@ -114,7 +168,27 @@ if __name__ == "__main__":
     print("ok")
 
 
+def _human_goes_first_slots():
+    """A slot counter whose next match has the human seat going first. The server's coin flip is a hash of the session
+    and its players, so the first player depends on the session the match gets."""
+    import hashlib
+    import itertools
+    # Start after the slots earlier matches in this process already used, so the session ids are new.
+    start = next(web_match._slots) + 1
+    for k in range(start, start + 1000):
+        slot = web_match.WEB_RUN_SLOT_BASE + k
+        session_id, pids = web_match.autoplay._autoplay_identity(slot, slot)
+        if hashlib.md5(f"{int(session_id)}:{pids[0]}:{pids[1]}".encode()).digest()[0] & 1:
+            return itertools.count(k)
+    raise RuntimeError("no slot gives the human seat the first turn")
+
+
+@_bound_to_current_db
 def test_shards_of_fate_offers_the_web_seat_a_threshold_pick():
+    _shards_of_fate_threshold_pick()
+
+
+def _shards_of_fate_threshold_pick():
     """Playing Shards of Fate in a PvP session (the web seat's) must resolve to a threshold pick, not abort.
 
     The opening hand is forced to hold Shards of Fate (a Resource whose abilities are the template's), so the
@@ -126,10 +200,8 @@ def test_shards_of_fate_offers_the_web_seat_a_threshold_pick():
     shards_of_fate = _db.execute(
         "SELECT guid FROM card_templates WHERE name='Shards of Fate' LIMIT 1").fetchone()[0].lower()
     decks = _ensure_two_decks()
-    match = web_match.WebMatch(decks[0]["deck_guid"], decks[1]["deck_guid"],
-                               seed=11, ai_delay=0)
+    match, snap, packets, after = _new_human_first_match(decks)
     try:
-        snap, packets, after = _settle(match)
         forced = None
         for _ in range(6):
             kind = snap["prompt"]["kind"]

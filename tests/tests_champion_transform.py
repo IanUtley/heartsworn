@@ -80,13 +80,19 @@ def _lose_and_convert(handler, session, db, state):
         return None
     with contextlib.redirect_stdout(io.StringIO()):
         game = handler._fresh_game(session, matrix.PLAYER_UID, matrix.AI_UID, state)
-        resolve_port_ability(
-            handler, game, session, db, matrix.PLAYER_UID, matrix.AI_UID, state,
-            pending.get("ability_guid", ""), pending.get("source_uid"),
-            int(pending.get("ability_owner_id", 0) or 0),
-            target_map={int(k): v for k, v in (pending.get("target_map") or {}).items()},
-            variables=pending.get("variables") or {},
-            resume_from_order=int(pending.get("resume_effect_order", 0)))
+        if isinstance(pending.get("interpreter"), dict):
+            # The interpreter paused for this conversation: its continuation resumes it (as the live answer does).
+            from rules_port import ir_exec
+            ir_exec.resume_conversation(pending["interpreter"], context=EffectContext.from_rules_port(
+                game, session, db, handler, matrix.PLAYER_UID, matrix.AI_UID, state, "", ability=None))
+        else:
+            resolve_port_ability(
+                handler, game, session, db, matrix.PLAYER_UID, matrix.AI_UID, state,
+                pending.get("ability_guid", ""), pending.get("source_uid"),
+                int(pending.get("ability_owner_id", 0) or 0),
+                target_map={int(k): v for k, v in (pending.get("target_map") or {}).items()},
+                variables=pending.get("variables") or {},
+                resume_from_order=int(pending.get("resume_effect_order", 0)))
     return pending
 
 

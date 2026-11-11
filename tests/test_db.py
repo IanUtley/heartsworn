@@ -104,3 +104,42 @@ def build_baseline(path: str) -> str:
         else:
             os.environ["HEX_DB_PATH"] = previous
     return path
+
+
+def isolated_db(test):
+    """Run a test against its own disposable copy of the baseline, bound as ``db._db``.
+
+    Tests that use the module-level connection (``db._db``) without a ``db`` argument would otherwise write into one
+    shared file database, and the rows they leave change the tests that run after them. The copy is closed and the
+    previous binding is restored when the test ends.
+    """
+    import functools
+
+    @functools.wraps(test)
+    def run(*args, **kwargs):
+        import sqlite3
+
+        import db as dbmod
+        src = sqlite3.connect(fresh_database())
+        # The server's connection is shared across threads (web matches run on a worker), so the copy is too.
+        conn = sqlite3.connect(":memory:", check_same_thread=False)
+        conn.row_factory = dbmod._named_row_factory
+        src.backup(conn)
+        src.close()
+        import sys
+        previous = dbmod._db
+        # Modules that imported ``_db`` hold the same connection object; point each one at the copy, then restore it.
+        rebound = [(module, module._db) for module in list(sys.modules.values())
+                   if getattr(module, "_db", None) is previous]
+        dbmod._db = conn
+        for module, _held in rebound:
+            module._db = conn
+        try:
+            return test(*args, **kwargs)
+        finally:
+            for module, held in rebound:
+                module._db = held
+            dbmod._db = previous
+            conn.close()
+
+    return run

@@ -1741,8 +1741,17 @@ def run_interpreted_trigger(handler, game, session, db, player_uid, ai_uid, batt
     from . import ir_exec
     from .context import EffectContext
     try:
+        # The event hands the ability instance its named IntAttrs (CardDealtDamageEvent's DamageDealt), as the native
+        # resolver seeds them, so an instance read ("a counter for each damage dealt") sees the event's values.
+        event_tac = (dict(event_data or {}).get("event_tac") or {})
+        instance_stats = {str(k): int(v or 0) for k, v in event_tac.items() if str(k) in _EVENT_INSTANCE_STATS}
+        if instance_stats and instance_id is not None:
+            from .statistics import seed_ability_stats
+            seed_ability_stats(battle_state, instance_stats, instance_id=int(instance_id))
+        # An item with no trigger event (a spell or an activated ability) runs with no event, not an empty event name,
+        # which the interpreter would read as a trigger and judge by its zone.
         ir_exec.run_ability(
-            guid, event_name,
+            guid, event_name or None,
             context=EffectContext.from_rules_port(
                 game, session, db, handler, player_uid, ai_uid, battle_state, ""),
             source_uid=int(source_uid), owner_uid=int(owner_uid),

@@ -242,3 +242,16 @@ installed here, so the function-style files ran through a small runner that bind
   Its `_StoreContext` stub lacks `template_value`, which `leaves_variables.store_target` reads (`m_SetTargets`). The read
   was added in commit `3b5ba3d`. Adding `def template_value(self, name, default=None): return default` to the stub
   is the likely fix; I have not made it.
+
+
+## Native path is empty (2026-11-10, later)
+
+- `9b36aabc-dffc-edf3-eaf9-cd514adf3d6a` is no longer native. Its invoke is random (`m_RandomlyLuckyOrUnlucky`) with a
+  null authored child. `_invoked_non_revealed_choice` used to load that null child and raised `KeyError` (the census
+  had been catching it and counting the ability as native). The gate now checks the random pool, as coverage does, and
+  skips a null invoke. The interpreter runs the pool pick at run time.
+- Census over all 8,996 `AbilityTemplate` records: **8,996 interpreter, 0 native, 0 errors.**
+- Stub fixed: `tests/tests_ir_exec_targets.py::test_store_targets_...` was out of date with the store leaf (which writes to
+  `bstate`, not through the context). Rewritten against the leaf's current inputs; it passes.
+- IR suites: 116 function-style tests pass; `tests_ability_ir.py` and `tests_ir_surface_write.py` pass.
+- New test: `tests/tests_ir_choice_zone.py::test_random_invoke_with_a_null_authored_child_runs_in_the_interpreter`.

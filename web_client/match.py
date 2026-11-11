@@ -115,10 +115,13 @@ class WebMatch:
         self._declared = set()
         self._ai_tried = set()
         self._actions: queue.Queue = queue.Queue()
+        # Set once the seats are up (or setup failed), so a caller never reads the session before _setup has made it.
+        self._set_up = threading.Event()
         if threaded:
             self._worker = threading.Thread(
                 target=self._run, name=f"web-match-{self.slot}", daemon=True)
             self._worker.start()
+            self._set_up.wait(timeout=120)
         else:
             self._start()
 
@@ -421,6 +424,12 @@ class WebMatch:
         try:
             with ENGINE_LOCK:
                 self._setup()
+        except Exception:
+            self._fail()
+            self._set_up.set()
+            return
+        self._set_up.set()
+        try:
             self._publish()
             self._advance()
         except Exception:

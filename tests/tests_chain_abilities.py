@@ -3699,9 +3699,9 @@ def test_pregame_champion_ability_fires_once_per_champion():
         "INSERT OR REPLACE INTO card_abilities_meta (ability_guid, "
         "trigger_event_type) VALUES (?,?)",
         (pure_hatred, "Game.Shared.Mechanics.PreGameEvent"))
-    add_card(db, 9001, 1001, goliath, loc="champion")
+    add_card(db, 9001, 1001, goliath, loc="champions")
     db.execute("UPDATE game_cards SET is_champion=1, card_abilities=? WHERE card_uid=9001",
-               (json.dumps([ability_guid]),))
+               (json.dumps([pure_hatred]),))
     db.commit()
     handler = HandlerStub(db)
     handler.user_profile = {"id": 1001}
@@ -3857,6 +3857,9 @@ def test_ravenous_zombies_exhausts_itself_after_voiding_a_crypt_troop(db):
     game = game_engine.Game(1, pl_t, ai_t)
     handler = HandlerStub(db)
     bstate = {"player_health": 20, "ai_health": 20, "turn_number": 2}
+    # A live battle names each champion's template; the interpreter reads a champion's subtype from it.
+    from tests.ir_equivalence import _test_champion_guid
+    bstate["champ_guid_map"] = {0: _test_champion_guid(), 5: _test_champion_guid()}
     handler._current_bstate = bstate
 
     def zombie_state():

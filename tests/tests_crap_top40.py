@@ -290,7 +290,11 @@ def test_pvp_phase_start_with_an_empty_state_pushes_nothing_back():
     import services.tournament_game as tg
     from tests.tests_combat import SessionStub
     import game_engine
-    assert tg._pvp_run_phase_start(SessionStub(), {}, game_engine.ETurnPhases.StartTurn) is None
+    from unittest import mock
+    # A session with no players in it: nothing is pushed. The lookup is pinned so the result does not depend on the
+    # rows an earlier test left in the shared database.
+    with mock.patch.object(tg, "db_game_session_pids", return_value=[]):
+        assert tg._pvp_run_phase_start(SessionStub(), {}, game_engine.ETurnPhases.StartTurn) is None
 
 
 def test_pvp_game_start_for_an_empty_session_pushes_nothing_and_returns():
@@ -535,10 +539,14 @@ def test_autoplay_game_runs_ten_turns_of_a_seeded_game():
     import db as shared
     import pvp_autoplay
     previous = shared._db
+    # pvp_autoplay copies db._db when it is first imported, which may be an earlier test's connection. Bind it here.
+    previous_autoplay = pvp_autoplay._db
+    pvp_autoplay._db = shared._db
     try:
         turns, _ = pvp_autoplay._play_one_game(seed=7, turns_cap=10)
     finally:
         shared._db = previous
+        pvp_autoplay._db = previous_autoplay
     # A game can end before the cap, so require progress rather than the exact count.
     assert turns >= 1, turns
 
@@ -695,24 +703,45 @@ def test_csharp_fallback_takes_control_of_the_opposing_troop():
     assert target == 201
 
 
+def _save_session_for_lookup(gs, session):
+    """Write a session where game_session's lookup reads it (its own connection to HEX_DB_PATH), and commit."""
+    conn = gs._db()
+    try:
+        gs.db_layer.db_save_session(session, conn=conn)
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def test_ready_to_start_in_a_pvp_session_acknowledges_the_client():
+    import db as shared
     import game_session as gs
     import hconnect_server
     from services.ready_to_start import handle_readytostartgame_22031
-    make_db()
-    reck = 5
-    session = gs.GameSession(7001, 7001 * 1000, "pvp-7001", reck)
-    session.add_player(hconnect_server.make_uid(
-        hconnect_server.UID_TYPE["ServicePlayer"], reck), 0)
-    handler = hconnect_server.HCPHandler(None, ("127.0.0.1", 0))
-    handler.user_profile = {"id": 5}
-    handler.client_reck_id = reck
-    sent = []
-    handler.send = lambda header, body: sent.append((header, body))
-    handle_readytostartgame_22031(handler, 0, 0, 40, False, 0, 0,
-                                  None, b"", SERVICE_MAIL_UID=252, log_req=lambda *_a, **_k: None, data_type=22031)
-    assert len(sent) == 1
-    assert sent[0][0]["reqid"] == 41, sent[0][0]
+    db = make_db()
+    previous = (shared._db, hconnect_server._db)
+    shared._db = db
+    hconnect_server._db = db
+    try:
+        reck = 5
+        session = gs.GameSession(7001, 7001 * 1000, "pvp-7001", reck)
+        session.add_player(hconnect_server.make_uid(
+            hconnect_server.UID_TYPE["ServicePlayer"], reck), 0)
+        # The handler finds the player's session through game_session's own database (HEX_DB_PATH), so the
+        # session is saved there.
+        _save_session_for_lookup(gs, session)
+        handler = hconnect_server.HCPHandler(None, ("127.0.0.1", 0))
+        handler.user_profile = {"id": 5}
+        handler.client_reck_id = reck
+        sent = []
+        handler.send = lambda header, body: sent.append((header, body))
+        handle_readytostartgame_22031(handler, 0, 0, 40, False, 0, 0,
+                                      None, b"", SERVICE_MAIL_UID=252, log_req=lambda *_a, **_k: None, data_type=22031)
+        assert len(sent) == 1
+        assert sent[0][0]["reqid"] == 41, sent[0][0]
+    finally:
+        shared._db, hconnect_server._db = previous
+
 
 
 def test_legal_targets_offers_the_ability_source_for_a_self_target_template():
@@ -1130,6 +1159,9 @@ def test_ready_to_start_in_a_practice_game_sends_the_opening_setup():
         reck = 5
         session = gs.GameSession(7101, 7101 * 1000, "practice-7101", reck)
         session.add_player(hconnect_server.make_uid(hconnect_server.UID_TYPE["ServicePlayer"], reck), 0)
+        # The handler finds the player's session through game_session's own database (HEX_DB_PATH), so the
+        # session is saved there.
+        _save_session_for_lookup(gs, session)
         handler = hconnect_server.HCPHandler(None, ("127.0.0.1", 0))
         handler.user_profile = {"id": 5, "name": "Tester"}
         handler.client_reck_id = reck

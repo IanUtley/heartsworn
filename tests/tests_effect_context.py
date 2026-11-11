@@ -381,6 +381,7 @@ def test_packet_visibility_matches_csharp_collections_and_reveal_scopes():
     from domain.game import Game
     from domain.types import UID, SessionCardId
     import game_engine
+    import services.pvp_core as pvp_core
 
     owner = UID.make(244, 1001)
     opponent = UID.make(244, 1002)
@@ -566,7 +567,7 @@ def test_packet_visibility_matches_csharp_collections_and_reveal_scopes():
                      "CanSeeUndergroundTroops": 1}} if can_see else {})}
         game = Game(1, owner, opponent)
         with mock.patch.object(
-                tournament_game, "db_game_cards_at_location",
+                pvp_core, "db_game_cards_at_location",
                 side_effect=underground_rows), \
                 mock.patch(
                     "pvp_db.db_underground_card_rows",
@@ -926,12 +927,12 @@ def test_context_activate_ability_uses_typed_child_resolver():
         "effect", "child-guid")
     # The native context resolves an activated child through its own
     # continuation-aware resolver, which receives the child, source, owner and target map.
-    from rules_port.context import EffectContext as _Ctx
-    with mock.patch.object(_Ctx, "_resolve_child_ability",
+    with mock.patch.object(_leaves_abilities, "_resolve_child_ability",
                            return_value="child") as run:
         assert _leaves_abilities.activate_ability(context) == "child"
-    assert run.call_args.args[:3] == ("child-guid", 123, 5), run.call_args
-    assert run.call_args.args[3] == {}, run.call_args
+    # _resolve_child_ability(ctx, child, source, owner, target_map)
+    assert run.call_args.args[1:4] == ("child-guid", 123, 5), run.call_args
+    assert run.call_args.args[4] == {}, run.call_args
 
 
 def test_activate_hand_target_prompts_the_player_instead_of_auto_picking():
@@ -1110,10 +1111,11 @@ def test_context_authored_events_use_typed_event_names():
                 "m_TriggerType": "Game.Shared.Mechanics.FateweavedEvent",
                 "m_Name": "fireFateweavedEvent",
             }.get(name, default)), mock.patch.object(
-                context, "_emit_trigger",
+                _leaves_abilities, "_emit_trigger",
                 return_value="triggered") as emit:
         assert _leaves_abilities.fire_event(context) == "fired FateweavedEvent: triggered"
-    assert emit.call_args.args[:3] == ("FateweavedEvent", 123, 5)
+    # _emit_trigger(ctx, event type, source card, owner, ...)
+    assert emit.call_args.args[1:4] == ("FateweavedEvent", 123, 5)
 
 
 def test_native_transform_uses_typed_stored_target_copy():
@@ -1705,11 +1707,11 @@ def test_context_damage_modifier_resolves_typed_input_and_target():
             "resolving_owner_id": 1,
         },
         "796ff24c-d468-68c1-8636-82d26a149c8b", "")
-    with mock.patch.object(context, "damage", return_value="damaged") as damage:
+    with mock.patch.object(_leaves_players, "damage", return_value="damaged") as damage:
         assert _leaves_modifiers.damage_modifier(context,
             {"text": "Deal 2 damage", "amount": 0},
             {"input_variable": "2"}) == "damaged"
-    damage.assert_called_once_with(123, 2)
+    damage.assert_called_once_with(context, 123, 2)
 
 
 def test_context_stat_modifier_resolves_typed_input_and_duration():
@@ -1722,13 +1724,13 @@ def test_context_stat_modifier_resolves_typed_input_and_duration():
             "resolving_owner_id": 1,
         },
         "796ff24c-d468-68c1-8636-82d26a149c8b", "")
-    with mock.patch.object(context, "stat_mod", return_value=4) as stat_mod:
+    with mock.patch.object(_leaves_modifiers, "stat_mod", return_value=4) as stat_mod:
         assert _leaves_modifiers.stat_modifier(context,
             {"property": "attack", "amount": 0,
              "input_variable": "2", "duration": "EndOfTurn"},
             {"property": "attack", "input_variable": "2"}) == \
             "mod 0x7b +2/+0"
-    stat_mod.assert_called_once_with(123, 2, 0, this_turn=True)
+    stat_mod.assert_called_once_with(context, 123, 2, 0, this_turn=True)
 
 
 def test_context_counter_hides_card_persistence_and_projection():
@@ -1818,11 +1820,11 @@ def test_context_card_state_owns_projection_and_tap_trigger():
         "tap-effect", "")
     with mock.patch("rules_port.card_projection.push_card_state") as push, \
             mock.patch.object(
-                context, "_emit_trigger", return_value=False) as emit:
+                _leaves_abilities, "_emit_trigger", return_value=False) as emit:
         assert _leaves_variables.update_card_state(context,
             123, add=1, trigger="CardTappedEvent") == 5
     push.assert_called_once()
-    assert emit.call_args.args[:2] == ("CardTappedEvent", 123)
+    assert emit.call_args.args[1:3] == ("CardTappedEvent", 123)
 
 
 def test_context_lose_thresholds_preserves_state_and_event_operation():
@@ -1866,25 +1868,27 @@ def test_context_typed_card_threshold_and_subtype_preserve_metadata_values():
     context = EffectContext.from_rules_port(
         _Game(), _Session(), _DB(), object(), "player", "ai", {},
         "typed-modifier", "")
-    with mock.patch.object(context, "_card_thresholds", return_value=[4, 4]), \
-            mock.patch.object(context, "_card_buffs", return_value={}), \
-            mock.patch.object(context, "_save_card_buffs") as save, \
-            mock.patch.object(context, "_push_modifier_card") as push:
+    with mock.patch.object(_leaves_modifiers, "_card_thresholds", return_value=[4, 4]), \
+            mock.patch.object(_leaves_modifiers, "_card_buffs", return_value={}), \
+            mock.patch.object(_leaves_modifiers, "_save_card_buffs") as save, \
+            mock.patch.object(_leaves_modifiers, "_push_modifier_card") as push:
         assert _leaves_modifiers.card_threshold(context,
             123, {"shard": "Ruby", "setthresholds": False}) == \
             "thresholds 0x7b -> [8, 8]"
         save.assert_called_once()
-        push.assert_called_once_with(123, thresholds=[8, 8])
+        push.assert_called_once_with(context, 123, thresholds=[8, 8])
 
-    with mock.patch.object(context, "_card_buffs",
+    with mock.patch.object(_leaves_modifiers, "_card_buffs",
                            return_value={"subtype": "Orc"}), \
-            mock.patch.object(context, "_save_card_buffs") as save, \
-            mock.patch.object(context, "_push_modifier_card") as push:
+            mock.patch.object(_leaves_modifiers, "_save_card_buffs") as save, \
+            mock.patch.object(_leaves_modifiers, "_push_modifier_card") as push:
         assert _leaves_modifiers.subtype_modifier(context,
             123, {"subtype": "Robot", "operation": "Add"}) == \
             "subtype 0x7b -> Orc Robot"
-        assert save.call_args.args[1]["subtype"] == "Orc Robot"
-        push.assert_called_once_with(123, sub_type="Orc Robot")
+        # _save_card_buffs(ctx, target, buffs, ...)
+        assert save.call_args.args[2]["subtype"] == "Orc Robot"
+        push.assert_called_once_with(context, 123, sub_type="Orc Robot")
+
 
 
 def test_context_modifier_keeps_deck_cards_nulled():
@@ -1916,23 +1920,24 @@ def test_context_typed_damage_shield_uses_client_flags():
     context = EffectContext.from_rules_port(
         _Game(), _Session(), _DB(), object(), "player", "ai", {},
         "typed-modifier", "")
-    with mock.patch.object(context, "_card_buffs", return_value={}) as buffs, \
-            mock.patch.object(context, "_save_card_buffs") as save, \
-            mock.patch.object(context, "_push_modifier_card") as push:
+    with mock.patch.object(_leaves_modifiers, "_card_buffs", return_value={}) as buffs, \
+            mock.patch.object(_leaves_modifiers, "_save_card_buffs") as save, \
+            mock.patch.object(_leaves_modifiers, "_push_modifier_card") as push:
         assert _leaves_modifiers.damage_shield(context,
             123, 3, {"onlycombatdamage": True, "oneshot": True,
                      "lastsindefinitely": False}) == \
             "damage shield 0x7b +3"
-        entry = save.call_args.args[1]["damage_shields"][0]
+        entry = save.call_args.args[2]["damage_shields"][0]
         assert entry == {
             "amount": 3, "only_combat": True, "one_shot": True,
             "lasts_indefinitely": False, "rules_port_order": 0,
         }
         assert buffs.call_args_list == [
-            mock.call(123, "permanent_buffs"),
-            mock.call(123, "temporary_buffs"),
+            mock.call(context, 123, "permanent_buffs"),
+            mock.call(context, 123, "temporary_buffs"),
         ]
-        push.assert_called_once_with(123, damage_shield=True)
+        push.assert_called_once_with(context, 123, damage_shield=True)
+
 
 
 def test_builder_reuses_metadata_cost_target_filter_and_ordering():

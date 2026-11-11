@@ -12,7 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 # Bind an isolated Records-backed database before importing any application or
 # server module; those modules may open db._db during import.
-from tests.test_db import fresh_database
+from tests.test_db import fresh_database, isolated_db
 
 fresh_database()
 
@@ -1292,6 +1292,7 @@ def test_rejected_classified_3029_is_not_replayed_to_legacy_dispatcher():
     _assert_one_empty_ack(sent)
 
 
+@isolated_db
 def test_fire_and_forget_setup_and_reconnect_routes_send_no_typed_reply():
     handler, sent = _capturing_handler()
 
@@ -1303,7 +1304,7 @@ def test_fire_and_forget_setup_and_reconnect_routes_send_no_typed_reply():
             7, 0, "2e590000-0000-0000-0000-000000000001", 0, {}, b"")
     assert sent == []
 
-    from services import tournament_game
+    from services import loadbalancer, tournament_game
 
     session = SimpleNamespace(
         session_id=42, session_name="tourney-u3", state="active")
@@ -1312,6 +1313,7 @@ def test_fire_and_forget_setup_and_reconnect_routes_send_no_typed_reply():
             hconnect_server.game_session, "find_session_by_player",
             return_value=session), \
             mock.patch.object(tournament_game, "PVP_EVENTS_READY", ready), \
+            mock.patch.object(loadbalancer, "PVP_EVENTS_READY", ready), \
             mock.patch.object(tournament_game, "pvp_start_priority_watchdog"), \
             mock.patch.object(tournament_game, "_session_has_reconnect_player",
                               return_value=True), \
