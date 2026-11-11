@@ -896,6 +896,21 @@ def db_profile_card_instances(user_id, conn=None):
     ).fetchall()
 
 
+def db_card_instance_ids(user_id, template_guid, conn=None):
+    """The owned card instance ids of one card template, lowest first (the ids a Unity deck lists)."""
+    return [int(row[0]) for row in _profile_connection(conn).execute(
+        "SELECT instance_id FROM card_instances WHERE user_id=? AND LOWER(template_guid)=? "
+        "ORDER BY instance_id", (user_id, str(template_guid).lower())).fetchall()]
+
+
+def db_set_exported_deck(template_id, deck_id, conn=None):
+    connection = _profile_connection(conn)
+    connection.execute("UPDATE player_deck_templates SET exported_deck_id=? WHERE id=?",
+                       (int(deck_id), int(template_id)))
+    if conn is None:
+        connection.commit()
+
+
 def db_collection_card_list(user_id, conn=None):
     return _profile_connection(conn).execute(
         "SELECT ct.guid, ct.name, ct.cost, ct.attack, ct.defense, col.quantity, ct.card_type, ct.socket_count "
@@ -1459,7 +1474,7 @@ def db_save_champion_party(champion_id, user_id, party_json, conn=None):
 
 _DECK_TEMPLATE_COLUMNS = ("id", "name", "champion_guid", "sleeve_guid",
                           "gameboard_guid", "personality", "equipment_json",
-                          "format", "pve_champion_id", "updated_at")
+                          "format", "pve_champion_id", "exported_deck_id", "updated_at")
 _DECK_TEMPLATE_CARD_COLUMNS = ("card_guid", "quantity", "gem_types_list_json",
                                "flags_json")
 _DECK_TEMPLATE_LOCK = threading.RLock()

@@ -213,6 +213,42 @@ def test_gems_are_saved_per_copy_and_reserves_come_first(monkeypatch):
     assert "InvalidGems" in {error["code"] for error in checked["errors"]}, checked
 
 
+@isolated_db
+def test_a_saved_deck_exports_to_the_unity_deck_store(monkeypatch):
+    """Each main-deck copy becomes one of the owner's card instance ids; re-exporting updates the same Unity deck;
+    a deck that needs copies the owner does not have is refused."""
+    import json
+    owner = _dbmod._db.execute("INSERT INTO users (name) VALUES ('exporter')").lastrowid
+    card = _dbmod._db.execute("SELECT guid FROM card_templates LIMIT 1").fetchone()[0]
+    champion = _playable_champion()
+    for instance in (9001, 9002, 9003):
+        _dbmod._db.execute("INSERT INTO card_instances (user_id, instance_id, template_guid) VALUES (?, ?, ?)",
+                           (owner, instance, card))
+    _dbmod._db.execute("INSERT INTO collections (user_id, card_template_id, quantity) VALUES (?, ?, 3)",
+                       (owner, card))
+    _dbmod._db.commit()
+    monkeypatch.setenv("HEX_WEB_PROFILE_ID", str(owner))
+    saved = profile.save_deck({"name": "Export", "format": "immortal", "champion_guid": champion,
+                               "cards": [{"guid": card, "quantity": 2}]})
+
+    first = profile.export_deck(saved["id"])
+    assert first["cards"] == 2
+    stored = _dbmod._db.execute("SELECT cards, pvp_champion_guid FROM decks WHERE id=?",
+                                (first["deck_id"],)).fetchone()
+    assert json.loads(stored[0]) == [9001, 9002] and stored[1] == champion
+
+    profile.save_deck({"id": saved["id"], "name": "Export", "cards": [{"guid": card, "quantity": 3}]})
+    again = profile.export_deck(saved["id"])
+    assert again["deck_id"] == first["deck_id"]
+    assert json.loads(_dbmod._db.execute("SELECT cards FROM decks WHERE id=?",
+                                         (again["deck_id"],)).fetchone()[0]) == [9001, 9002, 9003]
+
+    _dbmod._db.execute("DELETE FROM card_instances WHERE user_id=? AND instance_id=9003", (owner,))
+    _dbmod._db.commit()
+    with pytest.raises(ValueError, match="the owner has 2"):
+        profile.export_deck(saved["id"])
+
+
 if __name__ == "__main__":
     # Written in pytest style: run through pytest so each test executes and failures
     # set the exit status. A missing pytest fails loudly.

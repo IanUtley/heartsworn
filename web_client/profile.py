@@ -401,6 +401,43 @@ def play_spec(template_id) -> dict:
             "cards": cards, "ai_deck_personality": "Default"}
 
 
+def export_deck(template_id) -> dict:
+    """Write a saved deck to the Unity deck store (decks): each main-deck copy is one of the owner's card instances,
+    the lowest ids first. Re-exporting updates the same Unity deck. Reserves and gems are not exported."""
+    with _connection() as conn:
+        user_id = profile_user_id(conn)
+        template = (profile_db.db_profile_deck_template(user_id, template_id, conn=conn)
+                    if user_id is not None else None)
+        if template is None:
+            raise ValueError("no such saved deck")
+        view = _deck_view(template)
+        card_ids: list[int] = []
+        for card in view["cards"]:
+            main = card["quantity"] - card["reserves"]
+            if main <= 0:
+                continue
+            owned = profile_db.db_card_instance_ids(user_id, card["guid"], conn=conn)
+            if len(owned) < main:
+                raise ValueError(f"the deck needs {main} copies of {card['guid']} in its main deck; "
+                                 f"the owner has {len(owned)}")
+            card_ids.extend(owned[:main])
+        cards_json = json.dumps(card_ids)
+        unity_id = int(template.get("exported_deck_id") or 0)
+        if unity_id and conn.execute("SELECT 1 FROM decks WHERE id=? AND user_id=?",
+                                     (unity_id, user_id)).fetchone():
+            profile_db.db_update_deck(unity_id, user_id, deck_name=view["name"], cards_json=cards_json,
+                                      pve_champion_id=view["pve_champion_id"] or None,
+                                      pvp_champion_guid=view["champion_guid"], conn=conn)
+        else:
+            unity_id = profile_db.db_save_deck(user_id, view["name"], cards_json,
+                                               pve_champion_id=view["pve_champion_id"] or None,
+                                               pvp_champion_guid=view["champion_guid"],
+                                               deck_sleeve_guid=view["sleeve_guid"] or None,
+                                               gameboard_guid=view["gameboard_guid"] or None, conn=conn)
+            profile_db.db_set_exported_deck(template_id, unity_id, conn=conn)
+    return {"deck_id": unity_id, "cards": len(card_ids)}
+
+
 def delete_deck(template_id: int) -> bool:
     with _connection() as conn:
         user_id = profile_user_id(conn)

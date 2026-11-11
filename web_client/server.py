@@ -210,6 +210,13 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         path = urlparse(self.path).path
+        exported = re.fullmatch(r"/api/profile/decks/(\d+)/export", path)
+        if exported:
+            try:
+                from web_client import profile
+                return self._send(200, profile.export_deck(int(exported.group(1))))
+            except ValueError as exc:
+                return self._send(400, {"error": str(exc)})
         try:
             body = self._body()
             if path == "/api/matches":

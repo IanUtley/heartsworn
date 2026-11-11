@@ -361,6 +361,20 @@ async function saveDeck() {
   }
 }
 
+// Writes the saved deck to the Unity deck store, one owned card copy per main-deck card.
+async function exportDeck() {
+  if (deckPage.draft.id === null) {
+    $("#deck-status").textContent = "Save the deck before exporting it.";
+    return;
+  }
+  try {
+    const result = await api(`/api/profile/decks/${deckPage.draft.id}/export`, {});
+    $("#deck-status").textContent = `Exported ${result.cards} cards to Unity deck ${result.deck_id}.`;
+  } catch (err) {
+    $("#deck-status").textContent = err.message;
+  }
+}
+
 async function deleteDeck() {
   const id = deckPage.draft.id;
   if (id === null || !confirm("Delete this deck?")) return;
@@ -433,6 +447,7 @@ $("#deck-name").addEventListener("input", (e) => { deckPage.draft.name = e.targe
 $("#deck-champion").addEventListener("change", (e) => { deckPage.draft.champion_guid = e.target.value; scheduleValidation(); });
 $("#deck-save").addEventListener("click", saveDeck);
 $("#deck-delete").addEventListener("click", deleteDeck);
+$("#deck-export").addEventListener("click", exportDeck);
 
 /* ------------------------------------------------------------------ */
 /* Replay: a captured match run back through the battle reducer        */
