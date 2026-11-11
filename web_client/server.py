@@ -157,11 +157,19 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, {"decks": decks})
             if path in ("/api/profile", "/api/collection", "/api/profile/decks", "/api/profile/champions"):
                 from web_client import profile
+                format_name = (query.get("format") or [None])[0]
                 body = {"/api/profile": profile.profile_summary,
                         "/api/collection": lambda: {"cards": profile.collection()},
-                        "/api/profile/decks": lambda: {"decks": profile.decks()},
-                        "/api/profile/champions": lambda: {"champions": profile.champions()}}[path]()
+                        "/api/profile/decks": lambda: {"decks": profile.decks(format_name)},
+                        "/api/profile/champions": lambda: {"champions": profile.champions(format_name)}}[path]()
                 return self._send(200, body)
+            deck = re.fullmatch(r"/api/profile/decks/(\d+)", path)
+            if deck:
+                from web_client import profile
+                found = profile.deck(int(deck.group(1)))
+                if found is None:
+                    return self._send(404, {"error": "no such deck"})
+                return self._send(200, found)
             art = re.fullmatch(r"/art/(a\d{7})\.jpg", path)
             if art:
                 from web_client import catalog
@@ -178,6 +186,8 @@ class Handler(BaseHTTPRequestHandler):
                 wait = min(25.0, float((query.get("wait") or ["0"])[0]))
                 return self._send(200, match.snapshot(after, wait))
             self._send(404, {"error": "not found"})
+        except ValueError as exc:
+            self._send(400, {"error": str(exc)})
         except Exception as exc:
             self._send(500, {"error": str(exc)})
 

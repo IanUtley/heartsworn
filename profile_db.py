@@ -1459,7 +1459,7 @@ def db_save_champion_party(champion_id, user_id, party_json, conn=None):
 
 _DECK_TEMPLATE_COLUMNS = ("id", "name", "champion_guid", "sleeve_guid",
                           "gameboard_guid", "personality", "equipment_json",
-                          "updated_at")
+                          "format", "updated_at")
 _DECK_TEMPLATE_CARD_COLUMNS = ("card_guid", "quantity", "gem_types_list_json",
                                "flags_json")
 _DECK_TEMPLATE_LOCK = threading.RLock()
@@ -1500,13 +1500,19 @@ def _deck_template_row(connection, row):
     return template
 
 
-def db_profile_deck_templates(user_id, conn=None):
+def db_profile_deck_templates(user_id, conn=None, format=None):
     """Return a player's deck templates: column dicts, each with ``cards``
-    (``card_guid, quantity, gem_types_list_json, flags_json`` dicts)."""
+    (``card_guid, quantity, gem_types_list_json, flags_json`` dicts). With
+    ``format`` set, only the templates saved for that format."""
     connection = _profile_connection(conn)
-    rows = connection.execute(
-        f"SELECT {', '.join(_DECK_TEMPLATE_COLUMNS)} FROM player_deck_templates "
-        "WHERE user_id=? ORDER BY id", (user_id,)).fetchall()
+    if format is None:
+        rows = connection.execute(
+            f"SELECT {', '.join(_DECK_TEMPLATE_COLUMNS)} FROM player_deck_templates "
+            "WHERE user_id=? ORDER BY id", (user_id,)).fetchall()
+    else:
+        rows = connection.execute(
+            f"SELECT {', '.join(_DECK_TEMPLATE_COLUMNS)} FROM player_deck_templates "
+            "WHERE user_id=? AND format=? ORDER BY id", (user_id, format)).fetchall()
     return [_deck_template_row(connection, row) for row in rows]
 
 
@@ -1524,11 +1530,11 @@ def db_save_profile_deck_template(user_id, template_id, columns, card_rows,
     """Insert or update a deck template and replace its cards atomically.
 
     ``columns`` holds name, champion_guid, sleeve_guid, gameboard_guid,
-    personality and equipment_json; ``card_rows`` are ``(card_guid, quantity,
-    gem_types_list_json, flags_json)``.  Returns the template id.
+    personality, equipment_json and format; ``card_rows`` are ``(card_guid,
+    quantity, gem_types_list_json, flags_json)``.  Returns the template id.
     """
     names = ("name", "champion_guid", "sleeve_guid", "gameboard_guid",
-             "personality", "equipment_json")
+             "personality", "equipment_json", "format")
     values = tuple(columns.get(name, "{}" if name == "equipment_json" else "")
                    for name in names)
     with _deck_template_transaction(conn) as connection:

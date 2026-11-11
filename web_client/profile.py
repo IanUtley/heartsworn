@@ -20,6 +20,8 @@ import profile_db
 
 MINIMUM_DECK_SIZE = 60   # the client's c_MinimumDeckSize (UIPlayerDeckContentsViewModel)
 NAME_LIMIT = 40
+# EDeckFormat (Game/Shared/Mechanics/EDeckFormat.cs). '' is unset: templates the Unity client wrote.
+FORMATS = ("immortal", "standard", "pve", "siege")
 
 
 @contextmanager
@@ -76,24 +78,58 @@ def collection() -> list[dict]:
         return _owned_cards(user_id, conn)
 
 
-def champions() -> list[dict]:
-    """Every champion template, as card GUIDs (the catalog names them)."""
+def _format(value) -> str:
+    """A deck format name, or '' for unset. Anything else is refused, so a typo cannot silently file a deck under no
+    format."""
+    text = str(value or "").strip().lower()
+    if text and text not in FORMATS:
+        raise ValueError(f"unknown deck format {text!r}; expected one of {', '.join(FORMATS)}")
+    return text
+
+
+_PLAYABLE_CHAMPION = ("SELECT 1 FROM champion_templates ct "
+                      "LEFT JOIN champion_templates_extended cte ON cte.guid = ct.guid "
+                      "WHERE ct.guid=? AND ct.is_player=1 AND COALESCE(cte.is_selectable, 1)=1")
+
+
+def champions(format=None) -> list[dict]:
+    """The champions a player can take into a deck: player champions the client lets the player select.
+
+    ``format`` is validated and accepted, but the list is the same for every format for now: set legality per format
+    needs card-set data this view does not yet read.
+    """
+    _format(format)
     with _connection() as conn:
         return [{"guid": str(row[0]).lower()} for row in conn.execute(
-            "SELECT guid FROM champion_templates ORDER BY guid").fetchall()]
+            "SELECT ct.guid FROM champion_templates ct "
+            "LEFT JOIN champion_templates_extended cte ON cte.guid = ct.guid "
+            "WHERE ct.is_player=1 AND COALESCE(cte.is_selectable, 1)=1 ORDER BY ct.guid").fetchall()]
 
 
-def decks() -> list[dict]:
+def decks(format=None) -> list[dict]:
+    """The player's deck templates, or only those saved for ``format`` (unset decks are listed only unfiltered)."""
+    wanted = None if format is None else _format(format)
+    if wanted == "":
+        raise ValueError("list decks by a format name, not the unset format")
     with _connection() as conn:
         user_id = profile_user_id(conn)
         if user_id is None:
             return []
         return [_deck_view(template)
-                for template in profile_db.db_profile_deck_templates(user_id, conn=conn)]
+                for template in profile_db.db_profile_deck_templates(user_id, conn=conn, format=wanted)]
+
+
+def deck(template_id: int) -> dict | None:
+    with _connection() as conn:
+        user_id = profile_user_id(conn)
+        template = (profile_db.db_profile_deck_template(user_id, template_id, conn=conn)
+                    if user_id is not None else None)
+        return _deck_view(template) if template else None
 
 
 def _deck_view(template: dict) -> dict:
     return {"id": int(template["id"]), "name": str(template.get("name") or ""),
+            "format": str(template.get("format") or ""),
             "champion_guid": str(template.get("champion_guid") or "").lower(),
             "sleeve_guid": str(template.get("sleeve_guid") or ""),
             "gameboard_guid": str(template.get("gameboard_guid") or ""),
@@ -161,18 +197,20 @@ def save_deck(body: dict) -> dict:
             if quantity > owned.get(guid, 0):
                 raise ValueError(f"only {owned.get(guid, 0)} copies of {guid} are owned, not {quantity}")
         champion = _keep_or_set(body, None, "champion_guid").lower()
-        if champion and not conn.execute("SELECT 1 FROM champion_templates WHERE guid=?", (champion,)).fetchone():
-            raise ValueError("that champion is not in the game data")
+        if champion and not conn.execute(_PLAYABLE_CHAMPION, (champion,)).fetchone():
+            raise ValueError("that champion cannot be played in a deck")
         template_id = body.get("id")
         existing = (profile_db.db_profile_deck_template(user_id, template_id, conn=conn)
                     if template_id else None)
+        deck_format = _format(body["format"]) if "format" in body else _format((existing or {}).get("format"))
         previous_cards = {str(card["card_guid"]).lower(): card for card in (existing or {}).get("cards") or []}
         columns = {"name": str(body.get("name") or "").strip()[:NAME_LIMIT] or "New deck",
                    "champion_guid": champion if "champion_guid" in body else _keep_or_set({}, existing, "champion_guid"),
                    "sleeve_guid": _keep_or_set(body, existing, "sleeve_guid"),
                    "gameboard_guid": _keep_or_set(body, existing, "gameboard_guid"),
                    "personality": _keep_or_set({}, existing, "personality"),
-                   "equipment_json": _keep_or_set({}, existing, "equipment_json") or "{}"}
+                   "equipment_json": _keep_or_set({}, existing, "equipment_json") or "{}",
+                   "format": deck_format}
         card_rows = []
         for guid, quantity in sorted(wanted.items()):
             gems, flags = _card_state(previous_cards.get(guid), quantity)

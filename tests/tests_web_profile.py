@@ -81,6 +81,48 @@ def test_saving_from_the_browser_keeps_what_the_client_wrote(monkeypatch):
     assert json.loads(resized["flags_json"]) == {"extended": True, "copies": [{"reserves": False}]}
 
 
+@isolated_db
+def test_decks_are_listed_by_format_and_only_player_champions_are_offered(monkeypatch):
+    """A deck carries one format; the listing filters on it, a bad format is refused, and only champions the player
+    may select are offered or accepted."""
+    user_id = _dbmod._db.execute("INSERT INTO users (name) VALUES ('format tester')").lastrowid
+    card = _dbmod._db.execute("SELECT guid FROM card_templates LIMIT 1").fetchone()[0]
+    champion = _dbmod._db.execute(
+        "SELECT guid FROM champion_templates WHERE is_player=1 LIMIT 1").fetchone()[0]
+    _dbmod._db.execute("INSERT INTO collections (user_id, card_template_id, quantity) VALUES (?, ?, 3)",
+                       (user_id, card))
+    _dbmod._db.execute("INSERT INTO champion_templates (guid, race, champion_class, is_player) "
+                       "VALUES ('ffffffff-0000-0000-0000-000000000000', 'x', 'y', 0)")
+    _dbmod._db.commit()
+    monkeypatch.setenv("HEX_WEB_PROFILE_ID", str(user_id))
+    cards = [{"guid": card, "quantity": 2}]
+
+    standard = profile.save_deck({"name": "S", "format": "standard", "champion_guid": champion, "cards": cards})
+    immortal = profile.save_deck({"name": "I", "format": "immortal", "champion_guid": champion, "cards": cards})
+    assert [d["id"] for d in profile.decks("standard")] == [standard["id"]]
+    assert {d["id"] for d in profile.decks()} >= {standard["id"], immortal["id"]}
+    assert profile.deck(standard["id"])["format"] == "standard"
+
+    # A save that omits the format keeps the stored one.
+    profile.save_deck({"id": standard["id"], "name": "S renamed", "cards": cards})
+    assert [d["id"] for d in profile.decks("standard")] == [standard["id"]]
+
+    with pytest.raises(ValueError):
+        profile.save_deck({"name": "bad", "format": "casual", "champion_guid": champion, "cards": cards})
+    with pytest.raises(ValueError):
+        profile.decks("casual")
+    with pytest.raises(ValueError):
+        profile.save_deck({"name": "not playable", "format": "standard",
+                           "champion_guid": "ffffffff-0000-0000-0000-000000000000", "cards": cards})
+
+    offered = {row["guid"] for row in profile.champions("standard")}
+    assert champion in offered and "ffffffff-0000-0000-0000-000000000000" not in offered
+
+    index = _dbmod._db.execute("SELECT name FROM sqlite_master WHERE type='index' "
+                               "AND name='idx_player_deck_templates_user_format'").fetchone()
+    assert index is not None
+
+
 if __name__ == "__main__":
     # Written in pytest style: run through pytest so each test executes and failures
     # set the exit status. A missing pytest fails loudly.

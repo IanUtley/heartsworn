@@ -454,6 +454,7 @@ DDL = [
         gameboard_guid TEXT NOT NULL DEFAULT '',
         personality    TEXT NOT NULL DEFAULT '',
         equipment_json TEXT NOT NULL DEFAULT '{}',
+        format         TEXT NOT NULL DEFAULT '',
         updated_at     TEXT DEFAULT (datetime('now'))
     )
     """,
@@ -1583,6 +1584,10 @@ def ensure_schema(db):
     # Redeem-code usage is tracked per account in ``store_purchases``; the old
     # global ``uses`` counter is retired.
     _drop_column(db, "redeem_codes", "uses")
+    # EDeckFormat name ('immortal', 'standard', 'pve', 'siege'); '' is unset (templates the Unity client wrote).
+    _ensure_column(db, "player_deck_templates", "format", "TEXT NOT NULL DEFAULT ''")
+    db.execute("CREATE INDEX IF NOT EXISTS idx_player_deck_templates_user_format "
+               "ON player_deck_templates(user_id, format)")
     _ensure_column(db, "session_transactions", "decoded_intent_json",
                    "TEXT NOT NULL DEFAULT '{}'")
     _ensure_column(db, "session_transactions", "raw_request_body",
