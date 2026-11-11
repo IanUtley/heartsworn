@@ -10,6 +10,10 @@ ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), 
 CAMPAIGN_ROOT = os.path.join(ROOT, "campaign")
 sys.path[:0] = [ROOT, CAMPAIGN_ROOT]
 
+from tests.test_db import fresh_database  # noqa: E402
+
+fresh_database()   # bind this process's database before ``db`` is imported (campaign modules import it)
+
 import campaign_rules as cr
 from campaign_runtime import projection
 

@@ -4,12 +4,13 @@ import os
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
-import rules_port.leaves_abilities as _leaves_abilities
-import rules_port.leaves_variables as _leaves_variables
 
 from tests.test_db import fresh_database  # noqa: E402
 
-fresh_database()
+fresh_database()   # bind this process's database before the rules modules import ``db``
+
+import rules_port.leaves_abilities as _leaves_abilities  # noqa: E402
+import rules_port.leaves_variables as _leaves_variables  # noqa: E402
 
 def _service_call(data_type, handler, reqid, comp, session_id, conh, inner_obj):
     """Invoke a registered service handler the way the request dispatcher does."""
