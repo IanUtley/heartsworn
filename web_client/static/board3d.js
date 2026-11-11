@@ -713,8 +713,8 @@ class Board3D {
     new ResizeObserver(() => this.resize()).observe(container);
     this.resize();
     this.buildArena();
-    // The HUD panels move into the scene with the board's camera (hud3d.js).
-    this.hud = new HudLayer(container);
+    // The HUD panels are anchored in this scene and drawn with this camera (hud3d.js).
+    this.hud = new HudLayer(container, this.scene, this.camera);
     renderer.setAnimationLoop(() => this.frame());
   }
 

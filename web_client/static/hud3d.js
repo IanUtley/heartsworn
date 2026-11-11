@@ -1,14 +1,14 @@
-// HUD panels inside the three.js battle scene.
+// HUD panels anchored in the three.js battle scene.
 //
-// The champion panels, the piles and the phase dial are ordinary DOM (app.js
-// fills them in and handles their clicks). This module hands those elements to
-// CSS3DRenderer and places each one in the board's scene, so they are drawn by
-// three.js and follow the board's camera. Each panel keeps the screen corner
-// it had in the flat layout: the placement is recomputed every frame from the
-// panel's current size, so a resize or a changed panel stays where it belongs.
+// The champion panels, the piles and the phase dial are ordinary DOM (app.js fills them in and handles their clicks).
+// This module hands those elements to CSS2DRenderer as CSS2DObjects, each under an anchor in the board's own scene, and
+// draws them with the board's camera. An anchor sits on the table where the panel's corner in the flat layout meets
+// the table plane, so the panels keep the corners they had and move with the camera like the rest of the board.
+// Anchors are recomputed every frame from the panel's current size and the camera, so a resize or a changed panel
+// stays where it belongs.
 
 import * as THREE from "./vendor/three.module.min.js";
-import { CSS3DRenderer, CSS3DObject } from "./vendor/CSS3DRenderer.js";
+import { CSS2DRenderer, CSS2DObject } from "./css2d.js";
 
 // Each panel's corner, in CSS pixels, copied from the former layout in style.css.
 // `left`/`right` and `top`/`bottom` give the gap from that edge to the panel.
@@ -29,41 +29,50 @@ function centreOf(p, w, h, W, H) {
 }
 
 export class HudLayer {
-  // `host` is the element that holds the board canvas.
-  constructor(host) {
+  // `host` holds the board canvas; `scene` and `camera` are the board's own.
+  constructor(host, scene, camera) {
     this.host = host;
-    this.renderer = new CSS3DRenderer();
+    this.scene = scene;
+    this.camera = camera;
+    this.renderer = new CSS2DRenderer();
     this.renderer.domElement.classList.add("hud3d");
     host.appendChild(this.renderer.domElement);
-    this.scene = new THREE.Scene();
-    // One scene unit is one CSS pixel here, so the camera sits at the distance
-    // where that scale holds: the panels land exactly where the flat layout put them.
-    this.camera = new THREE.PerspectiveCamera(36, 1, 1, 10000);
+    this.table = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+    this.ray = new THREE.Raycaster();
+    this.point = new THREE.Vector3();
+    this.pointer = new THREE.Vector2();
     this.size = [0, 0];
     this.panels = [];
     for (const p of PANELS) {
       const el = document.querySelector(p.sel);
       if (!el) continue;
       el.classList.add("hud3d-panel");
-      const object = new CSS3DObject(el);
-      this.scene.add(object);
-      this.panels.push({ p, el, object });
+      const anchor = new THREE.Object3D();
+      anchor.add(new CSS2DObject(el));
+      scene.add(anchor);
+      this.panels.push({ p, el, anchor });
     }
   }
 
-  // Place every panel at its pixel corner, then draw the layer.
+  // The table point a screen point lies over, or null when the ray misses the table.
+  tableAt(x, y, W, H) {
+    this.pointer.set((x / W) * 2 - 1, -(y / H) * 2 + 1);
+    this.ray.setFromCamera(this.pointer, this.camera);
+    return this.ray.ray.intersectPlane(this.table, this.point) ? this.point : null;
+  }
+
+  // Anchor every panel over its corner, then draw the layer with the board's camera.
   update() {
     const W = this.host.clientWidth || 1, H = this.host.clientHeight || 1;
     if (W !== this.size[0] || H !== this.size[1]) {
       this.size = [W, H];
       this.renderer.setSize(W, H);
-      this.camera.aspect = W / H;
-      this.camera.position.set(0, 0, H / (2 * Math.tan(THREE.MathUtils.degToRad(this.camera.fov / 2))));
-      this.camera.updateProjectionMatrix();
     }
-    for (const { p, el, object } of this.panels) {
+    this.camera.updateMatrixWorld();
+    for (const { p, el, anchor } of this.panels) {
       const [cx, cy] = centreOf(p, el.offsetWidth, el.offsetHeight, W, H);
-      object.position.set(cx - W / 2, H / 2 - cy, 0);
+      const point = this.tableAt(cx, cy, W, H);
+      if (point) anchor.position.copy(point);
     }
     this.renderer.render(this.scene, this.camera);
   }
