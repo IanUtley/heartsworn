@@ -55,3 +55,26 @@ def test_a_captured_match_replays_to_the_seats_zones():
     assert result["first"]["turn_phase"] is not None
     # Replaying the same packets gives the same state.
     assert result["first"] == result["second"]
+
+
+ORDER = r"""
+const reducer = require(process.argv[1]);
+const state = reducer.createState(1);
+const card = (uid, collection, controller) => ({ session_card_id: uid, controller, collection,
+  card_id: "00000000-0000-0000-0000-00000000000a", abilities: [] });
+for (const ev of [card(10, 8, 1), card(11, 8, 1), card(12, 1, 1)]) reducer.reduceEvent(state, { type: "CardUpdated", ...ev });
+// CardMoved gives the server's order within the warzone, whatever the uid order is.
+reducer.reduceEvent(state, { type: "CardMoved", session_card_id: 11, player_id: 1, collection: 8, location: 0, index: 0 });
+reducer.reduceEvent(state, { type: "CardMoved", session_card_id: 10, player_id: 1, collection: 8, location: 0, index: 1 });
+// Card 12 was moved to the deck, then to the warzone by a CardUpdated with no CardMoved: its old position is ignored.
+reducer.reduceEvent(state, { type: "CardMoved", session_card_id: 12, player_id: 1, collection: 1, location: 0, index: 0 });
+reducer.reduceEvent(state, { type: "CardUpdated", ...card(12, 8, 1) });
+const warzone = reducer.zoneCards(state, 1, 8, new Set()).map((c) => c.uid);
+console.log(JSON.stringify(warzone));
+"""
+
+
+def test_cards_in_a_zone_follow_the_server_order():
+    run = subprocess.run(["node", "-e", ORDER, REDUCER], capture_output=True, text=True, timeout=120, check=True)
+    # 11 then 10 by CardMoved; 12 has no current position, so it follows them by uid.
+    assert json.loads(run.stdout) == [11, 10, 12]

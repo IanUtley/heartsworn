@@ -15,6 +15,45 @@ const CARD_W = 1.2, CARD_H = 1.68, CARD_T = 0.03;
 const CARDS_ON_SCREEN = 5, HAND_DEPTH = 0.65;
 const FIELD_R = 4.3, RING_R = 6.5, RING_Y = 0.12;
 const ROW_Z = 2.2, CHAIN_Y = 0.6, REST_Y = 0.14;
+// Zone geometry beyond the warzone rows: constants stand behind the troops, underground cards sink just below the
+// row nearest the centre, and cards being chosen rise above the table between the players.
+const CONSTANT_GAP = 1.1, UNDERGROUND_Z = 0.5, UNDERGROUND_DROP = 0.06, CHOOSE_LIFT = 1.2, CHOOSE_SPAN = 6;
+
+// Along a row, cards are spread evenly across the span (narrower rows are closer together, up to a card's width).
+function zoneX(entry, span, k) {
+  const n = entry.count;
+  const spacing = Math.min(1.42, span / Math.max(n, 1));
+  return (entry.index - (n - 1) / 2) * spacing * k;
+}
+
+// The player whose side a zone belongs to: "mine..." zones are the viewer's, every other zone the opponent's.
+function zoneSide(entry) { return entry.zone.startsWith("mine") ? 1 : -1; }
+
+// Attackers step towards the centre; a blocker steps in a little less. A tapped troop (an attacker after its attack)
+// rests a little back from the centre line.
+function warLunge(entry, side, k) {
+  return (entry.attacking ? -side * 0.55 : entry.blocking ? -side * 0.3 : entry.tapped ? side * 0.25 : 0) * k;
+}
+
+// A row of cards on one side of the table: spread along x across span, at height y, z rows out from the centre.
+function rowPose(entry, k, span, y, z, lunges) {
+  const side = zoneSide(entry);
+  const lunge = lunges ? warLunge(entry, side, k) : 0;
+  return new THREE.Vector3(zoneX(entry, span, k), y, side * z * k + lunge);
+}
+
+// Each zone object places its cards from the entry's index within the zone group (index of count).
+const ZONE_POSE = {
+  chain: (e, k) => new THREE.Vector3(zoneX(e, 7, k), (CHAIN_Y + (e.top ? 0.12 : 0)) * k, 0),
+  mine: (e, k) => rowPose(e, k, 8.2, REST_Y, ROW_Z, true),
+  opp: (e, k) => rowPose(e, k, 8.2, REST_Y, ROW_Z, true),
+  "mine-constants": (e, k) => rowPose(e, k, 8.2, REST_Y, ROW_Z + CONSTANT_GAP, false),
+  "opp-constants": (e, k) => rowPose(e, k, 8.2, REST_Y, ROW_Z + CONSTANT_GAP, false),
+  "mine-underground": (e, k) => rowPose(e, k, 8.2, REST_Y - UNDERGROUND_DROP, ROW_Z * UNDERGROUND_Z, false),
+  "opp-underground": (e, k) => rowPose(e, k, 8.2, REST_Y - UNDERGROUND_DROP, ROW_Z * UNDERGROUND_Z, false),
+  "mine-choosing": (e, k) => rowPose(e, k, CHOOSE_SPAN, REST_Y + CHOOSE_LIFT, 0, false),
+  "opp-choosing": (e, k) => rowPose(e, k, CHOOSE_SPAN, REST_Y + CHOOSE_LIFT, 0, false),
+};
 // The hands lie along a large circle across the bottom of the view (the top of the screen for the
 // opponent's), so the hand turns only a few degrees. Each card stands face-on with its top on that circle.
 // Cards always overlap: each one advances HAND_OVERLAP of a card width from the last.
@@ -803,18 +842,9 @@ class Board3D {
   }
 
   slot(entry) {
-    // World position for a card: hands in view at the screen's edges, warzone rows on either side, chain across the middle.
+    // World position for a card: hands in view at the screen's edges; every other zone is laid out by its zone object.
     if (entry.zone in HAND_SIDE) return this.handPose(entry).centre;
-    const n = entry.count;
-    const k = this.cardScale;
-    const spacing = Math.min(1.42, (entry.zone === "chain" ? 7 : 8.2) / Math.max(n, 1));
-    const x = (entry.index - (n - 1) / 2) * spacing * k;
-    if (entry.zone === "chain") return new THREE.Vector3(x, (CHAIN_Y + (entry.top ? 0.12 : 0)) * k, 0);
-    const side = entry.zone === "mine" ? 1 : -1;
-    // Attackers step towards the centre; a blocker steps in a little less. A tapped
-    // troop (an attacker after its attack) rests a little back from the centre line.
-    const lunge = (entry.attacking ? -side * 0.55 : entry.blocking ? -side * 0.3 : entry.tapped ? side * 0.25 : 0) * k;
-    return new THREE.Vector3(x, REST_Y, side * ROW_Z * k + lunge);
+    return (ZONE_POSE[entry.zone] || ZONE_POSE.mine)(entry, this.cardScale);
   }
 
   update(entries) {

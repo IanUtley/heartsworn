@@ -12,8 +12,21 @@
     return {
       me, cards: new Map(), players: {}, champions: {}, championTemplates: {}, names: {}, phase: {}, greenlight: {},
       chain: [], options: new Map(), combats: new Map(), decks: {}, ended: false,
-      pendingSounds: new Set(), log: [],
+      pendingSounds: new Set(), log: [], positions: new Map(),
     };
+  }
+
+  // The cards of one controller's collection, in the server's order. CardMoved gives each card its index in the zone it
+  // moved to; a card without a current index (or whose recorded collection is out of date) falls back to uid order.
+  function zoneCards(state, controller, collection, excluded) {
+    const positions = state.positions || new Map();
+    const order = (card) => {
+      const at = positions.get(card.uid);
+      return at && at.collection === collection ? at.index : Infinity;
+    };
+    return [...state.cards.values()]
+      .filter((c) => c.controller === controller && c.collection === collection && !(excluded && excluded.has(c.uid)))
+      .sort((a, b) => (order(a) - order(b)) || (a.uid - b.uid));
   }
 
   function want(effects, section, guid) {
@@ -67,6 +80,12 @@
         if (ev.turn_phase !== was) fx.push({ type: "phase", phase: ev.turn_phase, active: ev.active_player_id });
         break;
       }
+      case "CardMoved":
+        // The server's position of the card in its zone. Its collection is recorded with the index, so a later
+        // CardUpdated that moves the card elsewhere makes this entry stale rather than wrong.
+        (state.positions || (state.positions = new Map())).set(ev.session_card_id,
+          { collection: ev.collection, index: ev.index });
+        break;
       case "GreenLight":
         state.greenlight[ev.player_id] = ev.context;
         break;
@@ -132,7 +151,7 @@
     return fx;
   }
 
-  const api = { NO_GUID, createState, reduceEvent };
+  const api = { NO_GUID, createState, reduceEvent, zoneCards };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   root.BattleState = api;
 })(typeof window !== "undefined" ? window : globalThis);

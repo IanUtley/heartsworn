@@ -62,7 +62,7 @@ const S = {
   phase: {}, greenlight: {}, chain: [], options: new Map(), combats: new Map(), decks: {},
   prompt: null, busy: true, error: null, ended: false,
   ui: { mode: null }, catalog: { cards: {}, abilities: {} }, wanted: { cards: new Set(), abilities: new Set() },
-  log: [], pendingSounds: new Set(), prevLife: {}, rendered: new Set(), flying: new Set(), lastChain: 0,
+  log: [], pendingSounds: new Set(), positions: new Map(), prevLife: {}, rendered: new Set(), flying: new Set(), lastChain: 0,
 };
 
 function resetState() {
@@ -70,7 +70,7 @@ function resetState() {
     after: 0, cards: new Map(), players: {}, champions: {}, championTemplates: {}, names: {},
     phase: {}, greenlight: {}, chain: [], options: new Map(), combats: new Map(), decks: {},
     prompt: null, busy: true, error: null, ended: false, ui: { mode: null }, log: [], pendingSounds: new Set(),
-    prevLife: {}, rendered: new Set(), flying: new Set(), lastChain: 0,
+    positions: new Map(), prevLife: {}, rendered: new Set(), flying: new Set(), lastChain: 0,
   });
 }
 
@@ -311,11 +311,17 @@ function sleeveOf(pid) {
 /* Rendering                                                           */
 /* ------------------------------------------------------------------ */
 
+// A player's cards in one collection, in the server's zone order (battle_state.js zoneCards). Champions are not in a
+// zone's list: each is drawn as its champion portrait.
 function cardsIn(pid, collection) {
-  const champs = new Set(Object.values(S.champions));
-  return [...S.cards.values()]
-    .filter((c) => c.controller === pid && c.collection === collection && !champs.has(c.uid))
-    .sort((a, b) => a.uid - b.uid);
+  return BattleState.zoneCards(S, pid, collection, new Set(Object.values(S.champions)));
+}
+
+// A card in the warzone is a troop unless the catalog says it is something else. An unknown card counts as a troop,
+// so a card still on its way from the catalog is drawn where troops are.
+function isTroop(card) {
+  const tpl = S.catalog.cards[(card.card_id || "").toLowerCase()];
+  return !tpl || String(tpl.type || "").includes("Troop");
 }
 
 /* ------------------------------------------------------------------ */
@@ -432,9 +438,13 @@ function renderBoard3d(b) {
   b.setPhase(S.phase.turn_phase);
   const entries = [];
   const plan = combatPlan();
+  // Each player's zones are separate groups, so each is laid out by its own zone object on the board.
   for (const [pid, zone] of [[S.opp, "opp"], [S.me, "mine"]]) {
-    const war = [...cardsIn(pid, COLL.Warzone), ...cardsIn(pid, COLL.Underground)];
-    war.forEach((c, i) => entries.push(boardEntry(c, zone, i, war.length, plan)));
+    const war = cardsIn(pid, COLL.Warzone);
+    const troops = war.filter(isTroop), constants = war.filter((c) => !isTroop(c));
+    const groups = [[troops, zone], [constants, `${zone}-constants`],
+      [cardsIn(pid, COLL.Underground), `${zone}-underground`], [cardsIn(pid, COLL.Choosing), `${zone}-choosing`]];
+    for (const [cards, name] of groups) cards.forEach((c, i) => entries.push(boardEntry(c, name, i, cards.length, plan)));
   }
   for (const [pid, zone] of [[S.opp, "opp-hand"], [S.me, "mine-hand"]]) {
     const hand = cardsIn(pid, COLL.Hand);
