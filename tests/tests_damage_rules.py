@@ -49,8 +49,8 @@ class DamageRules(unittest.TestCase):
         self.attrs = {769: int(game_engine.ECardAttributes.SpiritDrain)}
         self.flags = {}
         self.handler = SimpleNamespace(user_profile={'id': 5},
-            _player_champ_scid=SimpleNamespace(uid=257),
-            _ai_champ_scid=SimpleNamespace(uid=513))
+            _player_champ_scid=SimpleNamespace(uid=SimpleNamespace(uid64=257)),
+            _ai_champ_scid=SimpleNamespace(uid=SimpleNamespace(uid64=513)))
         self.ctx = SimpleNamespace(db=self.db, session=SimpleNamespace(session_id=1),
             handler=self.handler, bstate=self.state,
             player_uid=game_engine.UID.make(244, 5), ai_uid=game_engine.UID.make(3, 1000),
