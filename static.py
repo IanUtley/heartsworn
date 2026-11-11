@@ -455,6 +455,7 @@ DDL = [
         personality    TEXT NOT NULL DEFAULT '',
         equipment_json TEXT NOT NULL DEFAULT '{}',
         format         TEXT NOT NULL DEFAULT '',
+        pve_champion_id INTEGER NOT NULL DEFAULT 0,
         updated_at     TEXT DEFAULT (datetime('now'))
     )
     """,
@@ -1586,6 +1587,8 @@ def ensure_schema(db):
     _drop_column(db, "redeem_codes", "uses")
     # EDeckFormat name ('immortal', 'standard', 'pve', 'siege'); '' is unset (templates the Unity client wrote).
     _ensure_column(db, "player_deck_templates", "format", "TEXT NOT NULL DEFAULT ''")
+    # The campaign champion (champions.id) a PvE deck belongs to; 0 when the deck is not bound to one.
+    _ensure_column(db, "player_deck_templates", "pve_champion_id", "INTEGER NOT NULL DEFAULT 0")
     db.execute("CREATE INDEX IF NOT EXISTS idx_player_deck_templates_user_format "
                "ON player_deck_templates(user_id, format)")
     _ensure_column(db, "session_transactions", "decoded_intent_json",

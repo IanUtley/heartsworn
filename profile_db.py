@@ -1459,7 +1459,7 @@ def db_save_champion_party(champion_id, user_id, party_json, conn=None):
 
 _DECK_TEMPLATE_COLUMNS = ("id", "name", "champion_guid", "sleeve_guid",
                           "gameboard_guid", "personality", "equipment_json",
-                          "format", "updated_at")
+                          "format", "pve_champion_id", "updated_at")
 _DECK_TEMPLATE_CARD_COLUMNS = ("card_guid", "quantity", "gem_types_list_json",
                                "flags_json")
 _DECK_TEMPLATE_LOCK = threading.RLock()
@@ -1534,9 +1534,9 @@ def db_save_profile_deck_template(user_id, template_id, columns, card_rows,
     quantity, gem_types_list_json, flags_json)``.  Returns the template id.
     """
     names = ("name", "champion_guid", "sleeve_guid", "gameboard_guid",
-             "personality", "equipment_json", "format")
-    values = tuple(columns.get(name, "{}" if name == "equipment_json" else "")
-                   for name in names)
+             "personality", "equipment_json", "format", "pve_champion_id")
+    defaults = {"equipment_json": "{}", "pve_champion_id": 0}
+    values = tuple(columns.get(name, defaults.get(name, "")) for name in names)
     with _deck_template_transaction(conn) as connection:
         existing = template_id and connection.execute(
             "SELECT 1 FROM player_deck_templates WHERE id=? AND user_id=?",

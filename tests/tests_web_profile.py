@@ -166,6 +166,30 @@ def test_reserves_are_saved_as_the_client_stores_them(monkeypatch):
     assert profile.deck(saved["id"])["cards"] == [{"guid": card, "quantity": 3, "reserves": 0}]
 
 
+@isolated_db
+def test_a_pve_deck_binds_to_the_owners_campaign_champion(monkeypatch):
+    owner = _dbmod._db.execute("INSERT INTO users (name) VALUES ('pve owner')").lastrowid
+    other = _dbmod._db.execute("INSERT INTO users (name) VALUES ('pve other')").lastrowid
+    card = _dbmod._db.execute("SELECT guid FROM card_templates LIMIT 1").fetchone()[0]
+    champion = _playable_champion()
+    _dbmod._db.execute("INSERT INTO collections (user_id, card_template_id, quantity) VALUES (?, ?, 3)", (owner, card))
+    mine = _dbmod._db.execute("INSERT INTO champions (user_id, champion_name) VALUES (?, 'Mine')", (owner,)).lastrowid
+    theirs = _dbmod._db.execute("INSERT INTO champions (user_id, champion_name) VALUES (?, 'Theirs')",
+                                (other,)).lastrowid
+    _dbmod._db.commit()
+    monkeypatch.setenv("HEX_WEB_PROFILE_ID", str(owner))
+    cards = [{"guid": card, "quantity": 2}]
+
+    saved = profile.save_deck({"name": "PvE", "format": "pve", "champion_guid": champion,
+                               "pve_champion_id": mine, "cards": cards})
+    assert profile.deck(saved["id"])["pve_champion_id"] == mine
+    with pytest.raises(ValueError, match="not yours"):
+        profile.save_deck({"id": saved["id"], "name": "PvE", "pve_champion_id": theirs, "cards": cards})
+    with pytest.raises(ValueError, match="only a PvE deck"):
+        profile.save_deck({"name": "Standard", "format": "standard", "champion_guid": champion,
+                           "pve_champion_id": mine, "cards": cards})
+
+
 if __name__ == "__main__":
     # Written in pytest style: run through pytest so each test executes and failures
     # set the exit status. A missing pytest fails loudly.

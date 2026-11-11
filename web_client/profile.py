@@ -154,6 +154,7 @@ def _with_reserves(flags_json: str, quantity: int, reserve: int) -> str:
 def _deck_view(template: dict) -> dict:
     return {"id": int(template["id"]), "name": str(template.get("name") or ""),
             "format": str(template.get("format") or ""),
+            "pve_champion_id": int(template.get("pve_champion_id") or 0),
             "champion_guid": str(template.get("champion_guid") or "").lower(),
             "sleeve_guid": str(template.get("sleeve_guid") or ""),
             "gameboard_guid": str(template.get("gameboard_guid") or ""),
@@ -233,6 +234,15 @@ def save_deck(body: dict) -> dict:
         existing = (profile_db.db_profile_deck_template(user_id, template_id, conn=conn)
                     if template_id else None)
         deck_format = _format(body["format"]) if "format" in body else _format((existing or {}).get("format"))
+        pve_champion = (int(body["pve_champion_id"] or 0) if "pve_champion_id" in body
+                        else int((existing or {}).get("pve_champion_id") or 0))
+        if pve_champion:
+            # A PvE deck belongs to one of the owner's campaign champions (the champions table).
+            if deck_format != "pve":
+                raise ValueError("only a PvE deck can be bound to a campaign champion")
+            if not conn.execute("SELECT 1 FROM champions WHERE id=? AND user_id=? AND is_deleted=0",
+                                (pve_champion, user_id)).fetchone():
+                raise ValueError("that campaign champion is not yours")
         previous_cards = {str(card["card_guid"]).lower(): card for card in (existing or {}).get("cards") or []}
         columns = {"name": str(body.get("name") or "").strip()[:NAME_LIMIT] or "New deck",
                    "champion_guid": champion if "champion_guid" in body else _keep_or_set({}, existing, "champion_guid"),
@@ -240,7 +250,7 @@ def save_deck(body: dict) -> dict:
                    "gameboard_guid": _keep_or_set(body, existing, "gameboard_guid"),
                    "personality": _keep_or_set({}, existing, "personality"),
                    "equipment_json": _keep_or_set({}, existing, "equipment_json") or "{}",
-                   "format": deck_format}
+                   "format": deck_format, "pve_champion_id": pve_champion}
         card_rows = []
         for guid, quantity in sorted(wanted.items()):
             gems, flags = _card_state(previous_cards.get(guid), quantity)
