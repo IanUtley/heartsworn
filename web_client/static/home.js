@@ -93,11 +93,30 @@ function chooseBackground(key) {
 /* Collection and deck page                                            */
 /* ------------------------------------------------------------------ */
 
+// EDeckFormat names. '' is a deck the Unity client saved, which has no format.
+const FORMAT_NAMES = [["standard", "Standard"], ["immortal", "Immortal"], ["pve", "PvE"], ["siege", "Siege"], ["", "Not chosen"]];
+const DECK_MINIMUM = 60;   // the client's c_MinimumDeckSize: a smaller main deck is saved as a draft
+const RESERVE_LIMIT = 15;  // the client's Format.cs reserve limit
+const ERROR_TEXT = {
+  Format: "Choose a format.",
+  NoChampionSelected: "Choose a champion.",
+  ChampionIDNotFound: "That champion cannot be played.",
+  TooFewCards: (a) => `The main deck has ${a.count} cards; it needs ${a.minimum} to play.`,
+  TooManyReserves: (a) => `${a.count} reserves; the limit is ${a.maximum}.`,
+  TooManyOfOneCard: (a) => `${a.count} copies of ${a.card}; the limit is ${a.maximum}.`,
+  NotOwned: (a) => `You own ${a.owned} copies of a card in the deck, and it needs ${a.needed}.`,
+  InvalidCards: (a) => (a.reason === "pve" ? "Some cards are PvE-only and cannot go in this format."
+                                          : "Some cards have no Standard version."),
+  CardNotLoaded: () => "Some cards are not in the game data.",
+  SiegeRulesNotChecked: () => "Siege rules are not checked yet.",
+};
 const deckPage = { loaded: false, cards: [], decks: [], champions: [], draft: null };
-const DECK_MINIMUM = 60;   // the client's c_MinimumDeckSize: a smaller deck is saved as a draft
+let validateTimer = null;
+let validateToken = 0;
 
+// A draft's cards: guid -> { main, reserve } copies.
 function emptyDraft() {
-  return { id: null, name: "New deck", champion_guid: "", cards: new Map() };
+  return { id: null, name: "New deck", format: "standard", champion_guid: "", cards: new Map() };
 }
 
 function ownedCopies(guid) {
@@ -105,13 +124,26 @@ function ownedCopies(guid) {
   return card ? card.quantity : 0;
 }
 
-function deckCopies() {
-  return [...deckPage.draft.cards.values()].reduce((sum, n) => sum + n, 0);
+function copiesOf(guid) {
+  const entry = deckPage.draft.cards.get(guid);
+  return entry ? entry.main + entry.reserve : 0;
+}
+
+function totals() {
+  let main = 0, reserve = 0;
+  for (const entry of deckPage.draft.cards.values()) { main += entry.main; reserve += entry.reserve; }
+  return { main, reserve };
 }
 
 function cardName(guid) {
   const tpl = S.catalog.cards[guid];
   return (tpl && tpl.name) || guid.slice(0, 8);
+}
+
+function errorText(error) {
+  const text = ERROR_TEXT[error.code];
+  if (typeof text === "function") return text(error.args || {});
+  return text || error.code;
 }
 
 async function openCollection() {
@@ -138,24 +170,34 @@ function loadDraft(id) {
   const saved = deckPage.decks.find((d) => d.id === id);
   if (!saved) { deckPage.draft = emptyDraft(); return renderCollection(); }
   deckPage.draft = {
-    id: saved.id, name: saved.name, champion_guid: saved.champion_guid,
-    cards: new Map(saved.cards.map((c) => [c.guid, c.quantity])),
+    id: saved.id, name: saved.name, format: saved.format || "", champion_guid: saved.champion_guid,
+    cards: new Map(saved.cards.map((c) => [c.guid, { main: c.quantity - (c.reserves || 0), reserve: c.reserves || 0 }])),
   };
   renderCollection();
 }
 
-function addCopy(guid) {
-  const draft = deckPage.draft;
-  const have = draft.cards.get(guid) || 0;
-  if (have >= ownedCopies(guid)) return toast("No more copies of that card are owned.");
-  draft.cards.set(guid, have + 1);
+function addCopy(guid, part = "main") {
+  if (copiesOf(guid) >= ownedCopies(guid)) return toast("No more copies of that card are owned.");
+  const entry = deckPage.draft.cards.get(guid) || { main: 0, reserve: 0 };
+  entry[part] += 1;
+  deckPage.draft.cards.set(guid, entry);
   renderCollection();
 }
 
-function removeCopy(guid) {
-  const draft = deckPage.draft;
-  const have = draft.cards.get(guid) || 0;
-  if (have <= 1) draft.cards.delete(guid); else draft.cards.set(guid, have - 1);
+function removeCopy(guid, part = "main") {
+  const entry = deckPage.draft.cards.get(guid);
+  if (!entry || entry[part] <= 0) return;
+  entry[part] -= 1;
+  if (entry.main + entry.reserve === 0) deckPage.draft.cards.delete(guid);
+  renderCollection();
+}
+
+function moveCopy(guid, to) {
+  const entry = deckPage.draft.cards.get(guid);
+  const from = to === "reserve" ? "main" : "reserve";
+  if (!entry || entry[from] <= 0) return;
+  entry[from] -= 1;
+  entry[to] += 1;
   renderCollection();
 }
 
@@ -176,41 +218,105 @@ function renderCollectionGrid() {
     return;
   }
   $("#collection-grid").innerHTML = cards.map((c, i) => {
-    const inDeck = deckPage.draft.cards.get(c.guid) || 0;
     // The grid uses the battle's card renderer; a pseudo card carries the template and a unique uid for the slot.
     const card = cardHTML({ uid: 900000 + i, card_id: c.guid, controller: S.me, state: 0 }, "owned-card");
     return `<div class="owned" data-guid="${c.guid}" title="${esc(c.name)}">${card}
-      <span class="owned-count">${inDeck}/${c.quantity}</span></div>`;
+      <span class="owned-count">${copiesOf(c.guid)}/${c.quantity}</span></div>`;
   }).join("");
+}
+
+function deckRows(part, others) {
+  const rows = [...deckPage.draft.cards.entries()].filter(([, e]) => e[part] > 0)
+    .sort(([a], [b]) => cardName(a).localeCompare(cardName(b)));
+  return rows.map(([guid, e]) => `<div class="deck-row">
+      <button class="deck-name" data-remove="${guid}" data-part="${part}" title="Remove one copy">${esc(cardName(guid))}</button>
+      <span>×${e[part]}</span>
+      <button class="secondary" data-move="${guid}" data-to="${others}">${others === "reserve" ? "To reserves" : "To main"}</button>
+    </div>`).join("");
+}
+
+function renderDeckList() {
+  const { main, reserve } = totals();
+  const mainRows = deckRows("main", "reserve");
+  const reserveRows = deckRows("reserve", "main");
+  $("#deck-list").innerHTML =
+    `<h3 class="deck-heading">Main deck (${main})</h3>` +
+    (mainRows || `<p class="status">Click cards in the collection to add them.</p>`) +
+    `<h3 class="deck-heading">Reserves (${reserve}/${RESERVE_LIMIT})</h3>` +
+    (reserveRows || `<p class="status">Move copies here to keep them in reserve.</p>`);
+}
+
+function renderStats() {
+  const costs = Array(7).fill(0);
+  const types = {};
+  for (const [guid, entry] of deckPage.draft.cards) {
+    const card = deckPage.cards.find((c) => c.guid === guid);
+    const copies = entry.main;   // reserves are not in the main deck's curve
+    if (!card || !copies) continue;
+    costs[Math.min(6, Number(card.cost) || 0)] += copies;
+    types[card.type || "Other"] = (types[card.type || "Other"] || 0) + copies;
+  }
+  const curve = costs.map((n, i) => `${i === 6 ? "6+" : i}: ${n}`).join(" · ");
+  const kinds = Object.entries(types).map(([name, n]) => `${esc(name)} ${n}`).join(" · ") || "none yet";
+  $("#deck-stats").innerHTML = `<p><strong>Cost</strong> ${curve}</p><p><strong>Types</strong> ${kinds}</p>`;
+}
+
+function renderErrors(result) {
+  const items = result.errors.map((e) => `<li class="error">${esc(errorText(e))}</li>`)
+    .concat(result.warnings.map((w) => `<li class="warning">${esc(errorText(w))}</li>`));
+  $("#deck-errors").innerHTML = items.length ? items.join("") : `<li class="ok">The deck is valid for ${esc(FORMAT_NAMES.find(([v]) => v === deckPage.draft.format)?.[1] || "no format")}.</li>`;
+}
+
+// Live validation: asks the server (which owns the rules) after the edits settle; a stale answer is dropped.
+function scheduleValidation() {
+  clearTimeout(validateTimer);
+  validateTimer = setTimeout(checkDeck, 250);
+}
+
+async function checkDeck() {
+  const token = ++validateToken;
+  try {
+    const result = await api("/api/profile/decks/validate", deckPayload());
+    if (token === validateToken) renderErrors(result);
+  } catch (err) {
+    if (token === validateToken) $("#deck-errors").innerHTML = `<li class="error">${esc(err.message)}</li>`;
+  }
 }
 
 function renderDeckPanel() {
   const draft = deckPage.draft;
   const select = $("#deck-select");
-  select.innerHTML = `<option value="">New deck</option>` + deckPage.decks.map((d) =>
+  const formatDecks = deckPage.decks.filter((d) => (d.format || "") === (draft.format || ""));
+  select.innerHTML = `<option value="">New deck</option>` + formatDecks.map((d) =>
     `<option value="${d.id}" ${d.id === draft.id ? "selected" : ""}>${esc(d.name)}</option>`).join("");
   select.value = draft.id ?? "";
+  $("#deck-format").innerHTML = FORMAT_NAMES.map(([value, label]) => `<option value="${value}">${label}</option>`).join("");
+  $("#deck-format").value = draft.format;
   if (document.activeElement !== $("#deck-name")) $("#deck-name").value = draft.name;
   $("#deck-champion").innerHTML = `<option value="">No champion</option>` + deckPage.champions.map((c) =>
     `<option value="${c.guid}" ${c.guid === draft.champion_guid ? "selected" : ""}>${esc(cardName(c.guid))}</option>`).join("");
-  const copies = deckCopies();
-  $("#deck-count").textContent = `${copies} cards (at least ${DECK_MINIMUM} to play)`;
-  $("#deck-count").className = `status${copies < DECK_MINIMUM ? " short" : ""}`;
+  const { main, reserve } = totals();
+  $("#deck-count").textContent = `${main} cards in the main deck (at least ${DECK_MINIMUM} to play), ${reserve} in reserve`;
+  $("#deck-count").className = `status${main < DECK_MINIMUM ? " short" : ""}`;
   $("#deck-delete").hidden = draft.id === null;
-  const rows = [...draft.cards.entries()].sort(([a], [b]) => cardName(a).localeCompare(cardName(b)));
-  $("#deck-list").innerHTML = rows.length
-    ? rows.map(([guid, n]) => `<button class="deck-row" data-remove="${guid}" title="Remove one copy">
-        <span>${esc(cardName(guid))}</span><span>×${n}</span></button>`).join("")
-    : `<p class="status">Click cards in the collection to add them.</p>`;
+  renderDeckList();
+  renderStats();
+  scheduleValidation();
 }
 
 function deckPayload() {
   const draft = deckPage.draft;
+  const cards = [];
+  for (const [guid, entry] of draft.cards) {
+    if (entry.main > 0) cards.push({ guid, quantity: entry.main, reserve: false });
+    if (entry.reserve > 0) cards.push({ guid, quantity: entry.reserve, reserve: true });
+  }
   return {
     id: draft.id,
     name: $("#deck-name").value.trim() || "New deck",
+    format: draft.format,
     champion_guid: $("#deck-champion").value,
-    cards: [...draft.cards.entries()].map(([guid, quantity]) => ({ guid, quantity })),
+    cards,
   };
 }
 
@@ -262,19 +368,33 @@ $("#collection-search").addEventListener("input", renderCollectionGrid);
 $("#collection-sort").addEventListener("change", renderCollectionGrid);
 $("#collection-grid").addEventListener("click", (e) => {
   const owned = e.target.closest("[data-guid]");
-  if (owned) addCopy(owned.dataset.guid);
+  if (owned) addCopy(owned.dataset.guid, "main");
 });
 $("#deck-list").addEventListener("click", (e) => {
-  const row = e.target.closest("[data-remove]");
-  if (row) removeCopy(row.dataset.remove);
+  const remove = e.target.closest("[data-remove]");
+  if (remove) return removeCopy(remove.dataset.remove, remove.dataset.part);
+  const move = e.target.closest("[data-move]");
+  if (move) moveCopy(move.dataset.move, move.dataset.to);
 });
 $("#deck-select").addEventListener("change", (e) => {
   $("#deck-status").textContent = "";
-  e.target.value === "" ? (deckPage.draft = emptyDraft(), renderCollection()) : loadDraft(Number(e.target.value));
+  e.target.value === "" ? (deckPage.draft = { ...emptyDraft(), format: deckPage.draft.format }, renderCollection())
+                        : loadDraft(Number(e.target.value));
 });
-$("#deck-new").addEventListener("click", () => { deckPage.draft = emptyDraft(); $("#deck-status").textContent = ""; renderCollection(); });
+$("#deck-format").addEventListener("change", (e) => {
+  // A saved deck belongs to its format: changing the format starts a new deck in it, keeping the cards chosen so far.
+  deckPage.draft.format = e.target.value;
+  deckPage.draft.id = null;
+  $("#deck-status").textContent = "Saving will create a new deck in this format.";
+  renderCollection();
+});
+$("#deck-new").addEventListener("click", () => {
+  deckPage.draft = { ...emptyDraft(), format: deckPage.draft.format };
+  $("#deck-status").textContent = "";
+  renderCollection();
+});
 $("#deck-name").addEventListener("input", (e) => { deckPage.draft.name = e.target.value; });
-$("#deck-champion").addEventListener("change", (e) => { deckPage.draft.champion_guid = e.target.value; });
+$("#deck-champion").addEventListener("change", (e) => { deckPage.draft.champion_guid = e.target.value; scheduleValidation(); });
 $("#deck-save").addEventListener("click", saveDeck);
 $("#deck-delete").addEventListener("click", deleteDeck);
 

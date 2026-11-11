@@ -495,3 +495,15 @@ body.targeting, body.targeting * {
    their transform, so their flat-layout offsets are cleared here. */
 .hud3d { position: absolute; inset: 0; pointer-events: none; z-index: 13; overflow: hidden; }
 .hud3d-panel { position: absolute !important; left: 0 !important; top: 0 !important; right: auto !important; bottom: auto !important; margin: 0 !important; }
+
+/* Deck builder: reserves, inline validation and the stats panel. */
+.deck-heading { margin: 8px 0 2px; font-size: 13px; color: var(--ink-dim); text-transform: uppercase; letter-spacing: 0.04em; }
+.deck-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 6px; }
+.deck-row .deck-name { text-align: left; background: none; border: 0; color: inherit; padding: 0; cursor: pointer; }
+.deck-errors { list-style: none; margin: 0; padding: 0; display: grid; gap: 3px; font-size: 13px; }
+.deck-errors .error { color: #ffb4a8; }
+.deck-errors .warning { color: #f3d28a; }
+.deck-errors .ok { color: var(--ink-dim); }
+.deck-stats { font-size: 13px; color: var(--ink-dim); display: grid; gap: 2px; }
+.deck-stats p { margin: 0; }
+

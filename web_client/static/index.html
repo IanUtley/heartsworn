@@ -53,8 +53,11 @@
             <button id="deck-new" class="secondary">New deck</button>
           </div>
           <label>Name <input id="deck-name" maxlength="40"></label>
+          <label>Format <select id="deck-format" aria-label="Deck format"></select></label>
           <label>Champion <select id="deck-champion"></select></label>
           <p id="deck-count" class="status"></p>
+          <ul id="deck-errors" class="deck-errors" aria-live="polite"></ul>
+          <div id="deck-stats" class="deck-stats"></div>
           <div id="deck-list" class="deck-list"></div>
           <div class="buttons">
             <button id="deck-save" class="primary">Save deck</button>

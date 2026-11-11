@@ -33,7 +33,7 @@ def test_deck_saves_only_owned_copies_and_round_trips(monkeypatch):
 
     deck = next(d for d in profile.decks() if d["id"] == saved["id"])
     assert deck["name"] == "Probe"
-    assert deck["cards"] == [{"guid": card, "quantity": 2}]
+    assert deck["cards"] == [{"guid": card, "quantity": 2, "reserves": 0}]
 
     assert profile.delete_deck(saved["id"]) is True
     assert all(d["id"] != saved["id"] for d in profile.decks())
@@ -137,6 +137,26 @@ def test_validate_reads_the_owners_copies_and_the_card_rules(monkeypatch):
     codes = {error["code"] for error in result["errors"]}
     assert result["valid"] is False
     assert {"TooFewCards", "NotOwned"} <= codes, result
+
+
+@isolated_db
+def test_reserves_are_saved_as_the_client_stores_them(monkeypatch):
+    user_id = _dbmod._db.execute("INSERT INTO users (name) VALUES ('reserve tester')").lastrowid
+    card = _dbmod._db.execute("SELECT guid FROM card_templates LIMIT 1").fetchone()[0]
+    champion = _dbmod._db.execute("SELECT guid FROM champion_templates WHERE is_player=1 LIMIT 1").fetchone()[0]
+    _dbmod._db.execute("INSERT INTO collections (user_id, card_template_id, quantity) VALUES (?, ?, 3)",
+                       (user_id, card))
+    _dbmod._db.commit()
+    monkeypatch.setenv("HEX_WEB_PROFILE_ID", str(user_id))
+    saved = profile.save_deck({"name": "Reserves", "format": "standard", "champion_guid": champion,
+                               "cards": [{"guid": card, "quantity": 2, "reserve": False},
+                                         {"guid": card, "quantity": 1, "reserve": True}]})
+    view = profile.deck(saved["id"])
+    assert view["cards"] == [{"guid": card, "quantity": 3, "reserves": 1}]
+
+    profile.save_deck({"id": saved["id"], "name": "Reserves", "cards": [{"guid": card, "quantity": 3,
+                                                                          "reserve": False}]})
+    assert profile.deck(saved["id"])["cards"] == [{"guid": card, "quantity": 3, "reserves": 0}]
 
 
 if __name__ == "__main__":

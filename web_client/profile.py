@@ -65,8 +65,8 @@ def profile_summary() -> dict:
 def _owned_cards(user_id, conn) -> list[dict]:
     rows = profile_db.db_collection_card_list(user_id, conn=conn)
     return [{"guid": str(guid).lower(), "name": str(name or ""), "cost": cost, "attack": attack,
-             "defense": defense, "quantity": int(quantity or 0)}
-            for guid, name, cost, attack, defense, quantity in rows if int(quantity or 0) > 0]
+             "defense": defense, "type": str(card_type or ""), "quantity": int(quantity or 0)}
+            for guid, name, cost, attack, defense, quantity, card_type in rows if int(quantity or 0) > 0]
 
 
 def collection() -> list[dict]:
@@ -127,13 +127,36 @@ def deck(template_id: int) -> dict | None:
         return _deck_view(template) if template else None
 
 
+def _reserve_copies(flags_json: str, quantity: int) -> int:
+    """How many of a card's copies are reserves: the ``copies`` list when the copies differ, else the shared flag."""
+    flags = json.loads(flags_json or "{}")
+    copies = flags.get("copies")
+    if isinstance(copies, list):
+        return sum(1 for copy in copies[:quantity] if copy.get("reserves"))
+    return quantity if flags.get("reserves") else 0
+
+
+def _with_reserves(flags_json: str, quantity: int, reserve: int) -> str:
+    """Write how many of a card's copies are reserves, in the client's flag shape: one shared flag object when every
+    copy is alike, else a ``copies`` list with one object per copy. Other flags (extended, foil) are kept."""
+    flags = json.loads(flags_json or "{}")
+    flags.pop("copies", None)
+    flags.pop("reserves", None)
+    if reserve in (0, quantity):
+        flags["reserves"] = reserve == quantity and quantity > 0
+        return json.dumps(flags)
+    flags["copies"] = [dict(flags, reserves=index < reserve) for index in range(quantity)]
+    return json.dumps(flags)
+
+
 def _deck_view(template: dict) -> dict:
     return {"id": int(template["id"]), "name": str(template.get("name") or ""),
             "format": str(template.get("format") or ""),
             "champion_guid": str(template.get("champion_guid") or "").lower(),
             "sleeve_guid": str(template.get("sleeve_guid") or ""),
             "gameboard_guid": str(template.get("gameboard_guid") or ""),
-            "cards": [{"guid": str(card["card_guid"]).lower(), "quantity": int(card["quantity"])}
+            "cards": [{"guid": str(card["card_guid"]).lower(), "quantity": int(card["quantity"]),
+                       "reserves": _reserve_copies(card.get("flags_json") or "{}", int(card["quantity"]))}
                       for card in template.get("cards") or []]}
 
 
@@ -187,12 +210,17 @@ def save_deck(body: dict) -> dict:
             raise ValueError("no profile to save the deck to")
         owned = {card["guid"]: card["quantity"] for card in _owned_cards(user_id, conn)}
         wanted: dict[str, int] = {}
+        reserved: dict[str, int] = {}
+        # A card's copies may come as a main-deck entry and a reserve entry; the request says which with "reserve".
+        reserve_info = any("reserve" in card for card in body.get("cards") or [])
         for card in body.get("cards") or []:
             guid = str(card.get("guid") or "").lower()
             quantity = int(card.get("quantity") or 0)
             if quantity <= 0:
                 continue
             wanted[guid] = wanted.get(guid, 0) + quantity
+            if card.get("reserve"):
+                reserved[guid] = reserved.get(guid, 0) + quantity
         for guid, quantity in wanted.items():
             if quantity > owned.get(guid, 0):
                 raise ValueError(f"only {owned.get(guid, 0)} copies of {guid} are owned, not {quantity}")
@@ -214,6 +242,8 @@ def save_deck(body: dict) -> dict:
         card_rows = []
         for guid, quantity in sorted(wanted.items()):
             gems, flags = _card_state(previous_cards.get(guid), quantity)
+            if reserve_info:
+                flags = _with_reserves(flags, quantity, reserved.get(guid, 0))
             card_rows.append((guid, quantity, gems, flags))
         template_id = profile_db.db_save_profile_deck_template(
             user_id, template_id, columns, card_rows, conn=conn)

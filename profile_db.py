@@ -898,7 +898,7 @@ def db_profile_card_instances(user_id, conn=None):
 
 def db_collection_card_list(user_id, conn=None):
     return _profile_connection(conn).execute(
-        "SELECT ct.guid, ct.name, ct.cost, ct.attack, ct.defense, col.quantity "
+        "SELECT ct.guid, ct.name, ct.cost, ct.attack, ct.defense, col.quantity, ct.card_type "
         "FROM collections col JOIN card_templates ct "
         "ON ct.guid=col.card_template_id WHERE col.user_id=? ORDER BY ct.name",
         (user_id,)).fetchall()
