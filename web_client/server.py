@@ -5,8 +5,8 @@
 
 Serves ``web_client/static`` and a JSON API:
 
-* ``GET  /api/decks``                 authored decks a seat can play
-* ``POST /api/matches``               ``{"deck", "opponent_deck", "name"}``
+* ``GET  /api/decks``                 authored decks a seat can play, and the player's playable saved decks
+* ``POST /api/matches``               ``{"deck" | "deck_id", "opponent_deck", "name"}``
 * ``GET  /api/matches/<id>?after=N``  event packets after ``N`` plus the prompt
                                       (long-polls for up to ``wait`` seconds)
 * ``POST /api/matches/<id>/action``   one browser decision
@@ -79,9 +79,16 @@ class Matches:
             if len(self.by_id) >= MAX_MATCHES:
                 oldest = next(iter(self.by_id))
                 self.by_id.pop(oldest).close()
-        match = WebMatch(str(body["deck"]), str(body["opponent_deck"]),
-                         player_name=str(body.get("name") or "You")[:32],
-                         ai_delay=float(body.get("ai_delay", 0.35)))
+        if "deck_id" in body:
+            # A saved deck, built from the live database so a deck saved after the server started can be played.
+            from web_client import profile
+            match = WebMatch(None, str(body["opponent_deck"]), player_spec=profile.play_spec(int(body["deck_id"])),
+                             player_name=str(body.get("name") or "You")[:32],
+                             ai_delay=float(body.get("ai_delay", 0.35)))
+        else:
+            match = WebMatch(str(body["deck"]), str(body["opponent_deck"]),
+                             player_name=str(body.get("name") or "You")[:32],
+                             ai_delay=float(body.get("ai_delay", 0.35)))
         match_id = f"m{match.slot}"
         with self.lock:
             self.by_id[match_id] = match
@@ -147,14 +154,15 @@ class Handler(BaseHTTPRequestHandler):
                 return self._file(STATIC, path[len("/static/"):])
             if path == "/api/decks":
                 from web_client.match import deck_choices
-                from web_client import catalog
+                from web_client import catalog, profile
                 decks = deck_choices()
                 names = catalog.describe({"cards": sorted(
                     {d["champion_guid"] for d in decks})})["cards"]
                 for deck in decks:
                     champ = names.get(deck["champion_guid"].lower()) or {}
                     deck["champion"] = champ.get("name", "")
-                return self._send(200, {"decks": decks})
+                # ``saved``: the player's own decks that can be played (see profile.play_decks).
+                return self._send(200, {"decks": decks, "saved": profile.play_decks()})
             if path in ("/api/profile", "/api/collection", "/api/profile/decks", "/api/profile/champions"):
                 from web_client import profile
                 format_name = (query.get("format") or [None])[0]

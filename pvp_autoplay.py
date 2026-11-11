@@ -715,6 +715,43 @@ def _defense_bytes(attacker_uids, blocker_map, champ_uid):
     return out
 
 
+def _gem_templates(connection):
+    """Gem name -> (gem type, ability GUIDs), from the gem templates."""
+    return {
+        str(name): (int(gem_type or 0),
+                    [str(value).lower() for value in
+                     json.loads(abilities_json or "[]")])
+        for name, gem_type, abilities_json in db_gem_templates(conn=connection)
+    }
+
+
+def _deck_cards(authored_cards, gem_templates):
+    """(card GUID, quantity, gem json) rows -> one (card GUID, gem type, gem ability GUIDs) entry per copy. A copy's
+    socket names come from its position in the gem json list."""
+    cards = []
+    for card_guid, quantity, gem_json in authored_cards:
+        try:
+            gem_slots = json.loads(gem_json or "[]")
+        except (TypeError, ValueError, json.JSONDecodeError):
+            gem_slots = []
+        for copy_index in range(max(0, int(quantity or 0))):
+            socket_names = (gem_slots[copy_index]
+                            if copy_index < len(gem_slots) else [])
+            if not isinstance(socket_names, list):
+                socket_names = [socket_names]
+            gem_type = 0
+            gem_abilities = []
+            for socket_name in socket_names:
+                gem_data = gem_templates.get(str(socket_name))
+                if not gem_data:
+                    continue
+                if not gem_type:
+                    gem_type = gem_data[0]
+                gem_abilities.extend(ability_guid for ability_guid in gem_data[1] if ability_guid not in gem_abilities)
+            cards.append((str(card_guid), gem_type, gem_abilities))
+    return cards
+
+
 def _fra_encounter_specs(deck_guids=None, *, non_elite_only=False,
                          all_decks=False):
     """Load authored FRA lists as disposable PvP decks.
@@ -744,35 +781,9 @@ def _fra_encounter_specs(deck_guids=None, *, non_elite_only=False,
         chosen = rows
 
     specs = []
-    gem_templates = {
-        str(name): (int(gem_type or 0),
-                    [str(value).lower() for value in
-                     json.loads(abilities_json or "[]")])
-        for name, gem_type, abilities_json in db_gem_templates(conn=_db)
-    }
+    gem_templates = _gem_templates(_db)
     for deck_guid, name, champion_guid, personality in chosen:
-        cards = []
-        authored_cards = db_encounter_deck_cards(deck_guid, conn=_db)
-        for card_guid, quantity, gem_json in authored_cards:
-            try:
-                gem_slots = json.loads(gem_json or "[]")
-            except (TypeError, ValueError, json.JSONDecodeError):
-                gem_slots = []
-            for copy_index in range(max(0, int(quantity or 0))):
-                socket_names = (gem_slots[copy_index]
-                                if copy_index < len(gem_slots) else [])
-                if not isinstance(socket_names, list):
-                    socket_names = [socket_names]
-                gem_type = 0
-                gem_abilities = []
-                for socket_name in socket_names:
-                    gem_data = gem_templates.get(str(socket_name))
-                    if not gem_data:
-                        continue
-                    if not gem_type:
-                        gem_type = gem_data[0]
-                    gem_abilities.extend(ability_guid for ability_guid in gem_data[1] if ability_guid not in gem_abilities)
-                cards.append((str(card_guid), gem_type, gem_abilities))
+        cards = _deck_cards(db_encounter_deck_cards(deck_guid, conn=_db), gem_templates)
         if not cards or not champion_guid:
             continue
         specs.append({"deck_guid": str(deck_guid), "name": str(name),

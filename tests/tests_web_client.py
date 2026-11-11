@@ -9,6 +9,8 @@ hidden cards while the browser's own hand carries real templates.
 import os
 import sys
 
+import pytest
+
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 
 from tests.test_db import fresh_database
@@ -242,3 +244,46 @@ def _shards_of_fate_threshold_pick():
         assert any(e["type"] == "PlayerResourceThresholdChanged" for e in events)
     finally:
         match.close()
+
+
+@_bound_to_current_db
+def test_a_saved_deck_starts_a_match_and_an_unplayable_one_is_refused():
+    """A saved deck the rules accept plays a match; one that breaks them (too few cards) is refused with the reason."""
+    import os
+    from db import _db
+    from web_client import profile
+    decks = _ensure_two_decks()
+    user_id = _db.execute("INSERT INTO users (name) VALUES ('saved player')").lastrowid
+    names = _db.execute(
+        "SELECT MIN(guid) FROM card_templates WHERE is_pve=0 AND card_type NOT LIKE '%Resource%' "
+        "GROUP BY name LIMIT 15").fetchall()
+    champion = _db.execute(
+        "SELECT LOWER(e.guid) FROM champion_templates_extended e WHERE e.is_selectable=1 AND EXISTS("
+        "SELECT 1 FROM champion_abilities ca WHERE LOWER(ca.champion_guid)=LOWER(e.guid)) LIMIT 1").fetchone()[0]
+    assert len(names) == 15 and champion, "the test database lacks the cards or champion a deck needs"
+    for (guid,) in names:
+        _db.execute("INSERT INTO collections (user_id, card_template_id, quantity) VALUES (?, ?, 4)", (user_id, guid))
+    _db.commit()
+    previous = os.environ.get("HEX_WEB_PROFILE_ID")
+    os.environ["HEX_WEB_PROFILE_ID"] = str(user_id)
+    try:
+        short = profile.save_deck({"name": "Short", "format": "immortal", "champion_guid": champion,
+                                   "cards": [{"guid": names[0][0], "quantity": 4}]})
+        with pytest.raises(ValueError, match="TooFewCards"):
+            profile.play_spec(short["id"])
+        full = profile.save_deck({"name": "Full", "format": "immortal", "champion_guid": champion,
+                                  "cards": [{"guid": guid, "quantity": 4} for (guid,) in names]})
+        assert profile.play_spec(full["id"]) is not None
+        match = web_match.WebMatch(None, decks[1]["deck_guid"], seed=11, ai_delay=0,
+                                   player_spec=profile.play_spec(full["id"]))
+        try:
+            snap, _packets, _after = _settle(match)
+            assert snap["error"] is None, snap["error"]
+            assert snap["prompt"]["kind"] in ("goes_first", "mulligan", "priority"), snap["prompt"]
+        finally:
+            match.close()
+    finally:
+        if previous is None:
+            os.environ.pop("HEX_WEB_PROFILE_ID", None)
+        else:
+            os.environ["HEX_WEB_PROFILE_ID"] = previous

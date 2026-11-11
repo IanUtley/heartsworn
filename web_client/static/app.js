@@ -1415,11 +1415,15 @@ async function loadLobby() {
   applyVolume();
   volume.oninput = () => { storage("hex.volume", volume.value); applyVolume(); };
   try {
-    const { decks } = await api("/api/decks");
+    const { decks, saved = [] } = await api("/api/decks");
     const opts = decks.map((d) => `<option value="${d.deck_guid}">${esc(d.name.replace(/^Arena_/, "").replace(/_/g, " "))}${d.champion ? ` — ${esc(d.champion)}` : ""}</option>`).join("");
-    $("#deck-mine").innerHTML = opts;
+    // Your saved decks come first ("saved:<id>"); the opponent is always an authored deck.
+    const savedOpts = saved.map((d) => `<option value="saved:${d.id}">${esc(d.name)} (saved${d.format ? `, ${esc(d.format)}` : ""})</option>`).join("");
+    $("#deck-mine").innerHTML = savedOpts + opts;
     $("#deck-theirs").innerHTML = opts;
-    $("#deck-mine").value = storage("hex.deck") || decks[0].deck_guid;
+    const offered = (value) => [...$("#deck-mine").options].some((o) => o.value === value);
+    const remembered = storage("hex.deck");
+    $("#deck-mine").value = offered(remembered) ? remembered : (saved.length ? `saved:${saved[0].id}` : decks[0].deck_guid);
     $("#deck-theirs").value = storage("hex.opponent") || decks[Math.min(2, decks.length - 1)].deck_guid;
   } catch (err) {
     $("#lobby-status").textContent = `Could not load decks: ${err.message}`;
@@ -1436,8 +1440,10 @@ async function startMatch() {
   storage("hex.deck", $("#deck-mine").value);
   storage("hex.opponent", $("#deck-theirs").value);
   try {
+    const mine = $("#deck-mine").value;
+    const player = mine.startsWith("saved:") ? { deck_id: Number(mine.slice("saved:".length)) } : { deck: mine };
     const { id } = await api("/api/matches", {
-      deck: $("#deck-mine").value, opponent_deck: $("#deck-theirs").value, name: $("#player-name").value });
+      ...player, opponent_deck: $("#deck-theirs").value, name: $("#player-name").value });
     resetState();
     S.matchId = id;
     const first = await api(`/api/matches/${id}?after=0&wait=0`);

@@ -89,9 +89,15 @@ class ActionError(ValueError):
     """A browser action that does not fit the current prompt."""
 
 
+def _opponent_spec(deck_guid):
+    """The match spec of an authored FRA deck. The loader wants two decks, so the deck is listed twice and the first
+    spec is kept."""
+    return autoplay._fra_encounter_specs([deck_guid, deck_guid])[0]
+
+
 class WebMatch:
     def __init__(self, player_deck_guid, opponent_deck_guid, *, seed=None,
-                 player_name="You", ai_delay=0.35, threaded=True):
+                 player_name="You", ai_delay=0.35, threaded=True, player_spec=None):
         # ``threaded=False`` runs the match inline (the Pyodide demo has no
         # threads): setup happens here and each ``submit`` is processed at once.
         self.threaded = threaded
@@ -103,8 +109,12 @@ class WebMatch:
         self.human_pid, self.ai_pid = int(pids[0]), int(pids[1])
         self.player_name = player_name
         self.ai_delay = float(ai_delay)
-        self.specs = autoplay._fra_encounter_specs(
-            [player_deck_guid, opponent_deck_guid])
+        # A saved deck arrives as a prebuilt spec (profile.play_spec); an authored deck is loaded by GUID.
+        if player_spec is None:
+            self.specs = autoplay._fra_encounter_specs(
+                [player_deck_guid, opponent_deck_guid])
+        else:
+            self.specs = [player_spec, _opponent_spec(opponent_deck_guid)]
         self.capture = PacketCapture(self.human_pid).start()
         self.log: list[dict] = []
         self.cond = threading.Condition()

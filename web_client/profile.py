@@ -87,9 +87,11 @@ def _format(value) -> str:
     return text
 
 
-_PLAYABLE_CHAMPION = ("SELECT 1 FROM champion_templates ct "
-                      "LEFT JOIN champion_templates_extended cte ON cte.guid = ct.guid "
-                      "WHERE ct.guid=? AND ct.is_player=1 AND COALESCE(cte.is_selectable, 1)=1")
+# A champion a player may put in a deck: selectable in the client, and with abilities the engine can seed (only
+# champions with ability rows are playable, so the list is the same set the matches use).
+_PLAYABLE_CHAMPION = ("SELECT 1 FROM champion_templates_extended e "
+                      "WHERE LOWER(e.guid)=? AND e.is_selectable=1 AND EXISTS("
+                      "SELECT 1 FROM champion_abilities ca WHERE LOWER(ca.champion_guid)=LOWER(e.guid))")
 
 
 def champions(format=None) -> list[dict]:
@@ -101,9 +103,9 @@ def champions(format=None) -> list[dict]:
     _format(format)
     with _connection() as conn:
         return [{"guid": str(row[0]).lower()} for row in conn.execute(
-            "SELECT ct.guid FROM champion_templates ct "
-            "LEFT JOIN champion_templates_extended cte ON cte.guid = ct.guid "
-            "WHERE ct.is_player=1 AND COALESCE(cte.is_selectable, 1)=1 ORDER BY ct.guid").fetchall()]
+            "SELECT LOWER(e.guid) FROM champion_templates_extended e "
+            "WHERE e.is_selectable=1 AND EXISTS(SELECT 1 FROM champion_abilities ca "
+            "WHERE LOWER(ca.champion_guid)=LOWER(e.guid)) ORDER BY LOWER(e.guid)").fetchall()]
 
 
 def decks(format=None) -> list[dict]:
@@ -251,22 +253,106 @@ def save_deck(body: dict) -> dict:
             "valid": sum(wanted.values()) >= MINIMUM_DECK_SIZE}
 
 
+def _validate(connection, user_id, body: dict) -> dict:
+    """The validator's result for a deck body, on ``connection`` with the owner's copies."""
+    from services import deck_validation
+    from web_client import catalog
+    owned = ({card["guid"]: card["quantity"] for card in _owned_cards(user_id, connection)}
+             if user_id is not None else {})
+    guids = [card.get("guid") for card in body.get("cards") or []]
+    rules = deck_validation.load_card_rules(
+        connection, guids, catalog.STANDARD_SETS,
+        lambda guid: bool((catalog.card(guid) or {}).get("unlimited")))
+    champion = str(body.get("champion_guid") or "").lower()
+    playable = bool(champion) and connection.execute(_PLAYABLE_CHAMPION, (champion,)).fetchone() is not None
+    return deck_validation.validate_deck(body, rules, owned, playable)
+
+
 def validate_deck(body: dict) -> dict:
     """Check a deck against the rules without saving it (``services/deck_validation``). The copies counted are the
     owner's; the card rules come from the game data the catalog reads."""
-    from services import deck_validation
-    from web_client import catalog
+    with _connection() as conn:
+        return _validate(conn, profile_user_id(conn), body)
+
+
+def _play_body(view: dict) -> dict:
+    """A saved deck as a validator body: one entry for its main-deck copies and one for its reserves."""
+    cards = []
+    for card in view["cards"]:
+        main = card["quantity"] - card["reserves"]
+        if main > 0:
+            cards.append({"guid": card["guid"], "quantity": main, "reserve": False})
+        if card["reserves"] > 0:
+            cards.append({"guid": card["guid"], "quantity": card["reserves"], "reserve": True})
+    return {"format": view["format"], "champion_guid": view["champion_guid"], "cards": cards}
+
+
+def _main_deck_rows(template: dict) -> list[tuple[str, int, str]]:
+    """The main deck's (card GUID, copies, gem json) rows, leaving out each card's reserve copies."""
+    rows = []
+    for card in template.get("cards") or []:
+        quantity = int(card["quantity"])
+        reserved = _reserve_flags(card.get("flags_json") or "{}", quantity)
+        gems = json.loads(card.get("gem_types_list_json") or "[]")
+        main_gems = [gem for index, gem in enumerate(gems) if index < quantity and not reserved[index]] if gems else []
+        main = sum(1 for flag in reserved if not flag)
+        if main > 0:
+            rows.append((str(card["card_guid"]).lower(), main, json.dumps(main_gems) if main_gems else "[]"))
+    return rows
+
+
+def _reserve_flags(flags_json: str, quantity: int) -> list[bool]:
+    """Per copy, whether it is a reserve."""
+    flags = json.loads(flags_json or "{}")
+    copies = flags.get("copies")
+    if isinstance(copies, list):
+        return [bool(copy.get("reserves")) for copy in copies[:quantity]] + [False] * max(0, quantity - len(copies))
+    return [bool(flags.get("reserves"))] * quantity
+
+
+def play_decks() -> list[dict]:
+    """Saved decks the server can play: valid under the rules, with a champion whose abilities it can seed."""
+    out = []
     with _connection() as conn:
         user_id = profile_user_id(conn)
-        owned = ({card["guid"]: card["quantity"] for card in _owned_cards(user_id, conn)}
-                 if user_id is not None else {})
-        guids = [card.get("guid") for card in body.get("cards") or []]
-        rules = deck_validation.load_card_rules(
-            conn, guids, catalog.STANDARD_SETS,
-            lambda guid: bool((catalog.card(guid) or {}).get("unlimited")))
-        champion = str(body.get("champion_guid") or "").lower()
-        playable = bool(champion) and conn.execute(_PLAYABLE_CHAMPION, (champion,)).fetchone() is not None
-    return deck_validation.validate_deck(body, rules, owned, playable)
+        if user_id is None:
+            return []
+        for template in profile_db.db_profile_deck_templates(user_id, conn=conn):
+            view = _deck_view(template)
+            if _playable(conn, user_id, view):
+                out.append({"id": view["id"], "name": view["name"], "format": view["format"],
+                            "champion_guid": view["champion_guid"]})
+    return out
+
+
+def _playable(conn, user_id, view) -> bool:
+    if _validate(conn, user_id, _play_body(view))["errors"]:
+        return False
+    return conn.execute("SELECT 1 FROM champion_abilities WHERE LOWER(champion_guid)=?",
+                        (view["champion_guid"],)).fetchone() is not None
+
+
+def play_spec(template_id) -> dict:
+    """The match spec for a saved deck: its main deck, its champion and the gem sockets of each copy. Raises
+    ValueError when the deck cannot be played, saying why."""
+    from pvp_autoplay import _deck_cards, _gem_templates
+    with _connection() as conn:
+        user_id = profile_user_id(conn)
+        template = (profile_db.db_profile_deck_template(user_id, template_id, conn=conn)
+                    if user_id is not None else None)
+        if template is None:
+            raise ValueError("no such saved deck")
+        view = _deck_view(template)
+        result = _validate(conn, user_id, _play_body(view))
+        if result["errors"]:
+            raise ValueError("this deck cannot be played yet: " +
+                             ", ".join(error["code"] for error in result["errors"]))
+        if conn.execute("SELECT 1 FROM champion_abilities WHERE LOWER(champion_guid)=?",
+                        (view["champion_guid"],)).fetchone() is None:
+            raise ValueError("this deck's champion has no abilities the server can play")
+        cards = _deck_cards(_main_deck_rows(template), _gem_templates(conn))
+    return {"deck_guid": f"saved:{view['id']}", "name": view["name"], "champion_guid": view["champion_guid"],
+            "cards": cards, "ai_deck_personality": "Default"}
 
 
 def delete_deck(template_id: int) -> bool:

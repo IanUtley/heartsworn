@@ -39,6 +39,13 @@ def test_deck_saves_only_owned_copies_and_round_trips(monkeypatch):
     assert all(d["id"] != saved["id"] for d in profile.decks())
 
 
+def _playable_champion():
+    """A champion the client lets a player select and the engine can seed (see profile._PLAYABLE_CHAMPION)."""
+    return _dbmod._db.execute(
+        "SELECT LOWER(e.guid) FROM champion_templates_extended e WHERE e.is_selectable=1 AND EXISTS("
+        "SELECT 1 FROM champion_abilities ca WHERE LOWER(ca.champion_guid)=LOWER(e.guid)) LIMIT 1").fetchone()[0]
+
+
 @isolated_db
 def test_saving_from_the_browser_keeps_what_the_client_wrote(monkeypatch):
     """A template the Unity client wrote (gems, flags, equipment, personality, sleeve) survives a browser save: its
@@ -82,17 +89,17 @@ def test_saving_from_the_browser_keeps_what_the_client_wrote(monkeypatch):
 
 
 @isolated_db
-def test_decks_are_listed_by_format_and_only_player_champions_are_offered(monkeypatch):
+def test_decks_are_listed_by_format_and_only_playable_champions_are_offered(monkeypatch):
     """A deck carries one format; the listing filters on it, a bad format is refused, and only champions the player
-    may select are offered or accepted."""
+    may select and the engine can play are offered or accepted."""
     user_id = _dbmod._db.execute("INSERT INTO users (name) VALUES ('format tester')").lastrowid
     card = _dbmod._db.execute("SELECT guid FROM card_templates LIMIT 1").fetchone()[0]
-    champion = _dbmod._db.execute(
-        "SELECT guid FROM champion_templates WHERE is_player=1 LIMIT 1").fetchone()[0]
+    champion = _playable_champion()
     _dbmod._db.execute("INSERT INTO collections (user_id, card_template_id, quantity) VALUES (?, ?, 3)",
                        (user_id, card))
-    _dbmod._db.execute("INSERT INTO champion_templates (guid, race, champion_class, is_player) "
-                       "VALUES ('ffffffff-0000-0000-0000-000000000000', 'x', 'y', 0)")
+    _dbmod._db.execute("INSERT INTO champion_templates_extended (guid, name, race, champion_class, gender, "
+                       "is_selectable, starting_health, faction) VALUES "
+                       "('ffffffff-0000-0000-0000-000000000000', 'Hidden', 'x', 'y', '', 0, 20, '')")
     _dbmod._db.commit()
     monkeypatch.setenv("HEX_WEB_PROFILE_ID", str(user_id))
     cards = [{"guid": card, "quantity": 2}]
@@ -127,7 +134,7 @@ def test_decks_are_listed_by_format_and_only_player_champions_are_offered(monkey
 def test_validate_reads_the_owners_copies_and_the_card_rules(monkeypatch):
     user_id = _dbmod._db.execute("INSERT INTO users (name) VALUES ('validator')").lastrowid
     card = _dbmod._db.execute("SELECT guid FROM card_templates WHERE is_pve=0 LIMIT 1").fetchone()[0]
-    champion = _dbmod._db.execute("SELECT guid FROM champion_templates WHERE is_player=1 LIMIT 1").fetchone()[0]
+    champion = _playable_champion()
     _dbmod._db.execute("INSERT INTO collections (user_id, card_template_id, quantity) VALUES (?, ?, 2)",
                        (user_id, card))
     _dbmod._db.commit()
@@ -143,7 +150,7 @@ def test_validate_reads_the_owners_copies_and_the_card_rules(monkeypatch):
 def test_reserves_are_saved_as_the_client_stores_them(monkeypatch):
     user_id = _dbmod._db.execute("INSERT INTO users (name) VALUES ('reserve tester')").lastrowid
     card = _dbmod._db.execute("SELECT guid FROM card_templates LIMIT 1").fetchone()[0]
-    champion = _dbmod._db.execute("SELECT guid FROM champion_templates WHERE is_player=1 LIMIT 1").fetchone()[0]
+    champion = _playable_champion()
     _dbmod._db.execute("INSERT INTO collections (user_id, card_template_id, quantity) VALUES (?, ?, 3)",
                        (user_id, card))
     _dbmod._db.commit()
