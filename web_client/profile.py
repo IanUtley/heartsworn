@@ -65,8 +65,9 @@ def profile_summary() -> dict:
 def _owned_cards(user_id, conn) -> list[dict]:
     rows = profile_db.db_collection_card_list(user_id, conn=conn)
     return [{"guid": str(guid).lower(), "name": str(name or ""), "cost": cost, "attack": attack,
-             "defense": defense, "type": str(card_type or ""), "quantity": int(quantity or 0)}
-            for guid, name, cost, attack, defense, quantity, card_type in rows if int(quantity or 0) > 0]
+             "defense": defense, "type": str(card_type or ""), "sockets": int(sockets or 0),
+             "quantity": int(quantity or 0)}
+            for guid, name, cost, attack, defense, quantity, card_type, sockets in rows if int(quantity or 0) > 0]
 
 
 def collection() -> list[dict]:
@@ -138,6 +139,24 @@ def _reserve_copies(flags_json: str, quantity: int) -> int:
     return quantity if flags.get("reserves") else 0
 
 
+def _gems_per_copy(gems_json) -> list:
+    """Each copy's gem names, from the stored per-copy list (reserve copies first). Empty when nothing is socketed."""
+    try:
+        gems = json.loads(gems_json or "[]")
+    except (TypeError, ValueError):
+        return []
+    if not isinstance(gems, list):
+        return []
+    return [[str(name) for name in (copy if isinstance(copy, list) else [copy]) if name] for copy in gems]
+
+
+def gem_choices() -> list[dict]:
+    """The gems a deck can socket: name and gem type, for the deck builder's pickers."""
+    with _connection() as conn:
+        return [{"name": str(name), "gem_type": int(gem_type or 0)} for name, gem_type in conn.execute(
+            "SELECT name, gem_type FROM gem_templates ORDER BY name").fetchall()]
+
+
 def _with_reserves(flags_json: str, quantity: int, reserve: int) -> str:
     """Write how many of a card's copies are reserves, in the client's flag shape: one shared flag object when every
     copy is alike, else a ``copies`` list with one object per copy. Other flags (extended, foil) are kept."""
@@ -159,7 +178,8 @@ def _deck_view(template: dict) -> dict:
             "sleeve_guid": str(template.get("sleeve_guid") or ""),
             "gameboard_guid": str(template.get("gameboard_guid") or ""),
             "cards": [{"guid": str(card["card_guid"]).lower(), "quantity": int(card["quantity"]),
-                       "reserves": _reserve_copies(card.get("flags_json") or "{}", int(card["quantity"]))}
+                       "reserves": _reserve_copies(card.get("flags_json") or "{}", int(card["quantity"])),
+                       "gems": _gems_per_copy(card.get("gem_types_list_json"))}
                       for card in template.get("cards") or []]}
 
 
@@ -216,14 +236,23 @@ def save_deck(body: dict) -> dict:
         reserved: dict[str, int] = {}
         # A card's copies may come as a main-deck entry and a reserve entry; the request says which with "reserve".
         reserve_info = any("reserve" in card for card in body.get("cards") or [])
+        # Gems per copy, by part: a card whose entries carry "gems" has its sockets set from the request.
+        gem_parts: dict[str, dict[str, list]] = {}
         for card in body.get("cards") or []:
             guid = str(card.get("guid") or "").lower()
             quantity = int(card.get("quantity") or 0)
             if quantity <= 0:
                 continue
             wanted[guid] = wanted.get(guid, 0) + quantity
+            part = "reserve" if card.get("reserve") else "main"
             if card.get("reserve"):
                 reserved[guid] = reserved.get(guid, 0) + quantity
+            if "gems" in card:
+                copies = card.get("gems") or []
+                parts = gem_parts.setdefault(guid, {"main": [], "reserve": []})
+                for copy in range(quantity):
+                    names = copies[copy] if copy < len(copies) else []
+                    parts[part].append([str(name) for name in names if name])
         for guid, quantity in wanted.items():
             if quantity > owned.get(guid, 0):
                 raise ValueError(f"only {owned.get(guid, 0)} copies of {guid} are owned, not {quantity}")
@@ -254,6 +283,10 @@ def save_deck(body: dict) -> dict:
         card_rows = []
         for guid, quantity in sorted(wanted.items()):
             gems, flags = _card_state(previous_cards.get(guid), quantity)
+            if guid in gem_parts:
+                # Reserve copies come first, as the reserve flags mark them.
+                listed = gem_parts[guid]["reserve"] + gem_parts[guid]["main"]
+                gems = json.dumps(listed) if any(listed) else "[]"
             if reserve_info:
                 flags = _with_reserves(flags, quantity, reserved.get(guid, 0))
             card_rows.append((guid, quantity, gems, flags))
@@ -275,7 +308,8 @@ def _validate(connection, user_id, body: dict) -> dict:
         lambda guid: bool((catalog.card(guid) or {}).get("unlimited")))
     champion = str(body.get("champion_guid") or "").lower()
     playable = bool(champion) and connection.execute(_PLAYABLE_CHAMPION, (champion,)).fetchone() is not None
-    return deck_validation.validate_deck(body, rules, owned, playable)
+    return deck_validation.validate_deck(body, rules, owned, playable,
+                                         gem_names=deck_validation.load_gem_names(connection))
 
 
 def validate_deck(body: dict) -> dict:
@@ -289,11 +323,13 @@ def _play_body(view: dict) -> dict:
     """A saved deck as a validator body: one entry for its main-deck copies and one for its reserves."""
     cards = []
     for card in view["cards"]:
-        main = card["quantity"] - card["reserves"]
+        gems = card.get("gems") or []
+        reserved = card["reserves"]
+        main = card["quantity"] - reserved
         if main > 0:
-            cards.append({"guid": card["guid"], "quantity": main, "reserve": False})
-        if card["reserves"] > 0:
-            cards.append({"guid": card["guid"], "quantity": card["reserves"], "reserve": True})
+            cards.append({"guid": card["guid"], "quantity": main, "reserve": False, "gems": gems[reserved:]})
+        if reserved > 0:
+            cards.append({"guid": card["guid"], "quantity": reserved, "reserve": True, "gems": gems[:reserved]})
     return {"format": view["format"], "champion_guid": view["champion_guid"], "cards": cards}
 
 

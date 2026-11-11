@@ -164,13 +164,15 @@ class Handler(BaseHTTPRequestHandler):
                     deck["champion"] = champ.get("name", "")
                 # ``saved``: the player's own decks that can be played (see profile.play_decks).
                 return self._send(200, {"decks": decks, "saved": profile.play_decks()})
-            if path in ("/api/profile", "/api/collection", "/api/profile/decks", "/api/profile/champions"):
+            if path in ("/api/profile", "/api/collection", "/api/profile/decks", "/api/profile/champions",
+                        "/api/profile/gems"):
                 from web_client import profile
                 format_name = (query.get("format") or [None])[0]
                 body = {"/api/profile": profile.profile_summary,
                         "/api/collection": lambda: {"cards": profile.collection()},
                         "/api/profile/decks": lambda: {"decks": profile.decks(format_name)},
-                        "/api/profile/champions": lambda: {"champions": profile.champions(format_name)}}[path]()
+                        "/api/profile/champions": lambda: {"champions": profile.champions(format_name)},
+                        "/api/profile/gems": lambda: {"gems": profile.gem_choices()}}[path]()
                 return self._send(200, body)
             deck = re.fullmatch(r"/api/profile/decks/(\d+)", path)
             if deck:

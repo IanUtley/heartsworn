@@ -110,7 +110,7 @@ const ERROR_TEXT = {
   CardNotLoaded: () => "Some cards are not in the game data.",
   SiegeRulesNotChecked: () => "Siege rules are not checked yet.",
 };
-const deckPage = { loaded: false, cards: [], decks: [], champions: [], draft: null };
+const deckPage = { loaded: false, cards: [], decks: [], champions: [], gems: [], draft: null };
 let validateTimer = null;
 let validateToken = 0;
 
@@ -154,6 +154,7 @@ async function openCollection() {
       deckPage.cards = col.cards;
       deckPage.decks = decks.decks;
       deckPage.champions = champs.champions;
+      deckPage.gems = (await api("/api/profile/gems")).gems;
       for (const c of [...col.cards, ...champs.champions]) S.wanted.cards.add(c.guid);
       await loadCatalog();
       deckPage.loaded = true;
@@ -171,14 +172,27 @@ function loadDraft(id) {
   if (!saved) { deckPage.draft = emptyDraft(); return renderCollection(); }
   deckPage.draft = {
     id: saved.id, name: saved.name, format: saved.format || "", champion_guid: saved.champion_guid,
-    cards: new Map(saved.cards.map((c) => [c.guid, { main: c.quantity - (c.reserves || 0), reserve: c.reserves || 0 }])),
+    cards: new Map(saved.cards.map((c) => [c.guid, { main: c.quantity - (c.reserves || 0), reserve: c.reserves || 0,
+      gems: savedGems(c) }])),
   };
   renderCollection();
 }
 
+// The gems a saved card's copies carry, by part: the first copy of each part (the page sets one gem layout per part).
+function savedGems(card) {
+  const reserves = card.reserves || 0;
+  const copies = card.gems || [];
+  return { main: (copies.slice(reserves)[0] || []).slice(), reserve: (copies.slice(0, reserves)[0] || []).slice() };
+}
+
+function sockets(guid) {
+  const card = deckPage.cards.find((c) => c.guid === guid);
+  return card ? card.sockets || 0 : 0;
+}
+
 function addCopy(guid, part = "main") {
   if (copiesOf(guid) >= ownedCopies(guid)) return toast("No more copies of that card are owned.");
-  const entry = deckPage.draft.cards.get(guid) || { main: 0, reserve: 0 };
+  const entry = deckPage.draft.cards.get(guid) || { main: 0, reserve: 0, gems: { main: [], reserve: [] } };
   entry[part] += 1;
   deckPage.draft.cards.set(guid, entry);
   renderCollection();
@@ -225,13 +239,25 @@ function renderCollectionGrid() {
   }).join("");
 }
 
+// One picker per socket of a card; the gems chosen apply to every copy in this part of the deck.
+function socketPickers(guid, part, gems) {
+  const options = (selected) => deckPage.gems.map((g) =>
+    `<option value="${esc(g.name)}" ${g.name === selected ? "selected" : ""}>${esc(g.name)}</option>`).join("");
+  return Array.from({ length: sockets(guid) }, (_, slot) => `<label class="socket">Socket ${slot + 1}
+      <select data-gem-guid="${guid}" data-part="${part}" data-slot="${slot}">
+        <option value="">Empty</option>${options(gems[slot])}</select></label>`).join("");
+}
+
 function deckRows(part, others) {
   const rows = [...deckPage.draft.cards.entries()].filter(([, e]) => e[part] > 0)
     .sort(([a], [b]) => cardName(a).localeCompare(cardName(b)));
-  return rows.map(([guid, e]) => `<div class="deck-row">
+  return rows.map(([guid, e]) => `<div class="deck-item">
+    <div class="deck-row">
       <button class="deck-name" data-remove="${guid}" data-part="${part}" title="Remove one copy">${esc(cardName(guid))}</button>
       <span>×${e[part]}</span>
       <button class="secondary" data-move="${guid}" data-to="${others}">${others === "reserve" ? "To reserves" : "To main"}</button>
+    </div>
+    ${sockets(guid) ? `<div class="socket-row">${socketPickers(guid, part, e.gems[part] || [])}</div>` : ""}
     </div>`).join("");
 }
 
@@ -308,8 +334,10 @@ function deckPayload() {
   const draft = deckPage.draft;
   const cards = [];
   for (const [guid, entry] of draft.cards) {
-    if (entry.main > 0) cards.push({ guid, quantity: entry.main, reserve: false });
-    if (entry.reserve > 0) cards.push({ guid, quantity: entry.reserve, reserve: true });
+    // Each copy carries the gems its part's pickers chose (empty sockets are left out).
+    const gemsFor = (part, copies) => Array.from({ length: copies }, () => (entry.gems[part] || []).filter(Boolean));
+    if (entry.main > 0) cards.push({ guid, quantity: entry.main, reserve: false, gems: gemsFor("main", entry.main) });
+    if (entry.reserve > 0) cards.push({ guid, quantity: entry.reserve, reserve: true, gems: gemsFor("reserve", entry.reserve) });
   }
   return {
     id: draft.id,
@@ -369,6 +397,14 @@ $("#collection-sort").addEventListener("change", renderCollectionGrid);
 $("#collection-grid").addEventListener("click", (e) => {
   const owned = e.target.closest("[data-guid]");
   if (owned) addCopy(owned.dataset.guid, "main");
+});
+$("#deck-list").addEventListener("change", (e) => {
+  const picker = e.target.closest("[data-gem-guid]");
+  if (!picker) return;
+  const entry = deckPage.draft.cards.get(picker.dataset.gemGuid);
+  if (!entry) return;
+  entry.gems[picker.dataset.part][Number(picker.dataset.slot)] = picker.value;
+  scheduleValidation();
 });
 $("#deck-list").addEventListener("click", (e) => {
   const remove = e.target.closest("[data-remove]");

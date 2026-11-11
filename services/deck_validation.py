@@ -16,6 +16,7 @@ from dataclasses import dataclass
 MINIMUM_DECK_SIZE = 60        # Format.cs c_MinimumDeckSize; DeckValidator.cs:436-452
 MAXIMUM_RESERVES = 15         # Format.cs:47-57
 MAXIMUM_COPIES = 4            # DeckValidator.cs:516-575
+MAXIMUM_GEM_COPIES = 4        # Format.cs MaximumGemCountLookup: the same in every format
 FORMATS = ("immortal", "standard", "pve", "siege")
 # The one card exempt from the copy limit by name (DeckValidator.cs:499). Mystic Squirrel is the morph target of
 # Spectral Acorn (BuiltInResources.MorphingCards).
@@ -31,27 +32,45 @@ class CardRules:
     unlimited: bool        # m_Unlimited: exempt from the copy limit
     pve: bool              # is_pve: a PvE-only card, refused in PvP formats
     standard_legal: bool   # has a version in a Standard set (or is basic)
+    sockets: int = 0       # m_SocketCount: how many gems the card takes
 
 
 def _error(code: str, **args) -> dict:
     return {"code": code, "args": args}
 
 
-def validate_deck(deck: dict, rules: dict[str, CardRules], owned: dict[str, int], champion_playable: bool) -> dict:
-    """Check a deck. ``deck`` is ``{"format", "champion_guid", "cards": [{"guid", "quantity", "reserve"?}]}``;
-    ``rules`` maps lowercase GUIDs to CardRules; ``owned`` maps GUIDs to owned copies; ``champion_playable`` says the
-    champion is a player champion the client lets the player select."""
+def validate_deck(deck: dict, rules: dict[str, CardRules], owned: dict[str, int], champion_playable: bool,
+                  gem_names=None) -> dict:
+    """Check a deck. ``deck`` is ``{"format", "champion_guid", "cards": [{"guid", "quantity", "reserve"?, "gems"?}]}``
+    where ``gems`` holds, for each copy, the gem names in its sockets. ``rules`` maps lowercase GUIDs to CardRules;
+    ``owned`` maps GUIDs to owned copies; ``champion_playable`` says the champion is a player champion the client lets
+    the player select; ``gem_names`` is the set of gems that exist (names are not checked when it is None)."""
     errors: list[dict] = []
     warnings: list[dict] = []
     deck_format = str(deck.get("format") or "").strip().lower()
     main: Counter = Counter()
     reserves: Counter = Counter()
+    gem_copies: Counter = Counter()        # gem name -> copies of it across the deck
+    ungemmed: list[str] = []               # guids of socketed copies with fewer gems than sockets
     for entry in deck.get("cards") or []:
         guid = str(entry.get("guid") or "").lower()
         quantity = int(entry.get("quantity") or 0)
         if quantity <= 0:
             continue
         (reserves if entry.get("reserve") else main)[guid] += quantity
+        rule = rules.get(guid)
+        copies_gems = list(entry.get("gems") or [])
+        for copy in range(quantity):
+            gems = [str(name) for name in (copies_gems[copy] if copy < len(copies_gems) else []) if name]
+            for name in gems:
+                gem_copies[name] += 1
+                if gem_names is not None and name not in gem_names:
+                    errors.append(_error("InvalidGems", gem=name))
+            sockets = rule.sockets if rule else 0
+            if sockets and len(gems) > sockets:
+                errors.append(_error("InvalidGems", card=rule.name, gems=len(gems), sockets=sockets))
+            elif sockets and len(gems) < sockets:
+                ungemmed.append(guid)
     everything = main + reserves
     main_count = sum(main.values())
     reserve_count = sum(reserves.values())
@@ -83,6 +102,12 @@ def validate_deck(deck: dict, rules: dict[str, CardRules], owned: dict[str, int]
         if count > MAXIMUM_COPIES and not exempt:
             errors.append(_error("TooManyOfOneCard", card=name, count=count, maximum=MAXIMUM_COPIES))
 
+    for name, count in sorted(gem_copies.items()):
+        if count > MAXIMUM_GEM_COPIES:
+            errors.append(_error("TooManyOfOneGem", gem=name, count=count, maximum=MAXIMUM_GEM_COPIES))
+    for guid in sorted(set(ungemmed)):
+        warnings.append(_error("UnGemmedSocketedCard", card=rules[guid].name if guid in rules else guid))
+
     unknown = sorted(guid for guid in everything if guid not in rules)
     if unknown:
         errors.append(_error("CardNotLoaded", cards=unknown))
@@ -109,6 +134,11 @@ def validate_deck(deck: dict, rules: dict[str, CardRules], owned: dict[str, int]
             "main": main_count, "reserves": reserve_count}
 
 
+def load_gem_names(connection) -> frozenset:
+    """The names of the gems that exist."""
+    return frozenset(str(row[0]) for row in connection.execute("SELECT name FROM gem_templates").fetchall())
+
+
 def load_card_rules(connection, guids, standard_sets, is_unlimited) -> dict[str, CardRules]:
     """Read the rules for these card GUIDs. ``standard_sets`` are the set GUIDs legal in Standard; ``is_unlimited(guid)``
     says whether the card's gamedata marks it m_Unlimited. Unknown GUIDs are absent from the result."""
@@ -117,15 +147,15 @@ def load_card_rules(connection, guids, standard_sets, is_unlimited) -> dict[str,
         return {}
     marks = ",".join("?" * len(standard_sets))
     rows = connection.execute(
-        "SELECT LOWER(t.guid), t.name, t.card_type, t.subtype, t.is_pve, "
+        "SELECT LOWER(t.guid), t.name, t.card_type, t.subtype, t.is_pve, COALESCE(t.socket_count, 0), "
         f"EXISTS(SELECT 1 FROM card_templates o WHERE o.name = t.name "
         f"AND LOWER(o.set_guid) IN ({marks})) "
         f"FROM card_templates t WHERE LOWER(t.guid) IN ({','.join('?' * len(wanted))})",
         (*standard_sets, *wanted)).fetchall()
     rules = {}
-    for guid, name, card_type, subtype, pve, standard in rows:
+    for guid, name, card_type, subtype, pve, sockets, standard in rows:
         basic = "Resource" in str(card_type or "") and "Standard" in str(subtype or "")
         unlimited = bool(is_unlimited(guid))
         rules[guid] = CardRules(guid=guid, name=str(name or ""), basic=basic, unlimited=unlimited,
-                                pve=bool(pve), standard_legal=bool(standard) or basic)
+                                pve=bool(pve), standard_legal=bool(standard) or basic, sockets=int(sockets or 0))
     return rules

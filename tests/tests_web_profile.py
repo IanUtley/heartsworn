@@ -33,7 +33,7 @@ def test_deck_saves_only_owned_copies_and_round_trips(monkeypatch):
 
     deck = next(d for d in profile.decks() if d["id"] == saved["id"])
     assert deck["name"] == "Probe"
-    assert deck["cards"] == [{"guid": card, "quantity": 2, "reserves": 0}]
+    assert deck["cards"] == [{"guid": card, "quantity": 2, "reserves": 0, "gems": []}]
 
     assert profile.delete_deck(saved["id"]) is True
     assert all(d["id"] != saved["id"] for d in profile.decks())
@@ -159,11 +159,11 @@ def test_reserves_are_saved_as_the_client_stores_them(monkeypatch):
                                "cards": [{"guid": card, "quantity": 2, "reserve": False},
                                          {"guid": card, "quantity": 1, "reserve": True}]})
     view = profile.deck(saved["id"])
-    assert view["cards"] == [{"guid": card, "quantity": 3, "reserves": 1}]
+    assert view["cards"] == [{"guid": card, "quantity": 3, "reserves": 1, "gems": []}]
 
     profile.save_deck({"id": saved["id"], "name": "Reserves", "cards": [{"guid": card, "quantity": 3,
                                                                           "reserve": False}]})
-    assert profile.deck(saved["id"])["cards"] == [{"guid": card, "quantity": 3, "reserves": 0}]
+    assert profile.deck(saved["id"])["cards"] == [{"guid": card, "quantity": 3, "reserves": 0, "gems": []}]
 
 
 @isolated_db
@@ -188,6 +188,29 @@ def test_a_pve_deck_binds_to_the_owners_campaign_champion(monkeypatch):
     with pytest.raises(ValueError, match="only a PvE deck"):
         profile.save_deck({"name": "Standard", "format": "standard", "champion_guid": champion,
                            "pve_champion_id": mine, "cards": cards})
+
+
+@isolated_db
+def test_gems_are_saved_per_copy_and_reserves_come_first(monkeypatch):
+    user_id = _dbmod._db.execute("INSERT INTO users (name) VALUES ('gem tester')").lastrowid
+    socketed = _dbmod._db.execute("SELECT guid FROM card_templates WHERE socket_count>0 AND is_pve=0 LIMIT 1").fetchone()[0]
+    gem = _dbmod._db.execute("SELECT name FROM gem_templates ORDER BY name LIMIT 1").fetchone()[0]
+    champion = _playable_champion()
+    _dbmod._db.execute("INSERT INTO collections (user_id, card_template_id, quantity) VALUES (?, ?, 3)",
+                       (user_id, socketed))
+    _dbmod._db.commit()
+    monkeypatch.setenv("HEX_WEB_PROFILE_ID", str(user_id))
+    saved = profile.save_deck({"name": "Gems", "format": "immortal", "champion_guid": champion, "cards": [
+        {"guid": socketed, "quantity": 1, "reserve": False, "gems": [[gem]]},
+        {"guid": socketed, "quantity": 1, "reserve": True, "gems": [[]]}]})
+    card = profile.deck(saved["id"])["cards"][0]
+    assert card["quantity"] == 2 and card["reserves"] == 1
+    # The reserve copy is listed first (its gems are empty), then the main-deck copy with its gem.
+    assert card["gems"] == [[], [gem]]
+    # Saving is advisory, like the other rules: an unknown gem is stored and reported by the validator.
+    checked = profile.validate_deck({"format": "immortal", "champion_guid": champion, "cards": [
+        {"guid": socketed, "quantity": 1, "reserve": False, "gems": [["Not a gem"]]}]})
+    assert "InvalidGems" in {error["code"] for error in checked["errors"]}, checked
 
 
 if __name__ == "__main__":

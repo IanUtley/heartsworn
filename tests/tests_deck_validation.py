@@ -78,3 +78,31 @@ def test_deck_rules(name, case, expected):
     assert {error["code"] for error in result["errors"]} == expected, (name, result["errors"])
     assert result["valid"] is (not expected)
     assert result["main"] + result["reserves"] == sum(entry["quantity"] for entry in deck["cards"])
+
+
+SOCKETED = "00000000-0000-0000-0000-00000000000f"
+RULES[SOCKETED] = CardRules(SOCKETED, "Socketed Relic", basic=False, unlimited=False, pve=False,
+                            standard_legal=True, sockets=2)
+GEMS = {"Ruby", "Sapphire"}
+
+
+@pytest.mark.parametrize("name, cards, expected_errors, expected_warnings", [
+    ("gems that exist, within the sockets", [{"guid": SOCKETED, "quantity": 1, "gems": [["Ruby", "Sapphire"]]}],
+     set(), set()),
+    ("a copy with no gems is a warning, not an error", [{"guid": SOCKETED, "quantity": 1, "gems": [[]]}],
+     set(), {"UnGemmedSocketedCard"}),
+    ("an unknown gem", [{"guid": SOCKETED, "quantity": 1, "gems": [["Pebble", "Ruby"]]}],
+     {"InvalidGems"}, set()),
+    ("more gems than sockets", [{"guid": SOCKETED, "quantity": 1, "gems": [["Ruby", "Ruby", "Ruby"]]}],
+     {"InvalidGems"}, set()),
+    ("five copies of one gem", [{"guid": SOCKETED, "quantity": 3, "gems": [["Ruby", "Ruby"], ["Ruby", "Ruby"], ["Ruby"]]}],
+     {"TooManyOfOneGem"}, {"UnGemmedSocketedCard"}),   # the third copy has one gem in two sockets
+])
+def test_gem_rules(name, cards, expected_errors, expected_warnings):
+    deck = _deck(_fillers(59) + cards)
+    owned = _owns(deck)
+    result = validate_deck(deck, RULES, owned, True, gem_names=GEMS)
+    errors = {error["code"] for error in result["errors"]}
+    warnings = {warning["code"] for warning in result["warnings"]}
+    assert errors == expected_errors, (name, result["errors"])
+    assert warnings == expected_warnings, (name, result["warnings"])
