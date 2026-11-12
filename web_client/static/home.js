@@ -135,7 +135,7 @@ function totals() {
   return { main, reserve };
 }
 
-function cardName(guid) {
+function deckCardName(guid) {
   const tpl = S.catalog.cards[guid];
   return (tpl && tpl.name) || guid.slice(0, 8);
 }
@@ -250,10 +250,10 @@ function socketPickers(guid, part, gems) {
 
 function deckRows(part, others) {
   const rows = [...deckPage.draft.cards.entries()].filter(([, e]) => e[part] > 0)
-    .sort(([a], [b]) => cardName(a).localeCompare(cardName(b)));
+    .sort(([a], [b]) => deckCardName(a).localeCompare(deckCardName(b)));
   return rows.map(([guid, e]) => `<div class="deck-item">
     <div class="deck-row">
-      <button class="deck-name" data-remove="${guid}" data-part="${part}" title="Remove one copy">${esc(cardName(guid))}</button>
+      <button class="deck-name" data-remove="${guid}" data-part="${part}" title="Remove one copy">${esc(deckCardName(guid))}</button>
       <span>×${e[part]}</span>
       <button class="secondary" data-move="${guid}" data-to="${others}">${others === "reserve" ? "To reserves" : "To main"}</button>
     </div>
@@ -320,7 +320,7 @@ function renderDeckPanel() {
   $("#deck-format").value = draft.format;
   if (document.activeElement !== $("#deck-name")) $("#deck-name").value = draft.name;
   $("#deck-champion").innerHTML = `<option value="">No champion</option>` + deckPage.champions.map((c) =>
-    `<option value="${c.guid}" ${c.guid === draft.champion_guid ? "selected" : ""}>${esc(cardName(c.guid))}</option>`).join("");
+    `<option value="${c.guid}" ${c.guid === draft.champion_guid ? "selected" : ""}>${esc(deckCardName(c.guid))}</option>`).join("");
   const { main, reserve } = totals();
   $("#deck-count").textContent = `${main} cards in the main deck (at least ${DECK_MINIMUM} to play), ${reserve} in reserve`;
   $("#deck-count").className = `status${main < DECK_MINIMUM ? " short" : ""}`;

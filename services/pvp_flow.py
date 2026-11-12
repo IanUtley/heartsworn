@@ -162,6 +162,13 @@ class _PvpChainHost:
         self.owner_id = int(owner_id)
         self.opponent_id = int(opponent_id)
 
+    def __getattr__(self, name):
+        # The interpreter asks its host for the player's prompts (a hand pick, a trigger target). Those live on the
+        # seat's handler, so they are forwarded to it; nothing else is.
+        if name.startswith('_prompt_'):
+            return getattr(self.__dict__['handler'], name)
+        raise AttributeError(name)
+
     def _view(self, state):
         return _resolve('_pvp_fra_view')(state, self.owner_id, self.opponent_id)
 

@@ -1380,3 +1380,18 @@ if __name__ == "__main__":
     test_pvp_choice_zone_target_resolves_child_then_parent()
     test_pvp_choice_reads_native_payload_when_raw_envelope_is_empty()
     test_pvp_play_transactions_use_the_client_envelope()
+
+
+def test_trigger_host_forwards_the_seat_prompts_to_its_handler():
+    """The interpreter asks the trigger host for a prompt (a hand pick); the host passes that to the seat's handler."""
+    from services.pvp_flow import _PvpChainHost
+
+    class Seat:
+        def _prompt_trigger_targets(self):
+            return "prompted"
+
+    seat = Seat()
+    host = _PvpChainHost(seat, None, {}, 1, 2)
+    assert host._prompt_trigger_targets() == "prompted"
+    assert getattr(host, "_prompt_missing", None) is None
+    assert getattr(host, "_something_else", None) is None
