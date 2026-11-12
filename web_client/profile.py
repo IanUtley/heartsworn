@@ -29,7 +29,7 @@ def _connection():
     """Yield the connection profile data is read and written on."""
     live = os.environ.get("HEX_LIVE_DB_PATH")
     if not live:
-        yield dbmod._db
+        yield dbmod.conn()
         return
     connection = dbmod.connect(live)
     try:

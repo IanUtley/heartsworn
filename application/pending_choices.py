@@ -231,7 +231,17 @@ class PendingChoicesMixin(_HostBase):
             state["pending_trigger"] = pend
             pvp_save_state(session, state)
             pids = db_game_session_pids(session.session_id)
-            chooser_pid = int(pend.get("owner_id", 0)) or int(pl_t.uid64 >> 8)
+            raw_owner = int(pend.get("owner_id", 0) or 0)
+            # A player id may arrive packed as a UID (type 244 in the low byte); the seats are plain player ids.
+            chooser_pid = raw_owner >> 8 if raw_owner & 0xff == 244 else raw_owner
+            log_req(f"    PvP trigger chooser: owner_id={raw_owner} seats={pids} source={source_uid}")
+            if chooser_pid not in pids:
+                # No owner was passed (an interpreted child's pick): the choice belongs to the source card's owner, not to
+                # whichever player happens to be resolving.
+                from pvp_db import db_card_owner_id
+                chooser_pid = int(db_card_owner_id(session.session_id, int(source_uid), conn=db._db) or 0)
+            if chooser_pid not in pids:
+                chooser_pid = int(pl_t.uid64 >> 8)
             if chooser_pid not in pids:
                 chooser_pid = pids[0] if pids else 0
             opp_pid = [p for p in pids if p != chooser_pid][0] \

@@ -201,6 +201,24 @@ def find_session_by_id(session_id, conn=None):
             conn.close()
 
 
+def _player_id_variants(player_uid):
+    """Both representations of one player: the raw Reckoning ID and the typed ServicePlayer UID."""
+    player_uid = int(player_uid)
+    raw_player_id = (player_uid >> 8
+                     if (player_uid & 0xff) == UID_TYPE["ServicePlayer"]
+                     else player_uid)
+    return {raw_player_id, make_uid(UID_TYPE["ServicePlayer"], raw_player_id)}
+
+
+def _row_has_player(row, player_ids):
+    try:
+        players = json.loads(row["players_json"] or "[]")
+    except (ValueError, TypeError):
+        return False
+    return any(isinstance(p, (list, tuple)) and p and int(p[0]) in player_ids
+               for p in players)
+
+
 def find_session_by_player(player_uid, conn=None):
     """Find the most recent session containing this player.
 
@@ -211,23 +229,38 @@ def find_session_by_player(player_uid, conn=None):
     owns_connection = conn is None
     conn = conn or _db()
     try:
-        player_uid = int(player_uid)
-        raw_player_id = (player_uid >> 8
-                         if (player_uid & 0xff) == UID_TYPE["ServicePlayer"]
-                         else player_uid)
-        player_ids = {raw_player_id,
-                      make_uid(UID_TYPE["ServicePlayer"], raw_player_id)}
-        rows = db_layer.db_get_sessions(conn=conn)
-        for row in rows:
-            try:
-                players = json.loads(row["players_json"] or "[]")
-            except (ValueError, TypeError):
-                continue
-            for p in players:
-                if (isinstance(p, (list, tuple)) and p
-                        and int(p[0]) in player_ids):
-                    return _load(row)
+        player_ids = _player_id_variants(player_uid)
+        for row in db_layer.db_get_sessions(conn=conn):
+            if _row_has_player(row, player_ids):
+                return _load(row)
         return None
+    finally:
+        if owns_connection:
+            conn.close()
+
+
+def resolve_session(player_uid, conn=None):
+    """Return ``(session, reason)`` for the player's active battle session.
+
+    Ended rows are skipped: they stay in the table for the replay and
+    tournament processes, which read them from the file, but a live request
+    must not bind to one.  ``reason`` is None when a session is found, and
+    otherwise says why none was, for the caller's log line.
+    """
+    owns_connection = conn is None
+    conn = conn or _db()
+    try:
+        player_ids = _player_id_variants(player_uid)
+        ended_match = False
+        for row in db_layer.db_get_sessions(conn=conn):
+            if not _row_has_player(row, player_ids):
+                continue
+            if str(row["state"] or "").lower() == "ended":
+                ended_match = True
+                continue
+            return _load(row), None
+        return None, ("only ended sessions contain player" if ended_match
+                      else "no session contains player")
     finally:
         if owns_connection:
             conn.close()

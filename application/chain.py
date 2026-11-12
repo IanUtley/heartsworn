@@ -118,8 +118,14 @@ class ChainMixin(_HostBase):
             return game_engine.EPriorityContext.EndPhase
         return game_engine.EPriorityContext.Normal
 
-    def _push_transaction_ack(self, session):
+    def _push_transaction_ack(self, session=None, *, session_id=None,
+                              server_id=None):
         """Send an empty 3055 sync packet to the client.
+
+        Pass ``session`` for an ordinary handled transaction.  When the request
+        resolved no session, pass the request's ``session_id`` and target
+        ``server_id`` instead, so the client still receives its acknowledgement.
+
 
         The client's SessionClient.SubmitTransaction sends only ONE transaction
         at a time and silently DROPS any further transaction while
@@ -133,17 +139,20 @@ class ChainMixin(_HostBase):
         dropped client-side and "nothing happens".
         """
         import hconnect_server as _hc
+        if session is not None:
+            session_id = session.session_id
+            server_id = session.server_id
         try:
             pl_t = game_engine.UID.make(244, int(self.client_reck_id))
-            game = game_engine.Game(session.session_id, pl_t, game_engine.UID.make(game_engine.SERVICE_AI_UID_TYPE, 1000))
+            game = game_engine.Game(session_id, pl_t, game_engine.UID.make(game_engine.SERVICE_AI_UID_TYPE, 1000))
             pkt = game.make_network_packet(pl_t)  # no events -> empty packet
             dw = encode_datawrapper(0, 3055, compress_gzip(encode_sync_event(pkt)), 1,
                                 "00000000-0000-0000-0000-000000000000")
             self._game_scnt = max(self._game_scnt, self.scnt) + 1
             self.scnt = self._game_scnt
-            gs_inst = str(session.server_id)
+            gs_inst = str(server_id)
             self.send({
-                "issuer": f"0.0.0.0.ServiceGameSession.{SERVICE_GAME_SESSION_UID}.{session.session_id}.{self.scnt}",
+                "issuer": f"0.0.0.0.ServiceGameSession.{SERVICE_GAME_SESSION_UID}.{session_id}.{self.scnt}",
                 "target": "ServiceGameSession", "instance": gs_inst, "reqid": 0, "c": 0, "conh": 0, "sid": self.sid,
             }, dw)
             self._event_q.append((self.scnt, dw, {}))

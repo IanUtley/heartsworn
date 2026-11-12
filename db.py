@@ -879,6 +879,16 @@ _db.execute("PRAGMA busy_timeout=5000")
 _db.execute("PRAGMA journal_mode=WAL")
 _db.execute("PRAGMA foreign_keys=ON")
 
+
+def conn():
+    """Return the process's shared connection as bound at call time.
+
+    Callers that need the connection should call this rather than copy
+    ``_db`` at import: tests rebind ``db._db``, and a copied reference keeps
+    pointing at the old database.
+    """
+    return _db
+
 # Ensure the static schema (incl. game_cards, session_events) exists and apply
 # any column migrations for databases created before columns were added.
 #

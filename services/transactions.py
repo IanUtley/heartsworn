@@ -25,7 +25,7 @@ def handle_player_transaction(handler, target, instance, reqid, comp, session_id
                               log_req, data_type, raw_data_wrapper_bytes=b"", **_kw):
     """Route one PlayerTransaction (3029) through capture and the rules-port dispatch."""
     player_uid = make_uid(UID_TYPE["ServicePlayer"], int(handler.client_reck_id))
-    session = game_session.find_session_by_player(player_uid)
+    session, lookup_reason = game_session.resolve_session(player_uid)
     sync_packets_before = int(getattr(
         handler, "_game_sync_send_count", 0))
     handler._ai_turn_depth = 0  # reset turn-advance recursion guard
@@ -48,6 +48,19 @@ def handle_player_transaction(handler, target, instance, reqid, comp, session_id
     txn_info = transaction.fields
     txn_id_str = txn_info.get("m_TransactionId", "?")
     txn_id_int = transaction.transaction_id
+    if session is None:
+        # No battle session matches this player, so no branch below can
+        # handle the request. Acknowledge it anyway: the client sends one
+        # transaction at a time and drops the next one until a 3055 arrives.
+        log_req(f"    ERROR no session for player {player_uid} "
+                f"(reck={handler.client_reck_id}) reason={lookup_reason} "
+                f"request_handler_session={session_id} instance={instance} "
+                f"txn={txn_id_int}; sending empty 3055 acknowledgement", "ERROR")
+        # The request's session_id is the client's RequestHandlerSessionId (a GUID),
+        # not a game session UID, so the ack cannot carry it. Session 0 keeps the
+        # packet valid; the client keys on the packet's arrival, not its issuer.
+        handler._push_transaction_ack(None, session_id=0, server_id=instance)
+        return
     set_session_transaction_trace_ids(
     transaction_id=txn_id_int,
     session_id=getattr(session, "session_id", None))

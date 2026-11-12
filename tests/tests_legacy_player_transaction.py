@@ -63,7 +63,7 @@ def _run(session, marker):
     handler = _RecordingHandler()
     inner = marker or b""
     entry = service_dispatch(3029)
-    with mock.patch.object(game_session, "find_session_by_player", return_value=session):
+    with mock.patch.object(game_session, "resolve_session", return_value=(session, None)):
         if entry:
             module_name, fn_name, extra = entry
             fn = getattr(importlib.import_module(module_name), fn_name)
@@ -76,7 +76,8 @@ def _run(session, marker):
 
 
 def test_no_session_transaction_is_not_routed():
-    assert _run(None, PASS_MARKER) == []
+    # Not dispatched to any handler; only the empty 3055 acknowledgement is sent.
+    assert _run(None, PASS_MARKER) == [("_push_transaction_ack", [])]
 
 
 def test_session_pass_priority_is_routed_to_the_rules_port_dispatch():
@@ -114,8 +115,8 @@ def test_replay_session_capture_records_the_real_wrapper_bytes():
         handler = _RecordingHandler()
         handler._application = SimpleNamespace(
             dispatch_request=lambda command, run: run(command))
-        with mock.patch.object(game_session, "find_session_by_player",
-                               return_value=replay_session):
+        with mock.patch.object(game_session, "resolve_session",
+                               return_value=(replay_session, None)):
             dispatch_service(handler, 3029, "target", 3, REQUEST_ID, False, "session-x",
                              "conh-1", {}, PASS_MARKER,
                              service_uids={"mail": 252, "profile": 0},

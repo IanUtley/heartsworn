@@ -71,8 +71,11 @@ def _settle(match, after=0):
 
 
 def _bound_to_current_db(test):
-    """Run a web test with the match module bound to the current test database (it captures ``_db`` at import, and an
-    earlier test may have left it pointing at another database)."""
+    """Run a web test against the current test database.
+
+    The web client reads the connection through ``db.conn()`` at call time, so it no longer needs rebinding. Modules
+    that still capture ``_db`` at import (the autoplay module, for one) are rebound here, and an earlier test may have
+    left them pointing at another database."""
     import functools
     import db as dbmod
 
@@ -287,3 +290,29 @@ def test_a_saved_deck_starts_a_match_and_an_unplayable_one_is_refused():
             os.environ.pop("HEX_WEB_PROFILE_ID", None)
         else:
             os.environ["HEX_WEB_PROFILE_ID"] = previous
+
+
+def test_missing_session_stops_match_with_error():
+    """A lost battle session stops the match: the error is recorded and no further action is accepted."""
+    import threading
+    from unittest import mock
+
+    match = object.__new__(web_match.WebMatch)
+    match.human_pid = 7
+    match.slot = 1
+    match.cond = threading.Condition()
+    match.busy = True
+    match.error = None
+    match.stopped = False
+    match.ended = False
+    with mock.patch.object(web_match.gs, "find_session_by_player", return_value=None), \
+         mock.patch.object(web_match.autoplay, "log_req", return_value=True):
+        try:
+            match._session()
+        except web_match.MatchSessionLost:
+            match._fail()
+    assert match.stopped is True
+    assert match.error.startswith("match stopped:")
+    assert match.busy is False
+    with pytest.raises(web_match.ActionError):
+        match.submit({"kind": "pass"})

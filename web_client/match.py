@@ -20,6 +20,7 @@ from __future__ import annotations
 import itertools
 import queue
 import random
+import sys
 import threading
 import time
 import traceback
@@ -27,7 +28,7 @@ import traceback
 import game_engine
 import game_session as gs
 import pvp_autoplay as autoplay
-from db import _db
+import db as dbmod
 from domain.constants import PLAY_CARD_ABILITY_TEMPLATE_ID, PLAYER_UID_TYPE
 from services.tournament_game import (
     handle_ready_for_game_events, handle_ready_for_game_setup,
@@ -59,7 +60,7 @@ _slots = itertools.count(1)
 
 def deck_choices():
     """Authored FRA decks with a champion whose cards the server can seed."""
-    rows = _db.execute(
+    rows = dbmod.conn().execute(
         "SELECT deck_guid, deck_name, champion_guid, "
         "COALESCE(NULLIF(TRIM(ai_deck_personality), ''), 'Default'), "
         "COALESCE(is_elite, 0) FROM fra_encounters "
@@ -68,8 +69,8 @@ def deck_choices():
     import campaign_source
     campaign_source.ensure_campaign_path()
     import campaign_content
-    known = {str(row[0]).lower() for row in _db.execute("SELECT guid FROM card_templates")}
-    known |= {str(row[0]).lower() for row in _db.execute(
+    known = {str(row[0]).lower() for row in dbmod.conn().execute("SELECT guid FROM card_templates")}
+    known |= {str(row[0]).lower() for row in dbmod.conn().execute(
         "SELECT DISTINCT champion_guid FROM champion_abilities")}
     unseedable = {str(row["deck_guid"]).lower()
                   for row in campaign_content.table("encounter_deck_cards")
@@ -93,6 +94,10 @@ def _opponent_spec(deck_guid):
     """The match spec of an authored FRA deck. The loader wants two decks, so the deck is listed twice and the first
     spec is kept."""
     return autoplay._fra_encounter_specs([deck_guid, deck_guid])[0]
+
+
+class MatchSessionLost(RuntimeError):
+    """The battle session behind a match is no longer in the database."""
 
 
 class WebMatch:
@@ -122,6 +127,8 @@ class WebMatch:
         self.cond = threading.Condition()
         self.error = None
         self.ended = False
+        # Set when the session behind the match cannot be found; the match then refuses further actions.
+        self.stopped = False
         self.busy = True
         self._damage_done = None
         self._declared = set()
@@ -142,8 +149,13 @@ class WebMatch:
     # ------------------------------------------------------------------
 
     def _session(self):
-        return gs.find_session_by_player(game_engine.UID.make(
-            PLAYER_UID_TYPE, self.human_pid).to_uint64()) or self.session
+        # Ended sessions are returned too: the terminal check reads them. Only a missing row is a failure.
+        session = gs.find_session_by_player(game_engine.UID.make(
+            PLAYER_UID_TYPE, self.human_pid).to_uint64())
+        if session is None:
+            raise MatchSessionLost(
+                f"no session contains player {self.human_pid}")
+        return session
 
     def _state(self):
         return pvp_load_state(self._session()) or {}
@@ -183,7 +195,7 @@ class WebMatch:
                             autoplay.AUTOPLAY_CHAMPION_UID_OFFSET),
                 row_id_base=(seat_base +
                              autoplay.AUTOPLAY_ROW_ID_CHAMPION_OFFSET))
-        _db.commit()
+        dbmod.conn().commit()
         human = autoplay._make_handler(self.human_pid, self.session)
         human.user_profile["name"] = self.player_name
         ai = autoplay._make_handler(
@@ -210,7 +222,7 @@ class WebMatch:
         self.capture.stop()
         with ENGINE_LOCK:
             autoplay._cleanup(self.session_id, [self.human_pid, self.ai_pid])
-            _db.commit()
+            dbmod.conn().commit()
 
     # ------------------------------------------------------------------
     # Event log for the browser
@@ -249,7 +261,7 @@ class WebMatch:
             "match": self.info(),
             "packets": packets,
             "busy": busy,
-            "prompt": None if busy else self.prompt(),
+            "prompt": None if busy or self.stopped else self.prompt(),
             "error": self.error,
         }
 
@@ -375,7 +387,7 @@ class WebMatch:
         if not candidates:
             return "card"
         with ENGINE_LOCK:
-            if all(card_template_threshold_flags(_db, self.session_id, uid)
+            if all(card_template_threshold_flags(dbmod.conn(), self.session_id, uid)
                    for uid in candidates):
                 return "threshold"
         return "card"
@@ -417,7 +429,7 @@ class WebMatch:
         owner = int(pending.get("owner_id") or state.get("turn_pid") or 0)
         try:
             found = legal_targets_for(
-                _db, self.session_id, owner, target,
+                dbmod.conn(), self.session_id, owner, target,
                 int(pending.get("source_uid") or 0), both_players=True,
                 champions=champions, battle_state=state)
         except Exception as exc:
@@ -431,6 +443,8 @@ class WebMatch:
 
     def submit(self, action):
         with self.cond:
+            if self.stopped:
+                raise ActionError("the match has stopped")
             if self.busy:
                 raise ActionError("the server is still resolving")
             self.busy = True
@@ -480,9 +494,14 @@ class WebMatch:
             self._process(action)
 
     def _fail(self):
-        self.error = traceback.format_exc(limit=6)
+        exc = sys.exc_info()[1]
+        if isinstance(exc, MatchSessionLost):
+            self.stopped = True
+            self.error = f"match stopped: {exc}"
+        else:
+            self.error = traceback.format_exc(limit=6)
         autoplay.log_req(f"    [web-client] match {self.slot} error:\n"
-                         f"{self.error}")
+                         f"{self.error}", "ERROR")
         with self.cond:
             self.busy = False
             self.cond.notify_all()
@@ -599,7 +618,7 @@ class WebMatch:
                          "x_cost": int(decision.get("x_cost", 0) or 0)}]})
         elif kind == "champion_power":
             power = decision["power"]
-            row = autoplay.db_game_champion(self.session_id, ai, conn=_db)
+            row = autoplay.db_game_champion(self.session_id, ai, conn=dbmod.conn())
             source = int(row[0]) if row else 0
             self._activate(ai, source, power["ability_guid"],
                            [power["target_uid"]]
@@ -755,7 +774,7 @@ class WebMatch:
                 raise ActionError("you do not have priority")
             card = int(action["card"])
             with ENGINE_LOCK:
-                row = _db.execute(
+                row = dbmod.conn().execute(
                     "SELECT card_type FROM game_cards WHERE session_id=? "
                     "AND card_uid=? AND user_id=?",
                     (self.session_id, card, human)).fetchone()

@@ -64,7 +64,7 @@ def _set_number(set_guid) -> int:
 def card(guid: str) -> dict | None:
     guid = str(guid).lower()
     standard = ",".join("?" * len(STANDARD_SETS))
-    row = dbmod._db.execute(
+    row = dbmod.conn().execute(
         "SELECT name, cost, attack, defense, card_type, rarity, "
         "threshold_json, subtype, socket_count, is_pve, "
         "current_resources_granted, max_resources_granted, "
