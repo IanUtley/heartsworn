@@ -192,8 +192,10 @@ def play_free_resource_card(host, game, session, db, player_uid, ai_uid,
         return "play free resource: card not found"
     owner_id = int(row[2] or 0)
     side = "player" if owner_id else "ai"
+    # The caller's connection, not the module default: the default can be a different database (tests rebind
+    # ``db._db``), and the zone move must land with the state commit below.
     db_set_card_played_to_zone(
-        session.session_id, int(card_uid), "PlayedResources")
+        session.session_id, int(card_uid), "PlayedResources", conn=db)
     state = battle_state
     current_grant = int(row[6] or 0)
     total_grant = int(row[7] or 0)
