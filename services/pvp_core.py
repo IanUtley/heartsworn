@@ -65,37 +65,30 @@ def _pvp_dispatch_triggers(handler, game, session, state, player_uid,
         force_ignores_chain=force_ignores_chain, data=event_data)
 
 
-def _pvp_auto_resolve_game_start_chain(session, state):
-    """Resolve the mandatory chain that GameStartedEvent created, stopping at the first choice a player must make.
+def _pvp_auto_pass_game_start_chain(session):
+    """Resolve the mandatory chain GameStartedEvent created by passing priority for the seat that holds it.
 
-    The same native loop as the PvE opening (application/chain.py _autopass_game_started_chain): each priority window
-    is passed automatically and each item is ticked, until the stack is empty or an item pauses for input. A paused
-    item keeps its pending prompt, so the player still answers it. Returns how many actions ran.
+    The opening triggers (Blood Sphinx: each champion chooses a target action in hand) sit on the chain until a seat
+    passes. Passing is the same route a player's pass takes, so each item resolves as it would in play. The loop stops
+    when the chain is empty or a trigger needs a choice; that choice keeps its prompt for the player to answer.
     """
-    port = getattr(session, "_rules_port_session", None)
-    if port is None or not state.get("stack"):
-        return 0
-    from rules_port.kernel import PriorityWindowAction
-    if port.chain.is_empty:
-        port.rehydrate_projected_chain()
-    resolved = 0
-    for _ in range(256):
-        if port.chain.is_empty:
+    passed = 0
+    handlers = _resolve("player_handlers")
+    for _ in range(12):
+        state = _resolve("pvp_load_state")(session) or {}
+        if not state.get("stack") or any(state.get(key) for key in (
+                "pending_trigger", "pending_choice", "pending_deck_search", "pending_conversation",
+                "pending_discard_ability")):
             break
-        action = port.action_stack.peek()
-        if action is None:
+        pid = state.get("priority_pid") or state.get("turn_pid")
+        handler = handlers.get(int(pid)) if pid else None
+        if handler is None:
             break
-        if isinstance(action, PriorityWindowAction):
-            if not port.auto_pass_internal_priority(port.player_ids):
-                break
-        elif not port.tick():
-            break
-        resolved += 1
-    port.persist()
-    if resolved:
-        log_req(f"    PvP auto-passed {resolved} GameStarted chain action(s)")
-    _resolve("pvp_save_state")(session, state)
-    return resolved
+        _resolve("route_pvp_pass")(handler, session)
+        passed += 1
+    if passed:
+        log_req(f"    PvP auto-passed {passed} GameStarted chain priority window(s)")
+    return passed
 
 
 def _pvp_defer_trigger_event(state, *, event_type, source_card_id,
@@ -2414,7 +2407,6 @@ def push_pvp_game_start(handler, session, log_req=log_req):
         _resolve('pvp_save_state')(session, state)
         # The opening triggers are mandatory: resolve them now, as the PvE opening does, so a trigger that needs no
         # choice never waits on the first priority pass. One that needs a choice keeps its prompt.
-        _pvp_auto_resolve_game_start_chain(session, state)
     turn_uid = _ge.UID.make(244, goes_first_pid)
     if player_pid == goes_first_pid:
         game2.push_green_light(turn_uid, _ge.EPriorityContext.Normal)

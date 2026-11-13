@@ -123,24 +123,20 @@ def test_a_charge_gain_on_a_raw_pvp_checkpoint_writes_the_raw_pool():
     assert "player_charges" not in state, state
 
 
-def test_game_start_chain_is_resolved_before_the_first_turn():
-    """Blood Sphinx's start-of-game trigger is on the stack when the PvP port attaches. It must resolve then, not wait
-    for the first player's pass: the helper ticks the item and persists the port."""
-    from types import SimpleNamespace
+def test_game_start_chain_is_passed_through_before_the_first_turn():
+    """Blood Sphinx's start-of-game trigger is on the stack when the mulligan completes. Each seat's priority pass
+    resolves it, and the loop stops once the stack is empty."""
     from unittest import mock
     from services import pvp_core
 
-    port = mock.Mock()
-    port.chain.is_empty = False
-    port.player_ids = [5, 6]
-    port.action_stack.peek.side_effect = [object(), None]   # one item to tick, then the stack is empty
-    port.tick.return_value = True
-    session = SimpleNamespace(_rules_port_session=port)
-    state = {"stack": [{"kind": "trigger"}]}
-    with mock.patch.object(pvp_core, "_resolve", lambda name: (lambda *a, **k: None)):
-        resolved = pvp_core._pvp_auto_resolve_game_start_chain(session, state)
-    assert resolved == 1, resolved
-    port.tick.assert_called_once()
-    port.persist.assert_called_once()
-    # Without a RulesPort session there is nothing to resolve and nothing changes.
-    assert pvp_core._pvp_auto_resolve_game_start_chain(SimpleNamespace(), state) == 0
+    states = [{"stack": [{"kind": "trigger"}], "priority_pid": 5},
+              {"stack": [], "priority_pid": 5}]
+    loads = iter(states)
+    passes = []
+    handler = object()
+    resolve = {"pvp_load_state": lambda session: next(loads),
+               "player_handlers": {5: handler},
+               "route_pvp_pass": lambda h, session: passes.append(h)}
+    with mock.patch.object(pvp_core, "_resolve", lambda name: resolve[name]):
+        assert pvp_core._pvp_auto_pass_game_start_chain(object()) == 1
+    assert passes == [handler]
