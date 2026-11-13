@@ -3497,6 +3497,10 @@ def pvp_mulligan_next(session, state, just_acted_pid):
             log_req('    PvP mulligan complete but RulesPort attachment failed')
             return False
         port.begin_pvp_turn()
+        # GameStarted ran before this port existed, so its mandatory triggers are still on the stack. Resolve them now,
+        # before the first turn, and leave any that need a choice for the player to answer.
+        from services.pvp_core import _pvp_auto_resolve_game_start_chain
+        _pvp_auto_resolve_game_start_chain(session, _resolve('pvp_load_state')(session) or state)
         live = _resolve('pvp_load_state')(session) or state
         log_req(f"    PvP mulligan complete — native scheduler reached phase {live.get('phase')} for turn player {live.get('turn_pid')}")
         _resolve('pvp_start_priority_watchdog')(session)

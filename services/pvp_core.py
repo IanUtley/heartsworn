@@ -65,6 +65,39 @@ def _pvp_dispatch_triggers(handler, game, session, state, player_uid,
         force_ignores_chain=force_ignores_chain, data=event_data)
 
 
+def _pvp_auto_resolve_game_start_chain(session, state):
+    """Resolve the mandatory chain that GameStartedEvent created, stopping at the first choice a player must make.
+
+    The same native loop as the PvE opening (application/chain.py _autopass_game_started_chain): each priority window
+    is passed automatically and each item is ticked, until the stack is empty or an item pauses for input. A paused
+    item keeps its pending prompt, so the player still answers it. Returns how many actions ran.
+    """
+    port = getattr(session, "_rules_port_session", None)
+    if port is None or not state.get("stack"):
+        return 0
+    from rules_port.kernel import PriorityWindowAction
+    if port.chain.is_empty:
+        port.rehydrate_projected_chain()
+    resolved = 0
+    for _ in range(256):
+        if port.chain.is_empty:
+            break
+        action = port.action_stack.peek()
+        if action is None:
+            break
+        if isinstance(action, PriorityWindowAction):
+            if not port.auto_pass_internal_priority(port.player_ids):
+                break
+        elif not port.tick():
+            break
+        resolved += 1
+    port.persist()
+    if resolved:
+        log_req(f"    PvP auto-passed {resolved} GameStarted chain action(s)")
+    _resolve("pvp_save_state")(session, state)
+    return resolved
+
+
 def _pvp_defer_trigger_event(state, *, event_type, source_card_id,
                             source_player_id, target_card_id=None,
                             target_player_id=None, phase=None, data=None):
@@ -2378,6 +2411,9 @@ def push_pvp_game_start(handler, session, log_req=log_req):
             _resolve('_pvp_dispatch_triggers')(owner_handler, game2, session, state, pl_t, opp_t, 'GameStartedEvent', None, int(owner_pid), zones=('hand', 'champions', 'warzone'))
         state['pvp_game_started_done'] = True
         _resolve('pvp_save_state')(session, state)
+        # The opening triggers are mandatory: resolve them now, as the PvE opening does, so a trigger that needs no
+        # choice never waits on the first priority pass. One that needs a choice keeps its prompt.
+        _pvp_auto_resolve_game_start_chain(session, state)
     turn_uid = _ge.UID.make(244, goes_first_pid)
     if player_pid == goes_first_pid:
         game2.push_green_light(turn_uid, _ge.EPriorityContext.Normal)

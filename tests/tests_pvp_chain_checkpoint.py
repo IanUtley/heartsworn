@@ -121,3 +121,26 @@ def test_a_charge_gain_on_a_raw_pvp_checkpoint_writes_the_raw_pool():
         change = apply_resource_change(state, "player", "chargepoints", 2)
     assert (state["chg_5"], change.new_value) == (3, 3), state
     assert "player_charges" not in state, state
+
+
+def test_game_start_chain_is_resolved_before_the_first_turn():
+    """Blood Sphinx's start-of-game trigger is on the stack when the PvP port attaches. It must resolve then, not wait
+    for the first player's pass: the helper ticks the item and persists the port."""
+    from types import SimpleNamespace
+    from unittest import mock
+    from services import pvp_core
+
+    port = mock.Mock()
+    port.chain.is_empty = False
+    port.player_ids = [5, 6]
+    port.action_stack.peek.side_effect = [object(), None]   # one item to tick, then the stack is empty
+    port.tick.return_value = True
+    session = SimpleNamespace(_rules_port_session=port)
+    state = {"stack": [{"kind": "trigger"}]}
+    with mock.patch.object(pvp_core, "_resolve", lambda name: (lambda *a, **k: None)):
+        resolved = pvp_core._pvp_auto_resolve_game_start_chain(session, state)
+    assert resolved == 1, resolved
+    port.tick.assert_called_once()
+    port.persist.assert_called_once()
+    # Without a RulesPort session there is nothing to resolve and nothing changes.
+    assert pvp_core._pvp_auto_resolve_game_start_chain(SimpleNamespace(), state) == 0
