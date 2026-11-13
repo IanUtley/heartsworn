@@ -77,6 +77,12 @@ def _pvp_auto_pass_game_start_chain(session):
     entry = _resolve("pvp_load_state")(session) or {}
     log_req(f"    PvP game-start chain: stack={len(entry.get('stack') or [])} priority={entry.get('priority_pid')} "
             f"turn={entry.get('turn_pid')} pending={[k for k in entry if k.startswith('pending') and entry.get(k)]}")
+    # The opening triggers live in the PvP stack; the RulesPort chain only knows them once they are projected onto it.
+    # Without this the passes complete priority windows and never resolve the items (PvE does the same at its opening).
+    port = getattr(session, "_rules_port_session", None)
+    if port is not None and port.chain.is_empty:
+        port.rehydrate_projected_chain()
+        log_req("    PvP game-start chain: projected onto the RulesPort chain")
     for _ in range(12):
         state = _resolve("pvp_load_state")(session) or {}
         if not state.get("stack") or any(state.get(key) for key in (
