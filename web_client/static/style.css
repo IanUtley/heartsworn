@@ -414,6 +414,14 @@ body[data-combat="1"] .firebar { display: block; }
   border: 1px solid var(--panel-edge); background: var(--panel); color: var(--gold); font-size: 18px; z-index: 25; }
 
 #modal { position: fixed; inset: 0; background: rgba(0,0,0,.55); display: grid; place-items: center; z-index: 100; }
+/* The zoomed card (right-click). Its powers are buttons to the right of the card's top edge; a click on the backdrop closes it. */
+#zoom { position: fixed; inset: 0; background: rgba(0,0,0,.55); display: grid; place-items: center; z-index: 110; }
+#zoom.hidden { display: none; }
+.zoom-wrap { position: relative; }
+.zoom-wrap .card { --card-w: 300px; --card-h: 420px; animation: none; transform: none; filter: none; }
+.zoom-powers { position: absolute; left: calc(100% + 18px); top: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 8px; min-width: 180px; }
+.zoom-powers .power { text-align: left; padding: 8px 12px; border-radius: 8px; border: 2px solid var(--gold); background: linear-gradient(#3a2e18, #17120a); color: #f6eed8; font: inherit; font-size: 13px; cursor: pointer; box-shadow: 0 0 12px rgba(255,220,130,.45); }
+.zoom-powers .power:hover { color: #fff; border-color: #fff; }
 .modal-card { min-width: 320px; max-width: min(92vw, 980px); max-height: 86vh; overflow: auto; padding: 22px; border-radius: 14px;
   background: var(--panel); border: 1px solid var(--panel-edge); box-shadow: 0 20px 80px #000; }
 .modal-card h2 { margin: 0 0 12px; font-family: Georgia, serif; color: var(--gold); }

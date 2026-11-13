@@ -334,6 +334,8 @@ function board3d() {
   // WebGL is available; otherwise the flat HTML board below is used.
   if (S.board3d === undefined && window.Board3D) {
     S.board3d = new URLSearchParams(location.search).has("flat") ? null : Board3D.create($("#board3d"), {
+      // Right-click on a 3D card zooms it; right-click anywhere while zoomed closes the zoom.
+      onContext: (uid) => toggleZoom(uid),
       onClick: (uid) => {
         if (S.ui.mode === "modal") { S.ui = { mode: null }; $("#modal").classList.add("hidden"); }
         clickCard(uid);
@@ -928,14 +930,30 @@ function chooseAbility(uid, instances) {
   openModal(`<h2>${esc(cardName(uid))}</h2><div class="champ-powers">${powerButtons(uid, instances)}</div>`);
 }
 
-// Right-click: the card enlarged, with its powers listed beneath it when it can act now.
+// Right-click: the card enlarged, with its powers as buttons to its right when it can act now. Right-click again
+// closes it. The zoom is its own overlay, so it works over the 3D board as well as the HTML cards.
+function zoomOpen() {
+  return !$("#zoom").classList.contains("hidden");
+}
+
+function closeZoom() {
+  $("#zoom").classList.add("hidden");
+  $("#zoom").innerHTML = "";
+}
+
 function showEnlarged(uid) {
   const c = S.cards.get(uid);
   if (!c) return;
   const o = S.options.get(uid);
   const instances = o && S.prompt && S.prompt.kind === "priority" && !S.busy ? o.instances : [];
-  const powers = instances.length ? `<div class="champ-powers">${powerButtons(uid, instances)}</div>` : "";
-  openModal(`<div class="enlarged">${faceHTML({ ...c, state: 0, uid: `e${c.uid}` }, "preview-card")}${powers}</div>`);
+  const powers = instances.length ? `<div class="zoom-powers">${powerButtons(uid, instances)}</div>` : "";
+  $("#zoom").innerHTML = `<div class="zoom-wrap">${faceHTML({ ...c, state: 0, uid: `e${c.uid}` }, "preview-card")}${powers}</div>`;
+  $("#zoom").classList.remove("hidden");
+}
+
+function toggleZoom(uid) {
+  if (zoomOpen()) return closeZoom();
+  if (uid) showEnlarged(uid);
 }
 
 // A card in a pile shows its painted face, as in hand; a hidden card keeps its back.
@@ -1227,6 +1245,8 @@ document.addEventListener("click", (e) => {
     drag.endedAt = 0;
     return;
   }
+  // A click on the dimmed backdrop closes the zoom; a click on the card or its buttons does not.
+  if (zoomOpen() && e.target.id === "zoom") return closeZoom();
   const actEl = e.target.closest("[data-act]");
   if (actEl) return handleAct(actEl.dataset.act);
   const inst = e.target.closest("[data-choose-instance]");
@@ -1235,6 +1255,7 @@ document.addEventListener("click", (e) => {
     const o = S.options.get(uid);
     S.ui = { mode: null };
     $("#modal").classList.add("hidden");
+    closeZoom();
     return startAction(uid, o.instances[Number(inst.dataset.chooseInstance)]);
   }
   const power = e.target.closest("[data-power]");
@@ -1263,14 +1284,13 @@ document.addEventListener("dblclick", (e) => {
   activateCard(Number(cardEl.dataset.uid));
 });
 
-// Right-click on any card enlarges it and lists its powers, instead of the browser menu.
+// Right-click on a card zooms it (and its powers); right-click while zoomed closes it. Otherwise the browser menu stays.
 document.addEventListener("contextmenu", (e) => {
   const cardEl = e.target.closest("[data-uid]");
-  if (!cardEl || !cardEl.dataset.uid || cardEl.closest("#modal")) return;
-  const uid = Number(cardEl.dataset.uid);
-  if (!S.cards.get(uid)) return;
+  const uid = cardEl && cardEl.dataset.uid && !cardEl.closest("#modal") ? Number(cardEl.dataset.uid) : 0;
+  if (!zoomOpen() && !S.cards.get(uid)) return;
   e.preventDefault();
-  showEnlarged(uid);
+  toggleZoom(S.cards.get(uid) ? uid : 0);
 });
 
 document.addEventListener("mouseover", (e) => {

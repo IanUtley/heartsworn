@@ -725,6 +725,12 @@ class Board3D {
     el.addEventListener("pointercancel", () => this.cancelDrag());
     el.addEventListener("pointerleave", () => this.hover(null));
     el.addEventListener("click", (e) => this.pointer(e, true));
+    // A right-click reports the card under the pointer (null on the table) and keeps the browser menu away.
+    el.addEventListener("contextmenu", (e) => {
+      e.preventDefault();
+      const rec = this.pick(e);
+      if (this.callbacks.onContext) this.callbacks.onContext(rec ? rec.entry.uid : null);
+    });
     new ResizeObserver(() => this.resize()).observe(container);
     this.resize();
     this.buildArena();
