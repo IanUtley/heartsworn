@@ -74,6 +74,9 @@ def _pvp_auto_pass_game_start_chain(session):
     """
     passed = 0
     handlers = _resolve("player_handlers")
+    entry = _resolve("pvp_load_state")(session) or {}
+    log_req(f"    PvP game-start chain: stack={len(entry.get('stack') or [])} priority={entry.get('priority_pid')} "
+            f"turn={entry.get('turn_pid')} pending={[k for k in entry if k.startswith('pending') and entry.get(k)]}")
     for _ in range(12):
         state = _resolve("pvp_load_state")(session) or {}
         if not state.get("stack") or any(state.get(key) for key in (
@@ -84,7 +87,11 @@ def _pvp_auto_pass_game_start_chain(session):
         handler = handlers.get(int(pid)) if pid else None
         if handler is None:
             break
-        _resolve("route_pvp_pass")(handler, session)
+        try:
+            _resolve("route_pvp_pass")(handler, session)
+        except Exception as exc:   # a failed pass must be visible in the log, not swallowed
+            log_req(f"    PvP game-start chain: pass failed: {exc!r}")
+            break
         passed += 1
     if passed:
         log_req(f"    PvP auto-passed {passed} GameStarted chain priority window(s)")

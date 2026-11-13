@@ -129,7 +129,8 @@ def test_game_start_chain_is_passed_through_before_the_first_turn():
     from unittest import mock
     from services import pvp_core
 
-    states = [{"stack": [{"kind": "trigger"}], "priority_pid": 5},
+    states = [{"stack": [{"kind": "trigger"}], "priority_pid": 5},   # the entry log
+              {"stack": [{"kind": "trigger"}], "priority_pid": 5},   # first pass
               {"stack": [], "priority_pid": 5}]
     loads = iter(states)
     passes = []
