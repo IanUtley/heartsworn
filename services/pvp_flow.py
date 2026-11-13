@@ -2481,6 +2481,13 @@ def _pvp_resolve_matching_target(handler, session, inner_bytes, my_pid, typed_pa
     view = _resolve('_pvp_fra_view')(state, owner_id, opp_pid)
     view.pop('pending_deck_search', None)
     view.pop('resolution_paused', None)
+    # The side-oriented view does not carry the chain markers. The continuation reads the paused chain item from the
+    # state it is given and marks that item completed there; without the marker the item stayed unmarked, the copy
+    # below then erased it from the PvP state, and the next chain pass ran the whole ability again from its first
+    # effect (Inquisition revealed the hand and asked for a discard once per card).
+    for key in ('paused_chain_instance_id', 'completed_chain_instance_id', 'rules_port_suspended_chain_continuation'):
+        if key in state:
+            view[key] = state[key]
     g = _ge.Game(int(session.session_id), pl_t, ai_t)
     _resolve('_pvp_populate_game_state')(g, state, owner_id, opp_pid)
     handler._hide_candidates_to_deck(g, session, pl_t, ai_t, [int(uid) for uid in pend.get('revealed_cards') or candidates])

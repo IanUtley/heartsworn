@@ -174,6 +174,24 @@ def queue_free_played_card(host, game, session, db, player_uid, ai_uid,
     return f"queued {kind} {card_uid} for free (chain={instance_id})"
 
 
+def _pool_keys(state, owner_id):
+    """The battle-state keys that hold one participant's resource pools.
+
+    A PvP chain item resolves against the persisted checkpoint, which keys each pool by the raw player id
+    (``res_<pid>``). A side-oriented PvP effect view (it carries ``pvp_health_map``) and a Practice/PvE state key
+    them by side (``player_resources``). Writing the side keys into a raw checkpoint left the real pools unchanged
+    and reported pools counted up from zero.
+    """
+    owner = int(owner_id or 0)
+    if state.get("pvp") and not state.get("pvp_health_map"):
+        return {"current": f"res_{owner}", "total": f"res_total_{owner}",
+                "charges": f"chg_{owner}", "threshold": f"thresh_{owner}"}
+    from .runtime_helpers import participant_side
+    side = participant_side(state, owner) or ("player" if owner else "ai")
+    return {"current": f"{side}_resources", "total": f"{side}_total_resources",
+            "charges": f"{side}_charges", "threshold": f"{side}_threshold"}
+
+
 def play_free_resource_card(host, game, session, db, player_uid, ai_uid,
                             battle_state, card_uid):
     """Play a Resource selected by a native free-play effect.
@@ -191,20 +209,20 @@ def play_free_resource_card(host, game, session, db, player_uid, ai_uid,
     if not row or str(row[4] or "").lower() != "resource":
         return "play free resource: card not found"
     owner_id = int(row[2] or 0)
-    side = "player" if owner_id else "ai"
     # The caller's connection, not the module default: the default can be a different database (tests rebind
     # ``db._db``), and the zone move must land with the state commit below.
     db_set_card_played_to_zone(
         session.session_id, int(card_uid), "PlayedResources", conn=db)
     state = battle_state
+    keys = _pool_keys(state, owner_id)
     current_grant = int(row[6] or 0)
     total_grant = int(row[7] or 0)
-    state[f"{side}_resources"] = max(
-        0, int(state.get(f"{side}_resources", 0) or 0) + current_grant)
-    state[f"{side}_total_resources"] = max(
-        0, int(state.get(f"{side}_total_resources", 0) or 0) + total_grant)
-    state[f"{side}_charges"] = int(
-        state.get(f"{side}_charges", 0) or 0) + 1
+    state[keys["current"]] = max(
+        0, int(state.get(keys["current"], 0) or 0) + current_grant)
+    state[keys["total"]] = max(
+        0, int(state.get(keys["total"], 0) or 0) + total_grant)
+    old_charges = int(state.get(keys["charges"], 0) or 0)
+    state[keys["charges"]] = old_charges + 1
     record_card_cast(state, owner_id, resource=True,
                      card_uid=int(card_uid), card_type="Resource")
     from .statistics import record_charge_gained
@@ -217,9 +235,13 @@ def play_free_resource_card(host, game, session, db, player_uid, ai_uid,
     threshold_grants = resource_threshold_grants(
         db, session.session_id, owner_id, ability_guids, state,
         source_uid=card_uid)
-    thresholds = state.setdefault(f"{side}_threshold", {})
+    thresholds = state.setdefault(keys["threshold"], {})
     for flag, amount in threshold_grants:
-        thresholds[flag] = int(thresholds.get(flag, 0) or 0) + int(amount)
+        # A checkpoint read back from JSON keys its thresholds by text; fold that entry into the integer key.
+        old = thresholds.get(flag)
+        if old is None:
+            old = thresholds.pop(str(flag), 0)
+        thresholds[flag] = int(old or 0) + int(amount)
     db.commit()
     from .persistence import save_state
     save_state(session, state)
@@ -230,8 +252,8 @@ def play_free_resource_card(host, game, session, db, player_uid, ai_uid,
         game_engine.ECardTypes.Resource, template_id=row[0])
     game.push_resource_card_played(scid, owner, free=True)
     for property_name, amount, value in (
-            ("currentresource", current_grant, state[f"{side}_resources"]),
-            ("totalresource", total_grant, state[f"{side}_total_resources"])):
+            ("currentresource", current_grant, state[keys["current"]]),
+            ("totalresource", total_grant, state[keys["total"]])):
         if not amount:
             continue
         event_type = (game_engine.PlayerCurrentResourcePoolChangedSessionEventArgs
@@ -249,21 +271,30 @@ def play_free_resource_card(host, game, session, db, player_uid, ai_uid,
         threshold_event.color = flag
         threshold_event.operation = 1
         threshold_event.delta = int(amount)
-        threshold_event.new_value = state[f"{side}_threshold"][flag]
+        threshold_event.new_value = thresholds[flag]
         game._push(threshold_event)
+    charge_event = game_engine.ChampionChargePointsChangedSessionEventArgs()
+    charge_event.player_id = owner
+    charge_event.operation = 1
+    charge_event.delta = 1
+    charge_event.new_value = state[keys["charges"]]
+    game._push(charge_event)
     # The client's champion panel reads resources, charges and thresholds from PlayerUpdated, which takes its values
     # from the Game. A manual resource play refreshes them; a free play must too, or the new numbers never reach the
     # client. Mirror the battle state onto the Game, then send both players' PlayerUpdated.
     # The Game's seats may be the other way round from the card's owner (a PvP chain resolved by the opposing seat),
     # so each Game seat takes the battle-state pool of the player it stands for.
-    owner_key = int(getattr(owner, "uid64", owner))
-    other = "ai" if side == "player" else "player"
     for game_seat, seat_uid in (("player", game.player_uid), ("ai", game.ai_uid)):
-        pool = side if int(getattr(seat_uid, "uid64", seat_uid)) == owner_key else other
-        setattr(game, f"{game_seat}_resources", int(state.get(f"{pool}_resources", 0) or 0))
-        setattr(game, f"{game_seat}_total_resources", int(state.get(f"{pool}_total_resources", 0) or 0))
-        setattr(game, f"{game_seat}_charges", int(state.get(f"{pool}_charges", 0) or 0))
-        setattr(game, f"{game_seat}_threshold", dict(state.get(f"{pool}_threshold", {}) or {}))
+        if state.get("pvp"):
+            seat_keys = _pool_keys(state, int(getattr(seat_uid, "uid64", seat_uid)) >> 8)
+        else:
+            seat_keys = _pool_keys(state, 1 if game_seat == "player" else 0)
+        setattr(game, f"{game_seat}_resources", int(state.get(seat_keys["current"], 0) or 0))
+        setattr(game, f"{game_seat}_total_resources", int(state.get(seat_keys["total"], 0) or 0))
+        setattr(game, f"{game_seat}_charges", int(state.get(seat_keys["charges"], 0) or 0))
+        setattr(game, f"{game_seat}_threshold", {
+            int(flag): int(value or 0)
+            for flag, value in (state.get(seat_keys["threshold"], {}) or {}).items()})
     champ_map = state.get("champ_map") or {}
     for uid, is_player in ((player_uid, True), (ai_uid, False)):
         champ_card = champ_map.get(str(int(uid) >> 8)) if state.get("pvp") else None
