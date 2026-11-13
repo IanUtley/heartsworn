@@ -13,6 +13,8 @@ const CARD_W = 1.2, CARD_H = 1.68, CARD_T = 0.03;
 // A hand card is 1/CARDS_ON_SCREEN of the screen height. The hand is HAND_DEPTH of the way from the camera
 // to the table's middle, so its cards look bigger than the board's cards, which are further away (0.65 of the hand's size).
 const CARDS_ON_SCREEN = 5, HAND_DEPTH = 0.65;
+// Extra size for the hand's cards and the board's cards, on top of the fitted size.
+const HAND_SCALE = 1.15, BOARD_SCALE = 1.12;
 const FIELD_R = 4.3, RING_R = 6.5, RING_Y = 0.12;
 const ROW_Z = 2.2, CHAIN_Y = 0.6, REST_Y = 0.14;
 // Zone geometry beyond the warzone rows: constants stand behind the troops, underground cards sink just below the
@@ -67,6 +69,8 @@ const HAND_STACK = 0.002;  // each hand card sits this much nearer the camera th
 // The camera: where it aims on the table.
 const CAMERA_LOOK_Z = 0.55;
 const HAND_SIDE = { "mine-hand": 1, "opp-hand": -1 };
+// The table's zones: the warzones and the constant and underground rows, but not the chain or the choice zone.
+const BOARD_ZONES = new Set(["mine", "opp", "mine-constants", "opp-constants", "mine-underground", "opp-underground"]);
 // A dragged card floats at DRAG_LIFT and leans into its movement, up to DRAG_LEAN_MAX radians.
 const DRAG_LIFT = 0.6, DRAG_LEAN = 0.06, DRAG_LEAN_MAX = 0.35;
 const DRAG_THRESHOLD = 6;        // px of movement before a press becomes a drag
@@ -77,8 +81,13 @@ const PLAY_EDGE_Z = 3.2;         // a card dropped nearer the camera than this i
 
 const GLOW = { playable: "#7cf0ff", selectable: "#ffe066", selected: "#ffb020", "chosen-attacker": "#ff5a3c",
   attacking: "#ff5a3c", blocking: "#7ad3ff", top: "#ffd27a" };
-// Highlights drawn as a shader border: flames around a playable card, a golden aura around an activatable one.
-const EFFECTS = { playable: 0, activatable: 1 };
+// Highlights drawn as a shader border: a blue marching border around a playable card, a yellow one around a
+// selectable card, and a golden aura around an activatable one.
+const EFFECTS = {
+  playable: { mode: 2, color: "#4aa8ff" },
+  selectable: { mode: 2, color: "#ffd84a" },
+  activatable: { mode: 1 },
+};
 const EFFECT_VERT = `
 varying vec2 vUv;
 void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }
@@ -86,6 +95,7 @@ void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(
 const EFFECT_FRAG = `
 uniform float uTime;
 uniform float uMode;
+uniform vec3 uColor;
 varying vec2 vUv;
 float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
 float noise(vec2 p) {
@@ -107,6 +117,11 @@ void main() {
     float heat = n * (1.0 - d / 0.12);
     a = ring * smoothstep(0.25, 0.55, heat);
     col = mix(vec3(1.0, 0.35, 0.05), vec3(1.0, 0.92, 0.45), smoothstep(0.4, 0.8, heat));
+  } else if (uMode < 1.5) {
+    // A marching border: bright dashes that run round the card in the highlight's colour.
+    float march = 0.5 + 0.5 * sin(atan(q.y, q.x) * 10.0 - uTime * 4.0);
+    a = ring * (0.3 + 0.7 * smoothstep(0.35, 0.75, march));
+    col = uColor;
   } else {
     // Golden aura: a bright band that turns round the card.
     float turn = 0.5 + 0.5 * sin(atan(q.y, q.x) * 6.0 - uTime * 2.0);
@@ -812,7 +827,7 @@ class Board3D {
   // Where a hand card rests: its centre, the turn that faces it to the camera, and the lift that shows
   // its lower part when hovered. The card's top sits on the hand's arc, in a plane facing the camera at the table's middle.
   handPose(entry) {
-    const cam = this.camera, side = HAND_SIDE[entry.zone], k = this.cardScale;
+    const cam = this.camera, side = HAND_SIDE[entry.zone], k = this.cardScale * HAND_SCALE;
     const w = CARD_W * k, cardH = CARD_H * k;
     const fwd = cam.getWorldDirection(new THREE.Vector3());
     const right = new THREE.Vector3(1, 0, 0).applyQuaternion(cam.quaternion);
@@ -863,9 +878,9 @@ class Board3D {
       rec.target = this.slot(entry);
       if (rec.fresh) { rec.mesh.position.copy(rec.target); rec.fresh = false; }
       rec.mesh.visible = !entry.hidden;
-      const mode = EFFECTS[entry.highlight];
-      if (mode !== undefined) {
-        rec.glow.material = this.effect(mode, entry.zone in HAND_SIDE);
+      const effect = EFFECTS[entry.highlight];
+      if (effect !== undefined) {
+        rec.glow.material = this.effect(effect.mode, entry.zone in HAND_SIDE, effect.color);
         rec.glow.visible = true;
       } else {
         const glow = GLOW[entry.highlight] || (entry.top ? GLOW.top : null);
@@ -908,11 +923,12 @@ class Board3D {
   }
 
   // The shader border for a highlight (mode 0: flames, 1: golden aura), shared by the cards that show it.
-  effect(mode, hand) {
-    const key = `${mode}:${hand}`;
+  effect(mode, hand, color) {
+    const key = `${mode}:${hand}:${color || ""}`;
     if (!this.effects.has(key)) {
       this.effects.set(key, new THREE.ShaderMaterial({ vertexShader: EFFECT_VERT, fragmentShader: EFFECT_FRAG,
-        uniforms: { uTime: this.effectTime, uMode: { value: mode } }, transparent: true, depthWrite: false,
+        uniforms: { uTime: this.effectTime, uMode: { value: mode }, uColor: { value: new THREE.Color(color || "#ffffff") } },
+        transparent: true, depthWrite: false,
         blending: THREE.AdditiveBlending }));
     }
     return this.effects.get(key);
@@ -1129,7 +1145,8 @@ class Board3D {
       }
       // The lean is applied in world space, after the resting turn, so it tips the card the same way whatever its yaw.
       m.quaternion.premultiply(new THREE.Quaternion().setFromEuler(new THREE.Euler(rec.lean.x, 0, rec.lean.y)));
-      const s = (hovered ? 1.12 : 1) * this.cardScale;
+      const zoneScale = e.zone in HAND_SIDE ? HAND_SCALE : BOARD_ZONES.has(e.zone) ? BOARD_SCALE : 1;
+      const s = (hovered ? 1.12 : 1) * this.cardScale * zoneScale;
       m.scale.setScalar(m.scale.x + (s - m.scale.x) * k);
       if (rec.glow.visible) rec.glow.material.opacity = 0.75 + Math.sin(t * 5) * 0.25;
     }

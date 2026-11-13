@@ -389,6 +389,8 @@ body[data-combat="1"] .firebar { display: block; }
 #prompt-text { font-size: 12px; letter-spacing: 1.5px; text-transform: uppercase; color: #f6eed8; text-shadow: 0 1px 2px #000;
   padding: 4px 48px; white-space: nowrap; background: linear-gradient(90deg, transparent, rgba(0,0,0,.72) 18%, rgba(0,0,0,.72) 82%, transparent); }
 #prompt-text:empty { display: none; }
+/* The prompt line and its buttons are controls, not text: a click on Resolve must not select the label. */
+#prompt-text, #action-buttons { -webkit-user-select: none; user-select: none; }
 #prompt-text .thinking::after { content: "…"; animation: dots 1.2s infinite; }
 @keyframes dots { 50% { opacity: .2; } }
 #action-buttons { display: flex; gap: 8px; }
