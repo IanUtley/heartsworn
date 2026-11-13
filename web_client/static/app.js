@@ -569,7 +569,8 @@ function interactive(uid) {
     return "";
   }
   if (S.prompt && S.prompt.kind === "choose") {
-    return (S.prompt.candidates || []).includes(uid) ? "selectable" : "";
+    if (!(S.prompt.candidates || []).includes(uid)) return "";
+    return choosePicks().includes(uid) ? "selected" : "selectable";
   }
   if (S.prompt && S.prompt.kind === "priority" && !S.busy) {
     const o = S.options.get(uid);
@@ -728,6 +729,11 @@ function renderActions() {
   } else if (p.kind === "defend") {
     label = ui.blocker ? "Now pick the attacker to block." : "Pick a blocker, then the attacker it blocks.";
     html = `<button data-act="commit-defense">Confirm blocks</button>`;
+  } else if (p.kind === "choose" && (p.max_picks || 1) > 1 && p.candidates.length) {
+    // A choice that takes several cards: pick them one by one, then confirm.
+    const picks = choosePicks();
+    label = `Choose ${p.min_picks} to ${p.max_picks} targets (${picks.length} chosen).`;
+    html = `<button data-act="choose-confirm" ${picks.length < (p.min_picks || 0) ? "disabled" : ""}>Confirm</button>`;
   } else if (p.kind === "choose") {
     label = !p.candidates.length ? "That ability has no legal target."
       : chooseWord() === "threshold" ? "Choose a threshold." : "Choose a target for the ability.";
@@ -861,6 +867,17 @@ function finishTargets() {
   act(action);
 }
 
+// The picks made so far for the choice on screen. They reset when a different choice is offered.
+function choosePickKey(p) {
+  return `${p.pending}:${p.source}:${(p.candidates || []).join(",")}`;
+}
+
+function choosePicks() {
+  const p = S.prompt;
+  if (!p || p.kind !== "choose" || S.ui.picksKey !== choosePickKey(p)) return [];
+  return S.ui.picks || [];
+}
+
 function clickCard(uid) {
   const p = S.prompt;
   const ui = S.ui;
@@ -876,8 +893,16 @@ function clickCard(uid) {
     return render();
   }
   if (p.kind === "choose") {
-    if ((p.candidates || []).includes(uid)) act({ type: "choose", card: uid });
-    return;
+    if (!(p.candidates || []).includes(uid)) return;
+    if ((p.max_picks || 1) <= 1) return act({ type: "choose", card: uid });
+    // Several cards: a click adds or removes a pick, and the most recent picks stay within the maximum.
+    const key = choosePickKey(p);
+    const picks = choosePicks().slice();
+    const at = picks.indexOf(uid);
+    if (at >= 0) picks.splice(at, 1);
+    else { if (picks.length >= p.max_picks) picks.shift(); picks.push(uid); }
+    S.ui = { mode: null, picks, picksKey: key };
+    return render();
   }
   if (ui.mode === "attack") {
     const o = S.options.get(uid);
@@ -1307,6 +1332,11 @@ function handleAct(name) {
     case "commit-attack": return act({ type: "attack", attackers: [...(ui.chosen || [])] });
     case "commit-defense": return act({ type: "defend", blocks: ui.blocks || {} });
     case "choose-none": return act({ type: "choose", card: null });
+    case "choose-confirm": {
+      const cards = choosePicks();
+      S.ui = { mode: null };
+      return act({ type: "choose", cards });
+    }
     case "confirm-targets": return finishTargets();
     case "cancel": sfx("Aud_FX_Cancel_Action", "interface"); S.ui = { mode: null }; return render();
     case "close-modal": S.ui = { mode: null }; $("#modal").classList.add("hidden"); return render();

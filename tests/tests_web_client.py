@@ -316,3 +316,10 @@ def test_missing_session_stops_match_with_error():
     assert match.busy is False
     with pytest.raises(web_match.ActionError):
         match.submit({"kind": "pass"})
+
+
+def test_a_two_target_trigger_takes_two_cards_and_other_choices_take_one():
+    """Crocosaur's Deploy names two opposing troops (min 2, max 2): the web choice takes two cards, others take one."""
+    trigger = {"target_entries": [{"minimum": 2, "maximum": 2}]}
+    assert web_match.WebMatch._pick_bounds("pending_trigger", trigger) == (2, 2)
+    assert web_match.WebMatch._pick_bounds("pending_choice", {}) == (1, 1)

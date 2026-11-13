@@ -375,6 +375,8 @@ class WebMatch:
                 "pick_kind": self._pick_kind(candidates),
                 "source": pending.get("source_uid"),
                 "candidates": candidates,
+                "min_picks": self._pick_bounds(details["key"], pending)[0],
+                "max_picks": self._pick_bounds(details["key"], pending)[1],
             })
             # A pick among revealed cards shows every revealed card, the ones that cannot be chosen too (the client's
             # Coverflow for a SourceRevealed target).
@@ -645,7 +647,22 @@ class WebMatch:
     # Transactions shared by both seats
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _pick_bounds(key, pending):
+        """How many cards the choice takes: the authored minimum and maximum of its target (a trigger's explicit target
+        records them; "Two target opposing troops" is 2 and 2). Any other choice takes one card."""
+        if key == "pending_trigger":
+            entries = pending.get("target_entries") or []
+            if entries:
+                return int(entries[0].get("minimum", 1) or 0), max(1, int(entries[0].get("maximum", 1) or 1))
+        return 1, 1
+
     def _choose(self, pid, key, pending, chosen_uid):
+        # chosen_uid is one card, a list of cards (a multi-target pick), or None for no target.
+        if isinstance(chosen_uid, (list, tuple)):
+            chosen = [int(uid) for uid in chosen_uid]
+        else:
+            chosen = [int(chosen_uid)] if chosen_uid is not None else []
         if key == "pending_choice":
             index = int((pending.get("continuation") or {}).get(
                 "target_index", 0) or 0)
@@ -659,9 +676,10 @@ class WebMatch:
         # ability resolves without one, as when Unity's picker has no cards.
         raw = b"SetAbilityActivationDataTransaction;"
         targets = {}
-        if chosen_uid is not None:
-            raw += autoplay._mk_uid_bytes(chosen_uid)
-            targets = {str(index): [int(chosen_uid)]}
+        if chosen:
+            for uid in chosen:
+                raw += autoplay._mk_uid_bytes(uid)
+            targets = {str(index): list(chosen)}
         self._tx(pid, raw, typed_payload={
             "AbilityInstanceId": int(pending.get("instance_id", 1) or 1),
             "AbilityActivationData": {"TargetMap": targets}})
@@ -755,11 +773,20 @@ class WebMatch:
             pending = details["pending"]
             legal = {int(u) for u in self._candidates(details["key"],
                                                        pending)}
-            chosen = action.get("card")
-            chosen = int(chosen) if chosen is not None else None
-            if (chosen is None and legal) or (
-                    chosen is not None and chosen not in legal):
-                raise ActionError("that card is not a legal choice")
+            low, high = self._pick_bounds(details["key"], pending)
+            if action.get("cards") is not None:
+                cards = [int(uid) for uid in action.get("cards") or []]
+                if len(set(cards)) != len(cards) or any(uid not in legal for uid in cards):
+                    raise ActionError("that card is not a legal choice")
+                if not low <= len(cards) <= high:
+                    raise ActionError(f"choose {low} to {high} cards")
+                chosen = cards or None
+            else:
+                chosen = action.get("card")
+                chosen = int(chosen) if chosen is not None else None
+                if (chosen is None and legal) or (
+                        chosen is not None and chosen not in legal):
+                    raise ActionError("that card is not a legal choice")
             self._choose(human, details["key"], pending, chosen)
         elif kind == "attack":
             if expected != "attack":
