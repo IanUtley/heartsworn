@@ -831,13 +831,44 @@ function activatablePower(uid, abilityGuid) {
   return optionInstance(uid, abilityGuid);
 }
 
+// The X-cost entry of an option (EAbilityCostType.XCostAbilityCostType), if it has one.
+const X_COST_TYPE = 256;
+function xCostOf(instance) {
+  return (instance.target_instances || []).find((ti) => ti.cost_type === X_COST_TYPE) || null;
+}
+
 function startAction(uid, instance) {
+  const xCost = xCostOf(instance);
+  const card = S.cards.get(uid);
+  const tpl = card && S.catalog.cards[(card.card_id || "").toLowerCase()];
+  const textX = instance.opt_id === PLAY_ABILITY && tpl && /\[X\]|\[\(X\)\]/.test(tpl.text || "");
+  if (xCost || textX) {
+    // The X value comes first; the rest of the action starts once it is chosen.
+    const have = (S.players[S.me] || {}).resources ?? 0;
+    const min = xCost ? xCost.min_target_count ?? 0 : 0;
+    const max = xCost ? Math.max(min, have) : Math.max(0, have);
+    return askX(min, max, (x) => beginAction(uid, instance, x));
+  }
+  return beginAction(uid, instance, null);
+}
+
+// The X dialog: a number between the minimum and the resources the player has. Confirming starts the action with it.
+function askX(min, max, then) {
+  S.pendingX = { min, max, then };
+  openModal(`<h2>Choose X</h2><p>X is between ${min} and ${max}.</p>
+    <div class="champ-powers"><input id="x-value" type="number" min="${min}" max="${max}" value="${min}" style="width:90px;font-size:18px">
+    <button data-act="x-confirm">Confirm</button><button class="secondary" data-act="x-cancel">Cancel</button></div>`);
+}
+
+function beginAction(uid, instance, x) {
   const card = S.cards.get(uid);
   const isPlay = instance.opt_id === PLAY_ABILITY;
   const action = isPlay ? { type: "play", card: uid } : { type: "activate", card: uid, ability: instance.opt_id };
+  if (x !== null) action.x = x;
   const steps = [];
   let costIndex = 0;
   (instance.target_instances || []).forEach((ti, i) => {
+    if (ti.cost_type === X_COST_TYPE) return;   // the X value is chosen above, not a card to pay
     const isCost = ti.cls === 66;
     const index = isCost ? costIndex++ : (ti.target_index ?? i);
     const max = isCost ? ti.max_target_count : (instance.max_target_counts[i] ?? 1);
@@ -846,11 +877,6 @@ function startAction(uid, instance) {
       candidates: new Set(ti.targets || []), min, max: Math.max(1, max),
       label: isCost ? "Choose a card to pay the cost" : "Choose a target" });
   });
-  const tpl = card && S.catalog.cards[(card.card_id || "").toLowerCase()];
-  if (isPlay && tpl && /\[X\]|\[\(X\)\]/.test(tpl.text || "")) {
-    const x = parseInt(window.prompt("Choose a value for X", "1") || "0", 10);
-    action.x = Number.isFinite(x) ? x : 0;
-  }
   if (!steps.length) return act(action);
   S.ui = { mode: "target", action, steps, step: 0, picked: {} };
   render();
@@ -1332,6 +1358,17 @@ function handleAct(name) {
     case "commit-attack": return act({ type: "attack", attackers: [...(ui.chosen || [])] });
     case "commit-defense": return act({ type: "defend", blocks: ui.blocks || {} });
     case "choose-none": return act({ type: "choose", card: null });
+    case "x-confirm": {
+      const pending = S.pendingX;
+      const x = Math.floor(Number($("#x-value").value));
+      if (!pending || !Number.isFinite(x) || x < pending.min || x > pending.max) {
+        return toast(`Choose a number from ${pending ? pending.min : 0} to ${pending ? pending.max : 0}.`);
+      }
+      S.pendingX = null;
+      $("#modal").classList.add("hidden");
+      return pending.then(x);
+    }
+    case "x-cancel": S.pendingX = null; $("#modal").classList.add("hidden"); return null;
     case "choose-confirm": {
       const cards = choosePicks();
       S.ui = { mode: null };

@@ -644,8 +644,9 @@ def _pvp_add_play_target_options(g, session, state, pl_t, opp_t, turn_pid):
             for inst in opt.instances:
                 if str(inst.opt_id.guid) == _ge.PLAY_CARD_ABILITY_TEMPLATE_ID:
                     ci = g._make_event(_ge.CostInstanceSessionEventArgs)
-                    ci.min = plan.cost.variable_minimum
-                    ci.max = 0
+                    # CostInstance's bounds are min_target_count / max_target_count (PvE sets them the same way).
+                    ci.min_target_count = int(plan.cost.variable_minimum)
+                    ci.max_target_count = 0
                     ci.cost_type = 256  # EAbilityCostType.XCostAbilityCostType
                     ci.target_template_id = _ge.ResourceId.invalid()
                     ci.targets = []
