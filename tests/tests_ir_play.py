@@ -71,6 +71,8 @@ def test_transcend_plays_the_deck_resources_for_free_as_the_live_path_does():
     for uid in RESOURCE_UIDS:
         assert locations[uid] != "deck", locations
     assert interpreted["events"], "the free plays pushed no client events"
+    # The client's champion panel reads resources and charges from PlayerUpdated, so a free play must send it.
+    assert any(name == "PlayerUpdatedSessionEventArgs" for name, _scalars in interpreted["events"]), interpreted["events"]
 
 
 if __name__ == "__main__":

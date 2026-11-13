@@ -251,4 +251,18 @@ def play_free_resource_card(host, game, session, db, player_uid, ai_uid,
         threshold_event.delta = int(amount)
         threshold_event.new_value = state[f"{side}_threshold"][flag]
         game._push(threshold_event)
+    # The client's champion panel reads resources, charges and thresholds from PlayerUpdated, which takes its values
+    # from the Game. A manual resource play refreshes them; a free play must too, or the new numbers never reach the
+    # client. Mirror the battle state onto the Game, then send both players' PlayerUpdated.
+    for pool in ("player", "ai"):
+        setattr(game, f"{pool}_resources", int(state.get(f"{pool}_resources", 0) or 0))
+        setattr(game, f"{pool}_total_resources", int(state.get(f"{pool}_total_resources", 0) or 0))
+        setattr(game, f"{pool}_charges", int(state.get(f"{pool}_charges", 0) or 0))
+        setattr(game, f"{pool}_threshold", dict(state.get(f"{pool}_threshold", {}) or {}))
+    champ_map = state.get("champ_map") or {}
+    for uid, is_player in ((player_uid, True), (ai_uid, False)):
+        champ_card = champ_map.get(str(int(uid) >> 8)) if state.get("pvp") else None
+        champ_id = (game_engine.SessionCardId(game_engine.UID(int(champ_card))) if champ_card
+                    else getattr(host, "_player_champ_scid" if is_player else "_ai_champ_scid", None))
+        game.push_player_updated(uid, champ_id=champ_id)
     return f"played resource {int(card_uid)} for free"
