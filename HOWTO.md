@@ -642,6 +642,20 @@ random card from their hand" look in the deck. A random reveal that enumerates
 through `MatchSecondaryTargetTemplate` must still restrict its sample to the
 previous target's controller's cards.
 
+A `CardsRevealed` event names each card's current collection and its own
+controller (C# `AuthoritativeSessionBase.RevealCards`), on every path: the
+shared reveal, the PvP recipient-only reveal (`_push_private_revealed_cards`)
+and the reveal a revealed-choice picker queues (`PickRequest.reveal_zones`).
+The recipient-only reveal tags its `CardUpdated`s for the viewer
+(`_hand_reveal_viewer_uid`, `_temporary_reveal`); untagged hidden-zone cards
+are nulled by the packet filter and the viewer sees card backs. When the
+picker closes, `_hide_candidates_to_deck` restores each card in the zone its
+row is in: only a deck/Choosing row is written to the deck, and a hand card is
+sent as a hand card again (never moved). The browser shows every revealed card
+in the picker (`prompt.revealed`), with only `prompt.candidates` selectable,
+and shows a reveal that has no choice as a view-only "Revealed cards" panel
+(`battle_state.js` keeps the faces in `state.reveal`).
+
 A card reaching the Warzone decides Tapped through
 `static_rules.card_enters_play_exhausted` (the instance's own
 `EntersPlayExhausted` bit, printed or granted such as Storm Cloud's, then the

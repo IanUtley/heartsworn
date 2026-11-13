@@ -63,6 +63,7 @@ const S = {
   prompt: null, busy: true, error: null, ended: false,
   ui: { mode: null }, catalog: { cards: {}, abilities: {} }, wanted: { cards: new Set(), abilities: new Set() },
   log: [], pendingSounds: new Set(), positions: new Map(), prevLife: {}, rendered: new Set(), flying: new Set(), lastChain: 0,
+  reveal: null,
 };
 
 function resetState() {
@@ -70,7 +71,7 @@ function resetState() {
     after: 0, cards: new Map(), players: {}, champions: {}, championTemplates: {}, names: {},
     phase: {}, greenlight: {}, chain: [], options: new Map(), combats: new Map(), decks: {},
     prompt: null, busy: true, error: null, ended: false, ui: { mode: null }, log: [], pendingSounds: new Set(),
-    positions: new Map(), prevLife: {}, rendered: new Set(), flying: new Set(), lastChain: 0,
+    positions: new Map(), prevLife: {}, rendered: new Set(), flying: new Set(), lastChain: 0, reveal: null,
   });
 }
 
@@ -753,13 +754,20 @@ function renderModal() {
     const hand = cardsIn(S.me, COLL.Hand);
     html = `<h2>Starting hand</h2><div class="row">${hand.map((c) => faceHTML(c)).join("")}</div>
       <div class="buttons"><button data-act="keep">Keep</button><button class="secondary" data-act="mulligan">Mulligan</button></div>`;
-  } else if (p && !S.busy && p.kind === "choose" && p.candidates.some((uid) => !onBoard(uid))) {
-    // Two or three choices show at 300% of a card's size; a longer list keeps the normal size.
-    const few = p.candidates.length <= 3 ? " few" : "";
-    html = `<h2>Choose a ${chooseWord()}</h2><div class="row${few}">${p.candidates.map((uid) => {
-      const c = S.cards.get(uid) || { uid, card_id: NO_GUID, controller: S.me };
-      return cardHTML(c, "selectable");
-    }).join("")}</div>`;
+  } else if (p && !S.busy && p.kind === "choose" && ((p.revealed || []).length || p.candidates.some((uid) => !onBoard(uid)))) {
+    // A pick among revealed cards shows every revealed card, as the client's Coverflow does; only the legal ones can
+    // be chosen. Two or three cards show at 300% of a card's size; a longer list keeps the normal size.
+    const shown = (p.revealed || []).length ? p.revealed : p.candidates;
+    if (S.reveal && shown.some((uid) => S.reveal.cards.includes(uid))) S.reveal.seen = true;
+    const few = shown.length <= 3 ? " few" : "";
+    const title = (p.revealed || []).length ? `Revealed cards: choose a ${chooseWord()}` : `Choose a ${chooseWord()}`;
+    html = `<h2>${title}</h2><div class="row${few}">${shown.map((uid) =>
+      pickerCard(uid, p.candidates.includes(uid) ? "selectable" : "unselectable")).join("")}</div>`;
+  } else if (p && !S.busy && S.reveal && !S.reveal.seen && S.reveal.cards.length) {
+    // A look or reveal with nothing to choose is still shown.
+    S.reveal.seen = true;
+    const few = S.reveal.cards.length <= 3 ? " few" : "";
+    return openModal(`<h2>Revealed cards</h2><div class="row${few} reveal-view">${S.reveal.cards.map((uid) => pickerCard(uid, "")).join("")}</div>`);
   } else if (p && !S.busy && p.kind === "ended") {
     html = `<h2>${p.you_won ? "Victory" : "Defeat"}</h2>
       <p>${p.you_won ? "The opposing champion has fallen." : "Your champion has fallen."}</p>
@@ -767,6 +775,15 @@ function renderModal() {
   }
   modal.classList.toggle("hidden", !html);
   if (html) body.innerHTML = html;
+}
+
+// A card in a picker or a reveal: its painted face (as in hand) when the page knows the card, its back otherwise. A
+// revealed card's face comes from the reveal when the card itself has been turned face down again.
+function pickerCard(uid, extra) {
+  const held = S.cards.get(uid);
+  const known = (c) => c && c.card_id && c.card_id !== NO_GUID;
+  const c = known(held) ? held : ((S.reveal && S.reveal.faces[uid]) || held || { uid, card_id: NO_GUID, controller: S.me });
+  return known(c) && S.catalog.cards[c.card_id.toLowerCase()] ? faceHTML({ ...c, state: 0 }, extra) : cardHTML(c, extra);
 }
 
 function onBoard(uid) {
@@ -1231,7 +1248,7 @@ document.addEventListener("click", (e) => {
   const pile = e.target.closest("[data-pile]");
   if (pile) return showPile(pile.dataset.owner, pile.dataset.pile);
   const cardEl = e.target.closest("[data-uid]");
-  if (cardEl && cardEl.closest(".enlarged")) return;
+  if (cardEl && cardEl.closest(".enlarged, .reveal-view")) return;   // shown only, not a choice
   if (cardEl && cardEl.dataset.uid) {
     if (S.ui.mode === "modal") { S.ui = { mode: null }; $("#modal").classList.add("hidden"); }
     clickCard(Number(cardEl.dataset.uid));

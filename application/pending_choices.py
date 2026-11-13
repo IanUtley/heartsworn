@@ -13,6 +13,7 @@ import game_engine
 import db
 from pvp_db import db_card_owner_id
 from pvp_db import db_card_zone_details
+from pvp_db import db_card_state_value
 from pvp_db import db_ability_effect_rows
 from pvp_db import db_game_session_pids
 from application.player_transactions import extract_resource_guid
@@ -27,6 +28,18 @@ if TYPE_CHECKING:
 else:
     _HostBase = object
 
+
+
+def cards_in_deck_view(session_id, card_uids):
+    """The cards of ``card_uids`` that a picker took from a deck: their row is in the deck or the Choosing zone. A
+    revealed card in any other zone (a looked-at hand, a discard pile) is not one, and must never be put into a deck
+    when the picker closes."""
+    kept = []
+    for uid in card_uids or ():
+        row = db_card_zone_details(session_id, int(uid), conn=db._db)
+        if row and str(row[3] or "").lower() in ("deck", "choosing"):
+            kept.append(int(uid))
+    return kept
 
 class PendingChoicesMixin(_HostBase):
     """Methods of HCPHandler, mixed into it (see hconnect_server)."""
@@ -1040,23 +1053,37 @@ class PendingChoicesMixin(_HostBase):
         viewer = game_engine.UID.make(244, viewer_pid)
         opponent = game_engine.UID.make(244, other_pid)
         private = game_engine.Game(int(session.session_id), viewer, opponent)
+        from rules_port.runtime_helpers import card_collection_for_location
         ids = []
         positions = []
-        for card_uid, position, template_guid, _user_id, card_state in rows:
+        collections = []
+        owners = []
+        for card_uid, position, template_guid, user_id, card_state in rows:
             scid = game_engine.SessionCardId(game_engine.UID(int(card_uid)))
             _tpl, ctype, _name, cost, attack, defense, _gem = \
                 self._card_full_data(private, scid, template_guid)
+            # C# RevealCards reports each card in its current collection, under its own controller. A reveal of a hand
+            # labelled Deck took the cards out of the viewer's picture of that hand.
+            zone = db_card_zone_details(session.session_id, int(card_uid), conn=db._db)
+            collection = card_collection_for_location((zone[3] if zone else "") or "deck")
+            card_owner = game_engine.UID.make(244, int(user_id or chooser_pid))
             private.push_card_updated(
-                scid, chooser, game_engine.ECardCollections.Deck, ctype,
+                scid, card_owner, collection, ctype,
                 state=int(card_state or 0), template_id=template_guid,
                 cost=cost, attack=attack, defense=defense, nulling=False)
+            # A hidden-zone card is face down to every recipient unless the update is scoped to its viewer: without
+            # the tag the packet filter nulls the template id and the viewer is shown card backs.
+            private.events[-1]._hand_reveal_viewer_uid = viewer
+            private.events[-1]._temporary_reveal = True
             ids.append(scid)
             positions.append(int(position or 0))
+            collections.append(collection)
+            owners.append(card_owner)
         ev = private._make_event(game_engine.CardsRevealedSessionEventArgs)
         ev.player_id = chooser
         ev.session_card_ids = ids
-        ev.collections = [game_engine.ECardCollections.Deck] * len(ids)
-        ev.owning_players = [chooser] * len(ids)
+        ev.collections = collections
+        ev.owning_players = owners
         ev.positions = positions
         private._push(ev)
         handler = player_handlers.get(viewer_pid)
@@ -1131,6 +1158,14 @@ class PendingChoicesMixin(_HostBase):
             # The picker reuses the reveal the game already holds for these cards, if there is one.
             reveal = (None if (bstate or {}).get("private_reveal_sent")
                       else tuple((int(cu), int(pos or 0)) for cu, pos in rows))
+            # Each revealed card's own zone and controller (C# RevealCards sends the card's current collection and
+            # controlling player): a looked-at hand is not the chooser's deck.
+            from rules_port.runtime_helpers import owner_uid
+            zones = []
+            for cu, _pos in (reveal or ()):
+                zone = db_card_zone_details(session.session_id, int(cu), conn=db._db)
+                zones.append(((zone[3] if zone else "") or "deck",
+                              owner_uid(zone[2], pl_t, ai_t, bstate) if zone else player_uid))
             present_pick(g, PickRequest(
                 player_id=player_uid, prompt_ability=ability_guid, source_uid=int(source_uid),
                 instance_id=inst_id,
@@ -1138,7 +1173,7 @@ class PendingChoicesMixin(_HostBase):
                     index=target_index, template_id=target_id,
                     candidates=tuple(int(u) for u in pend["candidates"]),
                     minimum=int(pend["minimum_picks"]), maximum=int(pend["maximum_picks"])),),
-                prompt_kind="ability", reveal=reveal,
+                prompt_kind="ability", reveal=reveal, reveal_zones=tuple(zones),
                 reveal_ids=tuple(int(u) for u in pend["revealed_cards"])))
 
         if bstate.get("pvp"):
@@ -2198,10 +2233,11 @@ class PendingChoicesMixin(_HostBase):
                 log_req(f"    Revealed choice: {hex(int(chosen_uid))} -> hand "
                     f"(owner {pend['owner_id']})")
             remaining = [cu for cu in revealed if cu != int(chosen_uid)]
-            if remaining:
+            returning = cards_in_deck_view(session.session_id, remaining)
+            if returning:
                 from pvp_db import db_randomly_insert_deck_cards
                 db_randomly_insert_deck_cards(
-                    session.session_id, int(pend["owner_id"]), remaining)
+                    session.session_id, int(pend["owner_id"]), returning)
             # Hide every other revealed card.  The cards were presented by
             # CardsRevealed, not moved in the database, so they all remain in
             # the deck until this continuation resolves.
@@ -2223,7 +2259,7 @@ class PendingChoicesMixin(_HostBase):
             # can make a later draw disagree with what the client showed.
             from pvp_db import db_randomly_insert_deck_cards
             db_randomly_insert_deck_cards(
-                session.session_id, int(pend["owner_id"]), revealed)
+                session.session_id, int(pend["owner_id"]), cards_in_deck_view(session.session_id, revealed))
             self._hide_candidates_to_deck(g, session, pl_t, ai_t, revealed)
             self._send_battle_events(session, g, pl_t)
             log_req("    Revealed choice declined; returned cards to deck")
@@ -2308,10 +2344,13 @@ class PendingChoicesMixin(_HostBase):
         return True
 
     def _hide_candidates_to_deck(self, game, session, pl_t, ai_t, uids):
-        """Move deck-search / Shards-of-Fate candidates from the client's
-        Choosing zone back to the deck, rendered face-down (nullable).  A bare
-        CardUpdated without the CardMoved leaves the client's cache showing the
-        cards face-up on top of the deck."""
+        """Close the temporary view of picker / revealed cards, each in the zone it is really in.
+
+        A deck-search, Shards-of-Fate or top-of-deck card goes from the client's Choosing zone back to the deck,
+        rendered face-down (nullable): a bare CardUpdated without the CardMoved leaves the client's cache showing the
+        cards face-up on top of the deck. A card revealed from a hand or a discard pile never left that zone, so it
+        is only shown there again (the packet filter turns a hand card face down for everyone but its owner). Only a
+        card whose row is in the deck or the Choosing zone is written to the deck."""
         import hconnect_server as _hc
         from rules_port.zone_effects import state_after_zone_exit
 
@@ -2333,11 +2372,20 @@ class PendingChoicesMixin(_HostBase):
                 game.push_card_updated(c_scid, owner, game_engine.ECardCollections.Discard, ct2,
                                        template_id=c_row[0], cost=_c2, attack=_a2, defense=_d2)
                 continue
+            if str(c_row[3] or "").lower() == "hand":
+                # A reveal of a hand ("look at target opposing champion's hand") never moved its cards: they stay in
+                # the hand (moving them to the deck emptied the hand and left the chosen card undiscardable). The look
+                # is over, so the hand card is sent as an ordinary hand card again: its owner keeps the face, and the
+                # packet filter hides it from the player who looked.
+                owner = owner_of(c_row[2])
+                _tpl2, ct2, _n2, _c2, _a2, _d2, _g2 = self._card_full_data(
+                    game, c_scid, c_row[0], c_row[1])
+                game.push_card_updated(c_scid, owner, game_engine.ECardCollections.Hand, ct2,
+                                       template_id=c_row[0], cost=_c2, attack=_a2, defense=_d2,
+                                       state=int(db_card_state_value(session.session_id, int(cu), conn=db._db) or 0))
+                continue
             if str(c_row[3] or "").lower() not in ("deck", "choosing"):
-                # A reveal of a hand (Inquisition: "look at target opposing
-                # champion's hand") never moved its cards, so there is no
-                # deck projection to hide. Moving them to the deck emptied the
-                # hand and left the chosen card undiscardable.
+                # Any other zone (the card was moved while the picker was open) has no deck view to restore.
                 continue
             db_move_card_to_deck(
             session.session_id, int(cu), state_after_zone_exit(0),

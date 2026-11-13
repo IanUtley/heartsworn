@@ -188,6 +188,8 @@ body.webgl #table { display: none; }
 
 .card.playable { box-shadow: 0 0 0 2px var(--glow), 0 0 16px 2px rgba(124,240,255,.6); cursor: pointer; }
 .card.selectable { box-shadow: 0 0 0 3px #ffe066, 0 0 18px 4px rgba(255,224,102,.55); cursor: pointer; }
+/* A revealed card that is not a legal choice: shown, but not selectable. */
+.card.unselectable { filter: grayscale(.6) brightness(.55); cursor: not-allowed; }
 .card.selected { box-shadow: 0 0 0 3px #ffb020, 0 0 22px 6px rgba(255,176,32,.7); }
 /* A card a chain item targets: golden, wherever a panel shows it. */
 .card.chain-target, .portrait.chain-target { outline: 3px solid #ffb020; outline-offset: 3px; box-shadow: 0 0 16px 4px rgba(255,176,32,.6); }

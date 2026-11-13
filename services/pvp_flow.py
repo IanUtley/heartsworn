@@ -2595,9 +2595,12 @@ def _pvp_resolve_revealed_choice(handler, session, inner_bytes, my_pid, typed_pa
     state['_rules_port_attached'] = True
     move_deck_card_to_hand(EffectContext.from_rules_port(g, session, _resolve('_db'), handler, pl_t, ai_t, state, 'move_deck_card_to_hand', ability=None), chosen_uid, owner_id)
     remaining = [cu for cu in revealed if cu != chosen_uid]
-    if remaining:
+    from application.pending_choices import cards_in_deck_view
+    # Only a card the look took from a deck returns to it: a revealed hand card stays in its hand.
+    returning = cards_in_deck_view(session.session_id, remaining)
+    if returning:
         from pvp_db import db_randomly_insert_deck_cards
-        db_randomly_insert_deck_cards(session.session_id, owner_id, remaining, connection=_resolve('_db'))
+        db_randomly_insert_deck_cards(session.session_id, owner_id, returning, connection=_resolve('_db'))
     handler._hide_candidates_to_deck(g, session, pl_t, ai_t, remaining)
     _resolve('_pvp_send_same_events')(session, g, pl_t, ai_t)
     _resolve('pvp_save_state')(session, state)

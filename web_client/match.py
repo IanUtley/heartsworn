@@ -376,6 +376,11 @@ class WebMatch:
                 "source": pending.get("source_uid"),
                 "candidates": candidates,
             })
+            # A pick among revealed cards shows every revealed card, the ones that cannot be chosen too (the client's
+            # Coverflow for a SourceRevealed target).
+            revealed = [int(uid) for uid in (pending.get("revealed_cards") or ())]
+            if details["key"] == "pending_deck_search" and revealed and set(candidates) <= set(revealed):
+                out["revealed"] = revealed
         elif kind == "defend":
             out["attackers"] = details["attackers"]
         return out

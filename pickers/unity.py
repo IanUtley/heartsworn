@@ -38,8 +38,14 @@ def _present_reveal(game, request: PickRequest, ge) -> None:
         reveal_event.player_id = request.player_id
         reveal_event.session_card_ids = [
             ge.SessionCardId(ge.UID(int(uid))) for uid, _pos in request.reveal]
-        reveal_event.collections = [ge.ECardCollections.Deck] * count
-        reveal_event.owning_players = [request.player_id] * count
+        if len(request.reveal_zones) == count:
+            # C# RevealCards: each card's current collection and controlling player.
+            from rules_port.runtime_helpers import card_collection_for_location
+            reveal_event.collections = [card_collection_for_location(zone) for zone, _owner in request.reveal_zones]
+            reveal_event.owning_players = [owner for _zone, owner in request.reveal_zones]
+        else:
+            reveal_event.collections = [ge.ECardCollections.Deck] * count
+            reveal_event.owning_players = [request.player_id] * count
         reveal_event.positions = [int(pos or 0) for _uid, pos in request.reveal]
         game._push(reveal_event)
     reveal_event.ability_instance_id = int(request.instance_id)

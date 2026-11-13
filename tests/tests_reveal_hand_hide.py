@@ -66,6 +66,34 @@ def test_opposing_seat_deck_cards_are_reported_under_their_owner():
     assert owners == [opponent.uid64]
 
 
+def test_a_looked_at_hand_is_shown_as_hand_cards_again_and_never_put_in_a_deck():
+    """Closing a look at the opposing hand sends each card as a card of that hand, under its owner (the packet filter
+    then turns it face down for the player who looked). The card is not reported in a deck and its row stays in hand."""
+    import game_engine
+    from application.pending_choices import PendingChoicesMixin, cards_in_deck_view
+
+    db = make_db()
+    add_card(db, 920, 7, TPL_GLADIATOR, loc="hand")
+    add_card(db, 921, 5, TPL_GLADIATOR, loc="deck")
+    session = type("Session", (), {"session_id": 1})()
+    looker = game_engine.UID.make(244, 5)
+    victim = game_engine.UID.make(244, 7)
+
+    host = mock.Mock()
+    host._card_full_data.return_value = (None, "Troop", "Gladiator", 0, 0, 0, "")
+    game = mock.Mock()
+    with mock.patch("application.pending_choices.db", type("D", (), {"_db": db})):
+        PendingChoicesMixin._hide_candidates_to_deck(host, game, session, looker, victim, [920, 921])
+        assert cards_in_deck_view(1, [920, 921]) == [921]
+
+    shown = {int(call.args[0].uid.uid64): (call.args[1].uid64, call.args[2])
+             for call in game.push_card_updated.call_args_list}
+    assert shown[920] == (victim.uid64, game_engine.ECardCollections.Hand)
+    assert shown[921] == (looker.uid64, game_engine.ECardCollections.Deck)
+    locations = dict(db.execute("SELECT card_uid, location FROM game_cards WHERE card_uid IN (920, 921)"))
+    assert locations == {920: "hand", 921: "deck"}
+
+
 if __name__ == "__main__":
     # Written in pytest style: run through pytest so each test executes and failures
     # set the exit status. A missing pytest fails loudly.

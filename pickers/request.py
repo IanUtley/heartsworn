@@ -52,6 +52,9 @@ class PickRequest:
     # here (the caller already sent one). An existing reveal is reused when its cards are exactly ``reveal_ids``.
     reveal: tuple[tuple[int, int], ...] | None = None
     reveal_ids: tuple[int, ...] = ()
+    # Parallel to ``reveal``: each revealed card's zone name (the game_cards location) and its controller's player id.
+    # Empty means every card is in the chooser's deck.
+    reveal_zones: tuple[tuple[str, Any], ...] = ()
 
     def option_target_ids(self) -> tuple[str, ...]:
         return self.target_ids or tuple(target.template_id for target in self.targets)

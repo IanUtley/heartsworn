@@ -12,7 +12,7 @@
     return {
       me, cards: new Map(), players: {}, champions: {}, championTemplates: {}, names: {}, phase: {}, greenlight: {},
       chain: [], options: new Map(), combats: new Map(), decks: {}, ended: false,
-      pendingSounds: new Set(), log: [], positions: new Map(),
+      pendingSounds: new Set(), log: [], positions: new Map(), reveal: null,
     };
   }
 
@@ -66,9 +66,26 @@
           card.card_id = prev.card_id;   // a hidden refresh of a card we saw
         }
         state.cards.set(card.uid, card);
+        // A revealed card's face is kept with the reveal: the reveal is temporary, and the update that turns the card
+        // face down again can arrive before the page has shown it.
+        if (state.reveal && state.reveal.cards.includes(card.uid) && card.card_id && card.card_id !== NO_GUID) {
+          state.reveal.faces[card.uid] = card;
+        }
         want(fx, "cards", card.card_id);
         (card.abilities || []).forEach((a) => want(fx, "abilities", a));
         fx.push({ type: "flush_sounds" });
+        break;
+      }
+      case "CardsRevealed": {
+        // The cards a look or reveal shows this player (the client's Coverflow). The faces already known are taken now;
+        // a face that arrives in a later packet is added by CardUpdated above.
+        const cards = (ev.session_card_ids || []).slice();
+        const faces = {};
+        cards.forEach((uid) => {
+          const known = state.cards.get(uid);
+          if (known && known.card_id && known.card_id !== NO_GUID) faces[uid] = known;
+        });
+        state.reveal = { player: ev.player_id, cards, faces, instance: ev.ability_instance_id || 0, seen: false };
         break;
       }
       case "DeckCreated":
