@@ -1579,7 +1579,11 @@ def _pvp_play_spell(handler, session, played_card_uid, my_pid, inner_bytes, type
     played_from_hand = str(source_location).lower() == 'hand'
     inst_id = _resolve('port_queue_stack_item')(state, {'kind': 'spell', 'source_uid': int(played_card_uid), 'ability_guids': ability_guids, 'target_uid': target_uid, 'x_cost': x_cost, 'played_from_hand': played_from_hand, 'activations': {guid: activation.as_dict() for guid, activation in activations.items()}})
     _chain_tpl2 = _ge.PLAY_CARD_ABILITY_TEMPLATE_ID if not ability_guids else ability_guids[0]
-    g.push_ability_on_chain(scid, _ge.ResourceId.from_str(_chain_tpl2), ability_instance_id=inst_id)
+    # The chain item names its chosen targets, so the client can draw the line from the spell to each one (PvE does the
+    # same in application/card_play.py). Cost payments are not targets of the spell.
+    chain_targets = [_ge.SessionCardId(_ge.UID(int(uid))) for uid in effect_targets]
+    g.push_ability_on_chain(scid, _ge.ResourceId.from_str(_chain_tpl2), ability_instance_id=inst_id,
+                            target_card_ids=chain_targets)
     state['stack'] = view.get('stack') or []
     state['stack_player_passed'] = False
     state['stack_ai_passed'] = False
