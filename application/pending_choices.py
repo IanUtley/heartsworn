@@ -2314,6 +2314,11 @@ class PendingChoicesMixin(_HostBase):
         cards face-up on top of the deck."""
         import hconnect_server as _hc
         from rules_port.zone_effects import state_after_zone_exit
+
+        def owner_of(user_id):
+            # pl_t is the controller only when the card belongs to its seat. In PvP both seats have real ids, so a card
+            # of the opposing seat (a deck search of its deck) must not be labelled with pl_t.
+            return pl_t if int(user_id or 0) == int(pl_t.uid64) >> 8 else ai_t
         for cu in uids:
             c_scid = game_engine.SessionCardId(game_engine.UID(int(cu)))
             c_row = db_card_zone_details(
@@ -2322,7 +2327,7 @@ class PendingChoicesMixin(_HostBase):
                 continue
             if str(c_row[3] or "").lower() == "discard":
                 # A discard pile pick never left the pile: show the card back in the discard collection.
-                owner = pl_t if (c_row[2] or 0) != 0 else ai_t
+                owner = owner_of(c_row[2])
                 _tpl2, ct2, _n2, _c2, _a2, _d2, _g2 = self._card_full_data(
                     game, c_scid, c_row[0], c_row[1])
                 game.push_card_updated(c_scid, owner, game_engine.ECardCollections.Discard, ct2,
@@ -2337,7 +2342,7 @@ class PendingChoicesMixin(_HostBase):
             db_move_card_to_deck(
             session.session_id, int(cu), state_after_zone_exit(0),
             conn=db._db)
-            owner = pl_t if (c_row[2] or 0) != 0 else ai_t
+            owner = owner_of(c_row[2])
             _tpl2, ct2, _n2, _c2, _a2, _d2, _g2 = self._card_full_data(
                 game, c_scid, c_row[0], c_row[1])
             game.push_card_updated(c_scid, owner,

@@ -41,6 +41,31 @@ def test_hand_revealed_cards_stay_in_hand_when_hidden():
     assert locations[901] == "deck"
 
 
+def test_opposing_seat_deck_cards_are_reported_under_their_owner():
+    """A PvP deck search of the opposing seat hides that seat's cards with that seat as controller.
+
+    Live symptom (the AI's Mindsnatch Raven searched the human's deck): the cards were reported under the chooser,
+    so the human's deck showed 0 and the AI's showed 96.
+    """
+    import game_engine
+    from application.pending_choices import PendingChoicesMixin
+
+    db = make_db()
+    add_card(db, 910, 7, TPL_GLADIATOR, loc="deck")
+    session = type("Session", (), {"session_id": 1})()
+    chooser = game_engine.UID.make(244, 5)
+    opponent = game_engine.UID.make(244, 7)
+
+    host = mock.Mock()
+    host._card_full_data.return_value = (None, "Troop", "Gladiator", 0, 0, 0, "")
+    game = mock.Mock()
+    with mock.patch("application.pending_choices.db", type("D", (), {"_db": db})):
+        PendingChoicesMixin._hide_candidates_to_deck(host, game, session, chooser, opponent, [910])
+
+    owners = [call.args[1].uid64 for call in game.push_card_updated.call_args_list]
+    assert owners == [opponent.uid64]
+
+
 if __name__ == "__main__":
     # Written in pytest style: run through pytest so each test executes and failures
     # set the exit status. A missing pytest fails loudly.
