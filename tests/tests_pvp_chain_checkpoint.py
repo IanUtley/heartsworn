@@ -105,3 +105,19 @@ def test_revealed_pick_completes_the_paused_chain_item():
         assert locations == {2049: "hand", 2305: "discard", 2561: "hand"}, locations
     finally:
         shared._db = previous
+
+
+def test_a_charge_gain_on_a_raw_pvp_checkpoint_writes_the_raw_pool():
+    """Plague Raven's "each champion gains 2 charges" changes the raw ``chg_<pid>`` pool of a PvP checkpoint.
+
+    The generic resource path wrote ``player_charges`` (a side key), which a raw checkpoint never reads, so the charge
+    gain was lost while its event still went out.
+    """
+    from unittest import mock
+    from rules_port.resources import apply_resource_change
+
+    state = {"pvp": True, "pids": [5, 6], "chg_5": 1, "chg_6": 0}
+    with mock.patch("rules_port.static_rules.champion_int_attribute", return_value=0):
+        change = apply_resource_change(state, "player", "chargepoints", 2)
+    assert (state["chg_5"], change.new_value) == (3, 3), state
+    assert "player_charges" not in state, state

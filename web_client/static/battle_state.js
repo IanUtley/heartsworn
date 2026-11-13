@@ -127,11 +127,13 @@
         state.combats.clear();
         break;
       case "ChampionHealthChanged": {
-        const delta = ev.new_damage_value - ev.old_damage_value;
-        if (delta > 0) fx.push({ type: "sfx", name: "Aud_FX_Card_Single_Melee_Damage_Medium_01", group: "combat" });
-        if (delta < 0) fx.push({ type: "sfx", name: "Aud_FX_Champion_Life_Up", group: "combat" });
-        if (delta) fx.push({ type: "float", player: ev.player_id, text: delta > 0 ? `-${delta}` : `+${-delta}`,
-          kind: delta > 0 ? "damage" : "heal" });
+        // The event carries the champion's health before and after (the client sets health from NewDamageValue), so a
+        // fall in health is damage and a rise is a heal.
+        const damage = ev.old_damage_value - ev.new_damage_value;
+        if (damage > 0) fx.push({ type: "sfx", name: "Aud_FX_Card_Single_Melee_Damage_Medium_01", group: "combat" });
+        if (damage < 0) fx.push({ type: "sfx", name: "Aud_FX_Champion_Life_Up", group: "combat" });
+        if (damage) fx.push({ type: "float", player: ev.player_id, text: damage > 0 ? `-${damage}` : `+${-damage}`,
+          kind: damage > 0 ? "damage" : "heal" });
         break;
       }
       case "TroopCardPlayed": case "SpellCardPlayed": case "ArtifactCardPlayed": case "ResourceCardPlayed":

@@ -367,6 +367,27 @@ def resource_threshold_grants(db, session_id, owner_id, ability_guids, state,
     return []
 
 
+_RAW_POOL_KEYS = {
+    "currentresource": "res_", "totalresource": "res_total_", "chargepoints": "chg_", "threshold": "thresh_",
+}
+_SIDE_POOL_KEYS = {
+    "currentresource": "_resources", "totalresource": "_total_resources", "chargepoints": "_charges",
+    "threshold": "_threshold",
+}
+
+
+def _pool_key(state, side: str, kind: str) -> str:
+    """The battle-state key of one side's pool of ``kind``.
+
+    A PvP chain item resolves against the raw checkpoint, which keys each participant's pools by the raw player id
+    (``chg_<pid>``). A side-oriented view (it carries ``pvp_health_map``) and PvE key them by side (``ai_charges``).
+    Writing the side key into a raw checkpoint left the real pool unchanged, so the charge never showed.
+    """
+    if isinstance(state, dict) and state.get("pvp") and not state.get("pvp_health_map"):
+        return f"{_RAW_POOL_KEYS[kind]}{_owner_for_side(state, side)}"
+    return f"{side}{_SIDE_POOL_KEYS[kind]}"
+
+
 def apply_resource_change(state: MutableMapping, side: str, property: str,
                           amount: int, *, color: int = 0) -> ResourceChange:
     """Apply one typed resource change and return its client-facing delta."""
@@ -374,7 +395,7 @@ def apply_resource_change(state: MutableMapping, side: str, property: str,
     property = str(property).lower()
     amount = int(amount)
     if property == "threshold":
-        thresholds = state.setdefault(f"{side}_threshold", {})
+        thresholds = state.setdefault(_pool_key(state, side, "threshold"), {})
         old = thresholds.get(color)
         if old is None:
             old = thresholds.get(str(color), 0)
@@ -391,11 +412,7 @@ def apply_resource_change(state: MutableMapping, side: str, property: str,
         from .static_rules import champion_int_attribute
         amount += champion_int_attribute(
             state, _owner_for_side(state, side), "ChargePointBonus")
-    key = {
-        "currentresource": f"{side}_resources",
-        "totalresource": f"{side}_total_resources",
-        "chargepoints": f"{side}_charges",
-    }[property]
+    key = _pool_key(state, side, property)
     old = int(state.get(key, 0) or 0)
     new = max(0, old + amount)
     state[key] = new
