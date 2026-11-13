@@ -238,6 +238,9 @@ class Scope:
     # The test each of the running clause's targets must pass (its RequiresTargetPassesFilterCondition), or None.
     gate: Any = None
     applied: dict[int, bool] = field(default_factory=dict)   # effect position -> whether it applied (C# applied_effects)
+    # Effect position -> the owners an invoke at that position has still to run for. A child that paused for one
+    # owner's choice leaves the later owners here, so the resumed frame invokes for them before it moves on.
+    invoke_owners: dict[int, list[int]] = field(default_factory=dict)
 
 
 class NeedsConversation(Exception):
@@ -1666,7 +1669,9 @@ def _run_effects(guid: str, root: MechanicsObject, scope: Scope, start: int) -> 
                 # choice is made at once (run through the native leaf below).
                 _pause_for_double_choice(guid, position, effect_raw, scope)
             if _short(effect_type) == "ActivateAbilityEffectTemplate":
-                _invoke(guid, position, effect_raw, scope, _target_owners(root, index, scope))
+                owners = scope.invoke_owners.pop(position, None)
+                _invoke(guid, position, effect_raw, scope,
+                        _target_owners(root, index, scope) if owners is None else owners)
                 continue
             if _short(effect_type) == "RepeatingAbilityEffectTemplate":
                 _repeat(guid, position, effect_raw, root, index, scope)
@@ -1929,7 +1934,7 @@ def _repeat(parent_guid: str, position: int, effect_raw: dict[str, Any], root: M
     loop = _loop_count(effect_raw.get("m_LoopCount") or {}, scope)
     owners = _target_owners(root, index, scope)
     for _ in range(max(0, loop)):
-        _invoke(parent_guid, position, effect_raw["m_RepeatingEffect"], scope, owners)
+        _invoke(parent_guid, position, effect_raw["m_RepeatingEffect"], scope, owners, resumable=False)
 
 
 ZERO_GUID = "00000000-0000-0000-0000-000000000000"
@@ -1951,7 +1956,8 @@ def sack_pool(unlucky: bool) -> list[str]:
     return pool
 
 
-def _invoke(parent_guid: str, position: int, effect_raw: dict[str, Any], scope: Scope, owners: list[int]) -> None:
+def _invoke(parent_guid: str, position: int, effect_raw: dict[str, Any], scope: Scope, owners: list[int],
+            resumable: bool = True) -> None:
     """C# ActivateAbilityEffectTemplate: run the invoked ability once for each owner the invoke's target names (the
     controller of "You invoke", each opposing champion of "Each opposing champion invokes"), as a child of the same
     source and event. Its own trigger is not checked. A choice the child pauses for is kept with this invoke as the
@@ -1965,7 +1971,7 @@ def _invoke(parent_guid: str, position: int, effect_raw: dict[str, Any], scope: 
     if not child_guid or child_guid == ZERO_GUID:
         return
     child_root = _load("AbilityTemplate", child_guid)
-    for owner in owners:
+    for done, owner in enumerate(owners, start=1):
         child_scope = Scope(context=scope.context, source_uid=int(scope.source_uid), owner_uid=int(owner),
                             table=child_root.version_table, event=dict(scope.event),
                             root_ability=scope.root_ability or parent_guid, invoked=True,
@@ -1984,7 +1990,10 @@ def _invoke(parent_guid: str, position: int, effect_raw: dict[str, Any], scope: 
                      "chosen": {str(k): v for k, v in scope.chosen.items()},
                      "picked": {str(k): list(v) for k, v in scope.picked.items()},
                      "variables": dict(scope.variables), "resolved": _resolved_json(scope),
-                     "applied": {str(k): v for k, v in scope.applied.items()}}
+                     "applied": {str(k): v for k, v in scope.applied.items()},
+                     # "Each champion chooses ...": the owners after the one whose choice paused the child.
+                     # A repeat's wrapped invoke is not re-entered by position (the position is the repeat's).
+                     "remaining_owners": [int(other) for other in owners[done:]] if resumable else []}
             _append_chain(pause.continuation, frame)
             raise
 
@@ -2033,6 +2042,9 @@ def _frame_scope(frame: dict[str, Any], context: Any) -> tuple[MechanicsObject, 
     scope.variables = dict(frame.get("variables") or {})
     scope.resolved_by_instance = {int(k): [int(uid) for uid in v] for k, v in (frame.get("resolved") or {}).items()}
     scope.applied = {int(k): bool(v) for k, v in (frame.get("applied") or {}).items()}
+    remaining = [int(owner) for owner in (frame.get("remaining_owners") or ())]
+    if remaining:
+        scope.invoke_owners[int(frame["position"])] = remaining
     return root, scope
 
 
@@ -2132,8 +2144,12 @@ def _resume_frames(frame: dict[str, Any] | None, context: Any) -> None:
     while frame is not None:
         frame_root, frame_scope = _frame_scope(frame, context)
         nxt = frame.get("parent")
+        # An invoke that still has owners to run for is entered again (for those owners only); otherwise the frame
+        # carries on after its invoke clause.
+        again = int(frame["position"]) in frame_scope.invoke_owners
         try:
-            _run_effects(frame["ability_guid"], frame_root, frame_scope, start=int(frame["position"]) + 1)
+            _run_effects(frame["ability_guid"], frame_root, frame_scope,
+                         start=int(frame["position"]) + (0 if again else 1))
         except (NeedsChoice, NeedsConversation) as pause:
             _append_chain(pause.continuation, nxt)
             raise

@@ -471,6 +471,26 @@ cost, target, and transaction identity before mutating state.
   so only scanning the entering card's own champion leaves the opposing
   champion's trait unfired. The authored trigger conditions still decide what
   actually fires.
+- `GameStartedEvent` is dispatched once per game in both modes: discovery
+  already scans both sides, so a dispatch per owner queues every start-of-game
+  ability twice. In PvP the event fires at game setup, before the RulesPort
+  session exists (it attaches when the mulligan completes), so its triggers
+  sit only in `state['stack']`; `state['pvp_game_start_chain']` lists their
+  instance ids. `_pvp_auto_pass_game_start_chain` puts the top one on the
+  native chain (the PvP chain holds one item at a time and
+  `rehydrate_projected_chain` only knows descriptors queued through the port)
+  and passes for the seat with priority until an item needs a choice; the
+  transaction that answers the choice calls it again (`application/turn_flow`).
+  It never passes a window whose top item is not an opening item — passing a
+  bare phase window runs whole turns.
+- An interpreted invoke that runs "for each owner" (`ir_exec._invoke`, "each
+  champion chooses ...") records the owners still to run in the paused frame
+  (`remaining_owners`); the resumed frame re-enters the invoke for them before
+  it moves on. Without that the first owner's prompt dropped every later one.
+- A champion-sourced `WhileCardInPlay` effect is never expired by the
+  "source lost its ability" check: a PvP champion has a `game_cards` row
+  (`location='champion'`) whose `card_abilities` does not list the champion's
+  abilities, so the check must not read it.
 - A `CardUpdated` with a changed collection or controller causes
   `ClientStateCache.Update` to derive the UI `CardMoved` before forwarding the
   update to `UIBattle`. Do not also send an explicit class-50 `CardMoved` for

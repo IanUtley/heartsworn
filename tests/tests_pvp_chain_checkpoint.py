@@ -121,23 +121,3 @@ def test_a_charge_gain_on_a_raw_pvp_checkpoint_writes_the_raw_pool():
         change = apply_resource_change(state, "player", "chargepoints", 2)
     assert (state["chg_5"], change.new_value) == (3, 3), state
     assert "player_charges" not in state, state
-
-
-def test_game_start_chain_is_passed_through_before_the_first_turn():
-    """Blood Sphinx's start-of-game trigger is on the stack when the mulligan completes. Each seat's priority pass
-    resolves it, and the loop stops once the stack is empty."""
-    from unittest import mock
-    from services import pvp_core
-
-    states = [{"stack": [{"kind": "trigger"}], "priority_pid": 5},   # the entry log
-              {"stack": [{"kind": "trigger"}], "priority_pid": 5},   # first pass
-              {"stack": [], "priority_pid": 5}]
-    loads = iter(states)
-    passes = []
-    handler = object()
-    resolve = {"pvp_load_state": lambda session: next(loads),
-               "player_handlers": {5: handler},
-               "route_pvp_pass": lambda h, session: passes.append(h)}
-    with mock.patch.object(pvp_core, "_resolve", lambda name: resolve[name]):
-        assert pvp_core._pvp_auto_pass_game_start_chain(object()) == 1
-    assert passes == [handler]

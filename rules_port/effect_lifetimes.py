@@ -153,8 +153,11 @@ def _source_ability_gone(db, session_id, entry):
     list is rebuilt -- ``AbilityManager.RemoveAbilities(card, WhileCardInPlay)`` runs before
     ``Session.TransformCard``/``Session.RevertCard`` swap the template, and before ``SetChampionTalents`` rebuilds a
     champion's abilities.  The server has no effect-instance list, so the same boundary is read from the source's
-    current authored abilities.  A source with no card row (a champion, whose abilities live on the handler) keeps its
-    effects: nothing here changes its list.
+    current authored abilities.  A champion keeps its effects: its abilities live on the handler and in
+    ``champion_abilities``, not on a card's list, and nothing here changes them.  In PvE a champion has no card row; in
+    PvP it has one (``location='champion'``) whose ``card_abilities`` never carries the champion's abilities, so
+    reading that list dropped every while-in-play grant a champion made (Blood Sphinx's "copy it" was gone by the
+    next phase).
     """
     ability = str(entry.get("source_ability") or "").lower()
     source = entry.get("source_uid")
@@ -162,7 +165,8 @@ def _source_ability_gone(db, session_id, entry):
         return False
     from pvp_db import (db_card_ability_list, db_card_gem_ability_guids,
                         db_card_source_info)
-    if not db_card_source_info(session_id, int(source), conn=db):
+    row = db_card_source_info(session_id, int(source), conn=db)
+    if not row or str(row[2] or "").lower() in ("champion", "champions"):
         return False
     abilities = {str(value).lower() for value in
                  db_card_ability_list(session_id, int(source), conn=db)}

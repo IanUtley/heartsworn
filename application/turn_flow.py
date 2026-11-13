@@ -563,6 +563,14 @@ class TurnFlowMixin(_HostBase):
                 f"{[getattr(type(ev), 'CLASS_ID', 0) for ev in game.events]}")
             if game is not None and not emitted and not prompt_pending:
                     self._send_battle_events(session, game, player_uid)
+            # An answered opening choice (Blood Sphinx's action) can leave further GameStarted triggers on the chain.
+            # They are mandatory setup, so pass them through now instead of handing a player a bare pass window.
+            if (session.session_name or "").startswith("tourney-"):
+                try:
+                    from services.pvp_core import _pvp_auto_pass_game_start_chain
+                    _pvp_auto_pass_game_start_chain(session)
+                except Exception as exc:
+                    log_req(f"    PvP game-start chain continuation failed: {exc!r}")
             # A manual champion activation leaves a chain item pending.  The
             # native resolver emits the mutation packet, but the PvP adapter
             # still owns the client-facing response window.  Project the

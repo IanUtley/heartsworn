@@ -323,3 +323,102 @@ def test_a_two_target_trigger_takes_two_cards_and_other_choices_take_one():
     trigger = {"target_entries": [{"minimum": 2, "maximum": 2}]}
     assert web_match.WebMatch._pick_bounds("pending_trigger", trigger) == (2, 2)
     assert web_match.WebMatch._pick_bounds("pending_choice", {}) == (1, 1)
+
+
+@_bound_to_current_db
+def test_a_start_of_game_choice_is_asked_before_the_first_turn():
+    """A champion whose start-of-game trigger makes each champion choose a card in hand (Blood Sphinx) asks the web
+    seat before the first turn, asks the AI seat too, and leaves both chosen cards with the granted ability.
+
+    The triggers used to stay on the PvP stack (the RulesPort chain never held them), so the opening passes ran whole
+    turns instead; the second champion's choice was dropped when the first paused; and the grant was removed at the
+    next phase because a PvP champion's card row lists none of its abilities.
+    """
+    from db import _db
+    from pvp_db import db_get_card_abilities
+    from gamedata import DEFAULT_RECORD_STORE, ability_graph
+    # Found from the authored data: a GameStarted champion trigger that invokes a child which grants an ability to a
+    # card the player picks.
+    rows = _db.execute(
+        "SELECT ca.champion_guid, inv.param, g.param FROM champion_abilities ca "
+        "JOIN card_abilities_meta cam ON cam.ability_guid=ca.ability_guid "
+        "JOIN ability_effects inv ON inv.ability_guid=ca.ability_guid "
+        "AND inv.effect_type='ActivateAbilityEffectTemplate' "
+        "JOIN ability_effects g ON g.ability_guid=inv.param AND g.effect_type='GrantAbilityEffectTemplate' "
+        "WHERE cam.trigger_event_type LIKE '%GameStartedEvent' ORDER BY ca.champion_guid").fetchall()
+    trigger = next((row for row in rows if any(
+        target.requires_input and not target.is_auto
+        for target in getattr(ability_graph(DEFAULT_RECORD_STORE, str(row[1]).lower()), "targets", ()) or ())), None)
+    assert trigger, "no champion with a start-of-game hand choice in the seed"
+    action = _db.execute(
+        "SELECT guid, card_type FROM card_templates WHERE card_type IN ('BasicAction', 'QuickAction') "
+        "AND is_pve=0 ORDER BY guid LIMIT 1").fetchone()
+    decks = _ensure_two_decks()
+    previous = _db.execute("SELECT champion_guid FROM fra_encounters WHERE deck_guid=?",
+                           (decks[0]["deck_guid"],)).fetchone()[0]
+    _db.execute("UPDATE fra_encounters SET champion_guid=? WHERE deck_guid=?", (trigger[0], decks[0]["deck_guid"]))
+    _db.commit()
+    match = None
+    try:
+        match, snap, packets, after = _new_human_first_match(web_match.deck_choices())
+
+        def hand(pid):
+            return [int(row[0]) for row in _db.execute(
+                "SELECT card_uid FROM game_cards WHERE session_id=? AND user_id=? AND location='hand' "
+                "ORDER BY position", (match.session_id, pid)).fetchall()]
+
+        def granted():
+            return {int(row[0]) for row in _db.execute(
+                "SELECT card_uid FROM game_cards WHERE session_id=? AND location='hand' AND card_abilities LIKE ?",
+                (match.session_id, f"%{str(trigger[2]).lower()}%")).fetchall()}
+
+        abilities = db_get_card_abilities(action[0].lower())[0]
+        forced = False
+        for _ in range(6):
+            kind = snap["prompt"]["kind"]
+            if kind == "mulligan" and not forced:
+                # Both seats hold two actions, so each has a real choice to make.
+                for pid in (match.human_pid, match.ai_pid):
+                    for uid in hand(pid)[:2]:
+                        _db.execute(
+                            "UPDATE game_cards SET template_guid=?, card_template_id=?, card_type=?, "
+                            "card_abilities=? WHERE session_id=? AND card_uid=?",
+                            (action[0].lower(), action[0].lower(), action[1], abilities, match.session_id, uid))
+                _db.commit()
+                forced = True
+            if kind not in ("goes_first", "mulligan"):
+                break
+            match.submit({"type": "play_first" if kind == "goes_first" else "keep"})
+            snap, more, after = _settle(match, after)
+        assert forced, "the mulligan prompt never came"
+        assert snap["error"] is None, snap["error"]
+
+        # The choice is the first thing the web seat is asked: turn 1, both hands still seven cards.
+        prompt = snap["prompt"]
+        mine = hand(match.human_pid)
+        assert prompt["kind"] == "choose" and prompt["pending"] == "pending_trigger", prompt
+        assert (prompt["turn_number"], prompt["min_picks"], prompt["max_picks"]) == (1, 1, 1), prompt
+        assert sorted(prompt["candidates"]) == sorted(mine[:2]), (prompt, mine)
+        assert (len(mine), len(hand(match.ai_pid))) == (7, 7)
+
+        match.submit({"type": "choose", "card": prompt["candidates"][1]})
+        snap, more, after = _settle(match, after)
+        assert snap["error"] is None, snap["error"]
+        # The AI seat chose as well, nothing is left on the chain, and it is still the first turn.
+        state = match._state()
+        assert snap["prompt"]["kind"] == "priority" and snap["prompt"]["turn_number"] == 1, snap["prompt"]
+        assert not state.get("stack") and not state.get("pvp_game_start_chain"), state.get("stack")
+        chosen = granted()
+        assert prompt["candidates"][1] in chosen and len(chosen) == 2, chosen
+        assert len(chosen & set(hand(match.ai_pid))) == 1, chosen
+
+        # A champion's grant lasts while the champion is in play: it survives the next phase.
+        match.submit({"type": "pass"})
+        snap, more, after = _settle(match, after)
+        assert snap["error"] is None, snap["error"]
+        assert granted() == chosen, (granted(), chosen)
+    finally:
+        if match is not None:
+            match.close()
+        _db.execute("UPDATE fra_encounters SET champion_guid=? WHERE deck_guid=?", (previous, decks[0]["deck_guid"]))
+        _db.commit()

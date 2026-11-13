@@ -70,31 +70,56 @@ def _pvp_auto_pass_game_start_chain(session):
 
     The opening triggers (Blood Sphinx: each champion chooses a target action in hand) sit on the chain until a seat
     passes. Passing is the same route a player's pass takes, so each item resolves as it would in play. The loop stops
-    when the chain is empty or a trigger needs a choice; that choice keeps its prompt for the player to answer.
+    when the opening items are gone or a trigger needs a choice; that choice keeps its prompt for the player to answer,
+    and the answer's transaction calls this again for the items behind it. Only the items GameStartedEvent queued
+    (``pvp_game_start_chain``) are passed for: a later play's chain is never passed here.
     """
     passed = 0
     handlers = _resolve("player_handlers")
     entry = _resolve("pvp_load_state")(session) or {}
+    opening = {int(value) for value in (entry.get("pvp_game_start_chain") or ())}
+    if not opening:
+        return 0
     log_req(f"    PvP game-start chain: stack={len(entry.get('stack') or [])} priority={entry.get('priority_pid')} "
             f"turn={entry.get('turn_pid')} pending={[k for k in entry if k.startswith('pending') and entry.get(k)]}")
-    # The opening triggers live in the PvP stack; the RulesPort chain only knows them once they are projected onto it.
-    # Without this the passes complete priority windows and never resolve the items (PvE does the same at its opening).
     port = getattr(session, "_rules_port_session", None)
-    if port is not None and port.chain.is_empty:
-        port.rehydrate_projected_chain()
-        log_req("    PvP game-start chain: projected onto the RulesPort chain")
-    for _ in range(12):
+    if port is None:
+        return 0
+    for _ in range(64):
         state = _resolve("pvp_load_state")(session) or {}
-        if not state.get("stack") or any(state.get(key) for key in (
-                "pending_trigger", "pending_choice", "pending_deck_search", "pending_conversation",
-                "pending_discard_ability")):
+        stack = state.get("stack") or []
+        if not any(int(item.get("instance_id", 0) or 0) in opening for item in stack):
+            # Every opening item has resolved: the first turn's priority is the players' from here on.
+            state.pop("pvp_game_start_chain", None)
+            _resolve("pvp_save_state")(session, state)
             break
-        pid = state.get("priority_pid") or state.get("turn_pid")
+        if any(state.get(key) for key in (
+                "pending_trigger", "pending_choice", "pending_deck_search", "pending_conversation",
+                "pending_discard_ability", "resolution_paused")):
+            break
+        item = stack[-1]
+        if int(item.get("instance_id", 0) or 0) not in opening:
+            break
+        if port.chain.is_empty:
+            # The opening triggers were queued before this port existed, so they live only in the PvP stack. The native
+            # chain holds one item at a time (its resolver queues the next), so put the top item on it; without that
+            # the passes below complete bare phase windows and run whole turns without resolving anything.
+            owner = item.get("source_owner_uid") or state.get("turn_pid")
+            if owner is None:
+                break
+            port.queue_projected_chain(item, int(owner), first_player_id=port.active_player_id)
+            port.sync_to_pvp_state(state)
+            _resolve("pvp_save_state")(session, state)
+            log_req(f"    PvP game-start chain: projected item {item.get('instance_id')} onto the RulesPort chain")
+        elif not port.chain.contains_ability(int(item.get("instance_id", 0) or 0)):
+            break
+        pid = _raw_priority_pid(port) or state.get("priority_pid") or state.get("turn_pid")
         handler = handlers.get(int(pid)) if pid else None
         if handler is None:
             break
         try:
-            _resolve("route_pvp_pass")(handler, session)
+            if not _resolve("route_pvp_pass")(handler, session):
+                break
         except Exception as exc:   # a failed pass must be visible in the log, not swallowed
             log_req(f"    PvP game-start chain: pass failed: {exc!r}")
             break
@@ -102,6 +127,18 @@ def _pvp_auto_pass_game_start_chain(session):
     if passed:
         log_req(f"    PvP auto-passed {passed} GameStarted chain priority window(s)")
     return passed
+
+
+def _raw_priority_pid(port):
+    """The raw player id that holds the RulesPort priority window, or None."""
+    value = getattr(getattr(port, "action_stack", None), "priority_player_id", None)
+    if value is None:
+        return None
+    try:
+        raw = int(getattr(value, "uid64", value))
+    except (TypeError, ValueError):
+        return None
+    return raw >> 8 if raw & 255 == 244 else raw
 
 
 def _pvp_defer_trigger_event(state, *, event_type, source_card_id,
@@ -2412,14 +2449,17 @@ def push_pvp_game_start(handler, session, log_req=log_req):
             _resolve('_pvp_dispatch_triggers')(owner_handler, game2, session, state, pl_t, opp_t, 'PreGameEvent', None, int(owner_pid), zones=('deck',))
         state['pvp_pregame_done'] = True
     if not state.get('pvp_game_started_done'):
-        for owner_pid in pids:
-            owner_handler = _resolve('player_handlers').get(int(owner_pid)) or handler
-            owner_handler._current_bstate = state
-            _resolve('_pvp_dispatch_triggers')(owner_handler, game2, session, state, pl_t, opp_t, 'GameStartedEvent', None, int(owner_pid), zones=('hand', 'champions', 'warzone'))
+        # One dispatch: trigger discovery already scans both sides (and both champions), so dispatching once per
+        # owner queued every start-of-game ability twice, as it did in PvE (Blood Sphinx asked for its action twice).
+        owner_pid = int(goes_first_pid if goes_first_pid in pids else pids[0])
+        owner_handler = _resolve('player_handlers').get(owner_pid) or handler
+        owner_handler._current_bstate = state
+        _resolve('_pvp_dispatch_triggers')(owner_handler, game2, session, state, pl_t, opp_t, 'GameStartedEvent', None, owner_pid, zones=('hand', 'champions', 'warzone'))
         state['pvp_game_started_done'] = True
+        # The opening triggers are mandatory, but the RulesPort session that resolves them is attached only when the
+        # mulligan completes; pvp_mulligan_next resolves them then (_pvp_auto_pass_game_start_chain).
+        state['pvp_game_start_chain'] = [int(item.get('instance_id', 0) or 0) for item in state.get('stack') or []]
         _resolve('pvp_save_state')(session, state)
-        # The opening triggers are mandatory: resolve them now, as the PvE opening does, so a trigger that needs no
-        # choice never waits on the first priority pass. One that needs a choice keeps its prompt.
     turn_uid = _ge.UID.make(244, goes_first_pid)
     if player_pid == goes_first_pid:
         game2.push_green_light(turn_uid, _ge.EPriorityContext.Normal)
