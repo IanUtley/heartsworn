@@ -501,6 +501,14 @@ class NativeTriggerBackend:
                         if graph.uses_previous_state and
                         event.data.get("event_source_collection") else
                         event.data.get("event_destination_collection"))
+                # The cast card hears its own CardCastEvent from CastSpells,
+                # where the client holds it while the event is raised; a
+                # permanent's row may already name its destination.
+                if (event_name == "CardCastEvent" and
+                        event.target_card_id is not None and
+                        int(event.target_card_id) == source_uid and
+                        str(trigger_location).lower() in ("warzone", "mod")):
+                    trigger_location = "CastSpells"
                 # ``trigger_collection_allows`` mirrors the client collection
                 # check, including its None and Simulacrum exceptions.
                 # A crypt troop with Inspire fires as though in play while the yard-inspire flag is set (C#

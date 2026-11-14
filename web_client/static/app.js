@@ -203,6 +203,23 @@ function gameText(raw) {
   return s.replace(/(<br>){3,}/g, "<br><br>");
 }
 
+// A card's rules text: its template's text, then the text of each ability the card holds beyond its template's own
+// (an ability granted during the match, such as "When you play this, copy it.").
+function cardText(card, tpl) {
+  const text = (tpl && tpl.text) || "";
+  if (!tpl || !Array.isArray(tpl.abilities)) return text;
+  const own = tpl.abilities.slice();
+  const granted = [];
+  for (const guid of (card && card.abilities) || []) {
+    const key = String(guid || "").toLowerCase();
+    const at = own.indexOf(key);
+    if (at >= 0) { own.splice(at, 1); continue; }
+    const ability = S.catalog.abilities[key];
+    if (ability && ability.text) granted.push(ability.text);
+  }
+  return [text, ...granted].filter(Boolean).join("<p>");
+}
+
 function shardClass(tpl) {
   const colors = Object.keys((tpl && tpl.thresholds) || {}).filter((c) => c !== "Colorless");
   if (!colors.length && tpl && tpl.type === "Resource") {
@@ -272,7 +289,7 @@ function cardHTML(card, extra = "", style = "") {
   const kws = keywordsOf(card).slice(0, 3).map((k) => `<span class="kw">${k}</span>`).join("");
   const counters = (card.counter_counts || []).map((n) => n > 0 ? `<span class="counter">${n}</span>` : "").join("");
   const cost = tpl && tpl.type !== "Resource" ? `<div class="cost">${card.collection === COLL.Hand ? card.cost : (tpl ? tpl.cost : card.cost)}</div>` : "";
-  const text = tpl ? `<div class="text-box">${gameText(tpl.text)}${tpl.flavor ? `<div class="flavor">${esc(tpl.flavor)}</div>` : ""}</div>` : "";
+  const text = tpl ? `<div class="text-box">${gameText(cardText(card, tpl))}${tpl.flavor ? `<div class="flavor">${esc(tpl.flavor)}</div>` : ""}</div>` : "";
   const faction = Object.keys((tpl && tpl.thresholds) || {}).find((color) => color !== "Colorless") || "Colorless";
   const rarity = tpl && tpl.rarity ? tpl.rarity : "Common";
   return `<div class="${classes.join(" ")}" data-uid="${card.uid}"${styleAttr}>
@@ -372,7 +389,7 @@ function faceOf(card) {
     set: tpl.set || 0, pve: !!tpl.pve, immortal: !!tpl.immortal,
     unique: !!tpl.unique, unlimited: !!tpl.unlimited,
     resources: tpl.resources || null, sockets: tpl.sockets || 0, flavor: tpl.flavor || "",
-    thresholds: tpl.thresholds || {}, text: tpl.text || "",
+    thresholds: tpl.thresholds || {}, text: cardText(card, tpl),
     shard: SHARD_HEX[shardClass(tpl).replace("shard-", "")] || "#8d939c",
     glyph: TYPE_CHAR[tpl.type] || "",
     art: artUrl(tpl),

@@ -70,7 +70,7 @@ def card(guid: str) -> dict | None:
         "current_resources_granted, max_resources_granted, "
         "variable_cost, variable_cost_double, set_guid, "
         f"EXISTS(SELECT 1 FROM card_templates o WHERE o.name = t.name "
-        f"AND LOWER(o.set_guid) IN ({standard})) "
+        f"AND LOWER(o.set_guid) IN ({standard})), abilities_json "
         "FROM card_templates t WHERE LOWER(guid)=?",
         (*STANDARD_SETS, guid)).fetchone()
     record = _record("CardTemplate", guid)
@@ -80,7 +80,15 @@ def card(guid: str) -> dict | None:
     if row is not None:
         (name, cost, attack, defense, card_type, rarity, thresholds, sub,
          sockets, pve, res_now, res_max, var_cost, var_double, set_guid,
-         standard_legal) = row
+         standard_legal, abilities) = row
+        # The template's own abilities: the page shows the text of any ability
+        # a card in a match holds beyond these (a granted ability).
+        try:
+            out["abilities"] = [str(value).lower()
+                                for value in json.loads(abilities or "[]")
+                                if isinstance(value, str)]
+        except (TypeError, ValueError):
+            out["abilities"] = []
         out.update(name=name, cost=int(cost or 0), attack=int(attack or 0),
                    defense=int(defense or 0), type=str(card_type or ""),
                    rarity=str(rarity or ""), subtype=str(sub or ""),

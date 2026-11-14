@@ -256,13 +256,13 @@ class RecordsTriggerDiscovery:
         for key, values in (self.battle_state.get(
                 "registered_triggers") or {}).items():
             self._add_registered(candidates, int(key), values)
-        # CardCastEvent's target is the card being cast, not another
-        # registered trigger source. A troop that only gained Warzone trigger
-        # registration as this cast resolved cannot hear its own earlier cast
-        # event.
+        # CardCastEvent's target is the card being cast. It hears its own
+        # cast from CastSpells ("When you play this, copy it."): the
+        # dispatcher checks each ability's TriggerCollectionFlags against
+        # that collection, so a troop's Warzone-only trigger, registered only
+        # once the cast resolves, still cannot hear its own earlier cast.
         if (extra_target is not None and
-                int(extra_target) != int(source_uid or 0) and
-                event_type != "CardCastEvent"):
+                int(extra_target) != int(source_uid or 0)):
             uid = int(extra_target)
             self._add_card(candidates, own, uid, card_abilities(uid))
 

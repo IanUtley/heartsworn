@@ -995,6 +995,36 @@ def test_pvp_spell_from_hand_is_pushed_onto_the_chain():
         shared._db = previous
 
 
+def test_pvp_played_card_hears_its_own_cast_trigger():
+    """A granted "When you play this, copy it." listens for its own card's CardCastEvent from CastSpells."""
+    import hconnect_server
+    import services.tournament_game as tournament_game
+    import db as shared
+    import json
+    from tests.tests_combat import add_card
+    copy_on_play = "02d32c76-3ae5-1fef-1336-db0d53845765"
+    db = make_db()
+    previous = shared._db
+    shared._db = db
+    hconnect_server._db = db
+    try:
+        add_card(db, 310, 5, "018bc77c-013f-493b-9ba3-3a286607c989", "hand")
+        held = json.loads(db.execute("SELECT card_abilities FROM game_cards WHERE card_uid=310").fetchone()[0])
+        db.execute("UPDATE game_cards SET card_abilities=? WHERE card_uid=310", (json.dumps(held + [copy_on_play]),))
+        db.commit()
+        handler = hconnect_server.HCPHandler(None, ("127.0.0.1", 0))
+        handler.user_profile = {"id": 5}
+        handler.client_reck_id = 5
+        handler.send = lambda header, body: None
+        session = _pvp_session(db)
+        assert tournament_game._pvp_play_spell(handler, session, 310, 5, b"") is True
+        stack = session._rules_port_battle_state["stack"]
+        triggers = [item for item in stack if copy_on_play in json.dumps(item)]
+        assert len(triggers) == 1 and int(triggers[0]["source_uid"]) == 310, stack
+    finally:
+        shared._db = previous
+
+
 def test_dungeon_import_dry_run_reports_each_dungeon_without_writing(capsys):
     sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "campaign_editor"))
     import import_dungeons
