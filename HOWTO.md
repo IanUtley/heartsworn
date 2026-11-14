@@ -487,6 +487,13 @@ cost, target, and transaction identity before mutating state.
   champion chooses ...") records the owners still to run in the paused frame
   (`remaining_owners`); the resumed frame re-enters the invoke for them before
   it moves on. Without that the first owner's prompt dropped every later one.
+- A player's pick from their own hand (an explicit `AbilityTargetTemplate`
+  whose filter is `InZone: Hand`) is asked even when only one card qualifies,
+  in both the native activate leaf and the interpreter (`ir_exec._run_effects`).
+  C# skips input only for an automatic or random target. Taking the single
+  candidate silently made a seat with one action in hand look as if Blood
+  Sphinx's start-of-game choice had skipped it. Other single forced
+  candidates are still taken without a prompt.
 - A champion-sourced `WhileCardInPlay` effect is never expired by the
   "source lost its ability" check: a PvP champion has a `game_cards` row
   (`location='champion'`) whose `card_abilities` does not list the champion's

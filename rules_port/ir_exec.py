@@ -1599,7 +1599,16 @@ def _run_effects(guid: str, root: MechanicsObject, scope: Scope, start: int) -> 
                     optional = True
                 if _is_sacrifice(clause):
                     candidates = [uid for uid in candidates if int(uid) != int(scope.source_uid)]
-                if len(candidates) == 1 and not optional:
+                # A player's pick from their own hand is asked even with one card to pick ("each champion chooses a
+                # target action in their hand"): C# only skips input for an automatic or random target, and the
+                # native activate leaf asks too (leaves_abilities.activate_ability's ``forced``). Without this the
+                # card was taken silently and the player never saw the choice.
+                from rules_port.targeting import filter_restricts_to_zone
+                hand_pick = (int(scope.owner_uid) != 0 and
+                             _short(count_template.type_name) == "AbilityTargetTemplate" and
+                             filter_restricts_to_zone(_stored("AbilityTargetTemplate", _guid(
+                                 root.m_AbilityTargetTemplateIds[index]))[1], "Hand"))
+                if len(candidates) == 1 and not optional and not hand_pick:
                     # The live resolver does not prompt for a single forced candidate (its single_forced rule).
                     scope.chosen[index] = candidates[0]
                 elif not candidates:

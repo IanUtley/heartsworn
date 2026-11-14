@@ -332,7 +332,8 @@ def test_a_start_of_game_choice_is_asked_before_the_first_turn():
 
     The triggers used to stay on the PvP stack (the RulesPort chain never held them), so the opening passes ran whole
     turns instead; the second champion's choice was dropped when the first paused; and the grant was removed at the
-    next phase because a PvP champion's card row lists none of its abilities.
+    next phase because a PvP champion's card row lists none of its abilities. A seat holding a single action was not
+    asked at all: the one candidate was taken silently, so the player never saw the choice.
     """
     from db import _db
     from pvp_db import db_get_card_abilities
@@ -377,9 +378,10 @@ def test_a_start_of_game_choice_is_asked_before_the_first_turn():
         for _ in range(6):
             kind = snap["prompt"]["kind"]
             if kind == "mulligan" and not forced:
-                # Both seats hold two actions, so each has a real choice to make.
+                # The web seat holds one action (still asked: a pick from hand is never taken silently) and the AI
+                # seat two.
                 for pid in (match.human_pid, match.ai_pid):
-                    for uid in hand(pid)[:2]:
+                    for uid in hand(pid)[:1 if pid == match.human_pid else 2]:
                         _db.execute(
                             "UPDATE game_cards SET template_guid=?, card_template_id=?, card_type=?, "
                             "card_abilities=? WHERE session_id=? AND card_uid=?",
@@ -398,10 +400,10 @@ def test_a_start_of_game_choice_is_asked_before_the_first_turn():
         mine = hand(match.human_pid)
         assert prompt["kind"] == "choose" and prompt["pending"] == "pending_trigger", prompt
         assert (prompt["turn_number"], prompt["min_picks"], prompt["max_picks"]) == (1, 1, 1), prompt
-        assert sorted(prompt["candidates"]) == sorted(mine[:2]), (prompt, mine)
+        assert prompt["candidates"] == mine[:1], (prompt, mine)
         assert (len(mine), len(hand(match.ai_pid))) == (7, 7)
 
-        match.submit({"type": "choose", "card": prompt["candidates"][1]})
+        match.submit({"type": "choose", "card": prompt["candidates"][0]})
         snap, more, after = _settle(match, after)
         assert snap["error"] is None, snap["error"]
         # The AI seat chose as well, nothing is left on the chain, and it is still the first turn.
@@ -409,7 +411,7 @@ def test_a_start_of_game_choice_is_asked_before_the_first_turn():
         assert snap["prompt"]["kind"] == "priority" and snap["prompt"]["turn_number"] == 1, snap["prompt"]
         assert not state.get("stack") and not state.get("pvp_game_start_chain"), state.get("stack")
         chosen = granted()
-        assert prompt["candidates"][1] in chosen and len(chosen) == 2, chosen
+        assert prompt["candidates"][0] in chosen and len(chosen) == 2, chosen
         assert len(chosen & set(hand(match.ai_pid))) == 1, chosen
 
         # A champion's grant lasts while the champion is in play: it survives the next phase.
